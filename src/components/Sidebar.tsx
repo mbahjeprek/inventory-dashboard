@@ -4,7 +4,6 @@ import {
   Package,
   ArrowLeftRight,
   FileDown,
-  Boxes,
   ArrowDownCircle,
   ArrowUpCircle,
   Users,
@@ -160,13 +159,8 @@ export function Sidebar() {
         }`}
       >
         <div className={`flex items-center gap-2 ${minimized ? "flex-col" : ""}`}>
-          <Boxes size={24} className="text-[#7fb2f0] shrink-0" />
-          {!minimized && (
-            <div>
-              <div className="font-semibold text-sm leading-tight">Inventory</div>
-              <div className="text-[11px] text-white/50 leading-tight">Monitoring Gudang</div>
-            </div>
-          )}
+          <img src="/logo-agro.png" alt="Agro" className="w-6 h-6 shrink-0 object-contain" />
+          {!minimized && <div className="font-semibold text-sm leading-tight">Management Inventory Agro</div>}
         </div>
         <button
           onClick={() => setMinimized((m) => !m)}
