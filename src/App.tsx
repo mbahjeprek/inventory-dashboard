@@ -28,6 +28,8 @@ function App() {
               <Route path="/inventory/:id" element={<ItemDetailPage />} />
               <Route path="/inventory-kns" element={<InventoryGudangEmptyPage gudang="KNS" />} />
               <Route path="/inventory-wja" element={<InventoryGudangEmptyPage gudang="WJA" />} />
+              <Route path="/inventory-zamrud" element={<InventoryGudangEmptyPage gudang="Zamrud" />} />
+              <Route path="/inventory-firus" element={<InventoryGudangEmptyPage gudang="Firus" />} />
               <Route path="/inventory-bbm" element={<InventoryBbmPage />} />
               <Route path="/stock-in" element={<StockInPage />} />
               <Route path="/stock-out" element={<StockOutPage />} />

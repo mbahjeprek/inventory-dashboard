@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { NavLink, useNavigate } from "react-router-dom";
+import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import {
   Package,
   ArrowLeftRight,
@@ -21,16 +21,20 @@ import { useAuth } from "../context/AuthContext";
 type NavItem = { to: string; label: string; icon: typeof Package };
 type NavSection = { title?: string; collapsible?: boolean; items: NavItem[] };
 
+const GUDANG_OPTIONS = [
+  { to: "/inventory", label: "Gudang Nilam" },
+  { to: "/inventory-kns", label: "Gudang KNS" },
+  { to: "/inventory-wja", label: "Gudang WJA" },
+  { to: "/inventory-zamrud", label: "Gudang Zamrud" },
+  { to: "/inventory-firus", label: "Gudang Firus" },
+];
+const LAST_GUDANG_KEY = "last-gudang";
+
 const navSections: NavSection[] = [
   {
     title: "Inventory",
     collapsible: true,
-    items: [
-      { to: "/inventory", label: "Gudang Nilam", icon: Package },
-      { to: "/inventory-kns", label: "Gudang KNS", icon: Package },
-      { to: "/inventory-wja", label: "Gudang WJA", icon: Package },
-      { to: "/inventory-bbm", label: "Inventory BBM", icon: Fuel },
-    ],
+    items: [{ to: "/inventory-bbm", label: "Inventory BBM", icon: Fuel }],
   },
   {
     title: "Transaksi",
@@ -57,6 +61,7 @@ const SIDEBAR_COLLAPSED_KEY = "sidebar-collapsed";
 export function Sidebar() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const [groupCollapsed, setGroupCollapsed] = useState<Record<string, boolean>>({});
   const [minimized, setMinimized] = useState(() => {
     try {
@@ -73,6 +78,27 @@ export function Sidebar() {
       // ignore
     }
   }, [minimized]);
+
+  const activeGudang = GUDANG_OPTIONS.find((g) => g.to === location.pathname)?.to;
+
+  useEffect(() => {
+    if (!activeGudang) return;
+    try {
+      localStorage.setItem(LAST_GUDANG_KEY, activeGudang);
+    } catch {
+      // ignore
+    }
+  }, [activeGudang]);
+
+  const selectedGudang =
+    activeGudang ??
+    (() => {
+      try {
+        return localStorage.getItem(LAST_GUDANG_KEY) ?? GUDANG_OPTIONS[0].to;
+      } catch {
+        return GUDANG_OPTIONS[0].to;
+      }
+    })();
 
   return (
     <aside
@@ -112,6 +138,45 @@ export function Sidebar() {
                   {section.title}
                   <ChevronDown size={12} className={`transition-transform ${isOpen ? "" : "-rotate-90"}`} />
                 </button>
+              )}
+
+              {isOpen && section.title === "Inventory" && (
+                minimized ? (
+                  <NavLink
+                    to={selectedGudang}
+                    title="Inventory Gudang"
+                    className={({ isActive }) =>
+                      `flex items-center justify-center py-2.5 rounded-md text-sm transition-colors ${
+                        isActive || activeGudang
+                          ? "bg-[#1e5bb5]/25 text-[#a9cdf5]"
+                          : "text-white/70 hover:bg-white/5 hover:text-white"
+                      }`
+                    }
+                  >
+                    <Package size={17} className="shrink-0" />
+                  </NavLink>
+                ) : (
+                  <div
+                    className={`flex items-center gap-2 px-3 py-2 rounded-md border ${
+                      activeGudang
+                        ? "border-[#1e5bb5] bg-[#1e5bb5]/10"
+                        : "border-white/10"
+                    }`}
+                  >
+                    <Package size={17} className="shrink-0 text-white/70" />
+                    <select
+                      value={selectedGudang}
+                      onChange={(e) => navigate(e.target.value)}
+                      className="flex-1 bg-transparent text-sm text-white/90 focus:outline-none [&>option]:text-black"
+                    >
+                      {GUDANG_OPTIONS.map((g) => (
+                        <option key={g.to} value={g.to}>
+                          {g.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )
               )}
 
               {isOpen &&
