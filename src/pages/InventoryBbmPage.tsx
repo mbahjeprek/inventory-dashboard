@@ -221,8 +221,8 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
                 <th className="px-4 py-2.5 whitespace-nowrap">Periode</th>
                 <th className="px-4 py-2.5 whitespace-nowrap">Tanggal</th>
                 <th className="px-4 py-2.5 whitespace-nowrap">No. SPB</th>
-                <th className="px-4 py-2.5 text-right whitespace-nowrap">Stock Awal</th>
-                <th className="px-4 py-2.5 text-right">Pemakaian</th>
+                <th className="px-4 py-2.5 text-right whitespace-nowrap">Stok Masuk</th>
+                <th className="px-4 py-2.5 text-right whitespace-nowrap">Stok Keluar</th>
                 <th className="px-4 py-2.5 text-right whitespace-nowrap">Saldo Stock</th>
                 <th className="px-4 py-2.5">Keterangan</th>
                 <th className="px-4 py-2.5">Status Kepemilikan</th>
@@ -251,8 +251,8 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
                     <td className="px-4 py-2.5 whitespace-nowrap text-[var(--text-secondary)] text-xs">{r.periode || "-"}</td>
                     <td className="px-4 py-2.5 whitespace-nowrap text-[var(--text-secondary)]">{r.tanggal || "-"}</td>
                     <td className="px-4 py-2.5 text-xs text-[var(--text-secondary)]">{r.no_spb || "-"}</td>
-                    <td className="px-4 py-2.5 text-right text-[var(--text-secondary)]">
-                      {r.stock_awal ? r.stock_awal.toLocaleString("id-ID") : "-"}
+                    <td className="px-4 py-2.5 text-right font-medium text-[var(--accent-green)]">
+                      {r.diterima ? r.diterima.toLocaleString("id-ID") : "-"}
                     </td>
                     <td className="px-4 py-2.5 text-right font-medium text-[var(--accent-red)]">
                       {r.pemakaian ? r.pemakaian.toLocaleString("id-ID") : "-"}
