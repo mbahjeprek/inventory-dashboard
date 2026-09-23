@@ -921,6 +921,21 @@ app.get("/api/bbm/estate-options", async (req, res) => {
   res.json(merged);
 });
 
+app.get("/api/bbm/alat-options", async (req, res) => {
+  const { lokasi = "" } = req.query as Record<string, string>;
+  const conditions = ["kode_kendaraan IS NOT NULL", "TRIM(kode_kendaraan) != ''"];
+  const params: any = {};
+  if (lokasi && BBM_LOKASI_OPTIONS.includes(lokasi)) {
+    conditions.push("lokasi = @lokasi");
+    params.lokasi = lokasi;
+  }
+  const rows = await queryMany<{ kode_kendaraan: string }>(
+    `SELECT DISTINCT kode_kendaraan FROM bbm_log WHERE ${conditions.join(" AND ")} ORDER BY kode_kendaraan`,
+    params
+  );
+  res.json(rows.map((r) => r.kode_kendaraan));
+});
+
 app.get("/api/bbm/summary", async (_req, res) => {
   const perLokasi = await queryMany(
     `SELECT jenis_bbm, lokasi, SUM(diterima) diterima, SUM(pemakaian) pemakaian
@@ -1059,6 +1074,7 @@ app.get("/api/bbm", async (req, res) => {
     search = "",
     jenis_bbm = "",
     lokasi = "",
+    kode_kendaraan = "",
     dateFrom = "",
     dateTo = "",
     sortBy = "tanggal_iso",
@@ -1085,6 +1101,10 @@ app.get("/api/bbm", async (req, res) => {
   if (lokasi && BBM_LOKASI_OPTIONS.includes(lokasi)) {
     conditions.push("lokasi = @lokasi");
     params.lokasi = lokasi;
+  }
+  if (kode_kendaraan) {
+    conditions.push("kode_kendaraan = @kode_kendaraan");
+    params.kode_kendaraan = kode_kendaraan;
   }
   if (dateFrom) {
     conditions.push("tanggal_iso >= @dateFrom");

@@ -17,6 +17,8 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
   const [search, setSearch] = useState("");
   const [jenisBbm, setJenisBbm] = useState("");
   const [lokasi, setLokasi] = useState(lokasiLock ?? "");
+  const [alat, setAlat] = useState("");
+  const [alatOptions, setAlatOptions] = useState<string[]>([]);
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [page, setPage] = useState(1);
@@ -27,7 +29,7 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
 
   const load = () => {
     setLoading(true);
-    api.bbm({ search, jenis_bbm: jenisBbm, lokasi, dateFrom, dateTo, page, pageSize }).then((res) => {
+    api.bbm({ search, jenis_bbm: jenisBbm, lokasi, kode_kendaraan: alat, dateFrom, dateTo, page, pageSize }).then((res) => {
       setRows(res.data);
       setTotal(res.total);
       setPemakaianSum(res.pemakaianSum);
@@ -42,9 +44,14 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
   }, []);
 
   useEffect(() => {
+    api.bbmAlatOptions(lokasiLock ?? lokasi).then(setAlatOptions);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lokasiLock, lokasi]);
+
+  useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, jenisBbm, lokasi, dateFrom, dateTo]);
+  }, [page, jenisBbm, lokasi, alat, dateFrom, dateTo]);
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -153,6 +160,22 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
           </select>
         )}
 
+        <select
+          value={alat}
+          onChange={(e) => {
+            setAlat(e.target.value);
+            setPage(1);
+          }}
+          className="text-sm rounded-md border border-[var(--border)] px-3 py-2"
+        >
+          <option value="">Semua Alat</option>
+          {alatOptions.map((a) => (
+            <option key={a} value={a}>
+              {a}
+            </option>
+          ))}
+        </select>
+
         <input
           type="date"
           value={dateFrom}
@@ -193,7 +216,7 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
                 <th className="px-4 py-2.5 text-right">Sisa</th>
                 <th className="px-4 py-2.5">Keterangan</th>
                 <th className="px-4 py-2.5">Estate</th>
-                <th className="px-4 py-2.5 whitespace-nowrap">Km/Hm Terakhir</th>
+                <th className="px-4 py-2.5 whitespace-nowrap">Alat / KM-HM</th>
                 <th className="px-4 py-2.5 text-right">Aksi</th>
               </tr>
             </thead>

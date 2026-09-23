@@ -268,6 +268,8 @@ export const api = {
   bbmEstateOptions: (jenis_bbm: string, lokasi: string) =>
     req<string[]>(`/api/bbm/estate-options?${new URLSearchParams({ jenis_bbm, lokasi }).toString()}`),
 
+  bbmAlatOptions: (lokasi: string) => req<string[]>(`/api/bbm/alat-options?${new URLSearchParams({ lokasi }).toString()}`),
+
   bbm: (params: Record<string, string | number>) => {
     const qs = new URLSearchParams(params as any).toString();
     return req<{ data: BbmRecord[]; total: number; pemakaianSum: number; diterimaSum: number; page: number; pageSize: number }>(
