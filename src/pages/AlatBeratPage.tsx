@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Search, ChevronLeft, ChevronRight, ArrowUp, ArrowDown, ArrowUpDown, Filter, Pencil, Plus } from "lucide-react";
+import { Search, ChevronLeft, ChevronRight, ArrowUp, ArrowDown, ArrowUpDown, Filter, Pencil, Plus, Trash2 } from "lucide-react";
 import { api, type AlatBerat } from "../lib/api";
 import { EditAlatBeratModal } from "../components/EditAlatBeratModal";
 
@@ -86,6 +86,7 @@ export function AlatBeratPage() {
   const [loading, setLoading] = useState(true);
   const [editingAlat, setEditingAlat] = useState<AlatBerat | null>(null);
   const [creating, setCreating] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
   const pageSize = 25;
 
   const load = () => {
@@ -129,6 +130,17 @@ export function AlatBeratPage() {
     setPage(1);
   };
 
+  const remove = async (a: AlatBerat) => {
+    setDeleteError("");
+    if (!confirm(`Hapus alat "${a.kode}"?`)) return;
+    try {
+      await api.deleteAlatBerat(a.id);
+      load();
+    } catch {
+      setDeleteError("Gagal menghapus alat");
+    }
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -156,6 +168,8 @@ export function AlatBeratPage() {
           />
         </div>
       </div>
+
+      {deleteError && <p className="text-xs text-[var(--accent-red)]">{deleteError}</p>}
 
       <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg overflow-hidden">
         <div className="overflow-x-auto">
@@ -188,13 +202,22 @@ export function AlatBeratPage() {
                     <td className="px-4 py-2.5 text-[var(--text-secondary)]">{a.jenis_unit || "-"}</td>
                     <td className="px-4 py-2.5">{a.nama}</td>
                     <td className="px-4 py-2.5 text-right">
-                      <button
-                        onClick={() => setEditingAlat(a)}
-                        title="Edit data alat"
-                        className="p-1.5 rounded-md border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[#f1f5f9]"
-                      >
-                        <Pencil size={14} />
-                      </button>
+                      <div className="inline-flex gap-1.5">
+                        <button
+                          onClick={() => setEditingAlat(a)}
+                          title="Edit data alat"
+                          className="p-1.5 rounded-md border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[#f1f5f9]"
+                        >
+                          <Pencil size={14} />
+                        </button>
+                        <button
+                          onClick={() => remove(a)}
+                          title="Hapus alat"
+                          className="p-1.5 rounded-md border border-[var(--accent-red-border)] text-[var(--accent-red)] hover:bg-[var(--accent-red-bg)]"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))

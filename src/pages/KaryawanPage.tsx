@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Search, ChevronLeft, ChevronRight, ArrowUp, ArrowDown, ArrowUpDown, Filter, Pencil, Plus } from "lucide-react";
+import { Search, ChevronLeft, ChevronRight, ArrowUp, ArrowDown, ArrowUpDown, Filter, Pencil, Plus, Trash2 } from "lucide-react";
 import { api, type Karyawan } from "../lib/api";
 import { EditKaryawanModal } from "../components/EditKaryawanModal";
 
@@ -88,6 +88,7 @@ export function KaryawanPage() {
   const [loading, setLoading] = useState(true);
   const [editingKaryawan, setEditingKaryawan] = useState<Karyawan | null>(null);
   const [creating, setCreating] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
   const pageSize = 25;
 
   const load = () => {
@@ -132,6 +133,17 @@ export function KaryawanPage() {
     setPage(1);
   };
 
+  const remove = async (k: Karyawan) => {
+    setDeleteError("");
+    if (!confirm(`Hapus karyawan "${k.nama}" (${k.nik})?`)) return;
+    try {
+      await api.deleteKaryawan(k.id);
+      load();
+    } catch {
+      setDeleteError("Gagal menghapus karyawan");
+    }
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -159,6 +171,8 @@ export function KaryawanPage() {
           />
         </div>
       </div>
+
+      {deleteError && <p className="text-xs text-[var(--accent-red)]">{deleteError}</p>}
 
       <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg overflow-hidden">
         <div className="overflow-x-auto">
@@ -197,13 +211,22 @@ export function KaryawanPage() {
                     <td className="px-4 py-2.5 text-[var(--text-secondary)]">{k.lokasi_kerja}</td>
                     <td className="px-4 py-2.5 font-mono text-xs text-[var(--text-secondary)]">{k.nik_ktp}</td>
                     <td className="px-4 py-2.5 text-right">
-                      <button
-                        onClick={() => setEditingKaryawan(k)}
-                        title="Edit data karyawan"
-                        className="p-1.5 rounded-md border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[#f1f5f9]"
-                      >
-                        <Pencil size={14} />
-                      </button>
+                      <div className="inline-flex gap-1.5">
+                        <button
+                          onClick={() => setEditingKaryawan(k)}
+                          title="Edit data karyawan"
+                          className="p-1.5 rounded-md border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[#f1f5f9]"
+                        >
+                          <Pencil size={14} />
+                        </button>
+                        <button
+                          onClick={() => remove(k)}
+                          title="Hapus karyawan"
+                          className="p-1.5 rounded-md border border-[var(--accent-red-border)] text-[var(--accent-red)] hover:bg-[var(--accent-red-bg)]"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))

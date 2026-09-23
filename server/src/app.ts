@@ -275,6 +275,24 @@ app.put("/api/items/:id", async (req, res) => {
   res.json({ success: true });
 });
 
+app.delete("/api/items/:id", async (req, res) => {
+  const { id } = req.params;
+  const existing = await queryOne("SELECT * FROM items WHERE id = @id", { id });
+  if (!existing) return res.status(404).json({ error: "Not found" });
+
+  const [tx, stockIn, stockOut] = await Promise.all([
+    queryOne<any>("SELECT 1 FROM transactions WHERE item_id = @id LIMIT 1", { id }),
+    queryOne<any>("SELECT 1 FROM stock_in_log WHERE item_id = @id LIMIT 1", { id }),
+    queryOne<any>("SELECT 1 FROM stock_out_log WHERE item_id = @id LIMIT 1", { id }),
+  ]);
+  if (tx || stockIn || stockOut) {
+    return res.status(409).json({ error: "Barang ini punya riwayat transaksi, tidak bisa dihapus" });
+  }
+
+  await execute("DELETE FROM items WHERE id = @id", { id });
+  res.json({ success: true });
+});
+
 // ---- Combined movement history for one item (stock in + stock out + manual transactions) ----
 app.get("/api/items/:id/movements", async (req, res) => {
   const itemId = req.params.id;
@@ -864,6 +882,14 @@ app.put("/api/karyawan/:id", async (req, res) => {
   res.json({ success: true });
 });
 
+app.delete("/api/karyawan/:id", async (req, res) => {
+  const existing = await queryOne("SELECT * FROM karyawan WHERE id = @id", { id: req.params.id });
+  if (!existing) return res.status(404).json({ error: "Not found" });
+
+  await execute("DELETE FROM karyawan WHERE id = @id", { id: req.params.id });
+  res.json({ success: true });
+});
+
 // ---- Alat Berat master data (heavy equipment/vehicles that consume fuel) ----
 app.get("/api/alat-berat/jenis-options", async (_req, res) => {
   const rows = await queryMany<{ jenis_unit: string }>(
@@ -950,6 +976,14 @@ app.put("/api/alat-berat/:id", async (req, res) => {
     throw e;
   }
 
+  res.json({ success: true });
+});
+
+app.delete("/api/alat-berat/:id", async (req, res) => {
+  const existing = await queryOne("SELECT * FROM alat_berat WHERE id = @id", { id: req.params.id });
+  if (!existing) return res.status(404).json({ error: "Not found" });
+
+  await execute("DELETE FROM alat_berat WHERE id = @id", { id: req.params.id });
   res.json({ success: true });
 });
 

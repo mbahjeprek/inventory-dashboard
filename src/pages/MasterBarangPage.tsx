@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Search, ChevronLeft, ChevronRight, ArrowUp, ArrowDown, ArrowUpDown, Filter, Pencil, Plus } from "lucide-react";
+import { Search, ChevronLeft, ChevronRight, ArrowUp, ArrowDown, ArrowUpDown, Filter, Pencil, Plus, Trash2 } from "lucide-react";
 import { api, type Item } from "../lib/api";
 import { EditItemModal } from "../components/EditItemModal";
 
@@ -88,6 +88,7 @@ export function MasterBarangPage() {
   const [loading, setLoading] = useState(true);
   const [editingItem, setEditingItem] = useState<Item | null>(null);
   const [creating, setCreating] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
   const pageSize = 25;
 
   const load = () => {
@@ -129,6 +130,19 @@ export function MasterBarangPage() {
     setPage(1);
   };
 
+  const remove = async (item: Item) => {
+    setDeleteError("");
+    if (!confirm(`Hapus barang "${item.nama}" (${item.kode})?`)) return;
+    try {
+      await api.deleteItem(item.id);
+      load();
+    } catch (e: any) {
+      setDeleteError(
+        e?.message?.includes("409") ? "Barang ini punya riwayat transaksi, tidak bisa dihapus" : "Gagal menghapus barang"
+      );
+    }
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -158,6 +172,8 @@ export function MasterBarangPage() {
           />
         </div>
       </div>
+
+      {deleteError && <p className="text-xs text-[var(--accent-red)]">{deleteError}</p>}
 
       <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg overflow-hidden">
         <div className="overflow-x-auto">
@@ -199,13 +215,22 @@ export function MasterBarangPage() {
                     <td className="px-4 py-2.5 text-[var(--text-secondary)]">{item.satuan}</td>
                     <td className="px-4 py-2.5 text-right text-[var(--text-secondary)]">{item.buffer_stock}</td>
                     <td className="px-4 py-2.5 text-right">
-                      <button
-                        onClick={() => setEditingItem(item)}
-                        title="Edit data barang"
-                        className="p-1.5 rounded-md border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[#f1f5f9]"
-                      >
-                        <Pencil size={14} />
-                      </button>
+                      <div className="inline-flex gap-1.5">
+                        <button
+                          onClick={() => setEditingItem(item)}
+                          title="Edit data barang"
+                          className="p-1.5 rounded-md border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[#f1f5f9]"
+                        >
+                          <Pencil size={14} />
+                        </button>
+                        <button
+                          onClick={() => remove(item)}
+                          title="Hapus barang"
+                          className="p-1.5 rounded-md border border-[var(--accent-red-border)] text-[var(--accent-red)] hover:bg-[var(--accent-red-bg)]"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))

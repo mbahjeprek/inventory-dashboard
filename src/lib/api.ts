@@ -219,6 +219,8 @@ export const api = {
   updateItem: (id: number, payload: { nama: string; satuan: string; buffer_stock: number }) =>
     req<{ success: boolean }>(`/api/items/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
 
+  deleteItem: (id: number) => req<{ success: boolean }>(`/api/items/${id}`, { method: "DELETE" }),
+
   updateTransaction: (
     id: number,
     payload: { tujuan?: string; type: "IN" | "OUT"; qty: number; note?: string; penerima?: string }
@@ -257,6 +259,8 @@ export const api = {
     payload: { nik: string; nama: string; status: string; estate: string; lokasi_kerja: string; nik_ktp: string }
   ) => req<{ success: boolean }>(`/api/karyawan/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
 
+  deleteKaryawan: (id: number) => req<{ success: boolean }>(`/api/karyawan/${id}`, { method: "DELETE" }),
+
   alatBerat: (params: Record<string, string | number>) => {
     const qs = new URLSearchParams(params as any).toString();
     return req<{ data: AlatBerat[]; total: number; page: number; pageSize: number }>(`/api/alat-berat?${qs}`);
@@ -269,6 +273,8 @@ export const api = {
 
   updateAlatBerat: (id: number, payload: { kode: string; jenis_unit: string; nama: string }) =>
     req<{ success: boolean }>(`/api/alat-berat/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
+
+  deleteAlatBerat: (id: number) => req<{ success: boolean }>(`/api/alat-berat/${id}`, { method: "DELETE" }),
 
   bbmSummary: () => req<BbmSummary>("/api/bbm/summary"),
 
