@@ -3,7 +3,7 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { parse } from "csv-parse/sync";
-import { execute, queryOne, pool } from "./db";
+import { execute, queryOne, pool } from "./db.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 

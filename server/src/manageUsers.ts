@@ -1,6 +1,6 @@
 import "dotenv/config";
-import { execute, queryMany, pool } from "./db";
-import { hashPassword } from "./auth";
+import { execute, queryMany, pool } from "./db.js";
+import { hashPassword } from "./auth.js";
 
 async function main() {
   const [mode, ...rest] = process.argv.slice(2);

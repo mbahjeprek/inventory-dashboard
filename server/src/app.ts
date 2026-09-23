@@ -1,8 +1,8 @@
 import express from "express";
 import cookieParser from "cookie-parser";
 import type { PoolClient } from "pg";
-import { queryMany, queryOne, execute, withTransaction } from "./db";
-import { COOKIE_NAME, hashPassword, verifyPassword, signSession, verifySession } from "./auth";
+import { queryMany, queryOne, execute, withTransaction } from "./db.js";
+import { COOKIE_NAME, hashPassword, verifyPassword, signSession, verifySession } from "./auth.js";
 
 export const app = express();
 // Frontend and API are always same-origin (one Vercel domain in production, Vite's dev proxy

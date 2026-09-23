@@ -26,8 +26,8 @@ export function LoginPage() {
     setError("");
     try {
       await login(username.trim(), password);
-    } catch {
-      setError("Username atau password salah");
+    } catch (e: any) {
+      setError(e?.message?.includes("401") ? "Username atau password salah" : "Gagal terhubung ke server, coba lagi");
     } finally {
       setSubmitting(false);
     }
