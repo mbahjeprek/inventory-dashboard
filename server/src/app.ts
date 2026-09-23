@@ -262,16 +262,30 @@ app.post("/api/items", async (req, res) => {
 });
 
 app.put("/api/items/:id", async (req, res) => {
-  const { nama, satuan, buffer_stock } = req.body;
+  const { kode, nama, satuan, buffer_stock } = req.body;
   const existing = await queryOne("SELECT * FROM items WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Not found" });
+  if (!kode || !String(kode).trim()) {
+    return res.status(400).json({ error: "Kode wajib diisi" });
+  }
 
-  await execute("UPDATE items SET nama = @nama, satuan = @satuan, buffer_stock = @buffer_stock WHERE id = @id", {
-    nama,
-    satuan,
-    buffer_stock: buffer_stock ?? 0,
-    id: req.params.id,
-  });
+  try {
+    await execute("UPDATE items SET kode = @kode, nama = @nama, satuan = @satuan, buffer_stock = @buffer_stock WHERE id = @id", {
+      kode: String(kode).trim(),
+      nama,
+      satuan,
+      buffer_stock: buffer_stock ?? 0,
+      id: req.params.id,
+    });
+  } catch (e: any) {
+    if (e.code === "23505") {
+      return res.status(409).json({ error: "Kode sudah digunakan barang lain" });
+    }
+    if (e.code === "23503") {
+      return res.status(409).json({ error: "Kode ini dipakai di stok gudang lain, tidak bisa diganti" });
+    }
+    throw e;
+  }
   res.json({ success: true });
 });
 
@@ -290,6 +304,130 @@ app.delete("/api/items/:id", async (req, res) => {
   }
 
   await execute("DELETE FROM items WHERE id = @id", { id });
+  res.json({ success: true });
+});
+
+// ---- Inventory Gudang for the non-Nilam warehouses (KNS/WJA/ZAMRUD/FIRUS) ----
+// Nilam's stock lives directly on `items`; these gudang instead keep their own buffer/stock
+// quantities in `gudang_stock`, picking the item name/satuan from that same master item list.
+const GUDANG_STOCK_OPTIONS = ["KNS", "WJA", "ZAMRUD", "FIRUS"];
+
+app.get("/api/gudang-stock/summary", async (req, res) => {
+  const { gudang = "" } = req.query as Record<string, string>;
+  if (!GUDANG_STOCK_OPTIONS.includes(gudang)) return res.status(400).json({ error: "Gudang tidak valid" });
+
+  const totalItems = (await queryOne<any>("SELECT COUNT(*) c FROM gudang_stock WHERE gudang = @gudang", { gudang }))!.c;
+  const lowStock = (
+    await queryOne<any>(
+      "SELECT COUNT(*) c FROM gudang_stock WHERE gudang = @gudang AND stock_tersedia <= buffer_stock AND buffer_stock > 0",
+      { gudang }
+    )
+  )!.c;
+  const outOfStock = (
+    await queryOne<any>("SELECT COUNT(*) c FROM gudang_stock WHERE gudang = @gudang AND stock_tersedia <= 0", { gudang })
+  )!.c;
+  const totalStock =
+    (await queryOne<any>("SELECT SUM(stock_tersedia) s FROM gudang_stock WHERE gudang = @gudang", { gudang }))!.s || 0;
+
+  res.json({ totalItems, lowStock, outOfStock, totalStock });
+});
+
+app.get("/api/gudang-stock", async (req, res) => {
+  const {
+    gudang = "",
+    search = "",
+    satuan = "",
+    status = "",
+    sortBy = "kode",
+    sortDir = "asc",
+    page = "1",
+    pageSize = "50",
+  } = req.query as Record<string, string>;
+
+  if (!GUDANG_STOCK_OPTIONS.includes(gudang)) return res.status(400).json({ error: "Gudang tidak valid" });
+
+  const validSort = ["kode", "nama", "stock_tersedia", "buffer_stock"];
+  const sortCol = validSort.includes(sortBy) ? sortBy : "kode";
+  const dir = sortDir === "desc" ? "DESC" : "ASC";
+
+  const conditions: string[] = ["gs.gudang = @gudang"];
+  const params: any = { gudang };
+
+  if (search) {
+    conditions.push("(i.kode ILIKE @search OR i.nama ILIKE @search)");
+    params.search = `%${search}%`;
+  }
+  if (satuan) {
+    conditions.push("i.satuan = @satuan");
+    params.satuan = satuan;
+  }
+  if (status === "AMAN") {
+    conditions.push("gs.stock_tersedia > 0");
+  } else if (status === "BUFFER STOCK") {
+    conditions.push("gs.stock_tersedia <= 0");
+  }
+
+  const where = "WHERE " + conditions.join(" AND ");
+  const joinSql = `FROM gudang_stock gs JOIN items i ON i.kode = gs.item_kode ${where}`;
+
+  const total = (await queryOne<any>(`SELECT COUNT(*) c ${joinSql}`, params))!.c;
+
+  const limit = Math.min(parseInt(pageSize) || 50, 500);
+  const offset = (Math.max(parseInt(page) || 1, 1) - 1) * limit;
+
+  const data = await queryMany(
+    `SELECT gs.id, i.kode, i.nama, i.satuan, gs.buffer_stock, gs.stock_tersedia,
+            CASE WHEN gs.stock_tersedia > 0 THEN 'AMAN' ELSE 'BUFFER STOCK' END AS keterangan
+     ${joinSql}
+     ORDER BY ${sortCol === "kode" || sortCol === "nama" ? "i." + sortCol : "gs." + sortCol} ${dir}
+     LIMIT @limit OFFSET @offset`,
+    { ...params, limit, offset }
+  );
+
+  res.json({ data, total: Number(total), page: parseInt(page), pageSize: limit });
+});
+
+app.post("/api/gudang-stock", async (req, res) => {
+  const { gudang, item_kode, buffer_stock, stock_tersedia } = req.body;
+  if (!GUDANG_STOCK_OPTIONS.includes(gudang)) return res.status(400).json({ error: "Gudang tidak valid" });
+  if (!item_kode || !String(item_kode).trim()) return res.status(400).json({ error: "Barang wajib dipilih" });
+
+  const item = await queryOne("SELECT kode FROM items WHERE kode = @item_kode", { item_kode });
+  if (!item) return res.status(400).json({ error: "Barang tidak ditemukan di master data" });
+
+  try {
+    const row = await queryOne<{ id: number }>(
+      `INSERT INTO gudang_stock (gudang, item_kode, buffer_stock, stock_tersedia)
+       VALUES (@gudang, @item_kode, @buffer_stock, @stock_tersedia) RETURNING id`,
+      { gudang, item_kode, buffer_stock: buffer_stock ?? 0, stock_tersedia: stock_tersedia ?? 0 }
+    );
+    res.json({ success: true, id: row!.id });
+  } catch (e: any) {
+    if (e.code === "23505") {
+      return res.status(409).json({ error: "Barang ini sudah ada di gudang ini" });
+    }
+    throw e;
+  }
+});
+
+app.put("/api/gudang-stock/:id", async (req, res) => {
+  const existing = await queryOne("SELECT * FROM gudang_stock WHERE id = @id", { id: req.params.id });
+  if (!existing) return res.status(404).json({ error: "Not found" });
+
+  const { buffer_stock, stock_tersedia } = req.body;
+  await execute("UPDATE gudang_stock SET buffer_stock = @buffer_stock, stock_tersedia = @stock_tersedia WHERE id = @id", {
+    buffer_stock: buffer_stock ?? 0,
+    stock_tersedia: stock_tersedia ?? 0,
+    id: req.params.id,
+  });
+  res.json({ success: true });
+});
+
+app.delete("/api/gudang-stock/:id", async (req, res) => {
+  const existing = await queryOne("SELECT * FROM gudang_stock WHERE id = @id", { id: req.params.id });
+  if (!existing) return res.status(404).json({ error: "Not found" });
+
+  await execute("DELETE FROM gudang_stock WHERE id = @id", { id: req.params.id });
   res.json({ success: true });
 });
 

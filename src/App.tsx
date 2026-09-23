@@ -5,6 +5,7 @@ import { LoginPage } from "./pages/LoginPage";
 import { MainLayout } from "./layouts/MainLayout";
 import { InventoryPage } from "./pages/InventoryPage";
 import { InventoryGudangEmptyPage } from "./pages/InventoryGudangEmptyPage";
+import { InventoryGudangStockPage } from "./pages/InventoryGudangStockPage";
 import { Fuel as FuelIcon } from "lucide-react";
 import { TransactionsPage } from "./pages/TransactionsPage";
 import { ReportsPage } from "./pages/ReportsPage";
@@ -28,10 +29,10 @@ function App() {
               <Route path="/" element={<InventoryPage />} />
               <Route path="/inventory" element={<InventoryPage />} />
               <Route path="/inventory/:id" element={<ItemDetailPage />} />
-              <Route path="/inventory-kns" element={<InventoryGudangEmptyPage gudang="KNS" />} />
-              <Route path="/inventory-wja" element={<InventoryGudangEmptyPage gudang="WJA" />} />
-              <Route path="/inventory-zamrud" element={<InventoryGudangEmptyPage gudang="Zamrud" />} />
-              <Route path="/inventory-firus" element={<InventoryGudangEmptyPage gudang="Firus" />} />
+              <Route path="/inventory-kns" element={<InventoryGudangStockPage gudang="KNS" />} />
+              <Route path="/inventory-wja" element={<InventoryGudangStockPage gudang="WJA" />} />
+              <Route path="/inventory-zamrud" element={<InventoryGudangStockPage gudang="ZAMRUD" />} />
+              <Route path="/inventory-firus" element={<InventoryGudangStockPage gudang="FIRUS" />} />
               <Route path="/inventory-bbm" element={<InventoryBbmPage lokasiLock="NILAM" />} />
               <Route path="/inventory-bbm-kns" element={<InventoryBbmPage lokasiLock="KNS" />} />
               <Route path="/inventory-bbm-wja" element={<InventoryBbmPage lokasiLock="WJA" />} />

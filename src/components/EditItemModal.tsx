@@ -20,7 +20,7 @@ export function EditItemModal({
   const [error, setError] = useState("");
 
   const submit = async () => {
-    if (!isEdit && !kode.trim()) {
+    if (!kode.trim()) {
       setError("Kode barang tidak boleh kosong");
       return;
     }
@@ -32,13 +32,17 @@ export function EditItemModal({
     setError("");
     try {
       if (isEdit) {
-        await api.updateItem(item.id, { nama, satuan, buffer_stock: bufferStock });
+        await api.updateItem(item.id, { kode, nama, satuan, buffer_stock: bufferStock });
       } else {
         await api.createItem({ kode, nama, satuan, buffer_stock: bufferStock });
       }
       onSuccess();
     } catch (e: any) {
-      setError(e?.message?.includes("409") ? "Kode sudah digunakan barang lain" : "Gagal menyimpan perubahan");
+      setError(
+        e?.message?.includes("409")
+          ? "Kode sudah dipakai barang lain, atau masih dipakai di stok gudang"
+          : "Gagal menyimpan perubahan"
+      );
     } finally {
       setSubmitting(false);
     }
@@ -52,7 +56,6 @@ export function EditItemModal({
             <h3 className="font-semibold text-sm text-[var(--text-primary)]">
               {isEdit ? "Edit Data Barang" : "Tambah Barang"}
             </h3>
-            {isEdit && <p className="text-xs text-[var(--text-secondary)] font-mono">{item.kode}</p>}
           </div>
           <button onClick={onClose} className="text-[var(--text-muted)] hover:text-[var(--text-primary)]">
             <X size={18} />
@@ -60,16 +63,14 @@ export function EditItemModal({
         </div>
 
         <div className="p-5 space-y-4">
-          {!isEdit && (
-            <div>
-              <label className="text-xs text-[var(--text-secondary)] mb-1 block">Kode Barang</label>
-              <input
-                value={kode}
-                onChange={(e) => setKode(e.target.value)}
-                className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-2"
-              />
-            </div>
-          )}
+          <div>
+            <label className="text-xs text-[var(--text-secondary)] mb-1 block">Kode Barang</label>
+            <input
+              value={kode}
+              onChange={(e) => setKode(e.target.value)}
+              className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-2"
+            />
+          </div>
 
           <div>
             <label className="text-xs text-[var(--text-secondary)] mb-1 block">Nama Barang</label>

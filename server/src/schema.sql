@@ -70,6 +70,18 @@ CREATE TABLE IF NOT EXISTS alat_berat (
   nama TEXT
 );
 
+-- Per-warehouse stock for the non-Nilam gudang (KNS/WJA/ZAMRUD/FIRUS). Nilam's own stock lives
+-- directly on `items` (it's the original/master warehouse); these gudang pick their item names
+-- from that same master list via item_kode, but track their own buffer/stock quantities.
+CREATE TABLE IF NOT EXISTS gudang_stock (
+  id SERIAL PRIMARY KEY,
+  gudang TEXT NOT NULL,
+  item_kode TEXT NOT NULL REFERENCES items(kode),
+  buffer_stock INTEGER DEFAULT 0,
+  stock_tersedia INTEGER DEFAULT 0,
+  UNIQUE(gudang, item_kode)
+);
+
 CREATE TABLE IF NOT EXISTS bbm_log (
   id SERIAL PRIMARY KEY,
   jenis_bbm TEXT NOT NULL,

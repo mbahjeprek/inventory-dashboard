@@ -36,6 +36,23 @@ export type Summary = {
   perTujuan: { tujuan: string; qty: number }[];
 };
 
+export type GudangStockItem = {
+  id: number;
+  kode: string;
+  nama: string;
+  satuan: string;
+  buffer_stock: number;
+  stock_tersedia: number;
+  keterangan: string;
+};
+
+export type GudangStockSummary = {
+  totalItems: number;
+  lowStock: number;
+  outOfStock: number;
+  totalStock: number;
+};
+
 export type Transaction = {
   id: number;
   item_id: number;
@@ -216,10 +233,25 @@ export const api = {
   createItem: (payload: { kode: string; nama: string; satuan: string; buffer_stock: number }) =>
     req<{ success: boolean; id: number }>("/api/items", { method: "POST", body: JSON.stringify(payload) }),
 
-  updateItem: (id: number, payload: { nama: string; satuan: string; buffer_stock: number }) =>
+  updateItem: (id: number, payload: { kode: string; nama: string; satuan: string; buffer_stock: number }) =>
     req<{ success: boolean }>(`/api/items/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
 
   deleteItem: (id: number) => req<{ success: boolean }>(`/api/items/${id}`, { method: "DELETE" }),
+
+  gudangStockSummary: (gudang: string) => req<GudangStockSummary>(`/api/gudang-stock/summary?gudang=${gudang}`),
+
+  gudangStock: (params: Record<string, string | number>) => {
+    const qs = new URLSearchParams(params as any).toString();
+    return req<{ data: GudangStockItem[]; total: number; page: number; pageSize: number }>(`/api/gudang-stock?${qs}`);
+  },
+
+  addGudangStockItem: (payload: { gudang: string; item_kode: string; buffer_stock: number; stock_tersedia: number }) =>
+    req<{ success: boolean; id: number }>("/api/gudang-stock", { method: "POST", body: JSON.stringify(payload) }),
+
+  updateGudangStockItem: (id: number, payload: { buffer_stock: number; stock_tersedia: number }) =>
+    req<{ success: boolean }>(`/api/gudang-stock/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
+
+  deleteGudangStockItem: (id: number) => req<{ success: boolean }>(`/api/gudang-stock/${id}`, { method: "DELETE" }),
 
   updateTransaction: (
     id: number,
