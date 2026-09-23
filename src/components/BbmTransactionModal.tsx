@@ -16,15 +16,17 @@ function todayIso(): string {
 
 export function BbmTransactionModal({
   summary,
+  lokasiLock,
   onClose,
   onSuccess,
 }: {
   summary: BbmSummary | null;
+  lokasiLock?: string;
   onClose: () => void;
   onSuccess: () => void;
 }) {
   const [jenisBbm, setJenisBbm] = useState<"SOLAR" | "BENSIN">("SOLAR");
-  const [lokasi, setLokasi] = useState("NILAM");
+  const [lokasi, setLokasi] = useState(lokasiLock ?? "NILAM");
   const [tipe, setTipe] = useState<"DITERIMA" | "PEMAKAIAN">("PEMAKAIAN");
   const [tanggal, setTanggal] = useState(todayIso());
   const [jumlah, setJumlah] = useState(1);
@@ -114,7 +116,7 @@ export function BbmTransactionModal({
                 onChange={(e) => {
                   const j = e.target.value as "SOLAR" | "BENSIN";
                   setJenisBbm(j);
-                  setLokasi(LOKASI_BY_JENIS[j][0]);
+                  if (!lokasiLock) setLokasi(LOKASI_BY_JENIS[j][0]);
                 }}
                 className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-2"
               >
@@ -127,13 +129,19 @@ export function BbmTransactionModal({
             </div>
             <div>
               <label className="text-xs text-[var(--text-secondary)] mb-1 block">Lokasi</label>
-              <select value={lokasi} onChange={(e) => setLokasi(e.target.value)} className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-2">
-                {LOKASI_BY_JENIS[jenisBbm].map((l) => (
-                  <option key={l} value={l}>
-                    {l}
-                  </option>
-                ))}
-              </select>
+              {lokasiLock ? (
+                <div className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-2 text-[var(--text-secondary)] bg-[#f8fafc]">
+                  {lokasiLock}
+                </div>
+              ) : (
+                <select value={lokasi} onChange={(e) => setLokasi(e.target.value)} className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-2">
+                  {LOKASI_BY_JENIS[jenisBbm].map((l) => (
+                    <option key={l} value={l}>
+                      {l}
+                    </option>
+                  ))}
+                </select>
+              )}
             </div>
           </div>
 

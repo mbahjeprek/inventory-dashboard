@@ -283,6 +283,7 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
       {showTransaksi && (
         <BbmTransactionModal
           summary={summary}
+          lokasiLock={lokasiLock}
           onClose={() => setShowTransaksi(false)}
           onSuccess={() => {
             setShowTransaksi(false);
