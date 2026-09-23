@@ -1,9 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { Navigate, useLocation } from "react-router-dom";
-import { Package, Fuel, Sprout } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
-import plantationAerial from "../assets/plantation-aerial.jpg";
-import plantationFruit from "../assets/plantation-fruit.jpg";
+import plantationWelcome from "../assets/plantation-welcome.jpg";
 
 export function LoginPage() {
   const { status, login } = useAuth();
@@ -37,13 +35,56 @@ export function LoginPage() {
 
   return (
     <div className="min-h-screen relative overflow-hidden bg-[#0f2a1c]">
-      <img src={plantationAerial} alt="" className="absolute inset-0 w-full h-full object-cover" />
-      <div className="absolute inset-0 bg-gradient-to-r from-black/80 via-black/45 to-black/20" />
+      <img src={plantationWelcome} alt="" className="absolute inset-0 w-full h-full object-cover" />
+      <div className="absolute inset-0 bg-gradient-to-l from-black/80 via-black/40 to-black/25" />
       <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-black/40" />
 
-      <div className="relative z-10 min-h-screen flex flex-col lg:flex-row lg:items-center gap-10 p-6 sm:p-10 lg:p-16">
-        <div className="flex-1 text-white space-y-5 lg:max-w-lg pt-4 lg:pt-0">
-          <div className="flex items-center gap-3">
+      <div className="relative z-10 min-h-screen flex flex-col lg:flex-row lg:items-center gap-10 p-6 sm:p-10 lg:px-20 lg:py-16">
+        <div className="w-full lg:w-auto flex justify-center lg:justify-start">
+          <form
+            onSubmit={submit}
+            className="bg-white/97 backdrop-blur-md rounded-2xl w-full max-w-md shadow-2xl p-8 sm:p-10 space-y-5"
+          >
+            <div className="flex flex-col items-center gap-2 mb-4">
+              <img src="/logo-agro.png" alt="Agro" className="w-14 h-14 object-contain" />
+              <h2 className="font-semibold text-xl text-[var(--text-primary)]">Inventory Agro Barokah</h2>
+              <p className="text-sm text-[var(--text-secondary)]">Masuk untuk melanjutkan</p>
+            </div>
+
+            <div>
+              <label className="text-sm font-medium text-[var(--text-secondary)] mb-1.5 block">Username</label>
+              <input
+                autoFocus
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                className="w-full text-sm rounded-lg border border-[var(--border)] px-3.5 py-3"
+              />
+            </div>
+
+            <div>
+              <label className="text-sm font-medium text-[var(--text-secondary)] mb-1.5 block">Password</label>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full text-sm rounded-lg border border-[var(--border)] px-3.5 py-3"
+              />
+            </div>
+
+            {error && <p className="text-sm text-[var(--accent-red)]">{error}</p>}
+
+            <button
+              type="submit"
+              disabled={submitting}
+              className="w-full py-3 rounded-lg text-sm font-semibold bg-[var(--accent-blue)] text-white shadow-md hover:opacity-90 disabled:opacity-50 transition"
+            >
+              {submitting ? "Masuk..." : "Masuk"}
+            </button>
+          </form>
+        </div>
+
+        <div className="order-first lg:order-none flex-1 flex flex-col items-center text-center lg:items-end lg:text-right text-white space-y-5 pt-4 lg:pt-0">
+          <div className="flex items-center gap-3 lg:flex-row-reverse">
             <img src="/logo-agro.png" alt="Agro" className="w-10 h-10 object-contain drop-shadow" />
             <div>
               <div className="font-semibold text-lg leading-tight">Management Inventory Agro</div>
@@ -51,79 +92,13 @@ export function LoginPage() {
             </div>
           </div>
 
-          <h1 className="text-2xl sm:text-3xl lg:text-4xl font-semibold leading-snug drop-shadow-sm">
-            Selamat Datang di Sistem Inventory Perkebunan Sawit
+          <div className="w-16 h-1 rounded-full bg-[#a7e8c4]" />
+
+          <h1 className="text-3xl sm:text-4xl lg:text-5xl font-semibold leading-tight drop-shadow-md lg:max-w-xl">
+            Selamat Datang di Managemen Inventory Barokah Agro Perkasa
           </h1>
-          <p className="text-sm text-white/80 leading-relaxed max-w-md">
-            Pantau stok gudang, BBM, dan aktivitas operasional setiap estate — Nilam, KNS, WJA, Zamrud, dan
-            Firus — dalam satu sistem yang terintegrasi dan rapi.
-          </p>
 
-          <div className="hidden sm:flex items-center gap-4 pt-2">
-            <img
-              src={plantationFruit}
-              alt="Buah kelapa sawit"
-              className="w-28 h-20 object-cover rounded-lg border-2 border-white/25 shadow-xl"
-            />
-            <div className="grid grid-cols-3 gap-2.5">
-              <div className="bg-white/10 rounded-lg p-2.5 backdrop-blur-sm">
-                <Package size={16} className="text-[#a7e8c4] mb-1" />
-                <div className="text-[11px] text-white/85 leading-tight">Inventory Gudang</div>
-              </div>
-              <div className="bg-white/10 rounded-lg p-2.5 backdrop-blur-sm">
-                <Fuel size={16} className="text-[#a7e8c4] mb-1" />
-                <div className="text-[11px] text-white/85 leading-tight">Inventory BBM</div>
-              </div>
-              <div className="bg-white/10 rounded-lg p-2.5 backdrop-blur-sm">
-                <Sprout size={16} className="text-[#a7e8c4] mb-1" />
-                <div className="text-[11px] text-white/85 leading-tight">Multi Estate</div>
-              </div>
-            </div>
-          </div>
-
-          <p className="hidden lg:block text-xs text-white/40 pt-6">© {new Date().getFullYear()} Agro Barokah</p>
-        </div>
-
-        <div className="w-full lg:w-auto flex justify-center lg:justify-end lg:pr-4">
-          <form
-            onSubmit={submit}
-            className="bg-white/97 backdrop-blur-md rounded-xl w-full max-w-sm shadow-2xl p-6 space-y-4"
-          >
-            <div className="flex flex-col items-center gap-1.5 mb-2">
-              <h2 className="font-semibold text-base text-[var(--text-primary)]">Inventory Agro Barokah</h2>
-              <p className="text-xs text-[var(--text-secondary)]">Masuk untuk melanjutkan</p>
-            </div>
-
-            <div>
-              <label className="text-xs text-[var(--text-secondary)] mb-1 block">Username</label>
-              <input
-                autoFocus
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-2"
-              />
-            </div>
-
-            <div>
-              <label className="text-xs text-[var(--text-secondary)] mb-1 block">Password</label>
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-2"
-              />
-            </div>
-
-            {error && <p className="text-xs text-[var(--accent-red)]">{error}</p>}
-
-            <button
-              type="submit"
-              disabled={submitting}
-              className="w-full py-2.5 rounded-md text-sm font-medium bg-[var(--accent-blue)] text-white hover:opacity-90 disabled:opacity-50"
-            >
-              {submitting ? "Masuk..." : "Masuk"}
-            </button>
-          </form>
+          <p className="hidden lg:block text-xs text-white/50 pt-6">© {new Date().getFullYear()} Agro Barokah</p>
         </div>
       </div>
     </div>

@@ -165,7 +165,7 @@ export function Sidebar() {
         <button
           onClick={() => setMinimized((m) => !m)}
           title={minimized ? "Perbesar sidebar" : "Perkecil sidebar"}
-          className="p-1.5 rounded-md text-white/50 hover:text-white hover:bg-white/5 shrink-0"
+          className="p-1.5 rounded-md text-white/50 hover:text-white hover:bg-white/10 shrink-0"
         >
           {minimized ? <ChevronsRight size={16} /> : <ChevronsLeft size={16} />}
         </button>
@@ -178,7 +178,7 @@ export function Sidebar() {
           return (
             <div key={section.title ?? i} className="space-y-1">
               {section.title && !minimized && !section.collapsible && (
-                <div className="px-3 pt-1 pb-1 text-[10px] font-semibold tracking-wider text-white/35 uppercase">
+                <div className="px-3 pt-1 pb-1 text-[10px] font-semibold tracking-wider text-white/55 uppercase">
                   {section.title}
                 </div>
               )}
@@ -188,7 +188,7 @@ export function Sidebar() {
                   onClick={() =>
                     setGroupCollapsed((c) => ({ ...c, [section.title!]: !(c[section.title!] ?? false) }))
                   }
-                  className="w-full flex items-center justify-between px-3 pt-1 pb-1 text-[10px] font-semibold tracking-wider text-white/35 uppercase hover:text-white/60"
+                  className="w-full flex items-center justify-between px-3 pt-1 pb-1 text-[10px] font-semibold tracking-wider text-white/55 uppercase hover:text-white/60"
                 >
                   {section.title}
                   <ChevronDown size={12} className={`transition-transform ${isOpen ? "" : "-rotate-90"}`} />
@@ -208,13 +208,13 @@ export function Sidebar() {
                         key={group.key}
                         to={selected}
                         title={group.title}
-                        className={`flex items-center justify-center py-2.5 rounded-md text-sm transition-colors ${
+                        className={`flex items-center justify-center py-2.5 rounded-md text-sm font-semibold transition-colors ${
                           active
-                            ? "bg-[#1e5bb5]/25 text-[#a9cdf5]"
-                            : "text-white/70 hover:bg-white/5 hover:text-white"
+                            ? "bg-white/15 text-white"
+                            : "text-white/70 hover:bg-white/10 hover:text-white"
                         }`}
                       >
-                        <GroupIcon size={17} className="shrink-0" />
+                        <GroupIcon size={17} className="shrink-0 text-[#b9f0c9]" />
                       </NavLink>
                     );
                   }
@@ -225,13 +225,13 @@ export function Sidebar() {
                     <div key={group.key}>
                       <button
                         onClick={() => setExpandedGroups((e) => ({ ...e, [group.key]: !expanded }))}
-                        className={`w-full flex items-center gap-3 py-2.5 px-3 rounded-md text-sm transition-colors ${
+                        className={`w-full flex items-center gap-3 py-2.5 px-3 rounded-md text-sm font-semibold transition-colors ${
                           active
-                            ? "bg-[#1e5bb5]/25 text-[#a9cdf5]"
-                            : "text-white/70 hover:bg-white/5 hover:text-white"
+                            ? "bg-white/15 text-white"
+                            : "text-white/70 hover:bg-white/10 hover:text-white"
                         }`}
                       >
-                        <GroupIcon size={17} className="shrink-0" />
+                        <GroupIcon size={17} className="shrink-0 text-[#b9f0c9]" />
                         <span className="flex-1 text-left">{group.title}</span>
                         <ChevronDown size={14} className={`transition-transform ${expanded ? "" : "-rotate-90"}`} />
                       </button>
@@ -243,10 +243,10 @@ export function Sidebar() {
                               key={o.to}
                               to={o.to}
                               className={({ isActive }) =>
-                                `flex items-center py-2 pl-11 pr-3 rounded-md text-sm transition-colors ${
+                                `flex items-center py-2 pl-11 pr-3 rounded-md text-sm font-semibold transition-colors ${
                                   isActive
-                                    ? "bg-[#1e5bb5]/25 text-[#a9cdf5] border-l-[3px] border-[#1e5bb5] pl-[41px]"
-                                    : "text-white/60 hover:bg-white/5 hover:text-white"
+                                    ? "bg-white/15 text-white border-l-[3px] border-[#b9f0c9] pl-[41px]"
+                                    : "text-white/60 hover:bg-white/10 hover:text-white"
                                 }`
                               }
                             >
@@ -267,16 +267,16 @@ export function Sidebar() {
                     end={to === "/"}
                     title={minimized ? label : undefined}
                     className={({ isActive }) =>
-                      `flex items-center gap-3 py-2.5 rounded-md text-sm transition-colors ${
+                      `flex items-center gap-3 py-2.5 rounded-md text-sm font-semibold transition-colors ${
                         minimized ? "justify-center px-0" : "px-3"
                       } ${
                         isActive
-                          ? `bg-[#1e5bb5]/25 text-[#a9cdf5] ${minimized ? "" : "border-l-[3px] border-[#1e5bb5] pl-[9px]"}`
-                          : "text-white/70 hover:bg-white/5 hover:text-white"
+                          ? `bg-white/15 text-white ${minimized ? "" : "border-l-[3px] border-[#b9f0c9] pl-[9px]"}`
+                          : "text-white/70 hover:bg-white/10 hover:text-white"
                       }`
                     }
                   >
-                    <Icon size={17} className="shrink-0" />
+                    <Icon size={17} className="shrink-0 text-[#b9f0c9]" />
                     {!minimized && label}
                   </NavLink>
                 ))}
@@ -297,7 +297,7 @@ export function Sidebar() {
             navigate("/login", { replace: true });
           }}
           title="Keluar"
-          className={`flex items-center gap-2 py-2 rounded-md text-sm text-white/60 hover:bg-white/5 hover:text-white ${
+          className={`flex items-center gap-2 py-2 rounded-md text-sm text-white/60 hover:bg-white/10 hover:text-white ${
             minimized ? "justify-center px-0 w-full" : "px-2 w-full"
           }`}
         >
