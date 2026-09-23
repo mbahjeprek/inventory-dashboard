@@ -14,9 +14,11 @@ import {
   Boxes,
   AlertTriangle,
   XCircle,
+  Printer,
 } from "lucide-react";
 import { api, type GudangStockItem, type GudangStockSummary } from "../lib/api";
 import { StatCard } from "../components/StatCard";
+import { fetchAllRows, confirmLargePrint, printTable } from "../lib/printTable";
 import { AddGudangStockModal } from "../components/AddGudangStockModal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { EditGudangStockModal } from "../components/EditGudangStockModal";
@@ -108,6 +110,7 @@ export function InventoryGudangStockPage({ gudang }: { gudang: string }) {
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
+  const [printing, setPrinting] = useState(false);
   const [editingItem, setEditingItem] = useState<GudangStockItem | null>(null);
   const [deleteError, setDeleteError] = useState("");
   const [confirmDelete, setConfirmDelete] = useState<GudangStockItem | null>(null);
@@ -160,6 +163,37 @@ export function InventoryGudangStockPage({ gudang }: { gudang: string }) {
     setPage(1);
   };
 
+  const cetak = async () => {
+    if (!confirmLargePrint(total)) return;
+    setPrinting(true);
+    try {
+      const all = await fetchAllRows((p, ps) =>
+        api.gudangStock({ gudang, search, status, stock: stockFilter, sortBy, sortDir, page: p, pageSize: ps })
+      );
+      const filters = [
+        search && `Cari: "${search}"`,
+        status && `Status: ${status}`,
+        stockFilter === "menipis" && "Stock Menipis (Buffer)",
+        stockFilter === "habis" && "Stock Habis",
+      ].filter(Boolean);
+      printTable({
+        title: `Inventory Gudang - ${gudang}`,
+        subtitle: filters.length ? [`Filter: ${filters.join(" · ")}`] : [],
+        columns: [
+          { label: "Kode" },
+          { label: "Nama Barang" },
+          { label: "Satuan" },
+          { label: "Buffer", align: "right" },
+          { label: "Stock Tersedia", align: "right" },
+          { label: "Status" },
+        ],
+        rows: all.map((i) => [i.kode, i.nama, i.satuan, i.buffer_stock, i.stock_tersedia.toLocaleString("id-ID"), i.keterangan]),
+      });
+    } finally {
+      setPrinting(false);
+    }
+  };
+
   const remove = async (item: GudangStockItem) => {
     setDeleteError("");
     try {
@@ -178,12 +212,21 @@ export function InventoryGudangStockPage({ gudang }: { gudang: string }) {
           <h1 className="text-xl font-semibold text-[var(--text-primary)]">Inventory Gudang - {gudang}</h1>
           <p className="text-sm text-[var(--text-secondary)]">{total.toLocaleString("id-ID")} item barang</p>
         </div>
-        <button
-          onClick={() => setShowAdd(true)}
-          className="inline-flex items-center gap-1.5 text-sm px-3.5 py-2 rounded-md border border-[var(--accent-blue-border)] text-[var(--accent-blue)] hover:bg-[var(--accent-blue-bg)]"
-        >
-          <PackagePlus size={16} /> Tambah Item
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={cetak}
+            disabled={printing}
+            className="inline-flex items-center gap-1.5 text-sm px-3.5 py-2 rounded-md border border-[var(--border)] bg-[var(--bg-card)] text-[var(--text-primary)] hover:bg-[#f1f5f9] disabled:opacity-50"
+          >
+            <Printer size={16} /> {printing ? "Menyiapkan..." : "Cetak"}
+          </button>
+          <button
+            onClick={() => setShowAdd(true)}
+            className="inline-flex items-center gap-1.5 text-sm px-3.5 py-2 rounded-md border border-[var(--accent-blue-border)] text-[var(--accent-blue)] hover:bg-[var(--accent-blue-bg)]"
+          >
+            <PackagePlus size={16} /> Tambah Item
+          </button>
+        </div>
       </div>
 
       {summary && (
