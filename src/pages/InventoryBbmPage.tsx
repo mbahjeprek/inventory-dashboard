@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { Search, ChevronLeft, ChevronRight, Fuel, Droplet, PackagePlus, Pencil, Trash2, Printer } from "lucide-react";
+import { Search, ChevronLeft, ChevronRight, Fuel, Droplet, PackagePlus, Pencil, Trash2 } from "lucide-react";
 import { api, type BbmRecord, type BbmSummary } from "../lib/api";
 import { StatCard } from "../components/StatCard";
-import { fetchAllRows, confirmLargePrint, printTable } from "../lib/printTable";
+import { ExportButtons } from "../components/ExportButtons";
+import { fetchAllRows, type TableReport } from "../lib/printTable";
 import { BbmTransactionModal } from "../components/BbmTransactionModal";
 import { EditBbmModal } from "../components/EditBbmModal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
@@ -28,7 +29,6 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
   const [showTransaksi, setShowTransaksi] = useState(false);
   const [editing, setEditing] = useState<BbmRecord | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<BbmRecord | null>(null);
-  const [printing, setPrinting] = useState(false);
   const pageSize = 25;
 
   const load = () => {
@@ -68,59 +68,53 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
 
   const totalPages = Math.max(Math.ceil(total / pageSize), 1);
 
-  const cetak = async () => {
-    if (!confirmLargePrint(total)) return;
-    setPrinting(true);
-    try {
-      const all = await fetchAllRows((p, ps) =>
-        api.bbm({ search, jenis_bbm: jenisBbm, lokasi, kode_kendaraan: alat, dateFrom, dateTo, page: p, pageSize: ps })
-      );
-      const fmt = (n: number | null | undefined) => (n ? n.toLocaleString("id-ID") : "-");
-      const tgl = (iso: string) => (iso ? iso.split("-").reverse().join("/") : "");
-      const filters = [
-        search && `Cari: "${search}"`,
-        jenisBbm && `Jenis BBM: ${jenisBbm}`,
-        `Lokasi: ${lokasiLock || lokasi || "Semua"}`,
-        alat && `Alat: ${alat}`,
-        (dateFrom || dateTo) && `Tanggal: ${tgl(dateFrom) || "awal"} - ${tgl(dateTo) || "akhir"}`,
-      ].filter(Boolean);
-      printTable({
-        title: `Inventory BBM${lokasiLock ? ` - ${lokasiLock}` : ""}`,
-        subtitle: [
-          `Filter: ${filters.join(" · ")}`,
-          `${total.toLocaleString("id-ID")} transaksi · total stok keluar ${pemakaianSum.toLocaleString("id-ID")} LTR · total stok masuk ${diterimaSum.toLocaleString("id-ID")} LTR`,
-        ],
-        landscape: true,
-        columns: [
-          { label: "Periode", nowrap: true },
-          { label: "Tanggal", nowrap: true },
-          { label: "No. SPB" },
-          { label: "Stok Masuk", align: "right" },
-          { label: "Stok Keluar", align: "right" },
-          { label: "Saldo Stock", align: "right" },
-          { label: "Keterangan" },
-          { label: "Status Kepemilikan" },
-          { label: "Kode Kendaraan" },
-          { label: "HM Terakhir Sebelum Permintaan Solar" },
-          { label: "Total HM Sebelum Pengisian", align: "right" },
-        ],
-        rows: all.map((r) => [
-          r.periode || "-",
-          r.tanggal || "-",
-          r.no_spb || "-",
-          fmt(r.diterima),
-          fmt(r.pemakaian),
-          r.saldo_stock !== null ? r.saldo_stock.toLocaleString("id-ID") : "-",
-          r.keterangan || "-",
-          r.status_kepemilikan || "-",
-          r.kode_kendaraan || "-",
-          r.hm_terakhir || "-",
-          r.total_hm != null ? r.total_hm.toLocaleString("id-ID", { maximumFractionDigits: 1 }) : "-",
-        ]),
-      });
-    } finally {
-      setPrinting(false);
-    }
+  const buildReport = async (): Promise<TableReport> => {
+    const all = await fetchAllRows((p, ps) =>
+      api.bbm({ search, jenis_bbm: jenisBbm, lokasi, kode_kendaraan: alat, dateFrom, dateTo, page: p, pageSize: ps })
+    );
+    const tgl = (iso: string) => (iso ? iso.split("-").reverse().join("/") : "");
+    const filters = [
+      search && `Cari: "${search}"`,
+      jenisBbm && `Jenis BBM: ${jenisBbm}`,
+      `Lokasi: ${lokasiLock || lokasi || "Semua"}`,
+      alat && `Alat: ${alat}`,
+      (dateFrom || dateTo) && `Tanggal: ${tgl(dateFrom) || "awal"} - ${tgl(dateTo) || "akhir"}`,
+    ].filter(Boolean);
+    return {
+      title: `Inventory BBM${lokasiLock ? ` - ${lokasiLock}` : ""}`,
+      subtitle: [
+        `Filter: ${filters.join(" · ")}`,
+        `${total.toLocaleString("id-ID")} transaksi · total stok keluar ${pemakaianSum.toLocaleString("id-ID")} LTR · total stok masuk ${diterimaSum.toLocaleString("id-ID")} LTR`,
+      ],
+      landscape: true,
+      columns: [
+        { label: "Periode", nowrap: true },
+        { label: "Tanggal", nowrap: true },
+        { label: "No. SPB" },
+        { label: "Stok Masuk", align: "right" },
+        { label: "Stok Keluar", align: "right" },
+        { label: "Saldo Stock", align: "right" },
+        { label: "Keterangan" },
+        { label: "Status Kepemilikan" },
+        { label: "Kode Kendaraan" },
+        { label: "HM Terakhir Sebelum Permintaan Solar" },
+        { label: "Total HM Sebelum Pengisian", align: "right" },
+      ],
+      // Same rules as the table cells: 0/empty Stok Masuk & Keluar show "-", Saldo shows 0.
+      rows: all.map((r) => [
+        r.periode,
+        r.tanggal,
+        r.no_spb,
+        r.diterima || null,
+        r.pemakaian || null,
+        r.saldo_stock,
+        r.keterangan,
+        r.status_kepemilikan,
+        r.kode_kendaraan,
+        r.hm_terakhir,
+        r.total_hm,
+      ]),
+    };
   };
 
   const handleDelete = async (r: BbmRecord) => {
@@ -149,13 +143,11 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
           <p className="text-sm text-[var(--text-secondary)]">Monitoring stok & histori pemakaian Solar dan Bensin per lokasi</p>
         </div>
         <div className="flex items-center gap-2">
-          <button
-            onClick={cetak}
-            disabled={printing}
-            className="inline-flex items-center gap-1.5 text-sm px-3.5 py-2 rounded-md border border-[var(--border)] bg-[var(--bg-card)] text-[var(--text-primary)] hover:bg-[#f1f5f9] disabled:opacity-50"
-          >
-            <Printer size={16} /> {printing ? "Menyiapkan..." : "Cetak"}
-          </button>
+          <ExportButtons
+            total={total}
+            buildReport={buildReport}
+            fileName={`inventory-bbm${lokasiLock ? `-${lokasiLock.toLowerCase()}` : ""}`}
+          />
           <button
             onClick={() => setShowTransaksi(true)}
             className="inline-flex items-center gap-1.5 text-sm px-3.5 py-2 rounded-md border border-[var(--accent-blue-border)] text-[var(--accent-blue)] hover:bg-[var(--accent-blue-bg)]"

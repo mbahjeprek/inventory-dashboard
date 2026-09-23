@@ -15,14 +15,14 @@ import {
   Boxes,
   AlertTriangle,
   XCircle,
-  Printer,
 } from "lucide-react";
 import { api, type Item, type Summary } from "../lib/api";
 import { TransactionModal } from "../components/TransactionModal";
 import { EditItemModal } from "../components/EditItemModal";
 import { ItemPickerModal } from "../components/ItemPickerModal";
 import { StatCard } from "../components/StatCard";
-import { fetchAllRows, confirmLargePrint, printTable } from "../lib/printTable";
+import { ExportButtons } from "../components/ExportButtons";
+import { fetchAllRows, type TableReport } from "../lib/printTable";
 
 const STATUSES = ["AMAN", "BUFFER STOCK"];
 
@@ -115,7 +115,6 @@ export function InventoryPage() {
   const [selectedItem, setSelectedItem] = useState<Item | null>(null);
   const [editingItem, setEditingItem] = useState<Item | null>(null);
   const [showPicker, setShowPicker] = useState(false);
-  const [printing, setPrinting] = useState(false);
   const pageSize = 25;
 
   const load = () => {
@@ -155,36 +154,30 @@ export function InventoryPage() {
 
   const totalPages = Math.max(Math.ceil(total / pageSize), 1);
 
-  const cetak = async () => {
-    if (!confirmLargePrint(total)) return;
-    setPrinting(true);
-    try {
-      const all = await fetchAllRows((p, ps) =>
-        api.items({ search, status, satuan, stock: stockFilter, sortBy, sortDir, page: p, pageSize: ps })
-      );
-      const filters = [
-        search && `Cari: "${search}"`,
-        satuan && `Satuan: ${satuan}`,
-        status && `Status: ${status}`,
-        stockFilter === "menipis" && "Stock Menipis (Buffer)",
-        stockFilter === "habis" && "Stock Habis",
-      ].filter(Boolean);
-      printTable({
-        title: "Inventory Gudang - Nilam",
-        subtitle: filters.length ? [`Filter: ${filters.join(" · ")}`] : [],
-        columns: [
-          { label: "Kode" },
-          { label: "Nama Barang" },
-          { label: "Satuan" },
-          { label: "Buffer", align: "right" },
-          { label: "Stock Tersedia", align: "right" },
-          { label: "Status" },
-        ],
-        rows: all.map((i) => [i.kode, i.nama, i.satuan, i.buffer_stock, i.stock_tersedia.toLocaleString("id-ID"), i.keterangan]),
-      });
-    } finally {
-      setPrinting(false);
-    }
+  const buildReport = async (): Promise<TableReport> => {
+    const all = await fetchAllRows((p, ps) =>
+      api.items({ search, status, satuan, stock: stockFilter, sortBy, sortDir, page: p, pageSize: ps })
+    );
+    const filters = [
+      search && `Cari: "${search}"`,
+      satuan && `Satuan: ${satuan}`,
+      status && `Status: ${status}`,
+      stockFilter === "menipis" && "Stock Menipis (Buffer)",
+      stockFilter === "habis" && "Stock Habis",
+    ].filter(Boolean);
+    return {
+      title: "Inventory Gudang - Nilam",
+      subtitle: filters.length ? [`Filter: ${filters.join(" · ")}`] : [],
+      columns: [
+        { label: "Kode" },
+        { label: "Nama Barang" },
+        { label: "Satuan" },
+        { label: "Buffer", align: "right" },
+        { label: "Stock Tersedia", align: "right" },
+        { label: "Status" },
+      ],
+      rows: all.map((i) => [i.kode, i.nama, i.satuan, i.buffer_stock, i.stock_tersedia, i.keterangan]),
+    };
   };
 
   const toggleSort = (key: SortKey) => {
@@ -205,13 +198,7 @@ export function InventoryPage() {
           <p className="text-sm text-[var(--text-secondary)]">{total.toLocaleString("id-ID")} item barang</p>
         </div>
         <div className="flex items-center gap-2">
-          <button
-            onClick={cetak}
-            disabled={printing}
-            className="inline-flex items-center gap-1.5 text-sm px-3.5 py-2 rounded-md border border-[var(--border)] bg-[var(--bg-card)] text-[var(--text-primary)] hover:bg-[#f1f5f9] disabled:opacity-50"
-          >
-            <Printer size={16} /> {printing ? "Menyiapkan..." : "Cetak"}
-          </button>
+          <ExportButtons total={total} buildReport={buildReport} fileName="inventory-gudang-nilam" />
           <button
             onClick={() => setShowPicker(true)}
             className="inline-flex items-center gap-1.5 text-sm px-3.5 py-2 rounded-md border border-[var(--accent-blue-border)] text-[var(--accent-blue)] hover:bg-[var(--accent-blue-bg)]"

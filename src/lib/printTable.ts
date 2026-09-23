@@ -1,9 +1,26 @@
 export type PrintColumn = { label: string; align?: "left" | "right"; nowrap?: boolean };
+type Cell = string | number | null | undefined;
+
+// One definition of a table report, shared by the Cetak (print) and Excel exports so both always
+// carry the same title, filters and columns as the on-screen table.
+export type TableReport = {
+  title: string;
+  subtitle?: string[];
+  columns: PrintColumn[];
+  rows: Cell[][];
+  landscape?: boolean;
+};
 
 const escapeHtml = (v: unknown) =>
   String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 
-// Pages through a list endpoint (the server caps pageSize at 500) so a print covers every row that
+// Empty cells show "-" and numbers use Indonesian grouping, the same as the on-screen table.
+const displayCell = (v: Cell) =>
+  v === null || v === undefined || v === "" ? "-" : typeof v === "number" ? v.toLocaleString("id-ID", { maximumFractionDigits: 1 }) : v;
+
+const printedAtText = () => new Date().toLocaleString("id-ID", { dateStyle: "long", timeStyle: "short" });
+
+// Pages through a list endpoint (the server caps pageSize at 500) so an export covers every row that
 // matches the current filters, not just the page on screen.
 export async function fetchAllRows<T>(
   fetchPage: (page: number, pageSize: number) => Promise<{ data: T[]; total: number }>
@@ -15,39 +32,23 @@ export async function fetchAllRows<T>(
   return [first, ...rest].flatMap((r) => r.data);
 }
 
-// Very large prints (BBM has 20k+ rows unfiltered) are slow and hundreds of pages; ask first.
+// Very large exports (BBM has 20k+ rows unfiltered) are slow and hundreds of pages; ask first.
 export function confirmLargePrint(total: number): boolean {
   if (total <= 2000) return true;
   return window.confirm(
-    `Akan mencetak ${total.toLocaleString("id-ID")} baris (sekitar ${Math.ceil(total / 30).toLocaleString("id-ID")} halaman).\n` +
+    `Akan mengambil ${total.toLocaleString("id-ID")} baris (sekitar ${Math.ceil(total / 30).toLocaleString("id-ID")} halaman cetak).\n` +
       "Gunakan filter (misalnya tanggal) untuk memperkecil. Lanjutkan?"
   );
 }
 
 // Prints a table laid out like the on-screen grid (same columns, green header, cell borders) via a
 // hidden iframe, so it isn't blocked as a popup and the app's own layout doesn't leak into the print.
-export function printTable({
-  title,
-  subtitle = [],
-  columns,
-  rows,
-  landscape = false,
-}: {
-  title: string;
-  subtitle?: string[];
-  columns: PrintColumn[];
-  rows: (string | number | null | undefined)[][];
-  landscape?: boolean;
-}) {
-  const printedAt = new Date().toLocaleString("id-ID", { dateStyle: "long", timeStyle: "short" });
+export function printTable({ title, subtitle = [], columns, rows, landscape = false }: TableReport) {
   const cls = (c?: PrintColumn) => [c?.align === "right" && "r", c?.nowrap && "nw"].filter(Boolean).join(" ");
   const head = columns.map((c) => `<th class="${cls(c)}">${escapeHtml(c.label)}</th>`).join("");
   const body = rows.length
     ? rows
-        .map(
-          (r) =>
-            `<tr>${r.map((v, i) => `<td class="${cls(columns[i])}">${escapeHtml(v ?? "-")}</td>`).join("")}</tr>`
-        )
+        .map((r) => `<tr>${r.map((v, i) => `<td class="${cls(columns[i])}">${escapeHtml(displayCell(v))}</td>`).join("")}</tr>`)
         .join("")
     : `<tr><td colspan="${columns.length}" class="empty">Tidak ada data</td></tr>`;
 
@@ -69,7 +70,7 @@ export function printTable({
   </style></head><body>
     <h1>${escapeHtml(title)}</h1>
     ${subtitle.map((s) => `<p class="meta">${escapeHtml(s)}</p>`).join("")}
-    <p class="meta">Dicetak: ${escapeHtml(printedAt)} · ${rows.length.toLocaleString("id-ID")} baris</p>
+    <p class="meta">Dicetak: ${escapeHtml(printedAtText())} · ${rows.length.toLocaleString("id-ID")} baris</p>
     <table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>
   </body></html>`;
 
@@ -86,4 +87,80 @@ export function printTable({
     win.focus();
     win.print();
   }, 50);
+}
+
+// Same report as printTable, as a styled .xlsx: title/filter lines, then the table with the green
+// header, cell borders and zebra rows. Numbers stay real numbers so they can be summed in Excel.
+export async function exportExcel({ title, subtitle = [], columns, rows, landscape = false }: TableReport, fileName: string) {
+  const { default: ExcelJS } = await import("exceljs");
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet(title.slice(0, 31).replace(/[\\/?*[\]:]/g, "-"), {
+    pageSetup: {
+      paperSize: 9, // A4
+      orientation: landscape ? "landscape" : "portrait",
+      fitToPage: true,
+      fitToWidth: 1,
+      fitToHeight: 0,
+      margins: { left: 0.4, right: 0.4, top: 0.4, bottom: 0.4, header: 0.2, footer: 0.2 },
+    },
+  });
+
+  ws.addRow([title]).font = { bold: true, size: 14 };
+  for (const s of [...subtitle, `Dicetak: ${printedAtText()} · ${rows.length.toLocaleString("id-ID")} baris`]) {
+    ws.addRow([s]).font = { size: 9, color: { argb: "FF5B6B7C" } };
+  }
+  ws.addRow([]);
+
+  const border = { style: "thin" as const, color: { argb: "FFB9C4CF" } };
+  const allBorders = { top: border, left: border, bottom: border, right: border };
+
+  const header = ws.addRow(columns.map((c) => c.label.toUpperCase()));
+  const headerRowNo = header.number;
+  header.eachCell((cell, i) => {
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFCFEAB5" } };
+    cell.font = { bold: true, size: 9, color: { argb: "FF1F3D12" } };
+    cell.border = allBorders;
+    cell.alignment = { vertical: "middle", horizontal: columns[i - 1]?.align === "right" ? "right" : "left", wrapText: true };
+  });
+
+  if (!rows.length) {
+    const empty = ws.addRow(["Tidak ada data"]);
+    ws.mergeCells(empty.number, 1, empty.number, columns.length);
+    empty.getCell(1).alignment = { horizontal: "center" };
+    empty.getCell(1).font = { size: 9, color: { argb: "FF94A3B8" } };
+    empty.getCell(1).border = allBorders;
+  }
+
+  rows.forEach((r, idx) => {
+    const row = ws.addRow(r.map((v) => (v === null || v === undefined || v === "" ? "-" : v)));
+    row.eachCell({ includeEmpty: true }, (cell, i) => {
+      const col = columns[i - 1];
+      cell.font = { size: 9 };
+      cell.border = allBorders;
+      cell.alignment = { vertical: "top", horizontal: col?.align === "right" ? "right" : "left", wrapText: !col?.nowrap };
+      if (typeof cell.value === "number") cell.numFmt = Number.isInteger(cell.value) ? "#,##0" : "#,##0.0";
+      if (idx % 2 === 1) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF7FAF5" } };
+    });
+  });
+
+  // Column widths from the longest value (capped), so long text like Keterangan wraps instead of
+  // producing one huge column.
+  columns.forEach((c, i) => {
+    const longest = Math.max(c.label.length, ...rows.map((r) => String(displayCell(r[i])).length));
+    ws.getColumn(i + 1).width = Math.min(Math.max(longest + 2, 8), 45);
+  });
+
+  ws.views = [{ state: "frozen", ySplit: headerRowNo }];
+  ws.autoFilter = { from: { row: headerRowNo, column: 1 }, to: { row: headerRowNo, column: columns.length } };
+  ws.pageSetup.printTitlesRow = `${headerRowNo}:${headerRowNo}`;
+
+  const buf = await wb.xlsx.writeBuffer();
+  const url = URL.createObjectURL(new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
