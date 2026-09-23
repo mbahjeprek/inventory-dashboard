@@ -15,15 +15,19 @@
     "import:logs": "tsx server/src/importLogs.ts",
     "import:karyawan": "tsx server/src/importKaryawan.ts",
     "import:alat-berat": "tsx server/src/importAlatBerat.ts",
-    "import:bbm": "tsx server/src/importBbm.ts"
+    "import:bbm": "tsx server/src/importBbm.ts",
+    "user:create": "tsx server/src/manageUsers.ts create",
+    "user:list": "tsx server/src/manageUsers.ts list",
+    "user:delete": "tsx server/src/manageUsers.ts delete"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.3",
     "@tanstack/react-query": "^5.102.8",
-    "cors": "^2.8.6",
+    "cookie-parser": "^1.4.7",
     "csv-parse": "^7.0.2",
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.2",
     "lucide-react": "^1.45.0",
     "pg": "^8.16.3",
     "react": "^19.2.8",
@@ -36,8 +40,9 @@
   },
   "devDependencies": {
     "@types/better-sqlite3": "^9.6.0",
-    "@types/cors": "^2.8.19",
+    "@types/cookie-parser": "^1.4.9",
     "@types/express": "^5.0.6",
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^24.13.3",
     "@types/pg": "^8.11.10",
     "@types/react": "^19.2.18",

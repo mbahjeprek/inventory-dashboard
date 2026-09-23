@@ -1,11 +1,65 @@
 import express from "express";
-import cors from "cors";
+import cookieParser from "cookie-parser";
 import type { PoolClient } from "pg";
 import { queryMany, queryOne, execute, withTransaction } from "./db";
+import { COOKIE_NAME, hashPassword, verifyPassword, signSession, verifySession } from "./auth";
 
 export const app = express();
-app.use(cors());
+// Frontend and API are always same-origin (one Vercel domain in production, Vite's dev proxy
+// locally) - no cross-origin requests happen, so no CORS middleware is needed. Keeping it out
+// matters now that auth uses a cookie: a permissive `cors()` would otherwise widen who can send
+// credentialed requests.
 app.use(express.json());
+app.use(cookieParser());
+
+const isProd = process.env.NODE_ENV === "production";
+
+function setSessionCookie(res: express.Response, token: string) {
+  res.cookie(COOKIE_NAME, token, {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: isProd,
+    maxAge: 7 * 24 * 60 * 60 * 1000,
+  });
+}
+
+// ---- Auth ----
+app.post("/api/auth/login", async (req, res) => {
+  const { username, password } = req.body;
+  if (!username || !password) return res.status(400).json({ error: "Username dan password wajib diisi" });
+
+  const row = await queryOne<{ id: number; username: string; nama: string; password_hash: string }>(
+    "SELECT * FROM users WHERE username = @username",
+    { username }
+  );
+  if (!row || !verifyPassword(password, row.password_hash)) {
+    return res.status(401).json({ error: "Username atau password salah" });
+  }
+
+  const user = { id: row.id, username: row.username, nama: row.nama };
+  setSessionCookie(res, signSession(user));
+  res.json({ user });
+});
+
+app.post("/api/auth/logout", (_req, res) => {
+  res.clearCookie(COOKIE_NAME);
+  res.json({ success: true });
+});
+
+app.get("/api/auth/me", (req, res) => {
+  const token = req.cookies?.[COOKIE_NAME];
+  const user = token ? verifySession(token) : null;
+  if (!user) return res.status(401).json({ error: "Not authenticated" });
+  res.json({ user });
+});
+
+// ---- Everything else under /api requires a valid session ----
+app.use("/api", (req, res, next) => {
+  const token = req.cookies?.[COOKIE_NAME];
+  const user = token ? verifySession(token) : null;
+  if (!user) return res.status(401).json({ error: "Not authenticated" });
+  next();
+});
 
 // Nilam/Zamrud/Firus are consumer/destination estates, NOT separate physical warehouses.
 // There is only one physical stock pool (the main warehouse, located at Nilam).
@@ -575,6 +629,99 @@ app.put("/api/stock-out/:id", async (req, res) => {
 app.delete("/api/stock-out/:id", async (req, res) => {
   const result = await execute("DELETE FROM stock_out_log WHERE id = @id", { id: req.params.id });
   if (result.rowCount === 0) return res.status(404).json({ error: "Not found" });
+  res.json({ success: true });
+});
+
+// ---- Users (login accounts) master data ----
+app.get("/api/users", async (req, res) => {
+  const { search = "", sortBy = "nama", sortDir = "asc", page = "1", pageSize = "50" } =
+    req.query as Record<string, string>;
+
+  const validSort = ["username", "nama", "created_at"];
+  const sortCol = validSort.includes(sortBy) ? sortBy : "nama";
+  const dir = sortDir === "desc" ? "DESC" : "ASC";
+
+  const conditions: string[] = [];
+  const params: any = {};
+
+  if (search) {
+    conditions.push("(username ILIKE @search OR nama ILIKE @search)");
+    params.search = `%${search}%`;
+  }
+
+  const where = conditions.length ? "WHERE " + conditions.join(" AND ") : "";
+  const total = (await queryOne<any>(`SELECT COUNT(*) c FROM users ${where}`, params))!.c;
+
+  const limit = Math.min(parseInt(pageSize) || 50, 500);
+  const offset = (Math.max(parseInt(page) || 1, 1) - 1) * limit;
+
+  const data = await queryMany(
+    `SELECT id, username, nama, created_at FROM users ${where} ORDER BY ${sortCol} ${dir} LIMIT @limit OFFSET @offset`,
+    { ...params, limit, offset }
+  );
+
+  res.json({ data, total: Number(total), page: parseInt(page), pageSize: limit });
+});
+
+app.post("/api/users", async (req, res) => {
+  const { username, password, nama } = req.body;
+  if (!username || !String(username).trim() || !password || !nama || !String(nama).trim()) {
+    return res.status(400).json({ error: "Username, password, dan nama wajib diisi" });
+  }
+
+  try {
+    const row = await queryOne<{ id: number }>(
+      `INSERT INTO users (username, password_hash, nama) VALUES (@username, @password_hash, @nama) RETURNING id`,
+      { username: String(username).trim(), password_hash: hashPassword(password), nama: String(nama).trim() }
+    );
+    res.json({ success: true, id: row!.id });
+  } catch (e: any) {
+    if (e.code === "23505") {
+      return res.status(409).json({ error: "Username sudah digunakan" });
+    }
+    throw e;
+  }
+});
+
+app.put("/api/users/:id", async (req, res) => {
+  const existing = await queryOne<any>("SELECT * FROM users WHERE id = @id", { id: req.params.id });
+  if (!existing) return res.status(404).json({ error: "Not found" });
+
+  const { username, nama, password } = req.body;
+  if (!username || !String(username).trim() || !nama || !String(nama).trim()) {
+    return res.status(400).json({ error: "Username dan nama wajib diisi" });
+  }
+
+  try {
+    await execute(
+      `UPDATE users SET username = @username, nama = @nama, password_hash = @password_hash WHERE id = @id`,
+      {
+        username: String(username).trim(),
+        nama: String(nama).trim(),
+        password_hash: password ? hashPassword(password) : existing.password_hash,
+        id: req.params.id,
+      }
+    );
+  } catch (e: any) {
+    if (e.code === "23505") {
+      return res.status(409).json({ error: "Username sudah digunakan" });
+    }
+    throw e;
+  }
+
+  res.json({ success: true });
+});
+
+app.delete("/api/users/:id", async (req, res) => {
+  const existing = await queryOne<any>("SELECT * FROM users WHERE id = @id", { id: req.params.id });
+  if (!existing) return res.status(404).json({ error: "Not found" });
+
+  const { c: userCount } = (await queryOne<{ c: number }>("SELECT COUNT(*) c FROM users"))!;
+  if (Number(userCount) <= 1) {
+    return res.status(400).json({ error: "Tidak bisa menghapus satu-satunya akun yang tersisa" });
+  }
+
+  await execute("DELETE FROM users WHERE id = @id", { id: req.params.id });
   res.json({ success: true });
 });
 

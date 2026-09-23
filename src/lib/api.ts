@@ -1,3 +1,16 @@
+export type AuthUser = {
+  id: number;
+  username: string;
+  nama: string;
+};
+
+export type UserAccount = {
+  id: number;
+  username: string;
+  nama: string;
+  created_at: string;
+};
+
 export type Item = {
   id: number;
   kode: string;
@@ -143,6 +156,13 @@ async function req<T>(url: string, opts?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  login: (username: string, password: string) =>
+    req<{ user: AuthUser }>("/api/auth/login", { method: "POST", body: JSON.stringify({ username, password }) }),
+
+  logout: () => req<{ success: boolean }>("/api/auth/logout", { method: "POST" }),
+
+  me: () => req<{ user: AuthUser }>("/api/auth/me"),
+
   summary: () => req<Summary>("/api/summary"),
 
   satuanOptions: () => req<string[]>("/api/satuan-options"),
@@ -284,4 +304,17 @@ export const api = {
   ) => req<{ success: boolean }>(`/api/bbm/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
 
   deleteBbm: (id: number) => req<{ success: boolean }>(`/api/bbm/${id}`, { method: "DELETE" }),
+
+  users: (params: Record<string, string | number>) => {
+    const qs = new URLSearchParams(params as any).toString();
+    return req<{ data: UserAccount[]; total: number; page: number; pageSize: number }>(`/api/users?${qs}`);
+  },
+
+  createUser: (payload: { username: string; password: string; nama: string }) =>
+    req<{ success: boolean; id: number }>("/api/users", { method: "POST", body: JSON.stringify(payload) }),
+
+  updateUser: (id: number, payload: { username: string; nama: string; password?: string }) =>
+    req<{ success: boolean }>(`/api/users/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
+
+  deleteUser: (id: number) => req<{ success: boolean }>(`/api/users/${id}`, { method: "DELETE" }),
 };

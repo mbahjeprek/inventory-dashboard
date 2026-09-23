@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { NavLink } from "react-router-dom";
+import { NavLink, useNavigate } from "react-router-dom";
 import {
   Package,
   ArrowLeftRight,
@@ -13,7 +13,10 @@ import {
   ChevronDown,
   ChevronsLeft,
   ChevronsRight,
+  LogOut,
+  KeyRound,
 } from "lucide-react";
+import { useAuth } from "../context/AuthContext";
 
 type NavItem = { to: string; label: string; icon: typeof Package };
 type NavSection = { title?: string; collapsible?: boolean; items: NavItem[] };
@@ -42,6 +45,7 @@ const navSections: NavSection[] = [
     items: [
       { to: "/karyawan", label: "Karyawan", icon: Users },
       { to: "/alat-berat", label: "Alat Berat", icon: Truck },
+      { to: "/users", label: "Pengguna", icon: KeyRound },
     ],
   },
 ];
@@ -49,6 +53,8 @@ const navSections: NavSection[] = [
 const SIDEBAR_COLLAPSED_KEY = "sidebar-collapsed";
 
 export function Sidebar() {
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
   const [groupCollapsed, setGroupCollapsed] = useState<Record<string, boolean>>({});
   const [minimized, setMinimized] = useState(() => {
     try {
@@ -142,6 +148,27 @@ export function Sidebar() {
         {minimized ? <ChevronsRight size={16} /> : <ChevronsLeft size={16} />}
         {!minimized && <span className="text-xs">Perkecil menu</span>}
       </button>
+
+      <div className={`px-3 py-3 border-t border-white/10 ${minimized ? "flex justify-center" : ""}`}>
+        {!minimized && (
+          <div className="px-2 pb-2 text-xs text-white truncate" title={user?.nama}>
+            {user?.nama}
+          </div>
+        )}
+        <button
+          onClick={async () => {
+            await logout();
+            navigate("/login", { replace: true });
+          }}
+          title="Keluar"
+          className={`flex items-center gap-2 py-2 rounded-md text-sm text-white/60 hover:bg-white/5 hover:text-white ${
+            minimized ? "justify-center px-0 w-full" : "px-2 w-full"
+          }`}
+        >
+          <LogOut size={16} className="shrink-0" />
+          {!minimized && "Keluar"}
+        </button>
+      </div>
 
       {!minimized && (
         <div className="px-5 py-4 text-[11px] text-white/40 border-t border-white/10">
