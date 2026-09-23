@@ -41,7 +41,7 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
   };
 
   useEffect(() => {
-    api.bbmSummary().then(setSummary);
+    api.bbmSummary(lokasiLock).then(setSummary);
     api.bbmLokasiOptions().then(setLokasiOptions);
   }, []);
 
@@ -68,7 +68,7 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
 
   const handleDelete = async (r: BbmRecord) => {
     await api.deleteBbm(r.id);
-    api.bbmSummary().then(setSummary);
+    api.bbmSummary(lokasiLock).then(setSummary);
     load();
   };
 
@@ -311,7 +311,7 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
           onClose={() => setShowTransaksi(false)}
           onSuccess={() => {
             setShowTransaksi(false);
-            api.bbmSummary().then(setSummary);
+            api.bbmSummary(lokasiLock).then(setSummary);
             load();
           }}
         />
@@ -323,7 +323,7 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
           onClose={() => setEditing(null)}
           onSuccess={() => {
             setEditing(null);
-            api.bbmSummary().then(setSummary);
+            api.bbmSummary(lokasiLock).then(setSummary);
             load();
           }}
         />

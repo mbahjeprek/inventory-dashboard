@@ -6,6 +6,12 @@ CREATE TABLE IF NOT EXISTS users (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- 'superuser' sees/manages everything; 'estate' is locked to just their one estate's Gudang/BBM
+-- pages (Nilam/KNS/WJA/Zamrud/Firus) so different estates' data never mix in one login.
+-- Existing rows default to 'superuser' so accounts that predate this column keep full access.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'superuser';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS estate TEXT;
+
 CREATE TABLE IF NOT EXISTS items (
   id SERIAL PRIMARY KEY,
   kode TEXT UNIQUE NOT NULL,

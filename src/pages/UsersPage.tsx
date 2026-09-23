@@ -136,6 +136,7 @@ export function UsersPage() {
               <tr className="bg-[#f8fafc] text-[var(--text-secondary)] text-xs uppercase">
                 <SortableHeader label="Username" sortKey="username" currentSort={sortBy} currentDir={sortDir} onSort={toggleSort} />
                 <SortableHeader label="Nama" sortKey="nama" currentSort={sortBy} currentDir={sortDir} onSort={toggleSort} />
+                <th className="px-4 py-2.5 text-left">Akses</th>
                 <SortableHeader label="Dibuat" sortKey="created_at" currentSort={sortBy} currentDir={sortDir} onSort={toggleSort} />
                 <th className="px-4 py-2.5 text-right">Aksi</th>
               </tr>
@@ -143,13 +144,13 @@ export function UsersPage() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={4} className="px-4 py-8 text-center text-[var(--text-muted)]">
+                  <td colSpan={5} className="px-4 py-8 text-center text-[var(--text-muted)]">
                     Memuat...
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={4} className="px-4 py-8 text-center text-[var(--text-muted)]">
+                  <td colSpan={5} className="px-4 py-8 text-center text-[var(--text-muted)]">
                     Tidak ada data
                   </td>
                 </tr>
@@ -163,6 +164,17 @@ export function UsersPage() {
                       )}
                     </td>
                     <td className="px-4 py-2.5">{u.nama}</td>
+                    <td className="px-4 py-2.5">
+                      {u.role === "superuser" ? (
+                        <span className="text-xs px-2 py-0.5 rounded-full border bg-[var(--accent-blue-bg)] text-[var(--accent-blue)] border-[var(--accent-blue-border)]">
+                          Super User
+                        </span>
+                      ) : (
+                        <span className="text-xs px-2 py-0.5 rounded-full border bg-[var(--accent-green-bg)] text-[var(--accent-green)] border-[var(--accent-green-border)]">
+                          {u.estate}
+                        </span>
+                      )}
+                    </td>
                     <td className="px-4 py-2.5 text-[var(--text-secondary)]">
                       {new Date(u.created_at).toLocaleDateString("id-ID")}
                     </td>

@@ -2,7 +2,7 @@ import express from "express";
 import cookieParser from "cookie-parser";
 import type { PoolClient } from "pg";
 import { queryMany, queryOne, execute, withTransaction } from "./db.js";
-import { COOKIE_NAME, hashPassword, verifyPassword, signSession, verifySession } from "./auth.js";
+import { COOKIE_NAME, hashPassword, verifyPassword, signSession, verifySession, ESTATES, type SessionUser } from "./auth.js";
 
 export const app = express();
 // Frontend and API are always same-origin (one Vercel domain in production, Vite's dev proxy
@@ -28,7 +28,7 @@ app.post("/api/auth/login", async (req, res) => {
   const { username, password } = req.body;
   if (!username || !password) return res.status(400).json({ error: "Username dan password wajib diisi" });
 
-  const row = await queryOne<{ id: number; username: string; nama: string; password_hash: string }>(
+  const row = await queryOne<{ id: number; username: string; nama: string; password_hash: string; role: "superuser" | "estate"; estate: string | null }>(
     "SELECT * FROM users WHERE username = @username",
     { username }
   );
@@ -36,7 +36,7 @@ app.post("/api/auth/login", async (req, res) => {
     return res.status(401).json({ error: "Username atau password salah" });
   }
 
-  const user = { id: row.id, username: row.username, nama: row.nama };
+  const user: SessionUser = { id: row.id, username: row.username, nama: row.nama, role: row.role, estate: row.estate as SessionUser["estate"] };
   setSessionCookie(res, signSession(user));
   res.json({ user });
 });
@@ -53,13 +53,41 @@ app.get("/api/auth/me", (req, res) => {
   res.json({ user });
 });
 
+declare global {
+  namespace Express {
+    interface Request {
+      user?: SessionUser;
+    }
+  }
+}
+
 // ---- Everything else under /api requires a valid session ----
 app.use("/api", (req, res, next) => {
   const token = req.cookies?.[COOKIE_NAME];
   const user = token ? verifySession(token) : null;
   if (!user) return res.status(401).json({ error: "Not authenticated" });
+  req.user = user;
   next();
 });
+
+// A 'superuser' sees/manages everything; an 'estate' user is locked to their own estate's
+// Gudang/BBM data. These two helpers gate routes accordingly - see schema.sql's comment on
+// users.role/estate for the reasoning.
+function requireSuperuser(req: express.Request, res: express.Response, next: express.NextFunction) {
+  if (req.user!.role !== "superuser") return res.status(403).json({ error: "Akses ditolak" });
+  next();
+}
+
+function estateAllowed(user: SessionUser, estate: string | null | undefined) {
+  return user.role === "superuser" || user.estate === estate;
+}
+
+function requireEstate(estate: string) {
+  return (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (!estateAllowed(req.user!, estate)) return res.status(403).json({ error: "Akses ditolak" });
+    next();
+  };
+}
 
 // Nilam/Zamrud/Firus are consumer/destination estates, NOT separate physical warehouses.
 // There is only one physical stock pool (the main warehouse, located at Nilam).
@@ -154,7 +182,7 @@ async function deleteMirror(client: PoolClient, mirrorSource: string | null, mir
 }
 
 // ---- Summary for dashboard ----
-app.get("/api/summary", async (_req, res) => {
+app.get("/api/summary", requireEstate("NILAM"), async (_req, res) => {
   const totalItems = (await queryOne<any>("SELECT COUNT(*) c FROM items"))!.c;
   const lowStock = (
     await queryOne<any>("SELECT COUNT(*) c FROM items WHERE stock_tersedia <= buffer_stock AND buffer_stock > 0")
@@ -226,7 +254,7 @@ app.get("/api/items", async (req, res) => {
   res.json({ data: items, total: Number(total), page: parseInt(page), pageSize: limit });
 });
 
-app.get("/api/items/:id", async (req, res) => {
+app.get("/api/items/:id", requireEstate("NILAM"), async (req, res) => {
   const item = await queryOne("SELECT * FROM items WHERE id = @id", { id: req.params.id });
   if (!item) return res.status(404).json({ error: "Not found" });
   const transactions = await queryMany(
@@ -236,7 +264,7 @@ app.get("/api/items/:id", async (req, res) => {
   res.json({ ...item, transactions });
 });
 
-app.post("/api/items", async (req, res) => {
+app.post("/api/items", requireEstate("NILAM"), async (req, res) => {
   const { kode, nama, satuan, buffer_stock } = req.body;
   if (!kode || !String(kode).trim() || !nama || !String(nama).trim()) {
     return res.status(400).json({ error: "Kode dan nama wajib diisi" });
@@ -261,7 +289,7 @@ app.post("/api/items", async (req, res) => {
   }
 });
 
-app.put("/api/items/:id", async (req, res) => {
+app.put("/api/items/:id", requireEstate("NILAM"), async (req, res) => {
   const { kode, nama, satuan, buffer_stock } = req.body;
   const existing = await queryOne("SELECT * FROM items WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Not found" });
@@ -289,7 +317,7 @@ app.put("/api/items/:id", async (req, res) => {
   res.json({ success: true });
 });
 
-app.delete("/api/items/:id", async (req, res) => {
+app.delete("/api/items/:id", requireEstate("NILAM"), async (req, res) => {
   const { id } = req.params;
   const existing = await queryOne("SELECT * FROM items WHERE id = @id", { id });
   if (!existing) return res.status(404).json({ error: "Not found" });
@@ -315,6 +343,7 @@ const GUDANG_STOCK_OPTIONS = ["KNS", "WJA", "ZAMRUD", "FIRUS"];
 app.get("/api/gudang-stock/summary", async (req, res) => {
   const { gudang = "" } = req.query as Record<string, string>;
   if (!GUDANG_STOCK_OPTIONS.includes(gudang)) return res.status(400).json({ error: "Gudang tidak valid" });
+  if (!estateAllowed(req.user!, gudang)) return res.status(403).json({ error: "Akses ditolak" });
 
   const totalItems = (await queryOne<any>("SELECT COUNT(*) c FROM gudang_stock WHERE gudang = @gudang", { gudang }))!.c;
   const lowStock = (
@@ -345,6 +374,7 @@ app.get("/api/gudang-stock", async (req, res) => {
   } = req.query as Record<string, string>;
 
   if (!GUDANG_STOCK_OPTIONS.includes(gudang)) return res.status(400).json({ error: "Gudang tidak valid" });
+  if (!estateAllowed(req.user!, gudang)) return res.status(403).json({ error: "Akses ditolak" });
 
   const validSort = ["kode", "nama", "stock_tersedia", "buffer_stock"];
   const sortCol = validSort.includes(sortBy) ? sortBy : "kode";
@@ -390,6 +420,7 @@ app.get("/api/gudang-stock", async (req, res) => {
 app.post("/api/gudang-stock", async (req, res) => {
   const { gudang, item_kode, buffer_stock, stock_tersedia } = req.body;
   if (!GUDANG_STOCK_OPTIONS.includes(gudang)) return res.status(400).json({ error: "Gudang tidak valid" });
+  if (!estateAllowed(req.user!, gudang)) return res.status(403).json({ error: "Akses ditolak" });
   if (!item_kode || !String(item_kode).trim()) return res.status(400).json({ error: "Barang wajib dipilih" });
 
   const item = await queryOne("SELECT kode FROM items WHERE kode = @item_kode", { item_kode });
@@ -411,8 +442,9 @@ app.post("/api/gudang-stock", async (req, res) => {
 });
 
 app.put("/api/gudang-stock/:id", async (req, res) => {
-  const existing = await queryOne("SELECT * FROM gudang_stock WHERE id = @id", { id: req.params.id });
+  const existing = await queryOne<any>("SELECT * FROM gudang_stock WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Not found" });
+  if (!estateAllowed(req.user!, existing.gudang)) return res.status(403).json({ error: "Akses ditolak" });
 
   const { buffer_stock, stock_tersedia } = req.body;
   await execute("UPDATE gudang_stock SET buffer_stock = @buffer_stock, stock_tersedia = @stock_tersedia WHERE id = @id", {
@@ -424,15 +456,16 @@ app.put("/api/gudang-stock/:id", async (req, res) => {
 });
 
 app.delete("/api/gudang-stock/:id", async (req, res) => {
-  const existing = await queryOne("SELECT * FROM gudang_stock WHERE id = @id", { id: req.params.id });
+  const existing = await queryOne<any>("SELECT * FROM gudang_stock WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Not found" });
+  if (!estateAllowed(req.user!, existing.gudang)) return res.status(403).json({ error: "Akses ditolak" });
 
   await execute("DELETE FROM gudang_stock WHERE id = @id", { id: req.params.id });
   res.json({ success: true });
 });
 
 // ---- Combined movement history for one item (stock in + stock out + manual transactions) ----
-app.get("/api/items/:id/movements", async (req, res) => {
+app.get("/api/items/:id/movements", requireEstate("NILAM"), async (req, res) => {
   const itemId = req.params.id;
 
   const stockIn = await queryMany<any>(
@@ -529,7 +562,7 @@ async function applyStockEffect(
   );
 }
 
-app.post("/api/transactions", async (req, res) => {
+app.post("/api/transactions", requireEstate("NILAM"), async (req, res) => {
   const { item_id, tujuan, type, qty, note, penerima } = req.body;
 
   if (!item_id || !["IN", "OUT"].includes(type) || !qty || qty <= 0) {
@@ -559,7 +592,7 @@ app.post("/api/transactions", async (req, res) => {
   res.json({ success: true });
 });
 
-app.put("/api/transactions/:id", async (req, res) => {
+app.put("/api/transactions/:id", requireEstate("NILAM"), async (req, res) => {
   const existing = await queryOne<any>("SELECT * FROM transactions WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Not found" });
 
@@ -593,7 +626,7 @@ app.put("/api/transactions/:id", async (req, res) => {
   res.json({ success: true });
 });
 
-app.delete("/api/transactions/:id", async (req, res) => {
+app.delete("/api/transactions/:id", requireEstate("NILAM"), async (req, res) => {
   const existing = await queryOne<any>("SELECT * FROM transactions WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Not found" });
 
@@ -607,7 +640,7 @@ app.delete("/api/transactions/:id", async (req, res) => {
 });
 
 // ---- Stock correction (stock opname / physical count adjustment) ----
-app.post("/api/stock-correction", async (req, res) => {
+app.post("/api/stock-correction", requireEstate("NILAM"), async (req, res) => {
   const { item_id, actual_qty, note } = req.body;
 
   if (!item_id || actual_qty === undefined || actual_qty < 0) {
@@ -642,7 +675,7 @@ app.post("/api/stock-correction", async (req, res) => {
   res.json({ success: true, delta });
 });
 
-app.get("/api/transactions", async (req, res) => {
+app.get("/api/transactions", requireEstate("NILAM"), async (req, res) => {
   const { limit = "100" } = req.query as Record<string, string>;
   const rows = await queryMany(
     `SELECT transactions.*, items.kode, items.nama FROM transactions
@@ -654,7 +687,7 @@ app.get("/api/transactions", async (req, res) => {
 });
 
 // ---- Stock In log (history from Google Sheet) ----
-app.get("/api/stock-in", async (req, res) => {
+app.get("/api/stock-in", requireEstate("NILAM"), async (req, res) => {
   const {
     search = "",
     tujuan = "",
@@ -705,14 +738,14 @@ app.get("/api/stock-in", async (req, res) => {
   res.json({ data, total: Number(total), qtySum: Number(qtySum), page: parseInt(page), pageSize: limit });
 });
 
-app.get("/api/stock-in/vendors", async (_req, res) => {
+app.get("/api/stock-in/vendors", requireEstate("NILAM"), async (_req, res) => {
   const rows = await queryMany<{ nama_vendor: string }>(
     "SELECT DISTINCT nama_vendor FROM stock_in_log WHERE nama_vendor IS NOT NULL AND nama_vendor NOT IN ('', '-') ORDER BY nama_vendor"
   );
   res.json(rows.map((r) => r.nama_vendor));
 });
 
-app.put("/api/stock-in/:id", async (req, res) => {
+app.put("/api/stock-in/:id", requireEstate("NILAM"), async (req, res) => {
   const existing = await queryOne("SELECT * FROM stock_in_log WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Not found" });
 
@@ -733,14 +766,14 @@ app.put("/api/stock-in/:id", async (req, res) => {
   res.json({ success: true });
 });
 
-app.delete("/api/stock-in/:id", async (req, res) => {
+app.delete("/api/stock-in/:id", requireEstate("NILAM"), async (req, res) => {
   const result = await execute("DELETE FROM stock_in_log WHERE id = @id", { id: req.params.id });
   if (result.rowCount === 0) return res.status(404).json({ error: "Not found" });
   res.json({ success: true });
 });
 
 // ---- Stock Out log (history from Google Sheet) ----
-app.get("/api/stock-out", async (req, res) => {
+app.get("/api/stock-out", requireEstate("NILAM"), async (req, res) => {
   const {
     search = "",
     tujuan = "",
@@ -786,7 +819,7 @@ app.get("/api/stock-out", async (req, res) => {
   res.json({ data, total: Number(total), qtySum: Number(qtySum), page: parseInt(page), pageSize: limit });
 });
 
-app.put("/api/stock-out/:id", async (req, res) => {
+app.put("/api/stock-out/:id", requireEstate("NILAM"), async (req, res) => {
   const existing = await queryOne("SELECT * FROM stock_out_log WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Not found" });
 
@@ -807,14 +840,14 @@ app.put("/api/stock-out/:id", async (req, res) => {
   res.json({ success: true });
 });
 
-app.delete("/api/stock-out/:id", async (req, res) => {
+app.delete("/api/stock-out/:id", requireEstate("NILAM"), async (req, res) => {
   const result = await execute("DELETE FROM stock_out_log WHERE id = @id", { id: req.params.id });
   if (result.rowCount === 0) return res.status(404).json({ error: "Not found" });
   res.json({ success: true });
 });
 
 // ---- Users (login accounts) master data ----
-app.get("/api/users", async (req, res) => {
+app.get("/api/users", requireSuperuser, async (req, res) => {
   const { search = "", sortBy = "nama", sortDir = "asc", page = "1", pageSize = "50" } =
     req.query as Record<string, string>;
 
@@ -837,23 +870,33 @@ app.get("/api/users", async (req, res) => {
   const offset = (Math.max(parseInt(page) || 1, 1) - 1) * limit;
 
   const data = await queryMany(
-    `SELECT id, username, nama, created_at FROM users ${where} ORDER BY ${sortCol} ${dir} LIMIT @limit OFFSET @offset`,
+    `SELECT id, username, nama, role, estate, created_at FROM users ${where} ORDER BY ${sortCol} ${dir} LIMIT @limit OFFSET @offset`,
     { ...params, limit, offset }
   );
 
   res.json({ data, total: Number(total), page: parseInt(page), pageSize: limit });
 });
 
-app.post("/api/users", async (req, res) => {
-  const { username, password, nama } = req.body;
+app.post("/api/users", requireSuperuser, async (req, res) => {
+  const { username, password, nama, role, estate } = req.body;
   if (!username || !String(username).trim() || !password || !nama || !String(nama).trim()) {
     return res.status(400).json({ error: "Username, password, dan nama wajib diisi" });
+  }
+  const finalRole = role === "estate" ? "estate" : "superuser";
+  if (finalRole === "estate" && !ESTATES.includes(estate)) {
+    return res.status(400).json({ error: "Estate wajib dipilih untuk akun estate" });
   }
 
   try {
     const row = await queryOne<{ id: number }>(
-      `INSERT INTO users (username, password_hash, nama) VALUES (@username, @password_hash, @nama) RETURNING id`,
-      { username: String(username).trim(), password_hash: hashPassword(password), nama: String(nama).trim() }
+      `INSERT INTO users (username, password_hash, nama, role, estate) VALUES (@username, @password_hash, @nama, @role, @estate) RETURNING id`,
+      {
+        username: String(username).trim(),
+        password_hash: hashPassword(password),
+        nama: String(nama).trim(),
+        role: finalRole,
+        estate: finalRole === "estate" ? estate : null,
+      }
     );
     res.json({ success: true, id: row!.id });
   } catch (e: any) {
@@ -864,22 +907,28 @@ app.post("/api/users", async (req, res) => {
   }
 });
 
-app.put("/api/users/:id", async (req, res) => {
+app.put("/api/users/:id", requireSuperuser, async (req, res) => {
   const existing = await queryOne<any>("SELECT * FROM users WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Not found" });
 
-  const { username, nama, password } = req.body;
+  const { username, nama, password, role, estate } = req.body;
   if (!username || !String(username).trim() || !nama || !String(nama).trim()) {
     return res.status(400).json({ error: "Username dan nama wajib diisi" });
+  }
+  const finalRole = role === "estate" ? "estate" : "superuser";
+  if (finalRole === "estate" && !ESTATES.includes(estate)) {
+    return res.status(400).json({ error: "Estate wajib dipilih untuk akun estate" });
   }
 
   try {
     await execute(
-      `UPDATE users SET username = @username, nama = @nama, password_hash = @password_hash WHERE id = @id`,
+      `UPDATE users SET username = @username, nama = @nama, password_hash = @password_hash, role = @role, estate = @estate WHERE id = @id`,
       {
         username: String(username).trim(),
         nama: String(nama).trim(),
         password_hash: password ? hashPassword(password) : existing.password_hash,
+        role: finalRole,
+        estate: finalRole === "estate" ? estate : null,
         id: req.params.id,
       }
     );
@@ -893,7 +942,7 @@ app.put("/api/users/:id", async (req, res) => {
   res.json({ success: true });
 });
 
-app.delete("/api/users/:id", async (req, res) => {
+app.delete("/api/users/:id", requireSuperuser, async (req, res) => {
   const existing = await queryOne<any>("SELECT * FROM users WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Not found" });
 
@@ -907,21 +956,21 @@ app.delete("/api/users/:id", async (req, res) => {
 });
 
 // ---- Karyawan master data ----
-app.get("/api/karyawan/status-options", async (_req, res) => {
+app.get("/api/karyawan/status-options", requireSuperuser, async (_req, res) => {
   const rows = await queryMany<{ status: string }>(
     "SELECT DISTINCT status FROM karyawan WHERE status IS NOT NULL AND status != '' ORDER BY status"
   );
   res.json(rows.map((r) => r.status));
 });
 
-app.get("/api/karyawan/estate-options", async (_req, res) => {
+app.get("/api/karyawan/estate-options", requireSuperuser, async (_req, res) => {
   const rows = await queryMany<{ estate: string }>(
     "SELECT DISTINCT estate FROM karyawan WHERE estate IS NOT NULL AND estate != '' ORDER BY estate"
   );
   res.json(rows.map((r) => r.estate));
 });
 
-app.get("/api/karyawan", async (req, res) => {
+app.get("/api/karyawan", requireSuperuser, async (req, res) => {
   const { search = "", status = "", estate = "", sortBy = "nama", sortDir = "asc", page = "1", pageSize = "50" } =
     req.query as Record<string, string>;
 
@@ -960,7 +1009,7 @@ app.get("/api/karyawan", async (req, res) => {
   res.json({ data, total: Number(total), page: parseInt(page), pageSize: limit });
 });
 
-app.post("/api/karyawan", async (req, res) => {
+app.post("/api/karyawan", requireSuperuser, async (req, res) => {
   const { nik, nama, status, estate, lokasi_kerja, nik_ktp } = req.body;
   if (!nik || !String(nik).trim() || !nama || !String(nama).trim()) {
     return res.status(400).json({ error: "NIK dan nama wajib diisi" });
@@ -988,7 +1037,7 @@ app.post("/api/karyawan", async (req, res) => {
   }
 });
 
-app.put("/api/karyawan/:id", async (req, res) => {
+app.put("/api/karyawan/:id", requireSuperuser, async (req, res) => {
   const existing = await queryOne("SELECT * FROM karyawan WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Not found" });
 
@@ -1020,7 +1069,7 @@ app.put("/api/karyawan/:id", async (req, res) => {
   res.json({ success: true });
 });
 
-app.delete("/api/karyawan/:id", async (req, res) => {
+app.delete("/api/karyawan/:id", requireSuperuser, async (req, res) => {
   const existing = await queryOne("SELECT * FROM karyawan WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Not found" });
 
@@ -1029,14 +1078,14 @@ app.delete("/api/karyawan/:id", async (req, res) => {
 });
 
 // ---- Alat Berat master data (heavy equipment/vehicles that consume fuel) ----
-app.get("/api/alat-berat/jenis-options", async (_req, res) => {
+app.get("/api/alat-berat/jenis-options", requireSuperuser, async (_req, res) => {
   const rows = await queryMany<{ jenis_unit: string }>(
     "SELECT DISTINCT jenis_unit FROM alat_berat WHERE jenis_unit IS NOT NULL AND jenis_unit != '' ORDER BY jenis_unit"
   );
   res.json(rows.map((r) => r.jenis_unit));
 });
 
-app.get("/api/alat-berat", async (req, res) => {
+app.get("/api/alat-berat", requireSuperuser, async (req, res) => {
   const { search = "", jenis_unit = "", sortBy = "kode", sortDir = "asc", page = "1", pageSize = "50" } =
     req.query as Record<string, string>;
 
@@ -1071,7 +1120,7 @@ app.get("/api/alat-berat", async (req, res) => {
   res.json({ data, total: Number(total), page: parseInt(page), pageSize: limit });
 });
 
-app.post("/api/alat-berat", async (req, res) => {
+app.post("/api/alat-berat", requireSuperuser, async (req, res) => {
   const { kode, jenis_unit, nama } = req.body;
   if (!kode || !String(kode).trim()) {
     return res.status(400).json({ error: "Kode wajib diisi" });
@@ -1091,7 +1140,7 @@ app.post("/api/alat-berat", async (req, res) => {
   }
 });
 
-app.put("/api/alat-berat/:id", async (req, res) => {
+app.put("/api/alat-berat/:id", requireSuperuser, async (req, res) => {
   const existing = await queryOne("SELECT * FROM alat_berat WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Not found" });
 
@@ -1117,7 +1166,7 @@ app.put("/api/alat-berat/:id", async (req, res) => {
   res.json({ success: true });
 });
 
-app.delete("/api/alat-berat/:id", async (req, res) => {
+app.delete("/api/alat-berat/:id", requireSuperuser, async (req, res) => {
   const existing = await queryOne("SELECT * FROM alat_berat WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Not found" });
 
@@ -1147,6 +1196,7 @@ const BBM_ESTATE_EXTRA: Record<string, string[]> = {
 
 app.get("/api/bbm/estate-options", async (req, res) => {
   const { lokasi = "" } = req.query as Record<string, string>;
+  if (lokasi && !estateAllowed(req.user!, lokasi)) return res.status(403).json({ error: "Akses ditolak" });
   const conditions = ["estate IS NOT NULL", "TRIM(estate) != ''"];
   const params: any = {};
   // Shared across Solar and Bensin on purpose: a sub-location (e.g. AKSS/UKM, only ever recorded
@@ -1168,6 +1218,7 @@ app.get("/api/bbm/estate-options", async (req, res) => {
 
 app.get("/api/bbm/alat-options", async (req, res) => {
   const { lokasi = "" } = req.query as Record<string, string>;
+  if (lokasi && !estateAllowed(req.user!, lokasi)) return res.status(403).json({ error: "Akses ditolak" });
   const conditions = ["kode_kendaraan IS NOT NULL", "TRIM(kode_kendaraan) != ''"];
   const params: any = {};
   if (lokasi && BBM_LOKASI_OPTIONS.includes(lokasi)) {
@@ -1181,10 +1232,21 @@ app.get("/api/bbm/alat-options", async (req, res) => {
   res.json(rows.map((r) => r.kode_kendaraan));
 });
 
-app.get("/api/bbm/summary", async (_req, res) => {
+app.get("/api/bbm/summary", async (req, res) => {
+  const { lokasi = "" } = req.query as Record<string, string>;
+  // Estate users must pass their own lokasi (the frontend always does, since every BBM page is
+  // lokasi-locked); a superuser can omit it to see everything.
+  if (req.user!.role !== "superuser" && (!lokasi || !estateAllowed(req.user!, lokasi))) {
+    return res.status(403).json({ error: "Akses ditolak" });
+  }
+
+  const lokasiFilter = lokasi ? "WHERE lokasi = @lokasi" : "";
+  const params = lokasi ? { lokasi } : {};
+
   const perLokasi = await queryMany(
     `SELECT jenis_bbm, lokasi, SUM(diterima) diterima, SUM(pemakaian) pemakaian
-     FROM bbm_log GROUP BY jenis_bbm, lokasi ORDER BY jenis_bbm, lokasi`
+     FROM bbm_log ${lokasiFilter} GROUP BY jenis_bbm, lokasi ORDER BY jenis_bbm, lokasi`,
+    params
   );
 
   // Latest known saldo (running balance) per jenis_bbm+lokasi. Several rows can share the same
@@ -1196,9 +1258,10 @@ app.get("/api/bbm/summary", async (_req, res) => {
        SELECT jenis_bbm, lokasi, saldo_stock, tanggal, tanggal_iso,
               ROW_NUMBER() OVER (PARTITION BY jenis_bbm, lokasi ORDER BY tanggal_iso DESC, id DESC) AS rn
        FROM bbm_log
-       WHERE saldo_stock IS NOT NULL AND ${foreignLedgerExclusion("bbm_log")}
+       WHERE saldo_stock IS NOT NULL AND ${foreignLedgerExclusion("bbm_log")} ${lokasi ? "AND lokasi = @lokasi" : ""}
      ) sub
-     WHERE rn = 1`
+     WHERE rn = 1`,
+    params
   );
 
   res.json({ perLokasi, saldoTerakhir });
@@ -1234,6 +1297,7 @@ app.post("/api/bbm", async (req, res) => {
 
   if (!["SOLAR", "BENSIN"].includes(jenis_bbm)) return res.status(400).json({ error: "Jenis BBM tidak valid" });
   if (!BBM_LOKASI_OPTIONS.includes(lokasi)) return res.status(400).json({ error: "Lokasi tidak valid" });
+  if (!estateAllowed(req.user!, lokasi)) return res.status(403).json({ error: "Akses ditolak" });
   if (!["DITERIMA", "PEMAKAIAN"].includes(tipe)) return res.status(400).json({ error: "Tipe transaksi tidak valid" });
   if (!jumlah || jumlah <= 0) return res.status(400).json({ error: "Jumlah harus lebih dari 0" });
   if (!tanggal_iso || !/^\d{4}-\d{2}-\d{2}$/.test(tanggal_iso)) return res.status(400).json({ error: "Tanggal tidak valid" });
@@ -1279,6 +1343,7 @@ app.post("/api/bbm", async (req, res) => {
 app.put("/api/bbm/:id", async (req, res) => {
   const existing = await queryOne<any>("SELECT * FROM bbm_log WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Not found" });
+  if (!estateAllowed(req.user!, existing.lokasi)) return res.status(403).json({ error: "Akses ditolak" });
 
   const { tanggal_iso, no_spb, diterima, pemakaian, saldo_stock, keterangan, estate, kode_kendaraan, hm_terakhir } = req.body;
   if (tanggal_iso && !/^\d{4}-\d{2}-\d{2}$/.test(tanggal_iso)) return res.status(400).json({ error: "Tanggal tidak valid" });
@@ -1309,8 +1374,11 @@ app.put("/api/bbm/:id", async (req, res) => {
 });
 
 app.delete("/api/bbm/:id", async (req, res) => {
-  const result = await execute("DELETE FROM bbm_log WHERE id = @id", { id: req.params.id });
-  if (result.rowCount === 0) return res.status(404).json({ error: "Not found" });
+  const existing = await queryOne<any>("SELECT * FROM bbm_log WHERE id = @id", { id: req.params.id });
+  if (!existing) return res.status(404).json({ error: "Not found" });
+  if (!estateAllowed(req.user!, existing.lokasi)) return res.status(403).json({ error: "Akses ditolak" });
+
+  await execute("DELETE FROM bbm_log WHERE id = @id", { id: req.params.id });
   res.json({ success: true });
 });
 
@@ -1327,6 +1395,11 @@ app.get("/api/bbm", async (req, res) => {
     page = "1",
     pageSize = "50",
   } = req.query as Record<string, string>;
+
+  // Estate users must pass their own lokasi (the frontend always does); a superuser can omit it.
+  if (req.user!.role !== "superuser" && (!lokasi || !estateAllowed(req.user!, lokasi))) {
+    return res.status(403).json({ error: "Akses ditolak" });
+  }
 
   const validSort = ["tanggal_iso", "lokasi", "jenis_bbm", "pemakaian", "diterima", "saldo_stock"];
   const sortCol = validSort.includes(sortBy) ? sortBy : "tanggal_iso";

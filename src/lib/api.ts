@@ -1,13 +1,21 @@
+export type Role = "superuser" | "estate";
+export const ESTATES = ["NILAM", "KNS", "WJA", "ZAMRUD", "FIRUS"] as const;
+export type Estate = (typeof ESTATES)[number];
+
 export type AuthUser = {
   id: number;
   username: string;
   nama: string;
+  role: Role;
+  estate: Estate | null;
 };
 
 export type UserAccount = {
   id: number;
   username: string;
   nama: string;
+  role: Role;
+  estate: Estate | null;
   created_at: string;
 };
 
@@ -308,7 +316,7 @@ export const api = {
 
   deleteAlatBerat: (id: number) => req<{ success: boolean }>(`/api/alat-berat/${id}`, { method: "DELETE" }),
 
-  bbmSummary: () => req<BbmSummary>("/api/bbm/summary"),
+  bbmSummary: (lokasi?: string) => req<BbmSummary>(`/api/bbm/summary${lokasi ? `?lokasi=${lokasi}` : ""}`),
 
   bbmLokasiOptions: () => req<string[]>("/api/bbm/lokasi-options"),
 
@@ -359,11 +367,13 @@ export const api = {
     return req<{ data: UserAccount[]; total: number; page: number; pageSize: number }>(`/api/users?${qs}`);
   },
 
-  createUser: (payload: { username: string; password: string; nama: string }) =>
+  createUser: (payload: { username: string; password: string; nama: string; role: Role; estate?: Estate | null }) =>
     req<{ success: boolean; id: number }>("/api/users", { method: "POST", body: JSON.stringify(payload) }),
 
-  updateUser: (id: number, payload: { username: string; nama: string; password?: string }) =>
-    req<{ success: boolean }>(`/api/users/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
+  updateUser: (
+    id: number,
+    payload: { username: string; nama: string; password?: string; role: Role; estate?: Estate | null }
+  ) => req<{ success: boolean }>(`/api/users/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
 
   deleteUser: (id: number) => req<{ success: boolean }>(`/api/users/${id}`, { method: "DELETE" }),
 };

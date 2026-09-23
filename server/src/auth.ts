@@ -8,7 +8,11 @@ if (!JWT_SECRET) {
   throw new Error("JWT_SECRET env var is not set");
 }
 
-export type SessionUser = { id: number; username: string; nama: string };
+export type Role = "superuser" | "estate";
+export const ESTATES = ["NILAM", "KNS", "WJA", "ZAMRUD", "FIRUS"] as const;
+export type Estate = (typeof ESTATES)[number];
+
+export type SessionUser = { id: number; username: string; nama: string; role: Role; estate: Estate | null };
 
 export function hashPassword(password: string): string {
   const salt = randomBytes(16).toString("hex");

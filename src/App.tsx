@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "./context/AuthContext";
 import { ProtectedRoute } from "./components/ProtectedRoute";
+import { RequireEstate, RequireSuperuser, RootRedirect } from "./components/AccessGate";
 import { LoginPage } from "./pages/LoginPage";
 import { MainLayout } from "./layouts/MainLayout";
 import { InventoryPage } from "./pages/InventoryPage";
@@ -26,36 +27,166 @@ function App() {
           <Route path="/login" element={<LoginPage />} />
           <Route element={<ProtectedRoute />}>
             <Route element={<MainLayout />}>
-              <Route path="/" element={<InventoryPage />} />
-              <Route path="/inventory" element={<InventoryPage />} />
-              <Route path="/inventory/:id" element={<ItemDetailPage />} />
-              <Route path="/inventory-kns" element={<InventoryGudangStockPage gudang="KNS" />} />
-              <Route path="/inventory-wja" element={<InventoryGudangStockPage gudang="WJA" />} />
-              <Route path="/inventory-zamrud" element={<InventoryGudangStockPage gudang="ZAMRUD" />} />
-              <Route path="/inventory-firus" element={<InventoryGudangStockPage gudang="FIRUS" />} />
-              <Route path="/inventory-bbm" element={<InventoryBbmPage lokasiLock="NILAM" />} />
-              <Route path="/inventory-bbm-kns" element={<InventoryBbmPage lokasiLock="KNS" />} />
-              <Route path="/inventory-bbm-wja" element={<InventoryBbmPage lokasiLock="WJA" />} />
+              <Route
+                path="/"
+                element={
+                  <RootRedirect>
+                    <InventoryPage />
+                  </RootRedirect>
+                }
+              />
+              <Route
+                path="/inventory"
+                element={
+                  <RequireEstate estate="NILAM">
+                    <InventoryPage />
+                  </RequireEstate>
+                }
+              />
+              <Route
+                path="/inventory/:id"
+                element={
+                  <RequireEstate estate="NILAM">
+                    <ItemDetailPage />
+                  </RequireEstate>
+                }
+              />
+              <Route
+                path="/inventory-kns"
+                element={
+                  <RequireEstate estate="KNS">
+                    <InventoryGudangStockPage gudang="KNS" />
+                  </RequireEstate>
+                }
+              />
+              <Route
+                path="/inventory-wja"
+                element={
+                  <RequireEstate estate="WJA">
+                    <InventoryGudangStockPage gudang="WJA" />
+                  </RequireEstate>
+                }
+              />
+              <Route
+                path="/inventory-zamrud"
+                element={
+                  <RequireEstate estate="ZAMRUD">
+                    <InventoryGudangStockPage gudang="ZAMRUD" />
+                  </RequireEstate>
+                }
+              />
+              <Route
+                path="/inventory-firus"
+                element={
+                  <RequireEstate estate="FIRUS">
+                    <InventoryGudangStockPage gudang="FIRUS" />
+                  </RequireEstate>
+                }
+              />
+              <Route
+                path="/inventory-bbm"
+                element={
+                  <RequireEstate estate="NILAM">
+                    <InventoryBbmPage lokasiLock="NILAM" />
+                  </RequireEstate>
+                }
+              />
+              <Route
+                path="/inventory-bbm-kns"
+                element={
+                  <RequireEstate estate="KNS">
+                    <InventoryBbmPage lokasiLock="KNS" />
+                  </RequireEstate>
+                }
+              />
+              <Route
+                path="/inventory-bbm-wja"
+                element={
+                  <RequireEstate estate="WJA">
+                    <InventoryBbmPage lokasiLock="WJA" />
+                  </RequireEstate>
+                }
+              />
               <Route
                 path="/inventory-bbm-zamrud"
                 element={
-                  <InventoryGudangEmptyPage gudang="Zamrud" titlePrefix="Inventory BBM" unitLabel="transaksi" icon={FuelIcon} />
+                  <RequireEstate estate="ZAMRUD">
+                    <InventoryGudangEmptyPage gudang="Zamrud" titlePrefix="Inventory BBM" unitLabel="transaksi" icon={FuelIcon} />
+                  </RequireEstate>
                 }
               />
               <Route
                 path="/inventory-bbm-firus"
                 element={
-                  <InventoryGudangEmptyPage gudang="Firus" titlePrefix="Inventory BBM" unitLabel="transaksi" icon={FuelIcon} />
+                  <RequireEstate estate="FIRUS">
+                    <InventoryGudangEmptyPage gudang="Firus" titlePrefix="Inventory BBM" unitLabel="transaksi" icon={FuelIcon} />
+                  </RequireEstate>
                 }
               />
-              <Route path="/stock-in" element={<StockInPage />} />
-              <Route path="/stock-out" element={<StockOutPage />} />
-              <Route path="/transactions" element={<TransactionsPage />} />
-              <Route path="/reports" element={<ReportsPage />} />
-              <Route path="/master-barang" element={<MasterBarangPage />} />
-              <Route path="/karyawan" element={<KaryawanPage />} />
-              <Route path="/alat-berat" element={<AlatBeratPage />} />
-              <Route path="/users" element={<UsersPage />} />
+              <Route
+                path="/stock-in"
+                element={
+                  <RequireEstate estate="NILAM">
+                    <StockInPage />
+                  </RequireEstate>
+                }
+              />
+              <Route
+                path="/stock-out"
+                element={
+                  <RequireEstate estate="NILAM">
+                    <StockOutPage />
+                  </RequireEstate>
+                }
+              />
+              <Route
+                path="/transactions"
+                element={
+                  <RequireEstate estate="NILAM">
+                    <TransactionsPage />
+                  </RequireEstate>
+                }
+              />
+              <Route
+                path="/reports"
+                element={
+                  <RequireEstate estate="NILAM">
+                    <ReportsPage />
+                  </RequireEstate>
+                }
+              />
+              <Route
+                path="/master-barang"
+                element={
+                  <RequireSuperuser>
+                    <MasterBarangPage />
+                  </RequireSuperuser>
+                }
+              />
+              <Route
+                path="/karyawan"
+                element={
+                  <RequireSuperuser>
+                    <KaryawanPage />
+                  </RequireSuperuser>
+                }
+              />
+              <Route
+                path="/alat-berat"
+                element={
+                  <RequireSuperuser>
+                    <AlatBeratPage />
+                  </RequireSuperuser>
+                }
+              />
+              <Route
+                path="/users"
+                element={
+                  <RequireSuperuser>
+                    <UsersPage />
+                  </RequireSuperuser>
+                }
+              />
             </Route>
           </Route>
         </Routes>

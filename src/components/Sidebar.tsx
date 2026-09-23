@@ -104,14 +104,29 @@ export function Sidebar() {
     }
   }, [minimized]);
 
+  const isSuperuser = user?.role === "superuser";
+
+  // An estate account only ever sees its own Gudang/BBM option and none of the cross-estate
+  // admin sections - Transaksi and Master Data are Nilam/superuser-only, see server-side
+  // requireEstate("NILAM") / requireSuperuser in app.ts for the matching enforcement.
+  const dropdownGroups: DropdownGroup[] = isSuperuser
+    ? DROPDOWN_GROUPS
+    : DROPDOWN_GROUPS.map((g) => ({ ...g, options: g.options.filter((o) => o.label.toUpperCase() === user?.estate) }));
+
+  const visibleSections = navSections.filter((s) => {
+    if (s.title === "Transaksi") return isSuperuser || user?.estate === "NILAM";
+    if (s.title === "Master Data") return isSuperuser;
+    return true;
+  });
+
   const normalizedPathname = location.pathname === "/" ? "/inventory" : location.pathname;
   const activeByGroup: Record<string, string | undefined> = {};
-  for (const group of DROPDOWN_GROUPS) {
+  for (const group of dropdownGroups) {
     activeByGroup[group.key] = group.options.find((o) => o.to === normalizedPathname)?.to;
   }
 
   useEffect(() => {
-    for (const group of DROPDOWN_GROUPS) {
+    for (const group of dropdownGroups) {
       const active = activeByGroup[group.key];
       if (!active) continue;
       try {
@@ -163,7 +178,7 @@ export function Sidebar() {
       </div>
 
       <nav className="flex-1 px-3 space-y-4 overflow-y-auto overflow-x-hidden">
-        {navSections.map((section, i) => {
+        {visibleSections.map((section, i) => {
           const isOpen = minimized || !section.collapsible ? true : !(groupCollapsed[section.title!] ?? false);
 
           return (
@@ -188,7 +203,7 @@ export function Sidebar() {
 
               {isOpen &&
                 section.title === "Inventory" &&
-                DROPDOWN_GROUPS.map((group) => {
+                dropdownGroups.map((group) => {
                   const selected = selectedFor(group);
                   const active = !!activeByGroup[group.key];
                   const GroupIcon = group.icon;

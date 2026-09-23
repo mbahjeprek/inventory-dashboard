@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { X } from "lucide-react";
-import { api, type UserAccount } from "../lib/api";
+import { api, ESTATES, type UserAccount, type Role, type Estate } from "../lib/api";
 
 export function UserFormModal({
   user,
@@ -15,6 +15,8 @@ export function UserFormModal({
   const [username, setUsername] = useState(user?.username ?? "");
   const [nama, setNama] = useState(user?.nama ?? "");
   const [password, setPassword] = useState("");
+  const [role, setRole] = useState<Role>(user?.role ?? "superuser");
+  const [estate, setEstate] = useState<Estate>(user?.estate ?? ESTATES[0]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
@@ -26,10 +28,16 @@ export function UserFormModal({
     setSubmitting(true);
     setError("");
     try {
+      const payload = {
+        username: username.trim(),
+        nama: nama.trim(),
+        role,
+        estate: role === "estate" ? estate : null,
+      };
       if (isEdit) {
-        await api.updateUser(user.id, { username: username.trim(), nama: nama.trim(), password: password || undefined });
+        await api.updateUser(user.id, { ...payload, password: password || undefined });
       } else {
-        await api.createUser({ username: username.trim(), nama: nama.trim(), password });
+        await api.createUser({ ...payload, password });
       }
       onSuccess();
     } catch (e: any) {
@@ -80,6 +88,36 @@ export function UserFormModal({
               onChange={(e) => setPassword(e.target.value)}
               className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-2"
             />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-[var(--text-secondary)] mb-1 block">Akses</label>
+              <select
+                value={role}
+                onChange={(e) => setRole(e.target.value as Role)}
+                className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-2"
+              >
+                <option value="superuser">Super User (semua akses)</option>
+                <option value="estate">Estate (satu gudang saja)</option>
+              </select>
+            </div>
+            {role === "estate" && (
+              <div>
+                <label className="text-xs text-[var(--text-secondary)] mb-1 block">Estate</label>
+                <select
+                  value={estate}
+                  onChange={(e) => setEstate(e.target.value as Estate)}
+                  className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-2"
+                >
+                  {ESTATES.map((e) => (
+                    <option key={e} value={e}>
+                      {e}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
 
           {error && <p className="text-xs text-[var(--accent-red)]">{error}</p>}
