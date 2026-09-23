@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { MainLayout } from "./layouts/MainLayout";
 import { InventoryPage } from "./pages/InventoryPage";
 import { TransactionsPage } from "./pages/TransactionsPage";
@@ -15,7 +15,7 @@ function App() {
     <BrowserRouter>
       <Routes>
         <Route element={<MainLayout />}>
-          <Route path="/" element={<Navigate to="/inventory" replace />} />
+          <Route path="/" element={<InventoryPage />} />
           <Route path="/inventory" element={<InventoryPage />} />
           <Route path="/inventory/:id" element={<ItemDetailPage />} />
           <Route path="/inventory-bbm" element={<InventoryBbmPage />} />
