@@ -1,0 +1,53 @@
+{
+  "name": "inventory-dashboard",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "dev:api": "tsx watch server/src/index.ts",
+    "build": "tsc -b && vite build",
+    "lint": "oxlint",
+    "preview": "vite preview",
+    "db:schema": "tsx server/src/applySchema.ts",
+    "db:migrate": "tsx server/src/migrateSqliteToSupabase.ts",
+    "import": "tsx server/src/import.ts",
+    "import:logs": "tsx server/src/importLogs.ts",
+    "import:karyawan": "tsx server/src/importKaryawan.ts",
+    "import:alat-berat": "tsx server/src/importAlatBerat.ts",
+    "import:bbm": "tsx server/src/importBbm.ts"
+  },
+  "dependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@tanstack/react-query": "^5.102.8",
+    "cors": "^2.8.6",
+    "csv-parse": "^7.0.2",
+    "dotenv": "^17.2.3",
+    "express": "^5.2.1",
+    "lucide-react": "^1.45.0",
+    "pg": "^8.16.3",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "react-router-dom": "^7.18.3",
+    "recharts": "^3.10.1",
+    "tailwindcss": "^4.3.3",
+    "xlsx": "^0.18.5",
+    "zustand": "^5.0.15"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/node": "^24.13.3",
+    "@types/pg": "^8.11.10",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.7",
+    "@vitejs/plugin-react": "^6.1.1",
+    "better-sqlite3": "^13.0.3",
+    "oxlint": "^1.81.0",
+    "playwright": "^1.63.0",
+    "tsx": "^4.23.13",
+    "typescript": "~6.0.2",
+    "vite": "^8.3.0"
+  }
+}

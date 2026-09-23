@@ -1,0 +1,13 @@
+node_modules
+dist
+dist-ssr
+*.local
+
+server/inventory.db
+server/inventory.db-journal
+server/inventory.db-wal
+server/inventory.db-shm
+server/data_*.csv
+
+.env
+.env.local
