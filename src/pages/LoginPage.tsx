@@ -1,20 +1,24 @@
 import { useState, type FormEvent } from "react";
-import { Navigate, useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import { homeRouteFor } from "../components/AccessGate";
 import plantationWelcome from "../assets/plantation-welcome.jpg";
 
 export function LoginPage() {
-  const { status, login } = useAuth();
+  const { status, user, login, logout } = useAuth();
   const location = useLocation();
+  const navigate = useNavigate();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
-  if (status === "authed") {
-    const redirectTo = (location.state as { from?: string } | null)?.from || "/";
-    return <Navigate to={redirectTo} replace />;
-  }
+  const from = (location.state as { from?: string } | null)?.from;
+
+  // Already signed in: offer to continue or switch accounts rather than auto-redirecting, so a
+  // user the app can't route anywhere never bounces between "/" and "/login" (blank page).
+  const signedIn = status === "authed" && user;
+  const home = signedIn ? from || homeRouteFor(user) : "/login";
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -25,7 +29,8 @@ export function LoginPage() {
     setSubmitting(true);
     setError("");
     try {
-      await login(username.trim(), password);
+      const u = await login(username.trim(), password);
+      navigate(from || homeRouteFor(u), { replace: true });
     } catch (e: any) {
       setError(e?.message?.includes("401") ? "Username atau password salah" : "Gagal terhubung ke server, coba lagi");
     } finally {
@@ -41,6 +46,33 @@ export function LoginPage() {
 
       <div className="relative z-10 min-h-screen flex flex-col lg:flex-row lg:items-center gap-10 p-6 sm:p-10 lg:px-20 lg:py-16">
         <div className="w-full lg:w-auto flex justify-center lg:justify-start">
+          {signedIn ? (
+            <div className="bg-white/97 backdrop-blur-md rounded-2xl w-full max-w-md shadow-2xl p-8 sm:p-10 space-y-5">
+              <div className="flex flex-col items-center gap-2 mb-2 text-center">
+                <img src="/logo-agro.png" alt="Agro" className="w-14 h-14 object-contain" />
+                <h2 className="font-semibold text-xl text-[var(--text-primary)]">Anda sudah masuk</h2>
+                <p className="text-sm text-[var(--text-secondary)]">
+                  sebagai <span className="font-semibold text-[var(--text-primary)]">{user.nama || user.username}</span>
+                </p>
+              </div>
+              {home !== "/login" && (
+                <button
+                  type="button"
+                  onClick={() => navigate(home, { replace: true })}
+                  className="w-full py-3 rounded-lg text-sm font-semibold bg-[var(--accent-blue)] text-white shadow-md hover:opacity-90 transition"
+                >
+                  Lanjutkan
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => logout()}
+                className="w-full py-3 rounded-lg text-sm font-semibold border border-[var(--border)] text-[var(--text-primary)] hover:bg-[#f1f5f9] transition"
+              >
+                Keluar &amp; ganti akun
+              </button>
+            </div>
+          ) : (
           <form
             onSubmit={submit}
             className="bg-white/97 backdrop-blur-md rounded-2xl w-full max-w-md shadow-2xl p-8 sm:p-10 space-y-5"
@@ -81,6 +113,7 @@ export function LoginPage() {
               {submitting ? "Masuk..." : "Masuk"}
             </button>
           </form>
+          )}
         </div>
 
         <div className="order-first lg:order-none flex-1 flex flex-col items-center text-center lg:items-end lg:text-right text-white space-y-5 pt-4 lg:pt-0">

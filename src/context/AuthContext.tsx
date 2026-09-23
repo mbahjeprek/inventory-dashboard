@@ -6,7 +6,7 @@ type Status = "loading" | "authed" | "guest";
 type AuthContextValue = {
   user: AuthUser | null;
   status: Status;
-  login: (username: string, password: string) => Promise<void>;
+  login: (username: string, password: string) => Promise<AuthUser>;
   logout: () => Promise<void>;
 };
 
@@ -30,6 +30,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { user } = await api.login(username, password);
     setUser(user);
     setStatus("authed");
+    return user;
   };
 
   const logout = async () => {

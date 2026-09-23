@@ -34,7 +34,12 @@ export function signSession(user: SessionUser): string {
 
 export function verifySession(token: string): SessionUser | null {
   try {
-    return jwt.verify(token, JWT_SECRET!) as SessionUser;
+    const user = jwt.verify(token, JWT_SECRET!) as SessionUser;
+    // Tokens issued before roles existed carry no role/estate; treat them as logged out so the
+    // user signs in again and gets a current token, instead of the client bouncing between
+    // "/" and "/login" with a user it can't route anywhere (a blank page).
+    if (user.role !== "superuser" && user.role !== "estate") return null;
+    return user;
   } catch {
     return null;
   }
