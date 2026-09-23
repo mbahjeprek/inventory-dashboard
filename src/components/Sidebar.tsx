@@ -26,7 +26,9 @@ const navSections: NavSection[] = [
     title: "Inventory",
     collapsible: true,
     items: [
-      { to: "/inventory", label: "Inventory Gudang", icon: Package },
+      { to: "/inventory", label: "Gudang Nilam", icon: Package },
+      { to: "/inventory-kns", label: "Gudang KNS", icon: Package },
+      { to: "/inventory-wja", label: "Gudang WJA", icon: Package },
       { to: "/inventory-bbm", label: "Inventory BBM", icon: Fuel },
     ],
   },
