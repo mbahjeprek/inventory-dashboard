@@ -293,14 +293,6 @@ export function Sidebar() {
           {!minimized && "Keluar"}
         </button>
       </div>
-
-      {!minimized && (
-        <div className="px-5 py-4 text-[11px] text-white/40 border-t border-white/10">
-          Gudang utama: Nilam
-          <br />
-          Tujuan: Nilam · Zamrud · Firus
-        </div>
-      )}
     </aside>
   );
 }
