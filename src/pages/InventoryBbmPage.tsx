@@ -7,7 +7,7 @@ import { EditBbmModal } from "../components/EditBbmModal";
 
 const JENIS_OPTIONS = ["SOLAR", "BENSIN"];
 
-export function InventoryBbmPage() {
+export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
   const [summary, setSummary] = useState<BbmSummary | null>(null);
   const [lokasiOptions, setLokasiOptions] = useState<string[]>([]);
   const [rows, setRows] = useState<BbmRecord[]>([]);
@@ -16,7 +16,7 @@ export function InventoryBbmPage() {
   const [diterimaSum, setDiterimaSum] = useState(0);
   const [search, setSearch] = useState("");
   const [jenisBbm, setJenisBbm] = useState("");
-  const [lokasi, setLokasi] = useState("");
+  const [lokasi, setLokasi] = useState(lokasiLock ?? "");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [page, setPage] = useState(1);
@@ -69,6 +69,7 @@ export function InventoryBbmPage() {
 
   const saldoCards = JENIS_OPTIONS.flatMap((jenis) =>
     (summary?.saldoTerakhir.filter((s) => s.jenis_bbm === jenis).map((s) => s.lokasi) || [])
+      .filter((lok) => !lokasiLock || lok === lokasiLock)
       .sort()
       .map((lok) => ({ jenis, lok, saldo: saldoFor(jenis, lok) }))
   ).filter((c) => c.saldo !== undefined);
@@ -77,7 +78,9 @@ export function InventoryBbmPage() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold text-[var(--text-primary)]">Inventory BBM</h1>
+          <h1 className="text-xl font-semibold text-[var(--text-primary)]">
+            Inventory BBM{lokasiLock ? ` - ${lokasiLock}` : ""}
+          </h1>
           <p className="text-sm text-[var(--text-secondary)]">Monitoring stok & histori pemakaian Solar dan Bensin per lokasi</p>
         </div>
         <button
@@ -128,21 +131,27 @@ export function InventoryBbmPage() {
           ))}
         </select>
 
-        <select
-          value={lokasi}
-          onChange={(e) => {
-            setLokasi(e.target.value);
-            setPage(1);
-          }}
-          className="text-sm rounded-md border border-[var(--border)] px-3 py-2"
-        >
-          <option value="">Semua Lokasi</option>
-          {lokasiOptions.map((w) => (
-            <option key={w} value={w}>
-              {w}
-            </option>
-          ))}
-        </select>
+        {lokasiLock ? (
+          <span className="text-sm rounded-md border border-[var(--border)] px-3 py-2 text-[var(--text-secondary)]">
+            Lokasi: {lokasiLock}
+          </span>
+        ) : (
+          <select
+            value={lokasi}
+            onChange={(e) => {
+              setLokasi(e.target.value);
+              setPage(1);
+            }}
+            className="text-sm rounded-md border border-[var(--border)] px-3 py-2"
+          >
+            <option value="">Semua Lokasi</option>
+            {lokasiOptions.map((w) => (
+              <option key={w} value={w}>
+                {w}
+              </option>
+            ))}
+          </select>
+        )}
 
         <input
           type="date"

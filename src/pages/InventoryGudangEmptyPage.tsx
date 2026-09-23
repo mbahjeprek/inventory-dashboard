@@ -1,13 +1,25 @@
-import { PackagePlus, Package, Boxes, AlertTriangle, XCircle } from "lucide-react";
+import { PackagePlus, Package, Boxes, AlertTriangle, XCircle, type LucideIcon } from "lucide-react";
 import { StatCard } from "../components/StatCard";
 
-export function InventoryGudangEmptyPage({ gudang }: { gudang: string }) {
+export function InventoryGudangEmptyPage({
+  gudang,
+  titlePrefix = "Inventory Gudang",
+  unitLabel = "item barang",
+  icon: Icon = Package,
+}: {
+  gudang: string;
+  titlePrefix?: string;
+  unitLabel?: string;
+  icon?: LucideIcon;
+}) {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold text-[var(--text-primary)]">Inventory Gudang - {gudang}</h1>
-          <p className="text-sm text-[var(--text-secondary)]">0 item barang</p>
+          <h1 className="text-xl font-semibold text-[var(--text-primary)]">
+            {titlePrefix} - {gudang}
+          </h1>
+          <p className="text-sm text-[var(--text-secondary)]">0 {unitLabel}</p>
         </div>
         <button
           disabled
@@ -18,7 +30,7 @@ export function InventoryGudangEmptyPage({ gudang }: { gudang: string }) {
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <StatCard label="Total Item Barang" value={0} icon={Package} tone="blue" />
+        <StatCard label={`Total ${unitLabel}`} value={0} icon={Icon} tone="blue" />
         <StatCard label="Total Stock Tersedia" value={0} icon={Boxes} tone="green" />
         <StatCard label="Stock Menipis (Buffer)" value={0} icon={AlertTriangle} tone="amber" />
         <StatCard label="Stock Habis" value={0} icon={XCircle} tone="red" />
@@ -26,7 +38,7 @@ export function InventoryGudangEmptyPage({ gudang }: { gudang: string }) {
 
       <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg overflow-hidden">
         <div className="px-4 py-10 text-center text-[var(--text-muted)] text-sm">
-          Data inventory gudang {gudang} belum tersedia.
+          Data {titlePrefix.toLowerCase()} {gudang} belum tersedia.
         </div>
       </div>
     </div>

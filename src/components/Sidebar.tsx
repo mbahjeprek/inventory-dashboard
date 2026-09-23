@@ -21,20 +21,42 @@ import { useAuth } from "../context/AuthContext";
 type NavItem = { to: string; label: string; icon: typeof Package };
 type NavSection = { title?: string; collapsible?: boolean; items: NavItem[] };
 
-const GUDANG_OPTIONS = [
-  { to: "/inventory", label: "Gudang Nilam" },
-  { to: "/inventory-kns", label: "Gudang KNS" },
-  { to: "/inventory-wja", label: "Gudang WJA" },
-  { to: "/inventory-zamrud", label: "Gudang Zamrud" },
-  { to: "/inventory-firus", label: "Gudang Firus" },
-];
-const LAST_GUDANG_KEY = "last-gudang";
+type DropdownOption = { to: string; label: string };
+type DropdownGroup = { key: string; icon: typeof Package; title: string; options: DropdownOption[] };
+
+const GUDANG_GROUP: DropdownGroup = {
+  key: "gudang",
+  icon: Package,
+  title: "Inventory Gudang",
+  options: [
+    { to: "/inventory", label: "Gudang Nilam" },
+    { to: "/inventory-kns", label: "Gudang KNS" },
+    { to: "/inventory-wja", label: "Gudang WJA" },
+    { to: "/inventory-zamrud", label: "Gudang Zamrud" },
+    { to: "/inventory-firus", label: "Gudang Firus" },
+  ],
+};
+
+const BBM_GROUP: DropdownGroup = {
+  key: "bbm",
+  icon: Fuel,
+  title: "Inventory BBM",
+  options: [
+    { to: "/inventory-bbm", label: "BBM Nilam" },
+    { to: "/inventory-bbm-kns", label: "BBM KNS" },
+    { to: "/inventory-bbm-wja", label: "BBM WJA" },
+    { to: "/inventory-bbm-zamrud", label: "BBM Zamrud" },
+    { to: "/inventory-bbm-firus", label: "BBM Firus" },
+  ],
+};
+
+const DROPDOWN_GROUPS: DropdownGroup[] = [GUDANG_GROUP, BBM_GROUP];
 
 const navSections: NavSection[] = [
   {
     title: "Inventory",
     collapsible: true,
-    items: [{ to: "/inventory-bbm", label: "Inventory BBM", icon: Fuel }],
+    items: [],
   },
   {
     title: "Transaksi",
@@ -79,24 +101,31 @@ export function Sidebar() {
     }
   }, [minimized]);
 
-  const activeGudang = GUDANG_OPTIONS.find((g) => g.to === location.pathname)?.to;
+  const activeByGroup: Record<string, string | undefined> = {};
+  for (const group of DROPDOWN_GROUPS) {
+    activeByGroup[group.key] = group.options.find((o) => o.to === location.pathname)?.to;
+  }
 
   useEffect(() => {
-    if (!activeGudang) return;
-    try {
-      localStorage.setItem(LAST_GUDANG_KEY, activeGudang);
-    } catch {
-      // ignore
+    for (const group of DROPDOWN_GROUPS) {
+      const active = activeByGroup[group.key];
+      if (!active) continue;
+      try {
+        localStorage.setItem(`last-${group.key}`, active);
+      } catch {
+        // ignore
+      }
     }
-  }, [activeGudang]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.pathname]);
 
-  const selectedGudang =
-    activeGudang ??
+  const selectedFor = (group: DropdownGroup) =>
+    activeByGroup[group.key] ??
     (() => {
       try {
-        return localStorage.getItem(LAST_GUDANG_KEY) ?? GUDANG_OPTIONS[0].to;
+        return localStorage.getItem(`last-${group.key}`) ?? group.options[0].to;
       } catch {
-        return GUDANG_OPTIONS[0].to;
+        return group.options[0].to;
       }
     })();
 
@@ -140,44 +169,47 @@ export function Sidebar() {
                 </button>
               )}
 
-              {isOpen && section.title === "Inventory" && (
-                minimized ? (
-                  <NavLink
-                    to={selectedGudang}
-                    title="Inventory Gudang"
-                    className={({ isActive }) =>
-                      `flex items-center justify-center py-2.5 rounded-md text-sm transition-colors ${
-                        isActive || activeGudang
+              {isOpen &&
+                section.title === "Inventory" &&
+                DROPDOWN_GROUPS.map((group) => {
+                  const selected = selectedFor(group);
+                  const active = !!activeByGroup[group.key];
+                  const GroupIcon = group.icon;
+                  return minimized ? (
+                    <NavLink
+                      key={group.key}
+                      to={selected}
+                      title={group.title}
+                      className={`flex items-center justify-center py-2.5 rounded-md text-sm transition-colors ${
+                        active
                           ? "bg-[#1e5bb5]/25 text-[#a9cdf5]"
                           : "text-white/70 hover:bg-white/5 hover:text-white"
-                      }`
-                    }
-                  >
-                    <Package size={17} className="shrink-0" />
-                  </NavLink>
-                ) : (
-                  <div
-                    className={`flex items-center gap-2 px-3 py-2 rounded-md border ${
-                      activeGudang
-                        ? "border-[#1e5bb5] bg-[#1e5bb5]/10"
-                        : "border-white/10"
-                    }`}
-                  >
-                    <Package size={17} className="shrink-0 text-white/70" />
-                    <select
-                      value={selectedGudang}
-                      onChange={(e) => navigate(e.target.value)}
-                      className="flex-1 bg-transparent text-sm text-white/90 focus:outline-none [&>option]:text-black"
+                      }`}
                     >
-                      {GUDANG_OPTIONS.map((g) => (
-                        <option key={g.to} value={g.to}>
-                          {g.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )
-              )}
+                      <GroupIcon size={17} className="shrink-0" />
+                    </NavLink>
+                  ) : (
+                    <div
+                      key={group.key}
+                      className={`flex items-center gap-2 px-3 py-2 rounded-md border ${
+                        active ? "border-[#1e5bb5] bg-[#1e5bb5]/10" : "border-white/10"
+                      }`}
+                    >
+                      <GroupIcon size={17} className="shrink-0 text-white/70" />
+                      <select
+                        value={selected}
+                        onChange={(e) => navigate(e.target.value)}
+                        className="flex-1 bg-transparent text-sm text-white/90 focus:outline-none [&>option]:text-black"
+                      >
+                        {group.options.map((o) => (
+                          <option key={o.to} value={o.to}>
+                            {o.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  );
+                })}
 
               {isOpen &&
                 section.items.map(({ to, label, icon: Icon }) => (
