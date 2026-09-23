@@ -14,6 +14,7 @@ import { ItemDetailPage } from "./pages/ItemDetailPage";
 import { KaryawanPage } from "./pages/KaryawanPage";
 import { InventoryBbmPage } from "./pages/InventoryBbmPage";
 import { AlatBeratPage } from "./pages/AlatBeratPage";
+import { MasterBarangPage } from "./pages/MasterBarangPage";
 import { UsersPage } from "./pages/UsersPage";
 
 function App() {
@@ -50,6 +51,7 @@ function App() {
               <Route path="/stock-out" element={<StockOutPage />} />
               <Route path="/transactions" element={<TransactionsPage />} />
               <Route path="/reports" element={<ReportsPage />} />
+              <Route path="/master-barang" element={<MasterBarangPage />} />
               <Route path="/karyawan" element={<KaryawanPage />} />
               <Route path="/alat-berat" element={<AlatBeratPage />} />
               <Route path="/users" element={<UsersPage />} />

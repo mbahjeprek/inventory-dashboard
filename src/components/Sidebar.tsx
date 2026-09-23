@@ -71,6 +71,7 @@ const navSections: NavSection[] = [
   {
     title: "Master Data",
     items: [
+      { to: "/master-barang", label: "Barang", icon: Package },
       { to: "/karyawan", label: "Karyawan", icon: Users },
       { to: "/alat-berat", label: "Alat Berat", icon: Truck },
       { to: "/users", label: "Pengguna", icon: KeyRound },
