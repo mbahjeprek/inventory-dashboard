@@ -153,6 +153,18 @@ export type BbmRecord = {
   total_hm?: number | null;
 };
 
+export type ActivityLog = {
+  id: number;
+  created_at: string;
+  module: "BARANG" | "BBM";
+  estate: string | null;
+  aksi: string;
+  objek: string | null;
+  detail: string | null;
+  username: string | null;
+  nama: string | null;
+};
+
 export type BbmSummary = {
   perLokasi: { jenis_bbm: string; lokasi: string; diterima: number; pemakaian: number }[];
   saldoTerakhir: { jenis_bbm: string; lokasi: string; saldo_stock: number; tanggal: string; tanggal_iso: string }[];
@@ -246,6 +258,16 @@ export const api = {
     req<{ success: boolean }>(`/api/items/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
 
   deleteItem: (id: number) => req<{ success: boolean }>(`/api/items/${id}`, { method: "DELETE" }),
+
+  activityLog: (params: Record<string, string | number>) => {
+    const qs = new URLSearchParams({
+      ...(params as any),
+      tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    }).toString();
+    return req<{ data: ActivityLog[]; total: number; page: number; pageSize: number; aksiOptions: string[] }>(
+      `/api/activity-log?${qs}`
+    );
+  },
 
   gudangStockSummary: (gudang: string) => req<GudangStockSummary>(`/api/gudang-stock/summary?gudang=${gudang}`),
 

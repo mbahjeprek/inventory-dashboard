@@ -144,3 +144,23 @@ CREATE INDEX IF NOT EXISTS idx_bbm_lokasi ON bbm_log(lokasi);
 CREATE INDEX IF NOT EXISTS idx_bbm_estate ON bbm_log(estate);
 CREATE INDEX IF NOT EXISTS idx_bbm_jenis ON bbm_log(jenis_bbm);
 CREATE INDEX IF NOT EXISTS idx_bbm_date ON bbm_log(tanggal_iso);
+
+-- Audit trail of every change made through the dashboard, kept as two separate logs: module
+-- 'BARANG' (Inventory Gudang of every estate, incl. Nilam's items/transactions/stock in-out) and
+-- 'BBM'. `estate` is the gudang/lokasi the change belongs to, so estate users see only their own.
+-- The acting user is copied in (not just referenced) so the log still reads correctly after an
+-- account is renamed or deleted.
+CREATE TABLE IF NOT EXISTS activity_log (
+  id SERIAL PRIMARY KEY,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  module TEXT NOT NULL,
+  estate TEXT,
+  aksi TEXT NOT NULL,
+  objek TEXT,
+  detail TEXT,
+  user_id INTEGER,
+  username TEXT,
+  nama TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_activity_module_time ON activity_log(module, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_activity_estate ON activity_log(estate);

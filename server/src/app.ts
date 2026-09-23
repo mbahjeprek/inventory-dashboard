@@ -89,6 +89,36 @@ function requireEstate(estate: string) {
   };
 }
 
+// ---- Activity log (audit trail), see schema.sql's activity_log ----
+type LogModule = "BARANG" | "BBM";
+
+// Records who changed what. Called after the change succeeded; a logging failure is reported but
+// never fails the user's action itself.
+async function logActivity(
+  req: express.Request,
+  entry: { module: LogModule; estate: string | null; aksi: string; objek: string; detail?: string }
+) {
+  const u = req.user!;
+  try {
+    await execute(
+      `INSERT INTO activity_log (module, estate, aksi, objek, detail, user_id, username, nama)
+       VALUES (@module, @estate, @aksi, @objek, @detail, @user_id, @username, @nama)`,
+      { ...entry, detail: entry.detail ?? "", user_id: u.id, username: u.username, nama: u.nama }
+    );
+  } catch (e) {
+    console.error("activity log failed", e);
+  }
+}
+
+// "Label: old → new" for each field that actually changed, e.g. "Stock Tersedia: 10 → 12".
+function describeChanges(before: Record<string, any>, after: Record<string, any>, labels: Record<string, string>) {
+  const show = (v: any) => (v === null || v === undefined || v === "" ? "-" : String(v));
+  const changes = Object.entries(labels)
+    .filter(([k]) => k in after && show(before[k]) !== show(after[k]))
+    .map(([k, label]) => `${label}: ${show(before[k])} → ${show(after[k])}`);
+  return changes.length ? changes.join("; ") : "Tidak ada perubahan";
+}
+
 // Nilam/Zamrud/Firus are consumer/destination estates, NOT separate physical warehouses.
 // There is only one physical stock pool (the main warehouse, located at Nilam).
 const TUJUAN_OPTIONS = ["NILAM", "ZAMRUD", "FIRUS"];
@@ -283,6 +313,13 @@ app.post("/api/items", requireEstate("NILAM"), async (req, res) => {
         buffer_stock: buffer_stock ?? 0,
       }
     );
+    await logActivity(req, {
+      module: "BARANG",
+      estate: "NILAM",
+      aksi: "Tambah Barang",
+      objek: `${String(kode).trim()} - ${String(nama).trim()}`,
+      detail: `Satuan: ${satuan || "-"}; Buffer: ${buffer_stock ?? 0}`,
+    });
     res.json({ success: true, id: row!.id });
   } catch (e: any) {
     if (e.code === "23505") {
@@ -317,6 +354,17 @@ app.put("/api/items/:id", requireEstate("NILAM"), async (req, res) => {
     }
     throw e;
   }
+  await logActivity(req, {
+    module: "BARANG",
+    estate: "NILAM",
+    aksi: "Edit Barang",
+    objek: `${String(kode).trim()} - ${nama}`,
+    detail: describeChanges(
+      existing,
+      { kode: String(kode).trim(), nama, satuan, buffer_stock: buffer_stock ?? 0 },
+      { kode: "Kode", nama: "Nama", satuan: "Satuan", buffer_stock: "Buffer" }
+    ),
+  });
   res.json({ success: true });
 });
 
@@ -335,6 +383,13 @@ app.delete("/api/items/:id", requireEstate("NILAM"), async (req, res) => {
   }
 
   await execute("DELETE FROM items WHERE id = @id", { id });
+  await logActivity(req, {
+    module: "BARANG",
+    estate: "NILAM",
+    aksi: "Hapus Barang",
+    objek: `${existing.kode} - ${existing.nama}`,
+    detail: `Stock terakhir: ${existing.stock_tersedia ?? 0}`,
+  });
   res.json({ success: true });
 });
 
@@ -439,6 +494,14 @@ app.post("/api/gudang-stock", async (req, res) => {
        VALUES (@gudang, @item_kode, @buffer_stock, @stock_tersedia) RETURNING id`,
       { gudang, item_kode, buffer_stock: buffer_stock ?? 0, stock_tersedia: stock_tersedia ?? 0 }
     );
+    const master = await queryOne<any>("SELECT nama FROM items WHERE kode = @item_kode", { item_kode });
+    await logActivity(req, {
+      module: "BARANG",
+      estate: gudang,
+      aksi: "Tambah Item",
+      objek: `${item_kode} - ${master?.nama ?? ""}`,
+      detail: `Buffer: ${buffer_stock ?? 0}; Stock Tersedia: ${stock_tersedia ?? 0}`,
+    });
     res.json({ success: true, id: row!.id });
   } catch (e: any) {
     if (e.code === "23505") {
@@ -459,6 +522,18 @@ app.put("/api/gudang-stock/:id", async (req, res) => {
     stock_tersedia: stock_tersedia ?? 0,
     id: req.params.id,
   });
+  const master = await queryOne<any>("SELECT nama FROM items WHERE kode = @kode", { kode: existing.item_kode });
+  await logActivity(req, {
+    module: "BARANG",
+    estate: existing.gudang,
+    aksi: "Edit Stok",
+    objek: `${existing.item_kode} - ${master?.nama ?? ""}`,
+    detail: describeChanges(
+      existing,
+      { buffer_stock: buffer_stock ?? 0, stock_tersedia: stock_tersedia ?? 0 },
+      { buffer_stock: "Buffer", stock_tersedia: "Stock Tersedia" }
+    ),
+  });
   res.json({ success: true });
 });
 
@@ -468,6 +543,14 @@ app.delete("/api/gudang-stock/:id", async (req, res) => {
   if (!estateAllowed(req.user!, existing.gudang)) return res.status(403).json({ error: "Akses ditolak" });
 
   await execute("DELETE FROM gudang_stock WHERE id = @id", { id: req.params.id });
+  const master = await queryOne<any>("SELECT nama FROM items WHERE kode = @kode", { kode: existing.item_kode });
+  await logActivity(req, {
+    module: "BARANG",
+    estate: existing.gudang,
+    aksi: "Hapus Item",
+    objek: `${existing.item_kode} - ${master?.nama ?? ""}`,
+    detail: `Buffer: ${existing.buffer_stock}; Stock Tersedia: ${existing.stock_tersedia}`,
+  });
   res.json({ success: true });
 });
 
@@ -596,6 +679,15 @@ app.post("/api/transactions", requireEstate("NILAM"), async (req, res) => {
     await applyStockEffect(client, item_id, type, qty, 1);
   });
 
+  await logActivity(req, {
+    module: "BARANG",
+    estate: "NILAM",
+    aksi: type === "IN" ? "Stok Masuk" : "Stok Keluar",
+    objek: `${item.kode} - ${item.nama}`,
+    detail: [`Jumlah: ${qty}`, tujuan && `Tujuan: ${tujuan}`, penerima && `Penerima: ${penerima}`, note && `Catatan: ${note}`]
+      .filter(Boolean)
+      .join("; "),
+  });
   res.json({ success: true });
 });
 
@@ -630,6 +722,17 @@ app.put("/api/transactions/:id", requireEstate("NILAM"), async (req, res) => {
     }
   });
 
+  await logActivity(req, {
+    module: "BARANG",
+    estate: "NILAM",
+    aksi: "Edit Transaksi",
+    objek: `${item?.kode} - ${item?.nama}`,
+    detail: describeChanges(
+      existing,
+      { type, qty, tujuan: tujuan || "", penerima: penerima || "", note: note || null },
+      { type: "Tipe", qty: "Jumlah", tujuan: "Tujuan", penerima: "Penerima", note: "Catatan" }
+    ),
+  });
   res.json({ success: true });
 });
 
@@ -643,6 +746,14 @@ app.delete("/api/transactions/:id", requireEstate("NILAM"), async (req, res) => 
     await execute("DELETE FROM transactions WHERE id = @id", { id: req.params.id }, client);
   });
 
+  const item = await queryOne<any>("SELECT kode, nama FROM items WHERE id = @id", { id: existing.item_id });
+  await logActivity(req, {
+    module: "BARANG",
+    estate: "NILAM",
+    aksi: "Hapus Transaksi",
+    objek: `${item?.kode} - ${item?.nama}`,
+    detail: `${existing.type === "IN" ? "Stok Masuk" : "Stok Keluar"} ${existing.qty}${existing.tujuan ? `; Tujuan: ${existing.tujuan}` : ""}`,
+  });
   res.json({ success: true });
 });
 
@@ -679,6 +790,13 @@ app.post("/api/stock-correction", requireEstate("NILAM"), async (req, res) => {
     );
   });
 
+  await logActivity(req, {
+    module: "BARANG",
+    estate: "NILAM",
+    aksi: "Koreksi Stok",
+    objek: `${item.kode} - ${item.nama}`,
+    detail: `Stock: ${item.stock_tersedia} → ${actual_qty} (selisih ${delta > 0 ? "+" : ""}${delta})${note ? `; Catatan: ${note}` : ""}`,
+  });
   res.json({ success: true, delta });
 });
 
@@ -770,12 +888,31 @@ app.put("/api/stock-in/:id", requireEstate("NILAM"), async (req, res) => {
       id: req.params.id,
     }
   );
+  await logActivity(req, {
+    module: "BARANG",
+    estate: "NILAM",
+    aksi: "Edit Stock In",
+    objek: `${existing.kode} - ${existing.nama}`,
+    detail: describeChanges(
+      existing,
+      { nama_vendor: nama_vendor ?? "", qty: qty ?? 0, satuan: satuan ?? "", tujuan, tanggal_terima_iso: tanggal_terima_iso || null, keterangan: keterangan ?? "" },
+      { nama_vendor: "Vendor", qty: "Jumlah", satuan: "Satuan", tujuan: "Tujuan", tanggal_terima_iso: "Tanggal", keterangan: "Keterangan" }
+    ),
+  });
   res.json({ success: true });
 });
 
 app.delete("/api/stock-in/:id", requireEstate("NILAM"), async (req, res) => {
+  const existing = await queryOne<any>("SELECT * FROM stock_in_log WHERE id = @id", { id: req.params.id });
   const result = await execute("DELETE FROM stock_in_log WHERE id = @id", { id: req.params.id });
   if (result.rowCount === 0) return res.status(404).json({ error: "Not found" });
+  await logActivity(req, {
+    module: "BARANG",
+    estate: "NILAM",
+    aksi: "Hapus Stock In",
+    objek: `${existing?.kode} - ${existing?.nama}`,
+    detail: `Jumlah: ${existing?.qty}; Tanggal: ${existing?.tanggal_terima || "-"}; Vendor: ${existing?.nama_vendor || "-"}`,
+  });
   res.json({ success: true });
 });
 
@@ -844,12 +981,31 @@ app.put("/api/stock-out/:id", requireEstate("NILAM"), async (req, res) => {
       id: req.params.id,
     }
   );
+  await logActivity(req, {
+    module: "BARANG",
+    estate: "NILAM",
+    aksi: "Edit Stock Out",
+    objek: `${existing.kode} - ${existing.nama}`,
+    detail: describeChanges(
+      existing,
+      { penerima: penerima ?? "", qty: qty ?? 0, satuan: satuan ?? "", tujuan, tanggal_keluar_iso: tanggal_keluar_iso || null, keterangan: keterangan ?? "" },
+      { penerima: "Penerima", qty: "Jumlah", satuan: "Satuan", tujuan: "Tujuan", tanggal_keluar_iso: "Tanggal", keterangan: "Keterangan" }
+    ),
+  });
   res.json({ success: true });
 });
 
 app.delete("/api/stock-out/:id", requireEstate("NILAM"), async (req, res) => {
+  const existing = await queryOne<any>("SELECT * FROM stock_out_log WHERE id = @id", { id: req.params.id });
   const result = await execute("DELETE FROM stock_out_log WHERE id = @id", { id: req.params.id });
   if (result.rowCount === 0) return res.status(404).json({ error: "Not found" });
+  await logActivity(req, {
+    module: "BARANG",
+    estate: "NILAM",
+    aksi: "Hapus Stock Out",
+    objek: `${existing?.kode} - ${existing?.nama}`,
+    detail: `Jumlah: ${existing?.qty}; Tanggal: ${existing?.tanggal_keluar || "-"}; Penerima: ${existing?.penerima || "-"}`,
+  });
   res.json({ success: true });
 });
 
@@ -1343,6 +1499,22 @@ app.post("/api/bbm", async (req, res) => {
     }
   );
 
+  await logActivity(req, {
+    module: "BBM",
+    estate: lokasi,
+    aksi: tipe === "DITERIMA" ? "Stok Masuk" : "Stok Keluar",
+    objek: `${jenis_bbm} · ${tanggal}${no_spb ? ` · SPB ${no_spb}` : ""}`,
+    detail: [
+      `Jumlah: ${jumlah} LTR`,
+      `Saldo: ${lastSaldo} → ${saldoBaru}`,
+      tipe === "PEMAKAIAN" && estate && `Estate: ${estate}`,
+      kode_kendaraan && `Kendaraan: ${kode_kendaraan}`,
+      hm_terakhir && `HM: ${hm_terakhir}`,
+      keterangan && `Keterangan: ${keterangan}`,
+    ]
+      .filter(Boolean)
+      .join("; "),
+  });
   res.json({ success: true, id: result!.id, saldo_stock: saldoBaru });
 });
 
@@ -1356,26 +1528,43 @@ app.put("/api/bbm/:id", async (req, res) => {
 
   const { tanggal, periode } = tanggal_iso ? isoToIndoDate(tanggal_iso) : { tanggal: existing.tanggal, periode: existing.periode };
 
+  const updated = {
+    tanggal,
+    tanggal_iso: tanggal_iso || existing.tanggal_iso,
+    periode,
+    no_spb: no_spb ?? "",
+    diterima: diterima === "" || diterima === undefined ? null : Number(diterima),
+    pemakaian: pemakaian === "" || pemakaian === undefined ? null : Number(pemakaian),
+    saldo_stock: saldo_stock === "" || saldo_stock === undefined ? null : Number(saldo_stock),
+    keterangan: keterangan ?? "",
+    estate: estate ?? "",
+    kode_kendaraan: kode_kendaraan ?? existing.kode_kendaraan ?? "",
+    hm_terakhir: hm_terakhir ?? existing.hm_terakhir ?? "",
+  };
   await execute(
     `UPDATE bbm_log SET
        tanggal = @tanggal, tanggal_iso = @tanggal_iso, periode = @periode, no_spb = @no_spb, diterima = @diterima, pemakaian = @pemakaian, saldo_stock = @saldo_stock,
        keterangan = @keterangan, estate = @estate, kode_kendaraan = @kode_kendaraan, hm_terakhir = @hm_terakhir
      WHERE id = @id`,
-    {
-      tanggal,
-      tanggal_iso: tanggal_iso || existing.tanggal_iso,
-      periode,
-      no_spb: no_spb ?? "",
-      diterima: diterima === "" || diterima === undefined ? null : Number(diterima),
-      pemakaian: pemakaian === "" || pemakaian === undefined ? null : Number(pemakaian),
-      saldo_stock: saldo_stock === "" || saldo_stock === undefined ? null : Number(saldo_stock),
-      keterangan: keterangan ?? "",
-      estate: estate ?? "",
-      kode_kendaraan: kode_kendaraan ?? existing.kode_kendaraan ?? "",
-      hm_terakhir: hm_terakhir ?? existing.hm_terakhir ?? "",
-      id: req.params.id,
-    }
+    { ...updated, id: req.params.id }
   );
+  await logActivity(req, {
+    module: "BBM",
+    estate: existing.lokasi,
+    aksi: "Edit Transaksi",
+    objek: `${existing.jenis_bbm} · ${existing.tanggal}${existing.no_spb ? ` · SPB ${existing.no_spb}` : ""}`,
+    detail: describeChanges(existing, updated, {
+      tanggal: "Tanggal",
+      no_spb: "No. SPB",
+      diterima: "Stok Masuk",
+      pemakaian: "Stok Keluar",
+      saldo_stock: "Saldo",
+      keterangan: "Keterangan",
+      estate: "Estate",
+      kode_kendaraan: "Kode Kendaraan",
+      hm_terakhir: "HM",
+    }),
+  });
   res.json({ success: true });
 });
 
@@ -1385,7 +1574,71 @@ app.delete("/api/bbm/:id", async (req, res) => {
   if (!estateAllowed(req.user!, existing.lokasi)) return res.status(403).json({ error: "Akses ditolak" });
 
   await execute("DELETE FROM bbm_log WHERE id = @id", { id: req.params.id });
+  await logActivity(req, {
+    module: "BBM",
+    estate: existing.lokasi,
+    aksi: "Hapus Transaksi",
+    objek: `${existing.jenis_bbm} · ${existing.tanggal}${existing.no_spb ? ` · SPB ${existing.no_spb}` : ""}`,
+    detail: [
+      existing.diterima && `Stok Masuk: ${existing.diterima}`,
+      existing.pemakaian && `Stok Keluar: ${existing.pemakaian}`,
+      existing.saldo_stock !== null && `Saldo: ${existing.saldo_stock}`,
+      existing.keterangan && `Keterangan: ${existing.keterangan}`,
+    ]
+      .filter(Boolean)
+      .join("; "),
+  });
   res.json({ success: true });
+});
+
+// ---- Activity log listing: separate logs per module, scoped to the caller's estate ----
+app.get("/api/activity-log", async (req, res) => {
+  const { module = "", estate = "", aksi = "", search = "", dateFrom = "", dateTo = "", tz = "", page = "1", pageSize = "50" } =
+    req.query as Record<string, string>;
+  if (module !== "BARANG" && module !== "BBM") return res.status(400).json({ error: "Modul tidak valid" });
+
+  const conditions = ["module = @module"];
+  const params: any = { module };
+
+  // Estate users only ever see their own estate's log; a superuser may narrow to one estate.
+  const scope = req.user!.role === "superuser" ? estate : req.user!.estate;
+  if (scope) {
+    conditions.push("estate = @estate");
+    params.estate = scope;
+  }
+  if (aksi) {
+    conditions.push("aksi = @aksi");
+    params.aksi = aksi;
+  }
+  if (search) {
+    conditions.push("(objek ILIKE @search OR detail ILIKE @search OR nama ILIKE @search OR username ILIKE @search)");
+    params.search = `%${search}%`;
+  }
+  // Date filters are calendar days in the viewer's own time zone (sent by the browser as an IANA
+  // name), so "today" means today where they are, not in UTC.
+  params.tz = /^[A-Za-z_]+(\/[A-Za-z0-9_+-]+)*$/.test(tz) ? tz : "Asia/Jakarta";
+  if (dateFrom) {
+    conditions.push("(created_at AT TIME ZONE @tz)::date >= @dateFrom::date");
+    params.dateFrom = dateFrom;
+  }
+  if (dateTo) {
+    conditions.push("(created_at AT TIME ZONE @tz)::date <= @dateTo::date");
+    params.dateTo = dateTo;
+  }
+
+  const where = "WHERE " + conditions.join(" AND ");
+  const total = (await queryOne<any>(`SELECT COUNT(*) c FROM activity_log ${where}`, params))!.c;
+  const limit = Math.min(parseInt(pageSize) || 50, 500);
+  const offset = (Math.max(parseInt(page) || 1, 1) - 1) * limit;
+  const data = await queryMany(
+    `SELECT * FROM activity_log ${where} ORDER BY created_at DESC, id DESC LIMIT @limit OFFSET @offset`,
+    { ...params, limit, offset }
+  );
+  const aksiOptions = (
+    await queryMany<{ aksi: string }>("SELECT DISTINCT aksi FROM activity_log WHERE module = @module ORDER BY aksi", { module })
+  ).map((r) => r.aksi);
+
+  res.json({ data, total: Number(total), page: parseInt(page), pageSize: limit, aksiOptions });
 });
 
 app.get("/api/bbm", async (req, res) => {
