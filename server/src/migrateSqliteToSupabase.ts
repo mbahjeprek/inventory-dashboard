@@ -2,7 +2,7 @@ import "dotenv/config";
 import path from "path";
 import { fileURLToPath } from "url";
 import Database from "better-sqlite3";
-import { Pool, type PoolClient } from "pg";
+import { Pool } from "pg";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -121,53 +121,80 @@ const TABLES: TableSpec[] = [
   },
 ];
 
-async function copyTable(client: PoolClient, spec: TableSpec) {
-  const rows = sqlite.prepare(`SELECT * FROM ${spec.table}`).all() as Record<string, any>[];
-  if (rows.length === 0) {
-    console.log(`${spec.table}: 0 rows, skipped.`);
-    return;
-  }
+const BATCH_SIZE = 500;
 
-  const colList = spec.columns.join(", ");
-  const placeholders = spec.columns.map((_, i) => `$${i + 1}`).join(", ");
-  const insertSql = `INSERT INTO ${spec.table} (${colList}) VALUES (${placeholders})`;
-
-  for (const row of rows) {
-    const values = spec.columns.map((c) => row[c] ?? null);
-    await client.query(insertSql, values);
-  }
-
-  if (spec.columns.includes("id")) {
-    await client.query(
-      `SELECT setval(pg_get_serial_sequence('${spec.table}', 'id'), COALESCE((SELECT MAX(id) FROM ${spec.table}), 1))`
-    );
-  }
-
-  console.log(`${spec.table}: ${rows.length} rows migrated.`);
+function chunk<T>(arr: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
 }
 
-async function main() {
-  const pool = new Pool({ connectionString, ssl: { rejectUnauthorized: false } });
+// One transaction per table (not one giant transaction for the whole migration) - keeps each
+// round trip short so it survives on a flaky/pooled connection, and a table that fails after this
+// one succeeds doesn't roll back tables already committed.
+async function copyTable(pool: Pool, spec: TableSpec) {
+  const rows = sqlite.prepare(`SELECT * FROM ${spec.table}`).all() as Record<string, any>[];
+
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    // Truncate dependents first so `DELETE FROM items` (inside copyTable) doesn't hit FK errors
-    // when re-running this script against an already-populated database.
-    for (const spec of [...TABLES].reverse()) {
-      await client.query(`DELETE FROM ${spec.table}`);
+    await client.query(`DELETE FROM ${spec.table}`);
+
+    if (rows.length > 0) {
+      const colList = spec.columns.join(", ");
+      for (const batch of chunk(rows, BATCH_SIZE)) {
+        const values: any[] = [];
+        const tuples = batch.map((row, rowIdx) => {
+          const placeholders = spec.columns.map((_, colIdx) => {
+            values.push(row[spec.columns[colIdx]] ?? null);
+            return `$${rowIdx * spec.columns.length + colIdx + 1}`;
+          });
+          return `(${placeholders.join(", ")})`;
+        });
+        await client.query(`INSERT INTO ${spec.table} (${colList}) VALUES ${tuples.join(", ")}`, values);
+      }
     }
-    for (const spec of TABLES) {
-      await copyTable(client, spec);
+
+    if (spec.columns.includes("id")) {
+      await client.query(
+        `SELECT setval(pg_get_serial_sequence('${spec.table}', 'id'), COALESCE((SELECT MAX(id) FROM ${spec.table}), 1))`
+      );
     }
+
     await client.query("COMMIT");
-    console.log("Migration complete.");
+    console.log(`${spec.table}: ${rows.length} rows migrated.`);
   } catch (err) {
     await client.query("ROLLBACK");
     throw err;
   } finally {
     client.release();
-    await pool.end();
   }
+}
+
+async function main() {
+  const pool = new Pool({ connectionString, ssl: { rejectUnauthorized: false }, max: 3 });
+  // Truncate dependents first (reverse order) so re-running this script against an
+  // already-populated database doesn't hit FK errors when clearing `items`.
+  const clearClient = await pool.connect();
+  try {
+    await clearClient.query("BEGIN");
+    for (const spec of [...TABLES].reverse()) {
+      await clearClient.query(`DELETE FROM ${spec.table}`);
+    }
+    await clearClient.query("COMMIT");
+  } catch (err) {
+    await clearClient.query("ROLLBACK");
+    throw err;
+  } finally {
+    clearClient.release();
+  }
+
+  for (const spec of TABLES) {
+    await copyTable(pool, spec);
+  }
+
+  console.log("Migration complete.");
+  await pool.end();
   sqlite.close();
 }
 
