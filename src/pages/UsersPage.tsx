@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Search, ChevronLeft, ChevronRight, ArrowUp, ArrowDown, ArrowUpDown, Pencil, Trash2, Plus } from "lucide-react";
 import { api, type UserAccount } from "../lib/api";
 import { UserFormModal } from "../components/UserFormModal";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useAuth } from "../context/AuthContext";
 
 type SortKey = "username" | "nama" | "created_at";
@@ -48,6 +49,7 @@ export function UsersPage() {
   const [editingUser, setEditingUser] = useState<UserAccount | null>(null);
   const [creating, setCreating] = useState(false);
   const [deleteError, setDeleteError] = useState("");
+  const [confirmDelete, setConfirmDelete] = useState<UserAccount | null>(null);
   const pageSize = 25;
 
   const load = () => {
@@ -87,7 +89,6 @@ export function UsersPage() {
 
   const remove = async (u: UserAccount) => {
     setDeleteError("");
-    if (!confirm(`Hapus akun "${u.username}"?`)) return;
     try {
       await api.deleteUser(u.id);
       load();
@@ -175,7 +176,7 @@ export function UsersPage() {
                           <Pencil size={14} />
                         </button>
                         <button
-                          onClick={() => remove(u)}
+                          onClick={() => setConfirmDelete(u)}
                           title="Hapus akun"
                           className="p-1.5 rounded-md border border-[var(--border)] text-[var(--accent-red)] hover:bg-[#fef2f2]"
                         >
@@ -231,6 +232,17 @@ export function UsersPage() {
           onSuccess={() => {
             setCreating(false);
             load();
+          }}
+        />
+      )}
+
+      {confirmDelete && (
+        <ConfirmDialog
+          message={`Hapus akun "${confirmDelete.username}"? Tindakan ini tidak bisa dibatalkan.`}
+          onCancel={() => setConfirmDelete(null)}
+          onConfirm={() => {
+            remove(confirmDelete);
+            setConfirmDelete(null);
           }}
         />
       )}

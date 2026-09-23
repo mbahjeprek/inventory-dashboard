@@ -2,11 +2,13 @@ import { useEffect, useState } from "react";
 import { ArrowDownCircle, ArrowUpCircle, Pencil, Trash2 } from "lucide-react";
 import { api, type Transaction } from "../lib/api";
 import { EditTransactionModal } from "../components/EditTransactionModal";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 
 export function TransactionsPage() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<Transaction | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<Transaction | null>(null);
 
   const load = () => {
     setLoading(true);
@@ -21,7 +23,6 @@ export function TransactionsPage() {
   }, []);
 
   const handleDelete = async (t: Transaction) => {
-    if (!confirm(`Hapus transaksi ${t.kode} - ${t.nama} (${t.qty})?`)) return;
     await api.deleteTransaction(t.id);
     load();
   };
@@ -95,7 +96,7 @@ export function TransactionsPage() {
                           <Pencil size={14} />
                         </button>
                         <button
-                          onClick={() => handleDelete(t)}
+                          onClick={() => setConfirmDelete(t)}
                           title="Hapus"
                           className="p-1.5 rounded-md border border-[var(--accent-red-border)] text-[var(--accent-red)] hover:bg-[var(--accent-red-bg)]"
                         >
@@ -118,6 +119,17 @@ export function TransactionsPage() {
           onSuccess={() => {
             setEditing(null);
             load();
+          }}
+        />
+      )}
+
+      {confirmDelete && (
+        <ConfirmDialog
+          message={`Hapus transaksi ${confirmDelete.kode} - ${confirmDelete.nama} (${confirmDelete.qty})? Tindakan ini tidak bisa dibatalkan.`}
+          onCancel={() => setConfirmDelete(null)}
+          onConfirm={() => {
+            handleDelete(confirmDelete);
+            setConfirmDelete(null);
           }}
         />
       )}

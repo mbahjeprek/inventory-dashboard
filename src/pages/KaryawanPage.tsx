@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Search, ChevronLeft, ChevronRight, ArrowUp, ArrowDown, ArrowUpDown, Filter, Pencil, Plus, Trash2 } from "lucide-react";
 import { api, type Karyawan } from "../lib/api";
 import { EditKaryawanModal } from "../components/EditKaryawanModal";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 
 type SortKey = "nik" | "nama" | "status" | "estate" | "lokasi_kerja";
 
@@ -89,6 +90,7 @@ export function KaryawanPage() {
   const [editingKaryawan, setEditingKaryawan] = useState<Karyawan | null>(null);
   const [creating, setCreating] = useState(false);
   const [deleteError, setDeleteError] = useState("");
+  const [confirmDelete, setConfirmDelete] = useState<Karyawan | null>(null);
   const pageSize = 25;
 
   const load = () => {
@@ -135,7 +137,6 @@ export function KaryawanPage() {
 
   const remove = async (k: Karyawan) => {
     setDeleteError("");
-    if (!confirm(`Hapus karyawan "${k.nama}" (${k.nik})?`)) return;
     try {
       await api.deleteKaryawan(k.id);
       load();
@@ -220,7 +221,7 @@ export function KaryawanPage() {
                           <Pencil size={14} />
                         </button>
                         <button
-                          onClick={() => remove(k)}
+                          onClick={() => setConfirmDelete(k)}
                           title="Hapus karyawan"
                           className="p-1.5 rounded-md border border-[var(--accent-red-border)] text-[var(--accent-red)] hover:bg-[var(--accent-red-bg)]"
                         >
@@ -276,6 +277,17 @@ export function KaryawanPage() {
           onSuccess={() => {
             setCreating(false);
             load();
+          }}
+        />
+      )}
+
+      {confirmDelete && (
+        <ConfirmDialog
+          message={`Hapus karyawan "${confirmDelete.nama}" (${confirmDelete.nik})? Tindakan ini tidak bisa dibatalkan.`}
+          onCancel={() => setConfirmDelete(null)}
+          onConfirm={() => {
+            remove(confirmDelete);
+            setConfirmDelete(null);
           }}
         />
       )}

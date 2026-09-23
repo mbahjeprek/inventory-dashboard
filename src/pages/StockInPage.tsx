@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Search, ChevronLeft, ChevronRight, ArrowDownCircle, Pencil, Trash2 } from "lucide-react";
 import { api, type StockInRecord } from "../lib/api";
 import { EditStockInModal } from "../components/EditStockInModal";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 
 const TUJUAN_OPTIONS = ["NILAM", "ZAMRUD", "FIRUS"];
 
@@ -18,6 +19,7 @@ export function StockInPage() {
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<StockInRecord | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<StockInRecord | null>(null);
   const pageSize = 25;
 
   const load = () => {
@@ -51,7 +53,6 @@ export function StockInPage() {
   const totalPages = Math.max(Math.ceil(total / pageSize), 1);
 
   const handleDelete = async (r: StockInRecord) => {
-    if (!confirm(`Hapus record stock in ${r.kode} - ${r.nama} (${r.qty})?`)) return;
     await api.deleteStockIn(r.id);
     load();
   };
@@ -185,7 +186,7 @@ export function StockInPage() {
                           <Pencil size={14} />
                         </button>
                         <button
-                          onClick={() => handleDelete(r)}
+                          onClick={() => setConfirmDelete(r)}
                           title="Hapus"
                           className="p-1.5 rounded-md border border-[var(--accent-red-border)] text-[var(--accent-red)] hover:bg-[var(--accent-red-bg)]"
                         >
@@ -230,6 +231,17 @@ export function StockInPage() {
           onSuccess={() => {
             setEditing(null);
             load();
+          }}
+        />
+      )}
+
+      {confirmDelete && (
+        <ConfirmDialog
+          message={`Hapus record stock in ${confirmDelete.kode} - ${confirmDelete.nama} (${confirmDelete.qty})? Tindakan ini tidak bisa dibatalkan.`}
+          onCancel={() => setConfirmDelete(null)}
+          onConfirm={() => {
+            handleDelete(confirmDelete);
+            setConfirmDelete(null);
           }}
         />
       )}

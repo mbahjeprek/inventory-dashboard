@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Search, ChevronLeft, ChevronRight, ArrowUp, ArrowDown, ArrowUpDown, Filter, Pencil, Plus, Trash2 } from "lucide-react";
 import { api, type Item } from "../lib/api";
 import { EditItemModal } from "../components/EditItemModal";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 
 type SortKey = "kode" | "nama" | "buffer_stock";
 
@@ -89,6 +90,7 @@ export function MasterBarangPage() {
   const [editingItem, setEditingItem] = useState<Item | null>(null);
   const [creating, setCreating] = useState(false);
   const [deleteError, setDeleteError] = useState("");
+  const [confirmDelete, setConfirmDelete] = useState<Item | null>(null);
   const pageSize = 25;
 
   const load = () => {
@@ -132,7 +134,6 @@ export function MasterBarangPage() {
 
   const remove = async (item: Item) => {
     setDeleteError("");
-    if (!confirm(`Hapus barang "${item.nama}" (${item.kode})?`)) return;
     try {
       await api.deleteItem(item.id);
       load();
@@ -224,7 +225,7 @@ export function MasterBarangPage() {
                           <Pencil size={14} />
                         </button>
                         <button
-                          onClick={() => remove(item)}
+                          onClick={() => setConfirmDelete(item)}
                           title="Hapus barang"
                           className="p-1.5 rounded-md border border-[var(--accent-red-border)] text-[var(--accent-red)] hover:bg-[var(--accent-red-bg)]"
                         >
@@ -280,6 +281,17 @@ export function MasterBarangPage() {
           onSuccess={() => {
             setCreating(false);
             load();
+          }}
+        />
+      )}
+
+      {confirmDelete && (
+        <ConfirmDialog
+          message={`Hapus barang "${confirmDelete.nama}" (${confirmDelete.kode})? Tindakan ini tidak bisa dibatalkan.`}
+          onCancel={() => setConfirmDelete(null)}
+          onConfirm={() => {
+            remove(confirmDelete);
+            setConfirmDelete(null);
           }}
         />
       )}

@@ -18,6 +18,7 @@ import {
 import { api, type GudangStockItem, type GudangStockSummary } from "../lib/api";
 import { StatCard } from "../components/StatCard";
 import { AddGudangStockModal } from "../components/AddGudangStockModal";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { EditGudangStockModal } from "../components/EditGudangStockModal";
 
 const STATUSES = ["AMAN", "BUFFER STOCK"];
@@ -108,6 +109,7 @@ export function InventoryGudangStockPage({ gudang }: { gudang: string }) {
   const [showAdd, setShowAdd] = useState(false);
   const [editingItem, setEditingItem] = useState<GudangStockItem | null>(null);
   const [deleteError, setDeleteError] = useState("");
+  const [confirmDelete, setConfirmDelete] = useState<GudangStockItem | null>(null);
   const pageSize = 25;
 
   const load = () => {
@@ -154,7 +156,6 @@ export function InventoryGudangStockPage({ gudang }: { gudang: string }) {
 
   const remove = async (item: GudangStockItem) => {
     setDeleteError("");
-    if (!confirm(`Hapus barang "${item.nama}" dari gudang ${gudang}?`)) return;
     try {
       await api.deleteGudangStockItem(item.id);
       load();
@@ -272,7 +273,7 @@ export function InventoryGudangStockPage({ gudang }: { gudang: string }) {
                           <Pencil size={14} />
                         </button>
                         <button
-                          onClick={() => remove(item)}
+                          onClick={() => setConfirmDelete(item)}
                           title="Hapus dari gudang ini"
                           className="p-1.5 rounded-md border border-[var(--accent-red-border)] text-[var(--accent-red)] hover:bg-[var(--accent-red-bg)]"
                         >
@@ -330,6 +331,17 @@ export function InventoryGudangStockPage({ gudang }: { gudang: string }) {
             setEditingItem(null);
             load();
             loadSummary();
+          }}
+        />
+      )}
+
+      {confirmDelete && (
+        <ConfirmDialog
+          message={`Hapus barang "${confirmDelete.nama}" dari gudang ${gudang}? Tindakan ini tidak bisa dibatalkan.`}
+          onCancel={() => setConfirmDelete(null)}
+          onConfirm={() => {
+            remove(confirmDelete);
+            setConfirmDelete(null);
           }}
         />
       )}

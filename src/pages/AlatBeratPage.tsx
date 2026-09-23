@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Search, ChevronLeft, ChevronRight, ArrowUp, ArrowDown, ArrowUpDown, Filter, Pencil, Plus, Trash2 } from "lucide-react";
 import { api, type AlatBerat } from "../lib/api";
 import { EditAlatBeratModal } from "../components/EditAlatBeratModal";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 
 type SortKey = "kode" | "jenis_unit" | "nama";
 
@@ -87,6 +88,7 @@ export function AlatBeratPage() {
   const [editingAlat, setEditingAlat] = useState<AlatBerat | null>(null);
   const [creating, setCreating] = useState(false);
   const [deleteError, setDeleteError] = useState("");
+  const [confirmDelete, setConfirmDelete] = useState<AlatBerat | null>(null);
   const pageSize = 25;
 
   const load = () => {
@@ -132,7 +134,6 @@ export function AlatBeratPage() {
 
   const remove = async (a: AlatBerat) => {
     setDeleteError("");
-    if (!confirm(`Hapus alat "${a.kode}"?`)) return;
     try {
       await api.deleteAlatBerat(a.id);
       load();
@@ -211,7 +212,7 @@ export function AlatBeratPage() {
                           <Pencil size={14} />
                         </button>
                         <button
-                          onClick={() => remove(a)}
+                          onClick={() => setConfirmDelete(a)}
                           title="Hapus alat"
                           className="p-1.5 rounded-md border border-[var(--accent-red-border)] text-[var(--accent-red)] hover:bg-[var(--accent-red-bg)]"
                         >
@@ -267,6 +268,17 @@ export function AlatBeratPage() {
           onSuccess={() => {
             setCreating(false);
             load();
+          }}
+        />
+      )}
+
+      {confirmDelete && (
+        <ConfirmDialog
+          message={`Hapus alat "${confirmDelete.kode}"? Tindakan ini tidak bisa dibatalkan.`}
+          onCancel={() => setConfirmDelete(null)}
+          onConfirm={() => {
+            remove(confirmDelete);
+            setConfirmDelete(null);
           }}
         />
       )}

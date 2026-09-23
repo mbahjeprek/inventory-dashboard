@@ -4,6 +4,7 @@ import { api, type BbmRecord, type BbmSummary } from "../lib/api";
 import { StatCard } from "../components/StatCard";
 import { BbmTransactionModal } from "../components/BbmTransactionModal";
 import { EditBbmModal } from "../components/EditBbmModal";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 
 const JENIS_OPTIONS = ["SOLAR", "BENSIN"];
 
@@ -25,6 +26,7 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
   const [loading, setLoading] = useState(true);
   const [showTransaksi, setShowTransaksi] = useState(false);
   const [editing, setEditing] = useState<BbmRecord | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<BbmRecord | null>(null);
   const pageSize = 25;
 
   const load = () => {
@@ -65,7 +67,6 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
   const totalPages = Math.max(Math.ceil(total / pageSize), 1);
 
   const handleDelete = async (r: BbmRecord) => {
-    if (!confirm(`Hapus transaksi ${r.jenis_bbm} - ${r.lokasi} tanggal ${r.tanggal}?`)) return;
     await api.deleteBbm(r.id);
     api.bbmSummary().then(setSummary);
     load();
@@ -265,7 +266,7 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
                           <Pencil size={14} />
                         </button>
                         <button
-                          onClick={() => handleDelete(r)}
+                          onClick={() => setConfirmDelete(r)}
                           title="Hapus"
                           className="p-1.5 rounded-md border border-[var(--accent-red-border)] text-[var(--accent-red)] hover:bg-[var(--accent-red-bg)]"
                         >
@@ -324,6 +325,17 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
             setEditing(null);
             api.bbmSummary().then(setSummary);
             load();
+          }}
+        />
+      )}
+
+      {confirmDelete && (
+        <ConfirmDialog
+          message={`Hapus transaksi ${confirmDelete.jenis_bbm} - ${confirmDelete.lokasi} tanggal ${confirmDelete.tanggal}? Tindakan ini tidak bisa dibatalkan.`}
+          onCancel={() => setConfirmDelete(null)}
+          onConfirm={() => {
+            handleDelete(confirmDelete);
+            setConfirmDelete(null);
           }}
         />
       )}

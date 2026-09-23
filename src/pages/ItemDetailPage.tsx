@@ -4,6 +4,7 @@ import { ArrowLeft, ArrowDownCircle, ArrowUpCircle, PackagePlus, Wrench, Pencil,
 import { api, type Item, type Movement } from "../lib/api";
 import { TransactionModal } from "../components/TransactionModal";
 import { EditItemModal } from "../components/EditItemModal";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 
 const TUJUAN_OPTIONS = ["NILAM", "ZAMRUD", "FIRUS"];
 
@@ -29,6 +30,7 @@ export function ItemDetailPage() {
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
+  const [confirmDeleteMovement, setConfirmDeleteMovement] = useState<Movement | null>(null);
 
   const load = () => {
     if (!id) return;
@@ -58,9 +60,6 @@ export function ItemDetailPage() {
   const totalOut = movements.filter((m) => m.type === "OUT").reduce((s, m) => s + m.qty, 0);
 
   const handleDeleteMovement = async (m: Movement) => {
-    if (!confirm(`Hapus riwayat ini? (${m.type === "IN" ? "+" : "-"}${m.qty} ${m.satuan || item.satuan} · ${SOURCE_LABEL[m.source]})`)) {
-      return;
-    }
     if (m.source === "MANUAL") {
       await api.deleteTransaction(m.id);
     } else if (m.source === "STOCK_IN") {
@@ -216,7 +215,7 @@ export function ItemDetailPage() {
                       </td>
                       <td className="px-4 py-2.5 text-right">
                         <button
-                          onClick={() => handleDeleteMovement(m)}
+                          onClick={() => setConfirmDeleteMovement(m)}
                           title="Hapus riwayat"
                           className="p-1.5 rounded-md border border-[var(--accent-red-border)] text-[var(--accent-red)] hover:bg-[var(--accent-red-bg)]"
                         >
@@ -250,6 +249,19 @@ export function ItemDetailPage() {
           onSuccess={() => {
             setShowEditModal(false);
             load();
+          }}
+        />
+      )}
+
+      {confirmDeleteMovement && (
+        <ConfirmDialog
+          message={`Hapus riwayat ini? (${confirmDeleteMovement.type === "IN" ? "+" : "-"}${confirmDeleteMovement.qty} ${
+            confirmDeleteMovement.satuan || item.satuan
+          } · ${SOURCE_LABEL[confirmDeleteMovement.source]}) Tindakan ini tidak bisa dibatalkan.`}
+          onCancel={() => setConfirmDeleteMovement(null)}
+          onConfirm={() => {
+            handleDeleteMovement(confirmDeleteMovement);
+            setConfirmDeleteMovement(null);
           }}
         />
       )}

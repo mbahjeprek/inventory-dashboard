@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Search, ChevronLeft, ChevronRight, ArrowUpCircle, Pencil, Trash2 } from "lucide-react";
 import { api, type StockOutRecord } from "../lib/api";
 import { EditStockOutModal } from "../components/EditStockOutModal";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 
 const TUJUAN_OPTIONS = ["NILAM", "ZAMRUD", "FIRUS"];
 
@@ -16,6 +17,7 @@ export function StockOutPage() {
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<StockOutRecord | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<StockOutRecord | null>(null);
   const pageSize = 25;
 
   const load = () => {
@@ -45,7 +47,6 @@ export function StockOutPage() {
   const totalPages = Math.max(Math.ceil(total / pageSize), 1);
 
   const handleDelete = async (r: StockOutRecord) => {
-    if (!confirm(`Hapus record stock out ${r.kode} - ${r.nama} (${r.qty})?`)) return;
     await api.deleteStockOut(r.id);
     load();
   };
@@ -159,7 +160,7 @@ export function StockOutPage() {
                           <Pencil size={14} />
                         </button>
                         <button
-                          onClick={() => handleDelete(r)}
+                          onClick={() => setConfirmDelete(r)}
                           title="Hapus"
                           className="p-1.5 rounded-md border border-[var(--accent-red-border)] text-[var(--accent-red)] hover:bg-[var(--accent-red-bg)]"
                         >
@@ -204,6 +205,17 @@ export function StockOutPage() {
           onSuccess={() => {
             setEditing(null);
             load();
+          }}
+        />
+      )}
+
+      {confirmDelete && (
+        <ConfirmDialog
+          message={`Hapus record stock out ${confirmDelete.kode} - ${confirmDelete.nama} (${confirmDelete.qty})? Tindakan ini tidak bisa dibatalkan.`}
+          onCancel={() => setConfirmDelete(null)}
+          onConfirm={() => {
+            handleDelete(confirmDelete);
+            setConfirmDelete(null);
           }}
         />
       )}
