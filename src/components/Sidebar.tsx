@@ -70,6 +70,7 @@ const navSections: NavSection[] = [
   },
   {
     title: "Master Data",
+    collapsible: true,
     items: [
       { to: "/master-barang", label: "Barang", icon: Package },
       { to: "/karyawan", label: "Karyawan", icon: Users },
