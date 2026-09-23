@@ -29,11 +29,11 @@ const GUDANG_GROUP: DropdownGroup = {
   icon: Package,
   title: "Inventory Gudang",
   options: [
-    { to: "/inventory", label: "Gudang Nilam" },
-    { to: "/inventory-kns", label: "Gudang KNS" },
-    { to: "/inventory-wja", label: "Gudang WJA" },
-    { to: "/inventory-zamrud", label: "Gudang Zamrud" },
-    { to: "/inventory-firus", label: "Gudang Firus" },
+    { to: "/inventory", label: "Nilam" },
+    { to: "/inventory-kns", label: "KNS" },
+    { to: "/inventory-wja", label: "WJA" },
+    { to: "/inventory-zamrud", label: "Zamrud" },
+    { to: "/inventory-firus", label: "Firus" },
   ],
 };
 
@@ -42,11 +42,11 @@ const BBM_GROUP: DropdownGroup = {
   icon: Fuel,
   title: "Inventory BBM",
   options: [
-    { to: "/inventory-bbm", label: "BBM Nilam" },
-    { to: "/inventory-bbm-kns", label: "BBM KNS" },
-    { to: "/inventory-bbm-wja", label: "BBM WJA" },
-    { to: "/inventory-bbm-zamrud", label: "BBM Zamrud" },
-    { to: "/inventory-bbm-firus", label: "BBM Firus" },
+    { to: "/inventory-bbm", label: "Nilam" },
+    { to: "/inventory-bbm-kns", label: "KNS" },
+    { to: "/inventory-bbm-wja", label: "WJA" },
+    { to: "/inventory-bbm-zamrud", label: "Zamrud" },
+    { to: "/inventory-bbm-firus", label: "Firus" },
   ],
 };
 
@@ -85,6 +85,7 @@ export function Sidebar() {
   const navigate = useNavigate();
   const location = useLocation();
   const [groupCollapsed, setGroupCollapsed] = useState<Record<string, boolean>>({});
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const [minimized, setMinimized] = useState(() => {
     try {
       return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1";
@@ -101,9 +102,10 @@ export function Sidebar() {
     }
   }, [minimized]);
 
+  const normalizedPathname = location.pathname === "/" ? "/inventory" : location.pathname;
   const activeByGroup: Record<string, string | undefined> = {};
   for (const group of DROPDOWN_GROUPS) {
-    activeByGroup[group.key] = group.options.find((o) => o.to === location.pathname)?.to;
+    activeByGroup[group.key] = group.options.find((o) => o.to === normalizedPathname)?.to;
   }
 
   useEffect(() => {
@@ -175,38 +177,60 @@ export function Sidebar() {
                   const selected = selectedFor(group);
                   const active = !!activeByGroup[group.key];
                   const GroupIcon = group.icon;
-                  return minimized ? (
-                    <NavLink
-                      key={group.key}
-                      to={selected}
-                      title={group.title}
-                      className={`flex items-center justify-center py-2.5 rounded-md text-sm transition-colors ${
-                        active
-                          ? "bg-[#1e5bb5]/25 text-[#a9cdf5]"
-                          : "text-white/70 hover:bg-white/5 hover:text-white"
-                      }`}
-                    >
-                      <GroupIcon size={17} className="shrink-0" />
-                    </NavLink>
-                  ) : (
-                    <div
-                      key={group.key}
-                      className={`flex items-center gap-2 px-3 py-2 rounded-md border ${
-                        active ? "border-[#1e5bb5] bg-[#1e5bb5]/10" : "border-white/10"
-                      }`}
-                    >
-                      <GroupIcon size={17} className="shrink-0 text-white/70" />
-                      <select
-                        value={selected}
-                        onChange={(e) => navigate(e.target.value)}
-                        className="flex-1 bg-transparent text-sm text-white/90 focus:outline-none [&>option]:text-black"
+
+                  if (minimized) {
+                    return (
+                      <NavLink
+                        key={group.key}
+                        to={selected}
+                        title={group.title}
+                        className={`flex items-center justify-center py-2.5 rounded-md text-sm transition-colors ${
+                          active
+                            ? "bg-[#1e5bb5]/25 text-[#a9cdf5]"
+                            : "text-white/70 hover:bg-white/5 hover:text-white"
+                        }`}
                       >
-                        {group.options.map((o) => (
-                          <option key={o.to} value={o.to}>
-                            {o.label}
-                          </option>
-                        ))}
-                      </select>
+                        <GroupIcon size={17} className="shrink-0" />
+                      </NavLink>
+                    );
+                  }
+
+                  const expanded = expandedGroups[group.key] ?? active;
+
+                  return (
+                    <div key={group.key}>
+                      <button
+                        onClick={() => setExpandedGroups((e) => ({ ...e, [group.key]: !expanded }))}
+                        className={`w-full flex items-center gap-3 py-2.5 px-3 rounded-md text-sm transition-colors ${
+                          active
+                            ? "bg-[#1e5bb5]/25 text-[#a9cdf5]"
+                            : "text-white/70 hover:bg-white/5 hover:text-white"
+                        }`}
+                      >
+                        <GroupIcon size={17} className="shrink-0" />
+                        <span className="flex-1 text-left">{group.title}</span>
+                        <ChevronDown size={14} className={`transition-transform ${expanded ? "" : "-rotate-90"}`} />
+                      </button>
+
+                      {expanded && (
+                        <div className="mt-1 space-y-1">
+                          {group.options.map((o) => (
+                            <NavLink
+                              key={o.to}
+                              to={o.to}
+                              className={({ isActive }) =>
+                                `flex items-center py-2 pl-11 pr-3 rounded-md text-sm transition-colors ${
+                                  isActive
+                                    ? "bg-[#1e5bb5]/25 text-[#a9cdf5] border-l-[3px] border-[#1e5bb5] pl-[41px]"
+                                    : "text-white/60 hover:bg-white/5 hover:text-white"
+                                }`
+                              }
+                            >
+                              {o.label}
+                            </NavLink>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   );
                 })}
