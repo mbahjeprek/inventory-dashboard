@@ -85,8 +85,8 @@ export function BbmTransactionModal({
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg w-full max-w-md shadow-xl">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--border)]">
+      <div className="bg-white rounded-lg w-full max-w-md shadow-xl max-h-[calc(100vh-2rem)] flex flex-col">
+        <div className="flex items-center justify-between px-5 py-3 border-b border-[var(--border)]">
           <div>
             <h3 className="font-semibold text-sm text-[var(--text-primary)]">Input Transaksi BBM</h3>
             <p className="text-xs text-[var(--text-secondary)]">Solar / Bensin per lokasi</p>
@@ -96,20 +96,20 @@ export function BbmTransactionModal({
           </button>
         </div>
 
-        <div className="px-5 py-4 bg-[#f8fafc] border-b border-[var(--border)] space-y-2.5">
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-[var(--text-secondary)]">Stok Saat Ini</span>
-            <span className="text-lg font-semibold text-[var(--text-primary)]">{saldoSaatIni.toLocaleString("id-ID")} LTR</span>
+        <div className="px-5 py-2.5 bg-[#f8fafc] border-b border-[var(--border)] grid grid-cols-2 gap-3">
+          <div>
+            <div className="text-xs text-[var(--text-secondary)]">Stok Saat Ini</div>
+            <div className="text-base font-semibold text-[var(--text-primary)]">{saldoSaatIni.toLocaleString("id-ID")} LTR</div>
           </div>
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-[var(--text-secondary)]">Proyeksi Stok Setelah Transaksi</span>
-            <span className={`text-sm font-medium ${saldoProyeksi < 0 ? "text-[var(--accent-red)]" : "text-[var(--text-primary)]"}`}>
+          <div className="text-right">
+            <div className="text-xs text-[var(--text-secondary)]">Setelah Transaksi</div>
+            <div className={`text-base font-semibold ${saldoProyeksi < 0 ? "text-[var(--accent-red)]" : "text-[var(--text-primary)]"}`}>
               {saldoProyeksi.toLocaleString("id-ID")} LTR
-            </span>
+            </div>
           </div>
         </div>
 
-        <div className="p-5 space-y-4">
+        <div className="px-5 py-4 space-y-3 overflow-y-auto">
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-xs text-[var(--text-secondary)] mb-1 block">Jenis BBM</label>
@@ -120,7 +120,7 @@ export function BbmTransactionModal({
                   setJenisBbm(j);
                   if (!lokasiLock) setLokasi(LOKASI_BY_JENIS[j][0]);
                 }}
-                className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-2"
+                className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-1.5"
               >
                 {JENIS_OPTIONS.map((j) => (
                   <option key={j} value={j}>
@@ -132,11 +132,11 @@ export function BbmTransactionModal({
             <div>
               <label className="text-xs text-[var(--text-secondary)] mb-1 block">Lokasi</label>
               {lokasiLock ? (
-                <div className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-2 text-[var(--text-secondary)] bg-[#f8fafc]">
+                <div className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-1.5 text-[var(--text-secondary)] bg-[#f8fafc]">
                   {lokasiLock}
                 </div>
               ) : (
-                <select value={lokasi} onChange={(e) => setLokasi(e.target.value)} className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-2">
+                <select value={lokasi} onChange={(e) => setLokasi(e.target.value)} className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-1.5">
                   {LOKASI_BY_JENIS[jenisBbm].map((l) => (
                     <option key={l} value={l}>
                       {l}
@@ -150,7 +150,7 @@ export function BbmTransactionModal({
           <div className="grid grid-cols-2 gap-2">
             <button
               onClick={() => setTipe("DITERIMA")}
-              className={`py-2 rounded-md text-xs font-medium border ${
+              className={`py-1.5 rounded-md text-xs font-medium border ${
                 tipe === "DITERIMA"
                   ? "bg-[var(--accent-green-bg)] text-[var(--accent-green)] border-[var(--accent-green-border)]"
                   : "border-[var(--border)] text-[var(--text-secondary)]"
@@ -160,7 +160,7 @@ export function BbmTransactionModal({
             </button>
             <button
               onClick={() => setTipe("PEMAKAIAN")}
-              className={`py-2 rounded-md text-xs font-medium border ${
+              className={`py-1.5 rounded-md text-xs font-medium border ${
                 tipe === "PEMAKAIAN"
                   ? "bg-[var(--accent-red-bg)] text-[var(--accent-red)] border-[var(--accent-red-border)]"
                   : "border-[var(--border)] text-[var(--text-secondary)]"
@@ -177,7 +177,7 @@ export function BbmTransactionModal({
                 type="date"
                 value={tanggal}
                 onChange={(e) => setTanggal(e.target.value)}
-                className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-2"
+                className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-1.5"
               />
             </div>
             <div>
@@ -187,7 +187,7 @@ export function BbmTransactionModal({
                 min={1}
                 value={jumlah}
                 onChange={(e) => setJumlah(parseInt(e.target.value) || 0)}
-                className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-2"
+                className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-1.5"
               />
             </div>
           </div>
@@ -198,7 +198,7 @@ export function BbmTransactionModal({
               <select
                 value={estate}
                 onChange={(e) => setEstate(e.target.value)}
-                className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-2"
+                className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-1.5"
               >
                 <option value="">-- Pilih Estate --</option>
                 {estateOptions.map((e) => (
@@ -210,10 +210,6 @@ export function BbmTransactionModal({
             </div>
           )}
 
-          <div>
-            <label className="text-xs text-[var(--text-secondary)] mb-1 block">No. SPB (opsional)</label>
-            <input value={noSpb} onChange={(e) => setNoSpb(e.target.value)} className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-2" />
-          </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -221,7 +217,7 @@ export function BbmTransactionModal({
               <input
                 value={kodeKendaraan}
                 onChange={(e) => setKodeKendaraan(e.target.value)}
-                className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-2"
+                className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-1.5"
               />
             </div>
             <div>
@@ -230,19 +226,25 @@ export function BbmTransactionModal({
                 value={hmTerakhir}
                 onChange={(e) => setHmTerakhir(e.target.value)}
                 placeholder="cth. 4373.7 h"
-                className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-2"
+                className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-1.5"
               />
             </div>
           </div>
 
-          <div>
-            <label className="text-xs text-[var(--text-secondary)] mb-1 block">Keterangan</label>
-            <input
-              value={keterangan}
-              onChange={(e) => setKeterangan(e.target.value)}
-              placeholder="cth. Genset 02 B"
-              className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-2"
-            />
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-[var(--text-secondary)] mb-1 block">No. SPB (opsional)</label>
+              <input value={noSpb} onChange={(e) => setNoSpb(e.target.value)} className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-1.5" />
+            </div>
+            <div>
+              <label className="text-xs text-[var(--text-secondary)] mb-1 block">Keterangan</label>
+              <input
+                value={keterangan}
+                onChange={(e) => setKeterangan(e.target.value)}
+                placeholder="cth. Genset 02 B"
+                className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-1.5"
+              />
+            </div>
           </div>
 
           {error && <p className="text-xs text-[var(--accent-red)]">{error}</p>}
@@ -250,7 +252,7 @@ export function BbmTransactionModal({
           <button
             onClick={submit}
             disabled={submitting}
-            className="w-full py-2.5 rounded-md text-sm font-medium bg-[var(--accent-blue)] text-white hover:opacity-90 disabled:opacity-50"
+            className="w-full py-2 rounded-md text-sm font-medium bg-[var(--accent-blue)] text-white hover:opacity-90 disabled:opacity-50"
           >
             {submitting ? "Menyimpan..." : "Simpan Transaksi"}
           </button>
