@@ -27,7 +27,7 @@ type DropdownGroup = { key: string; icon: typeof Package; title: string; options
 const GUDANG_GROUP: DropdownGroup = {
   key: "gudang",
   icon: Package,
-  title: "Inventory Gudang",
+  title: "Gudang",
   options: [
     { to: "/inventory", label: "Nilam" },
     { to: "/inventory-kns", label: "KNS" },
@@ -40,7 +40,7 @@ const GUDANG_GROUP: DropdownGroup = {
 const BBM_GROUP: DropdownGroup = {
   key: "bbm",
   icon: Fuel,
-  title: "Inventory BBM",
+  title: "BBM",
   options: [
     { to: "/inventory-bbm", label: "Nilam" },
     { to: "/inventory-bbm-kns", label: "KNS" },
@@ -138,14 +138,27 @@ export function Sidebar() {
         minimized ? "w-[68px]" : "w-[220px]"
       } shrink-0 bg-[var(--bg-sidebar)] text-white flex flex-col h-screen sticky top-0 transition-[width] duration-200`}
     >
-      <div className={`flex items-center gap-2 px-5 py-6 ${minimized ? "justify-center px-0" : ""}`}>
-        <Boxes size={24} className="text-[#7fb2f0] shrink-0" />
-        {!minimized && (
-          <div>
-            <div className="font-semibold text-sm leading-tight">Inventory</div>
-            <div className="text-[11px] text-white/50 leading-tight">Monitoring Gudang</div>
-          </div>
-        )}
+      <div
+        className={`flex items-center py-6 ${
+          minimized ? "flex-col gap-3 justify-center px-0" : "justify-between px-5 gap-2"
+        }`}
+      >
+        <div className={`flex items-center gap-2 ${minimized ? "flex-col" : ""}`}>
+          <Boxes size={24} className="text-[#7fb2f0] shrink-0" />
+          {!minimized && (
+            <div>
+              <div className="font-semibold text-sm leading-tight">Inventory</div>
+              <div className="text-[11px] text-white/50 leading-tight">Monitoring Gudang</div>
+            </div>
+          )}
+        </div>
+        <button
+          onClick={() => setMinimized((m) => !m)}
+          title={minimized ? "Perbesar sidebar" : "Perkecil sidebar"}
+          className="p-1.5 rounded-md text-white/50 hover:text-white hover:bg-white/5 shrink-0"
+        >
+          {minimized ? <ChevronsRight size={16} /> : <ChevronsLeft size={16} />}
+        </button>
       </div>
 
       <nav className="flex-1 px-3 space-y-4 overflow-y-auto overflow-x-hidden">
@@ -261,17 +274,6 @@ export function Sidebar() {
           );
         })}
       </nav>
-
-      <button
-        onClick={() => setMinimized((m) => !m)}
-        title={minimized ? "Perbesar sidebar" : "Perkecil sidebar"}
-        className={`flex items-center gap-2 px-5 py-3 text-white/50 hover:text-white hover:bg-white/5 border-t border-white/10 ${
-          minimized ? "justify-center px-0" : ""
-        }`}
-      >
-        {minimized ? <ChevronsRight size={16} /> : <ChevronsLeft size={16} />}
-        {!minimized && <span className="text-xs">Perkecil menu</span>}
-      </button>
 
       <div className={`px-3 py-3 border-t border-white/10 ${minimized ? "flex justify-center" : ""}`}>
         {!minimized && (
