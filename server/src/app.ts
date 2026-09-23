@@ -236,6 +236,31 @@ app.get("/api/items/:id", async (req, res) => {
   res.json({ ...item, transactions });
 });
 
+app.post("/api/items", async (req, res) => {
+  const { kode, nama, satuan, buffer_stock } = req.body;
+  if (!kode || !String(kode).trim() || !nama || !String(nama).trim()) {
+    return res.status(400).json({ error: "Kode dan nama wajib diisi" });
+  }
+
+  try {
+    const row = await queryOne<{ id: number }>(
+      `INSERT INTO items (kode, nama, satuan, buffer_stock) VALUES (@kode, @nama, @satuan, @buffer_stock) RETURNING id`,
+      {
+        kode: String(kode).trim(),
+        nama: String(nama).trim(),
+        satuan: satuan || "",
+        buffer_stock: buffer_stock ?? 0,
+      }
+    );
+    res.json({ success: true, id: row!.id });
+  } catch (e: any) {
+    if (e.code === "23505") {
+      return res.status(409).json({ error: "Kode sudah digunakan barang lain" });
+    }
+    throw e;
+  }
+});
+
 app.put("/api/items/:id", async (req, res) => {
   const { nama, satuan, buffer_stock } = req.body;
   const existing = await queryOne("SELECT * FROM items WHERE id = @id", { id: req.params.id });
@@ -779,6 +804,34 @@ app.get("/api/karyawan", async (req, res) => {
   res.json({ data, total: Number(total), page: parseInt(page), pageSize: limit });
 });
 
+app.post("/api/karyawan", async (req, res) => {
+  const { nik, nama, status, estate, lokasi_kerja, nik_ktp } = req.body;
+  if (!nik || !String(nik).trim() || !nama || !String(nama).trim()) {
+    return res.status(400).json({ error: "NIK dan nama wajib diisi" });
+  }
+
+  try {
+    const row = await queryOne<{ id: number }>(
+      `INSERT INTO karyawan (nik, nama, status, estate, lokasi_kerja, nik_ktp)
+       VALUES (@nik, @nama, @status, @estate, @lokasi_kerja, @nik_ktp) RETURNING id`,
+      {
+        nik: String(nik).trim(),
+        nama: String(nama).trim(),
+        status: status || "",
+        estate: estate || "",
+        lokasi_kerja: lokasi_kerja || "",
+        nik_ktp: nik_ktp || "",
+      }
+    );
+    res.json({ success: true, id: row!.id });
+  } catch (e: any) {
+    if (e.code === "23505") {
+      return res.status(409).json({ error: "NIK sudah digunakan karyawan lain" });
+    }
+    throw e;
+  }
+});
+
 app.put("/api/karyawan/:id", async (req, res) => {
   const existing = await queryOne("SELECT * FROM karyawan WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Not found" });
@@ -852,6 +905,26 @@ app.get("/api/alat-berat", async (req, res) => {
   );
 
   res.json({ data, total: Number(total), page: parseInt(page), pageSize: limit });
+});
+
+app.post("/api/alat-berat", async (req, res) => {
+  const { kode, jenis_unit, nama } = req.body;
+  if (!kode || !String(kode).trim()) {
+    return res.status(400).json({ error: "Kode wajib diisi" });
+  }
+
+  try {
+    const row = await queryOne<{ id: number }>(
+      `INSERT INTO alat_berat (kode, jenis_unit, nama) VALUES (@kode, @jenis_unit, @nama) RETURNING id`,
+      { kode: String(kode).trim(), jenis_unit: jenis_unit || "", nama: nama || "" }
+    );
+    res.json({ success: true, id: row!.id });
+  } catch (e: any) {
+    if (e.code === "23505") {
+      return res.status(409).json({ error: "Kode sudah digunakan alat lain" });
+    }
+    throw e;
+  }
 });
 
 app.put("/api/alat-berat/:id", async (req, res) => {

@@ -10,16 +10,17 @@ export function EditKaryawanModal({
   onClose,
   onSuccess,
 }: {
-  karyawan: Karyawan;
+  karyawan: Karyawan | null;
   onClose: () => void;
   onSuccess: () => void;
 }) {
-  const [nik, setNik] = useState(karyawan.nik);
-  const [nama, setNama] = useState(karyawan.nama);
-  const [status, setStatus] = useState(karyawan.status);
-  const [estate, setEstate] = useState(karyawan.estate);
-  const [lokasiKerja, setLokasiKerja] = useState(karyawan.lokasi_kerja);
-  const [nikKtp, setNikKtp] = useState(karyawan.nik_ktp);
+  const isEdit = !!karyawan;
+  const [nik, setNik] = useState(karyawan?.nik ?? "");
+  const [nama, setNama] = useState(karyawan?.nama ?? "");
+  const [status, setStatus] = useState(karyawan?.status ?? "");
+  const [estate, setEstate] = useState(karyawan?.estate ?? "");
+  const [lokasiKerja, setLokasiKerja] = useState(karyawan?.lokasi_kerja ?? "");
+  const [nikKtp, setNikKtp] = useState(karyawan?.nik_ktp ?? "");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
@@ -31,14 +32,12 @@ export function EditKaryawanModal({
     setSubmitting(true);
     setError("");
     try {
-      await api.updateKaryawan(karyawan.id, {
-        nik,
-        nama,
-        status,
-        estate,
-        lokasi_kerja: lokasiKerja,
-        nik_ktp: nikKtp,
-      });
+      const payload = { nik, nama, status, estate, lokasi_kerja: lokasiKerja, nik_ktp: nikKtp };
+      if (isEdit) {
+        await api.updateKaryawan(karyawan.id, payload);
+      } else {
+        await api.createKaryawan(payload);
+      }
       onSuccess();
     } catch (e: any) {
       setError(e?.message?.includes("409") ? "NIK sudah digunakan karyawan lain" : "Gagal menyimpan perubahan");
@@ -52,8 +51,10 @@ export function EditKaryawanModal({
       <div className="bg-white rounded-lg w-full max-w-md shadow-xl">
         <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--border)]">
           <div>
-            <h3 className="font-semibold text-sm text-[var(--text-primary)]">Edit Data Karyawan</h3>
-            <p className="text-xs text-[var(--text-secondary)] font-mono">{karyawan.nik}</p>
+            <h3 className="font-semibold text-sm text-[var(--text-primary)]">
+              {isEdit ? "Edit Data Karyawan" : "Tambah Karyawan"}
+            </h3>
+            {isEdit && <p className="text-xs text-[var(--text-secondary)] font-mono">{karyawan.nik}</p>}
           </div>
           <button onClick={onClose} className="text-[var(--text-muted)] hover:text-[var(--text-primary)]">
             <X size={18} />
@@ -138,7 +139,7 @@ export function EditKaryawanModal({
             disabled={submitting}
             className="w-full py-2.5 rounded-md text-sm font-medium bg-[var(--accent-blue)] text-white hover:opacity-90 disabled:opacity-50"
           >
-            {submitting ? "Menyimpan..." : "Simpan Perubahan"}
+            {submitting ? "Menyimpan..." : isEdit ? "Simpan Perubahan" : "Simpan Karyawan"}
           </button>
         </div>
       </div>

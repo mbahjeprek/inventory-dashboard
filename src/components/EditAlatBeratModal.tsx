@@ -7,13 +7,14 @@ export function EditAlatBeratModal({
   onClose,
   onSuccess,
 }: {
-  alatBerat: AlatBerat;
+  alatBerat: AlatBerat | null;
   onClose: () => void;
   onSuccess: () => void;
 }) {
-  const [kode, setKode] = useState(alatBerat.kode);
-  const [jenisUnit, setJenisUnit] = useState(alatBerat.jenis_unit);
-  const [nama, setNama] = useState(alatBerat.nama);
+  const isEdit = !!alatBerat;
+  const [kode, setKode] = useState(alatBerat?.kode ?? "");
+  const [jenisUnit, setJenisUnit] = useState(alatBerat?.jenis_unit ?? "");
+  const [nama, setNama] = useState(alatBerat?.nama ?? "");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
@@ -25,7 +26,11 @@ export function EditAlatBeratModal({
     setSubmitting(true);
     setError("");
     try {
-      await api.updateAlatBerat(alatBerat.id, { kode, jenis_unit: jenisUnit, nama });
+      if (isEdit) {
+        await api.updateAlatBerat(alatBerat.id, { kode, jenis_unit: jenisUnit, nama });
+      } else {
+        await api.createAlatBerat({ kode, jenis_unit: jenisUnit, nama });
+      }
       onSuccess();
     } catch (e: any) {
       setError(e?.message?.includes("409") ? "Kode sudah digunakan alat lain" : "Gagal menyimpan perubahan");
@@ -39,8 +44,10 @@ export function EditAlatBeratModal({
       <div className="bg-white rounded-lg w-full max-w-md shadow-xl">
         <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--border)]">
           <div>
-            <h3 className="font-semibold text-sm text-[var(--text-primary)]">Edit Data Alat Berat</h3>
-            <p className="text-xs text-[var(--text-secondary)] font-mono">{alatBerat.kode}</p>
+            <h3 className="font-semibold text-sm text-[var(--text-primary)]">
+              {isEdit ? "Edit Data Alat Berat" : "Tambah Alat Berat"}
+            </h3>
+            {isEdit && <p className="text-xs text-[var(--text-secondary)] font-mono">{alatBerat.kode}</p>}
           </div>
           <button onClick={onClose} className="text-[var(--text-muted)] hover:text-[var(--text-primary)]">
             <X size={18} />
@@ -83,7 +90,7 @@ export function EditAlatBeratModal({
             disabled={submitting}
             className="w-full py-2.5 rounded-md text-sm font-medium bg-[var(--accent-blue)] text-white hover:opacity-90 disabled:opacity-50"
           >
-            {submitting ? "Menyimpan..." : "Simpan Perubahan"}
+            {submitting ? "Menyimpan..." : isEdit ? "Simpan Perubahan" : "Simpan Alat"}
           </button>
         </div>
       </div>

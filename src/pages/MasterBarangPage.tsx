@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Search, ChevronLeft, ChevronRight, ArrowUp, ArrowDown, ArrowUpDown, Filter, Pencil } from "lucide-react";
+import { Search, ChevronLeft, ChevronRight, ArrowUp, ArrowDown, ArrowUpDown, Filter, Pencil, Plus } from "lucide-react";
 import { api, type Item } from "../lib/api";
 import { EditItemModal } from "../components/EditItemModal";
 
@@ -87,6 +87,7 @@ export function MasterBarangPage() {
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [editingItem, setEditingItem] = useState<Item | null>(null);
+  const [creating, setCreating] = useState(false);
   const pageSize = 25;
 
   const load = () => {
@@ -130,11 +131,20 @@ export function MasterBarangPage() {
 
   return (
     <div className="space-y-4">
-      <div>
-        <h1 className="text-xl font-semibold text-[var(--text-primary)]">Master Data Barang</h1>
-        <p className="text-sm text-[var(--text-secondary)]">
-          {total.toLocaleString("id-ID")} jenis barang · diambil dari daftar barang Gudang Nilam
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-xl font-semibold text-[var(--text-primary)]">Master Data Barang</h1>
+          <p className="text-sm text-[var(--text-secondary)]">
+            {total.toLocaleString("id-ID")} jenis barang · diambil dari daftar barang Gudang Nilam
+          </p>
+        </div>
+        <button
+          onClick={() => setCreating(true)}
+          className="flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium bg-[var(--accent-blue)] text-white hover:opacity-90"
+        >
+          <Plus size={16} />
+          Tambah Barang
+        </button>
       </div>
 
       <div className="flex flex-wrap items-center gap-3 bg-[var(--bg-card)] border border-[var(--border)] rounded-lg p-3">
@@ -233,6 +243,17 @@ export function MasterBarangPage() {
           onClose={() => setEditingItem(null)}
           onSuccess={() => {
             setEditingItem(null);
+            load();
+          }}
+        />
+      )}
+
+      {creating && (
+        <EditItemModal
+          item={null}
+          onClose={() => setCreating(false)}
+          onSuccess={() => {
+            setCreating(false);
             load();
           }}
         />

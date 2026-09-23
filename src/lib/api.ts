@@ -213,6 +213,9 @@ export const api = {
     );
   },
 
+  createItem: (payload: { kode: string; nama: string; satuan: string; buffer_stock: number }) =>
+    req<{ success: boolean; id: number }>("/api/items", { method: "POST", body: JSON.stringify(payload) }),
+
   updateItem: (id: number, payload: { nama: string; satuan: string; buffer_stock: number }) =>
     req<{ success: boolean }>(`/api/items/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
 
@@ -246,6 +249,9 @@ export const api = {
 
   karyawanEstateOptions: () => req<string[]>("/api/karyawan/estate-options"),
 
+  createKaryawan: (payload: { nik: string; nama: string; status: string; estate: string; lokasi_kerja: string; nik_ktp: string }) =>
+    req<{ success: boolean; id: number }>("/api/karyawan", { method: "POST", body: JSON.stringify(payload) }),
+
   updateKaryawan: (
     id: number,
     payload: { nik: string; nama: string; status: string; estate: string; lokasi_kerja: string; nik_ktp: string }
@@ -257,6 +263,9 @@ export const api = {
   },
 
   alatBeratJenisOptions: () => req<string[]>("/api/alat-berat/jenis-options"),
+
+  createAlatBerat: (payload: { kode: string; jenis_unit: string; nama: string }) =>
+    req<{ success: boolean; id: number }>("/api/alat-berat", { method: "POST", body: JSON.stringify(payload) }),
 
   updateAlatBerat: (id: number, payload: { kode: string; jenis_unit: string; nama: string }) =>
     req<{ success: boolean }>(`/api/alat-berat/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
