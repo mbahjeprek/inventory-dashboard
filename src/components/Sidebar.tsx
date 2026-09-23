@@ -13,6 +13,7 @@ import {
   ChevronsLeft,
   ChevronsRight,
   LogOut,
+  X,
   KeyRound,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
@@ -81,13 +82,27 @@ const navSections: NavSection[] = [
 
 const SIDEBAR_COLLAPSED_KEY = "sidebar-collapsed";
 
-export function Sidebar() {
+const DESKTOP_QUERY = "(min-width: 768px)";
+
+function useIsDesktop() {
+  const [isDesktop, setIsDesktop] = useState(() => window.matchMedia(DESKTOP_QUERY).matches);
+  useEffect(() => {
+    const mq = window.matchMedia(DESKTOP_QUERY);
+    const onChange = () => setIsDesktop(mq.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+  return isDesktop;
+}
+
+export function Sidebar({ mobileOpen = false, onMobileClose }: { mobileOpen?: boolean; onMobileClose?: () => void }) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [groupCollapsed, setGroupCollapsed] = useState<Record<string, boolean>>({});
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
-  const [minimized, setMinimized] = useState(() => {
+  const isDesktop = useIsDesktop();
+  const [minimizedPref, setMinimized] = useState(() => {
     try {
       return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1";
     } catch {
@@ -97,11 +112,14 @@ export function Sidebar() {
 
   useEffect(() => {
     try {
-      localStorage.setItem(SIDEBAR_COLLAPSED_KEY, minimized ? "1" : "0");
+      localStorage.setItem(SIDEBAR_COLLAPSED_KEY, minimizedPref ? "1" : "0");
     } catch {
       // ignore
     }
-  }, [minimized]);
+  }, [minimizedPref]);
+
+  // The phone drawer always shows full labels; the icon-only mode is a desktop preference.
+  const minimized = minimizedPref && isDesktop;
 
   const isSuperuser = user?.role === "superuser";
 
@@ -148,10 +166,14 @@ export function Sidebar() {
     })();
 
   return (
+    <>
+    {mobileOpen && <div className="md:hidden fixed inset-0 z-40 bg-black/40" onClick={onMobileClose} />}
     <aside
       className={`${
-        minimized ? "w-[68px]" : "w-[220px]"
-      } shrink-0 bg-[var(--bg-sidebar)] text-white flex flex-col h-screen sticky top-0 transition-[width] duration-200`}
+        minimized ? "w-[68px]" : "w-[260px] md:w-[220px]"
+      } shrink-0 bg-[var(--bg-sidebar)] text-white flex flex-col h-screen top-0 z-50 fixed left-0 md:sticky transition-[width,transform] duration-200 ${
+        mobileOpen ? "translate-x-0" : "-translate-x-full"
+      } md:translate-x-0`}
     >
       <div
         className={`flex items-center py-6 ${
@@ -162,10 +184,13 @@ export function Sidebar() {
           <img src="/logo-agro.png" alt="Agro" className="w-6 h-6 shrink-0 object-contain" />
           {!minimized && <div className="font-semibold text-sm leading-tight">Management Inventory Agro</div>}
         </div>
+        <button onClick={onMobileClose} title="Tutup menu" className="md:hidden p-1.5 rounded-md text-white/70 hover:text-white hover:bg-white/10 shrink-0">
+          <X size={18} />
+        </button>
         <button
           onClick={() => setMinimized((m) => !m)}
           title={minimized ? "Perbesar sidebar" : "Perkecil sidebar"}
-          className="p-1.5 rounded-md text-white/50 hover:text-white hover:bg-white/10 shrink-0"
+          className="hidden md:block p-1.5 rounded-md text-white/50 hover:text-white hover:bg-white/10 shrink-0"
         >
           {minimized ? <ChevronsRight size={16} /> : <ChevronsLeft size={16} />}
         </button>
@@ -306,5 +331,6 @@ export function Sidebar() {
         </button>
       </div>
     </aside>
+    </>
   );
 }
