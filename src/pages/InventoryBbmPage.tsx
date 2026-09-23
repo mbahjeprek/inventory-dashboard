@@ -215,7 +215,7 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
 
       <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="grid-table w-full text-sm">
             <thead>
               <tr className="bg-[#f8fafc] text-left text-[var(--text-secondary)] text-xs uppercase">
                 <th className="px-4 py-2.5 whitespace-nowrap">Periode</th>
