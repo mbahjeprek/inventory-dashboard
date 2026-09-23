@@ -150,6 +150,7 @@ export type BbmRecord = {
   status_kepemilikan: string | null;
   kode_kendaraan: string | null;
   hm_terakhir: string | null;
+  total_hm?: number | null;
 };
 
 export type BbmSummary = {

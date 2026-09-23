@@ -102,6 +102,7 @@ export function InventoryGudangStockPage({ gudang }: { gudang: string }) {
   const [total, setTotal] = useState(0);
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("");
+  const [stockFilter, setStockFilter] = useState<"" | "menipis" | "habis">("");
   const [sortBy, setSortBy] = useState<SortKey>("kode");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [page, setPage] = useState(1);
@@ -114,7 +115,7 @@ export function InventoryGudangStockPage({ gudang }: { gudang: string }) {
 
   const load = () => {
     setLoading(true);
-    api.gudangStock({ gudang, search, status, sortBy, sortDir, page, pageSize }).then((res) => {
+    api.gudangStock({ gudang, search, status, stock: stockFilter, sortBy, sortDir, page, pageSize }).then((res) => {
       setItems(res.data);
       setTotal(res.total);
       setLoading(false);
@@ -131,7 +132,12 @@ export function InventoryGudangStockPage({ gudang }: { gudang: string }) {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gudang, page, status, sortBy, sortDir]);
+  }, [gudang, page, status, stockFilter, sortBy, sortDir]);
+
+  const toggleStockFilter = (f: "menipis" | "habis") => {
+    setStockFilter((cur) => (cur === f ? "" : f));
+    setPage(1);
+  };
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -184,8 +190,22 @@ export function InventoryGudangStockPage({ gudang }: { gudang: string }) {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <StatCard label="Total Item Barang" value={summary.totalItems.toLocaleString("id-ID")} icon={Package} tone="blue" />
           <StatCard label="Total Stock Tersedia" value={summary.totalStock.toLocaleString("id-ID")} icon={Boxes} tone="green" />
-          <StatCard label="Stock Menipis (Buffer)" value={summary.lowStock.toLocaleString("id-ID")} icon={AlertTriangle} tone="amber" />
-          <StatCard label="Stock Habis" value={summary.outOfStock.toLocaleString("id-ID")} icon={XCircle} tone="red" />
+          <StatCard
+            label="Stock Menipis (Buffer)"
+            value={summary.lowStock.toLocaleString("id-ID")}
+            icon={AlertTriangle}
+            tone="amber"
+            active={stockFilter === "menipis"}
+            onClick={() => toggleStockFilter("menipis")}
+          />
+          <StatCard
+            label="Stock Habis"
+            value={summary.outOfStock.toLocaleString("id-ID")}
+            icon={XCircle}
+            tone="red"
+            active={stockFilter === "habis"}
+            onClick={() => toggleStockFilter("habis")}
+          />
         </div>
       )}
 

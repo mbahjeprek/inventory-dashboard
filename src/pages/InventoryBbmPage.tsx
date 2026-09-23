@@ -100,16 +100,25 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-        {saldoCards.map(({ jenis, lok, saldo }) => (
-          <StatCard
-            key={`${jenis}-${lok}`}
-            label={`Stok ${jenis === "SOLAR" ? "Solar" : "Bensin"} - ${lok}`}
-            value={(saldo ?? 0).toLocaleString("id-ID")}
-            suffix="LTR"
-            icon={jenis === "SOLAR" ? Fuel : Droplet}
-            tone={jenis === "SOLAR" ? "blue" : "amber"}
-          />
-        ))}
+        {saldoCards.map(({ jenis, lok, saldo }) => {
+          const active = jenisBbm === jenis && (!!lokasiLock || lokasi === lok);
+          return (
+            <StatCard
+              key={`${jenis}-${lok}`}
+              label={`Stok ${jenis === "SOLAR" ? "Solar" : "Bensin"} - ${lok}`}
+              value={(saldo ?? 0).toLocaleString("id-ID")}
+              suffix="LTR"
+              icon={jenis === "SOLAR" ? Fuel : Droplet}
+              tone={jenis === "SOLAR" ? "blue" : "amber"}
+              active={active}
+              onClick={() => {
+                setJenisBbm(active ? "" : jenis);
+                if (!lokasiLock) setLokasi(active ? "" : lok);
+                setPage(1);
+              }}
+            />
+          );
+        })}
       </div>
 
       <div className="flex flex-wrap items-center gap-3 bg-[var(--bg-card)] border border-[var(--border)] rounded-lg p-3">
@@ -211,26 +220,28 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
               <tr className="bg-[#f8fafc] text-left text-[var(--text-secondary)] text-xs uppercase">
                 <th className="px-4 py-2.5 whitespace-nowrap">Periode</th>
                 <th className="px-4 py-2.5 whitespace-nowrap">Tanggal</th>
-                <th className="px-4 py-2.5">No. SPB</th>
-                <th className="px-4 py-2.5 text-right">Stok Masuk</th>
-                <th className="px-4 py-2.5 text-right">Stok Keluar</th>
-                <th className="px-4 py-2.5 text-right">Sisa</th>
+                <th className="px-4 py-2.5 whitespace-nowrap">No. SPB</th>
+                <th className="px-4 py-2.5 text-right whitespace-nowrap">Stock Awal</th>
+                <th className="px-4 py-2.5 text-right">Pemakaian</th>
+                <th className="px-4 py-2.5 text-right whitespace-nowrap">Saldo Stock</th>
                 <th className="px-4 py-2.5">Keterangan</th>
-                <th className="px-4 py-2.5">Estate</th>
-                <th className="px-4 py-2.5 whitespace-nowrap">Alat / KM-HM</th>
+                <th className="px-4 py-2.5">Status Kepemilikan</th>
+                <th className="px-4 py-2.5">Kode Kendaraan</th>
+                <th className="px-4 py-2.5 min-w-[150px]">HM Terakhir Sebelum Permintaan Solar</th>
+                <th className="px-4 py-2.5 text-right min-w-[130px]">Total HM Sebelum Pengisian</th>
                 <th className="px-4 py-2.5 text-right">Aksi</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={10} className="px-4 py-8 text-center text-[var(--text-muted)]">
+                  <td colSpan={12} className="px-4 py-8 text-center text-[var(--text-muted)]">
                     Memuat...
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="px-4 py-8 text-center text-[var(--text-muted)]">
+                  <td colSpan={12} className="px-4 py-8 text-center text-[var(--text-muted)]">
                     Tidak ada data
                   </td>
                 </tr>
@@ -240,8 +251,8 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
                     <td className="px-4 py-2.5 whitespace-nowrap text-[var(--text-secondary)] text-xs">{r.periode || "-"}</td>
                     <td className="px-4 py-2.5 whitespace-nowrap text-[var(--text-secondary)]">{r.tanggal || "-"}</td>
                     <td className="px-4 py-2.5 text-xs text-[var(--text-secondary)]">{r.no_spb || "-"}</td>
-                    <td className="px-4 py-2.5 text-right font-medium text-[var(--accent-green)]">
-                      {r.diterima ? r.diterima.toLocaleString("id-ID") : "-"}
+                    <td className="px-4 py-2.5 text-right text-[var(--text-secondary)]">
+                      {r.stock_awal ? r.stock_awal.toLocaleString("id-ID") : "-"}
                     </td>
                     <td className="px-4 py-2.5 text-right font-medium text-[var(--accent-red)]">
                       {r.pemakaian ? r.pemakaian.toLocaleString("id-ID") : "-"}
@@ -252,9 +263,11 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
                     <td className="px-4 py-2.5 text-[var(--text-secondary)] text-xs max-w-[260px] truncate" title={r.keterangan}>
                       {r.keterangan || "-"}
                     </td>
-                    <td className="px-4 py-2.5">{r.estate || <span className="text-[var(--text-muted)]">-</span>}</td>
-                    <td className="px-4 py-2.5 text-xs text-[var(--text-secondary)]">
-                      {r.hm_terakhir || r.kode_kendaraan || "-"}
+                    <td className="px-4 py-2.5 text-xs text-[var(--text-secondary)]">{r.status_kepemilikan || "-"}</td>
+                    <td className="px-4 py-2.5 text-xs whitespace-nowrap">{r.kode_kendaraan || "-"}</td>
+                    <td className="px-4 py-2.5 text-xs text-[var(--text-secondary)] whitespace-nowrap">{r.hm_terakhir || "-"}</td>
+                    <td className="px-4 py-2.5 text-right text-xs">
+                      {r.total_hm != null ? r.total_hm.toLocaleString("id-ID", { maximumFractionDigits: 1 }) : "-"}
                     </td>
                     <td className="px-4 py-2.5 text-right">
                       <div className="inline-flex gap-1.5">

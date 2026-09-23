@@ -15,15 +15,25 @@ export function StatCard({
   icon: Icon,
   tone = "blue",
   suffix,
+  onClick,
+  active = false,
 }: {
   label: string;
   value: string | number;
   icon: LucideIcon;
   tone?: Tone;
   suffix?: string;
+  onClick?: () => void;
+  active?: boolean;
 }) {
+  const Tag = onClick ? "button" : "div";
   return (
-    <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg p-4 flex items-center gap-4">
+    <Tag
+      {...(onClick ? { type: "button" as const, onClick, title: active ? "Tampilkan semua barang" : `Lihat daftar ${label}` } : {})}
+      className={`bg-[var(--bg-card)] border rounded-lg p-4 flex items-center gap-4 text-left w-full ${
+        active ? "border-[var(--accent-blue)] ring-2 ring-[var(--accent-blue-border)]" : "border-[var(--border)]"
+      } ${onClick ? "cursor-pointer hover:shadow-md hover:border-[var(--accent-blue-border)] transition" : ""}`}
+    >
       <div className={`w-11 h-11 rounded-md border flex items-center justify-center shrink-0 ${toneClasses[tone]}`}>
         <Icon size={20} />
       </div>
@@ -34,6 +44,6 @@ export function StatCard({
         </div>
         <div className="text-xs text-[var(--text-secondary)] mt-0.5">{label}</div>
       </div>
-    </div>
+    </Tag>
   );
 }

@@ -18,7 +18,8 @@ export function EditBbmModal({
   const [saldoStock, setSaldoStock] = useState(record.saldo_stock ?? "");
   const [keterangan, setKeterangan] = useState(record.keterangan || "");
   const [estate, setEstate] = useState(record.estate || "");
-  const [kodeKendaraan, setKodeKendaraan] = useState(record.hm_terakhir || record.kode_kendaraan || "");
+  const [kodeKendaraan, setKodeKendaraan] = useState(record.kode_kendaraan || "");
+  const [hmTerakhir, setHmTerakhir] = useState(record.hm_terakhir || "");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
@@ -34,7 +35,8 @@ export function EditBbmModal({
         saldo_stock: saldoStock === "" ? null : Number(saldoStock),
         keterangan,
         estate,
-        hm_terakhir: kodeKendaraan,
+        kode_kendaraan: kodeKendaraan,
+        hm_terakhir: hmTerakhir,
       });
       onSuccess();
     } catch {
@@ -113,13 +115,24 @@ export function EditBbmModal({
             <input value={estate} onChange={(e) => setEstate(e.target.value)} className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-2" />
           </div>
 
-          <div>
-            <label className="text-xs text-[var(--text-secondary)] mb-1 block">Kode Kendaraan / KM-HM Terakhir</label>
-            <input
-              value={kodeKendaraan}
-              onChange={(e) => setKodeKendaraan(e.target.value)}
-              className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-2"
-            />
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-[var(--text-secondary)] mb-1 block">Kode Kendaraan</label>
+              <input
+                value={kodeKendaraan}
+                onChange={(e) => setKodeKendaraan(e.target.value)}
+                className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-2"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-[var(--text-secondary)] mb-1 block">HM/KM Terakhir</label>
+              <input
+                value={hmTerakhir}
+                onChange={(e) => setHmTerakhir(e.target.value)}
+                placeholder="cth. 4373.7 h"
+                className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-2"
+              />
+            </div>
           </div>
 
           <div>

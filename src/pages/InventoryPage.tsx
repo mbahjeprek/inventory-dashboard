@@ -105,6 +105,7 @@ export function InventoryPage() {
   const [status, setStatus] = useState("");
   const [satuan, setSatuan] = useState("");
   const [satuanOptions, setSatuanOptions] = useState<string[]>([]);
+  const [stockFilter, setStockFilter] = useState<"" | "menipis" | "habis">("");
   const [sortBy, setSortBy] = useState<SortKey>("kode");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [page, setPage] = useState(1);
@@ -117,7 +118,7 @@ export function InventoryPage() {
   const load = () => {
     setLoading(true);
     api
-      .items({ search, status, satuan, sortBy, sortDir, page, pageSize })
+      .items({ search, status, satuan, stock: stockFilter, sortBy, sortDir, page, pageSize })
       .then((res) => {
         setItems(res.data);
         setTotal(res.total);
@@ -133,7 +134,12 @@ export function InventoryPage() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, status, satuan, sortBy, sortDir]);
+  }, [page, status, satuan, stockFilter, sortBy, sortDir]);
+
+  const toggleStockFilter = (f: "menipis" | "habis") => {
+    setStockFilter((cur) => (cur === f ? "" : f));
+    setPage(1);
+  };
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -175,8 +181,22 @@ export function InventoryPage() {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <StatCard label="Total Item Barang" value={summary.totalItems.toLocaleString("id-ID")} icon={Package} tone="blue" />
           <StatCard label="Total Stock Tersedia" value={summary.totalStock.toLocaleString("id-ID")} icon={Boxes} tone="green" />
-          <StatCard label="Stock Menipis (Buffer)" value={summary.lowStock.toLocaleString("id-ID")} icon={AlertTriangle} tone="amber" />
-          <StatCard label="Stock Habis" value={summary.outOfStock.toLocaleString("id-ID")} icon={XCircle} tone="red" />
+          <StatCard
+            label="Stock Menipis (Buffer)"
+            value={summary.lowStock.toLocaleString("id-ID")}
+            icon={AlertTriangle}
+            tone="amber"
+            active={stockFilter === "menipis"}
+            onClick={() => toggleStockFilter("menipis")}
+          />
+          <StatCard
+            label="Stock Habis"
+            value={summary.outOfStock.toLocaleString("id-ID")}
+            icon={XCircle}
+            tone="red"
+            active={stockFilter === "habis"}
+            onClick={() => toggleStockFilter("habis")}
+          />
         </div>
       )}
 

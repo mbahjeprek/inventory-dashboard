@@ -35,6 +35,7 @@ export function BbmTransactionModal({
   const [estate, setEstate] = useState("");
   const [estateOptions, setEstateOptions] = useState<string[]>([]);
   const [kodeKendaraan, setKodeKendaraan] = useState("");
+  const [hmTerakhir, setHmTerakhir] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
@@ -72,6 +73,7 @@ export function BbmTransactionModal({
         no_spb: noSpb,
         estate: tipe === "DITERIMA" ? lokasi : estate,
         kode_kendaraan: kodeKendaraan,
+        hm_terakhir: hmTerakhir,
       });
       onSuccess();
     } catch {
@@ -208,16 +210,26 @@ export function BbmTransactionModal({
             </div>
           )}
 
+          <div>
+            <label className="text-xs text-[var(--text-secondary)] mb-1 block">No. SPB (opsional)</label>
+            <input value={noSpb} onChange={(e) => setNoSpb(e.target.value)} className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-2" />
+          </div>
+
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-xs text-[var(--text-secondary)] mb-1 block">No. SPB (opsional)</label>
-              <input value={noSpb} onChange={(e) => setNoSpb(e.target.value)} className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-2" />
-            </div>
-            <div>
-              <label className="text-xs text-[var(--text-secondary)] mb-1 block">Kode Kendaraan / KM-HM (opsional)</label>
+              <label className="text-xs text-[var(--text-secondary)] mb-1 block">Kode Kendaraan (opsional)</label>
               <input
                 value={kodeKendaraan}
                 onChange={(e) => setKodeKendaraan(e.target.value)}
+                className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-2"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-[var(--text-secondary)] mb-1 block">HM/KM Terakhir (opsional)</label>
+              <input
+                value={hmTerakhir}
+                onChange={(e) => setHmTerakhir(e.target.value)}
+                placeholder="cth. 4373.7 h"
                 className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-2"
               />
             </div>

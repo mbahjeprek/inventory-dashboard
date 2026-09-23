@@ -98,14 +98,6 @@ const TUJUAN_OPTIONS = ["NILAM", "ZAMRUD", "FIRUS"];
 // are distribution/consumption destinations, not separate warehouses - see `estate`.
 const BBM_LOKASI_OPTIONS = ["NILAM", "WJA", "KNS"];
 
-// Solar/Nilam is the one lokasi bucket that merges in whole separate sheets (Zamrud's and Firus's
-// own independently-numbered running balances, retagged under lokasi=NILAM since they have no
-// warehouse of their own) - any query computing "the" Nilam tank balance must exclude those rows,
-// or it'll pick up whichever of the 3 unrelated ledgers has the newest date/id.
-function foreignLedgerExclusion(alias: string): string {
-  return `NOT (${alias}.jenis_bbm = 'SOLAR' AND ${alias}.lokasi = 'NILAM' AND ${alias}.estate IN ('ZAMRUD', 'FIRUS'))`;
-}
-
 function isoToDisplay(iso: string): string {
   const m = (iso || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (!m) return "";
@@ -216,8 +208,16 @@ app.get("/api/satuan-options", async (_req, res) => {
 
 // ---- Items list with search/filter/sort/pagination ----
 app.get("/api/items", async (req, res) => {
-  const { search = "", status = "", satuan = "", sortBy = "kode", sortDir = "asc", page = "1", pageSize = "50" } =
-    req.query as Record<string, string>;
+  const {
+    search = "",
+    status = "",
+    satuan = "",
+    stock = "",
+    sortBy = "kode",
+    sortDir = "asc",
+    page = "1",
+    pageSize = "50",
+  } = req.query as Record<string, string>;
 
   const validSort = ["kode", "nama", "stock_tersedia", "buffer_stock"];
   const sortCol = validSort.includes(sortBy) ? sortBy : "kode";
@@ -238,6 +238,9 @@ app.get("/api/items", async (req, res) => {
     conditions.push("satuan = @satuan");
     params.satuan = satuan;
   }
+  // Same conditions as the lowStock/outOfStock counts in /api/summary, so the stat cards link to matching rows.
+  if (stock === "menipis") conditions.push("stock_tersedia <= buffer_stock AND buffer_stock > 0");
+  if (stock === "habis") conditions.push("stock_tersedia <= 0");
 
   const where = conditions.length ? "WHERE " + conditions.join(" AND ") : "";
 
@@ -367,6 +370,7 @@ app.get("/api/gudang-stock", async (req, res) => {
     search = "",
     satuan = "",
     status = "",
+    stock = "",
     sortBy = "kode",
     sortDir = "asc",
     page = "1",
@@ -396,6 +400,9 @@ app.get("/api/gudang-stock", async (req, res) => {
   } else if (status === "BUFFER STOCK") {
     conditions.push("gs.stock_tersedia <= 0");
   }
+  // Same conditions as the lowStock/outOfStock counts in /api/gudang-stock/summary.
+  if (stock === "menipis") conditions.push("gs.stock_tersedia <= gs.buffer_stock AND gs.buffer_stock > 0");
+  if (stock === "habis") conditions.push("gs.stock_tersedia <= 0");
 
   const where = "WHERE " + conditions.join(" AND ");
   const joinSql = `FROM gudang_stock gs JOIN items i ON i.kode = gs.item_kode ${where}`;
@@ -1258,7 +1265,7 @@ app.get("/api/bbm/summary", async (req, res) => {
        SELECT jenis_bbm, lokasi, saldo_stock, tanggal, tanggal_iso,
               ROW_NUMBER() OVER (PARTITION BY jenis_bbm, lokasi ORDER BY tanggal_iso DESC, id DESC) AS rn
        FROM bbm_log
-       WHERE saldo_stock IS NOT NULL AND ${foreignLedgerExclusion("bbm_log")} ${lokasi ? "AND lokasi = @lokasi" : ""}
+       WHERE saldo_stock IS NOT NULL ${lokasi ? "AND lokasi = @lokasi" : ""}
      ) sub
      WHERE rn = 1`,
     params
@@ -1305,7 +1312,6 @@ app.post("/api/bbm", async (req, res) => {
 
   const last = await queryOne<{ saldo_stock: number }>(
     `SELECT saldo_stock FROM bbm_log WHERE jenis_bbm = @jenis_bbm AND lokasi = @lokasi AND saldo_stock IS NOT NULL
-     AND ${foreignLedgerExclusion("bbm_log")}
      ORDER BY tanggal_iso DESC, id DESC LIMIT 1`,
     { jenis_bbm, lokasi }
   );
@@ -1365,8 +1371,8 @@ app.put("/api/bbm/:id", async (req, res) => {
       saldo_stock: saldo_stock === "" || saldo_stock === undefined ? null : Number(saldo_stock),
       keterangan: keterangan ?? "",
       estate: estate ?? "",
-      kode_kendaraan: kode_kendaraan ?? "",
-      hm_terakhir: hm_terakhir ?? "",
+      kode_kendaraan: kode_kendaraan ?? existing.kode_kendaraan ?? "",
+      hm_terakhir: hm_terakhir ?? existing.hm_terakhir ?? "",
       id: req.params.id,
     }
   );
@@ -1441,8 +1447,21 @@ app.get("/api/bbm", async (req, res) => {
   const limit = Math.min(parseInt(pageSize) || 50, 500);
   const offset = (Math.max(parseInt(page) || 1, 1) - 1) * limit;
 
+  // total_hm = this reading minus the same vehicle's previous HM/KM reading (hours/km worked since its
+  // last refuel). Computed over the whole table before filtering, so the previous reading is found
+  // even when it falls outside the current page/filter. hm_terakhir is free text like "4373.7 h".
   const data = await queryMany(
-    `SELECT * FROM bbm_log ${where} ORDER BY ${sortCol} ${dir}, id ${dir} LIMIT @limit OFFSET @offset`,
+    `SELECT b.*, CASE WHEN h.cur >= h.prev THEN (h.cur - h.prev)::float8 END AS total_hm
+     FROM bbm_log b
+     LEFT JOIN (
+       SELECT id, cur, LAG(cur) OVER (PARTITION BY kode_kendaraan ORDER BY tanggal_iso, id) AS prev
+       FROM (
+         SELECT id, kode_kendaraan, tanggal_iso, substring(hm_terakhir from '(\\d+(?:\\.\\d+)?)')::numeric AS cur
+         FROM bbm_log
+         WHERE kode_kendaraan <> '' AND hm_terakhir ~ '\\d'
+       ) x
+     ) h ON h.id = b.id
+     ${where} ORDER BY b.${sortCol} ${dir}, b.id ${dir} LIMIT @limit OFFSET @offset`,
     { ...params, limit, offset }
   );
 
