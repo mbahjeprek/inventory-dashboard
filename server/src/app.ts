@@ -1403,13 +1403,18 @@ app.get("/api/bbm/summary", async (req, res) => {
     return res.status(403).json({ error: "Akses ditolak" });
   }
 
-  const lokasiFilter = lokasi ? "WHERE lokasi = @lokasi" : "";
   const params = lokasi ? { lokasi } : {};
 
+  // Stok masuk/keluar totals per jenis+lokasi for a date range (the page passes its date filter,
+  // or the current month); saldoTerakhir below is always the latest balance regardless of range.
+  const { dateFrom = "", dateTo = "" } = req.query as Record<string, string>;
+  const isoDate = /^\d{4}-\d{2}-\d{2}$/;
+  const flowConditions = [lokasi && "lokasi = @lokasi", isoDate.test(dateFrom) && "tanggal_iso >= @dateFrom", isoDate.test(dateTo) && "tanggal_iso <= @dateTo"].filter(Boolean);
   const perLokasi = await queryMany(
-    `SELECT jenis_bbm, lokasi, SUM(diterima) diterima, SUM(pemakaian) pemakaian
-     FROM bbm_log ${lokasiFilter} GROUP BY jenis_bbm, lokasi ORDER BY jenis_bbm, lokasi`,
-    params
+    `SELECT jenis_bbm, lokasi, COALESCE(SUM(diterima), 0)::float8 diterima, COALESCE(SUM(pemakaian), 0)::float8 pemakaian
+     FROM bbm_log ${flowConditions.length ? "WHERE " + flowConditions.join(" AND ") : ""}
+     GROUP BY jenis_bbm, lokasi ORDER BY jenis_bbm, lokasi`,
+    { ...params, ...(isoDate.test(dateFrom) ? { dateFrom } : {}), ...(isoDate.test(dateTo) ? { dateTo } : {}) }
   );
 
   // Latest known saldo (running balance) per jenis_bbm+lokasi. Several rows can share the same

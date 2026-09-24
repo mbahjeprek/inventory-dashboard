@@ -339,7 +339,12 @@ export const api = {
 
   deleteAlatBerat: (id: number) => req<{ success: boolean }>(`/api/alat-berat/${id}`, { method: "DELETE" }),
 
-  bbmSummary: (lokasi?: string) => req<BbmSummary>(`/api/bbm/summary${lokasi ? `?lokasi=${lokasi}` : ""}`),
+  bbmSummary: (lokasi?: string, range?: { dateFrom?: string; dateTo?: string }) => {
+    const qs = new URLSearchParams(
+      Object.entries({ lokasi, ...range }).filter((e): e is [string, string] => !!e[1])
+    ).toString();
+    return req<BbmSummary>(`/api/bbm/summary${qs ? `?${qs}` : ""}`);
+  },
 
   bbmLokasiOptions: () => req<string[]>("/api/bbm/lokasi-options"),
 

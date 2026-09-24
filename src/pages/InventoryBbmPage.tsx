@@ -31,6 +31,20 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
   const [confirmDelete, setConfirmDelete] = useState<BbmRecord | null>(null);
   const pageSize = 25;
 
+  // Stok masuk/keluar under each card follow the page's date filter; with no filter they cover the
+  // current month (an all-time total since 2023 isn't a useful number).
+  const localIso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  const flowRange =
+    dateFrom || dateTo
+      ? { dateFrom, dateTo }
+      : { dateFrom: localIso(new Date(new Date().getFullYear(), new Date().getMonth(), 1)), dateTo: localIso(new Date()) };
+  const flowLabel = (() => {
+    const fmt = (iso: string) => new Date(`${iso}T00:00:00`).toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" });
+    if (!dateFrom && !dateTo) return new Date().toLocaleDateString("id-ID", { month: "long", year: "numeric" });
+    return `${flowRange.dateFrom ? fmt(flowRange.dateFrom) : "Awal"} – ${flowRange.dateTo ? fmt(flowRange.dateTo) : "Sekarang"}`;
+  })();
+  const loadSummary = () => api.bbmSummary(lokasiLock, flowRange).then(setSummary);
+
   const load = () => {
     setLoading(true);
     api.bbm({ search, jenis_bbm: jenisBbm, lokasi, kode_kendaraan: alat, dateFrom, dateTo, page, pageSize }).then((res) => {
@@ -43,9 +57,13 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
   };
 
   useEffect(() => {
-    api.bbmSummary(lokasiLock).then(setSummary);
     api.bbmLokasiOptions().then(setLokasiOptions);
   }, []);
+
+  useEffect(() => {
+    loadSummary();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dateFrom, dateTo]);
 
   useEffect(() => {
     api.bbmAlatOptions(lokasiLock ?? lokasi).then(setAlatOptions);
@@ -119,9 +137,11 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
 
   const handleDelete = async (r: BbmRecord) => {
     await api.deleteBbm(r.id);
-    api.bbmSummary(lokasiLock).then(setSummary);
+    loadSummary();
     load();
   };
+
+  const flowFor = (jenis: string, lok: string) => summary?.perLokasi.find((s) => s.jenis_bbm === jenis && s.lokasi === lok);
 
   const saldoFor = (jenis: string, lok: string) =>
     summary?.saldoTerakhir.find((s) => s.jenis_bbm === jenis && s.lokasi === lok)?.saldo_stock;
@@ -169,6 +189,25 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
               icon={jenis === "SOLAR" ? Fuel : Droplet}
               tone={jenis === "SOLAR" ? "blue" : "amber"}
               active={active}
+              footer={
+                <div>
+                  <div className="text-[11px] text-[var(--text-muted)] mb-1.5">{flowLabel}</div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <div className="text-[11px] text-[var(--text-secondary)]">Stok Masuk</div>
+                      <div className="text-sm font-semibold text-[var(--accent-green)]">
+                        {(flowFor(jenis, lok)?.diterima ?? 0).toLocaleString("id-ID")} LTR
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[11px] text-[var(--text-secondary)]">Stok Keluar</div>
+                      <div className="text-sm font-semibold text-[var(--accent-red)]">
+                        {(flowFor(jenis, lok)?.pemakaian ?? 0).toLocaleString("id-ID")} LTR
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              }
               onClick={() => {
                 setJenisBbm(active ? "" : jenis);
                 if (!lokasiLock) setLokasi(active ? "" : lok);
@@ -382,7 +421,7 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
           onClose={() => setShowTransaksi(false)}
           onSuccess={() => {
             setShowTransaksi(false);
-            api.bbmSummary(lokasiLock).then(setSummary);
+            loadSummary();
             load();
           }}
         />
@@ -394,7 +433,7 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
           onClose={() => setEditing(null)}
           onSuccess={() => {
             setEditing(null);
-            api.bbmSummary(lokasiLock).then(setSummary);
+            loadSummary();
             load();
           }}
         />

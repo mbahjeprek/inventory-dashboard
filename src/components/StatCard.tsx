@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 
 type Tone = "blue" | "green" | "amber" | "red";
@@ -17,6 +18,7 @@ export function StatCard({
   suffix,
   onClick,
   active = false,
+  footer,
 }: {
   label: string;
   value: string | number;
@@ -25,25 +27,29 @@ export function StatCard({
   suffix?: string;
   onClick?: () => void;
   active?: boolean;
+  footer?: ReactNode;
 }) {
   const Tag = onClick ? "button" : "div";
   return (
     <Tag
       {...(onClick ? { type: "button" as const, onClick, title: active ? "Tampilkan semua barang" : `Lihat daftar ${label}` } : {})}
-      className={`bg-[var(--bg-card)] border rounded-lg p-3 sm:p-4 flex items-center gap-3 sm:gap-4 text-left w-full min-w-0 ${
+      className={`bg-[var(--bg-card)] border rounded-lg p-3 sm:p-4 text-left w-full min-w-0 ${
         active ? "border-[var(--accent-blue)] ring-2 ring-[var(--accent-blue-border)]" : "border-[var(--border)]"
       } ${onClick ? "cursor-pointer hover:shadow-md hover:border-[var(--accent-blue-border)] transition" : ""}`}
     >
-      <div className={`w-9 h-9 sm:w-11 sm:h-11 rounded-md border flex items-center justify-center shrink-0 ${toneClasses[tone]}`}>
-        <Icon size={20} />
-      </div>
-      <div className="min-w-0">
-        <div className="text-xl sm:text-2xl font-semibold text-[var(--text-primary)] leading-tight">
-          {value}
-          {suffix && <span className="text-sm font-normal text-[var(--text-muted)] ml-1">{suffix}</span>}
+      <div className="flex items-center gap-3 sm:gap-4">
+        <div className={`w-9 h-9 sm:w-11 sm:h-11 rounded-md border flex items-center justify-center shrink-0 ${toneClasses[tone]}`}>
+          <Icon size={20} />
         </div>
-        <div className="text-xs text-[var(--text-secondary)] mt-0.5">{label}</div>
+        <div className="min-w-0">
+          <div className="text-xl sm:text-2xl font-semibold text-[var(--text-primary)] leading-tight">
+            {value}
+            {suffix && <span className="text-sm font-normal text-[var(--text-muted)] ml-1">{suffix}</span>}
+          </div>
+          <div className="text-xs text-[var(--text-secondary)] mt-0.5">{label}</div>
+        </div>
       </div>
+      {footer && <div className="mt-3 pt-3 border-t border-[var(--border)]">{footer}</div>}
     </Tag>
   );
 }
