@@ -1,7 +1,7 @@
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "./context/AuthContext";
 import { ProtectedRoute } from "./components/ProtectedRoute";
-import { RequireEstate, RequireSuperuser, RootRedirect } from "./components/AccessGate";
+import { RequireEstate, RequireSuperuser } from "./components/AccessGate";
 import { LoginPage } from "./pages/LoginPage";
 import { MainLayout } from "./layouts/MainLayout";
 import { InventoryPage } from "./pages/InventoryPage";
@@ -17,6 +17,7 @@ import { AlatBeratPage } from "./pages/AlatBeratPage";
 import { MasterBarangPage } from "./pages/MasterBarangPage";
 import { UsersPage } from "./pages/UsersPage";
 import { ActivityLogPage } from "./pages/ActivityLogPage";
+import { DashboardPage } from "./pages/DashboardPage";
 
 function App() {
   return (
@@ -26,14 +27,9 @@ function App() {
           <Route path="/login" element={<LoginPage />} />
           <Route element={<ProtectedRoute />}>
             <Route element={<MainLayout />}>
-              <Route
-                path="/"
-                element={
-                  <RootRedirect>
-                    <InventoryPage />
-                  </RootRedirect>
-                }
-              />
+              {/* Landing page for every account; it only shows the estates the account can open. */}
+              <Route path="/" element={<DashboardPage />} />
+
               <Route
                 path="/inventory"
                 element={

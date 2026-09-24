@@ -16,6 +16,7 @@ import {
   X,
   KeyRound,
   History,
+  LayoutDashboard,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 
@@ -54,6 +55,7 @@ const BBM_GROUP: DropdownGroup = {
 const DROPDOWN_GROUPS: DropdownGroup[] = [GUDANG_GROUP, BBM_GROUP];
 
 const navSections: NavSection[] = [
+  { items: [{ to: "/", label: "Dashboard", icon: LayoutDashboard }] },
   {
     title: "Inventory",
     collapsible: true,
@@ -140,7 +142,7 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: { mobileOpen?: bo
     return true;
   });
 
-  const normalizedPathname = location.pathname === "/" ? "/inventory" : location.pathname;
+  const normalizedPathname = location.pathname;
   const activeByGroup: Record<string, string | undefined> = {};
   for (const group of dropdownGroups) {
     activeByGroup[group.key] = group.options.find((o) => o.to === normalizedPathname)?.to;
