@@ -1608,8 +1608,8 @@ app.delete("/api/bbm/:id", async (req, res) => {
 });
 
 // ---- Inventory Pupuk (fertiliser), see schema.sql's pupuk_log ----
-// Only these estates have fertiliser stock (KNS/WJA have none in the source sheet).
-const PUPUK_ESTATES = ["NILAM", "ZAMRUD", "FIRUS"];
+// Estates with an Inventory Pupuk. KNS and WJA had no rows in the source sheet and start empty.
+const PUPUK_ESTATES = ["NILAM", "ZAMRUD", "FIRUS", "KNS", "WJA"];
 
 function pupukFilters(q: Record<string, string>) {
   const conditions = ["estate = @estate"];
@@ -1684,7 +1684,11 @@ app.get("/api/pupuk/options", async (req, res) => {
     "SELECT DISTINCT divisi v FROM pupuk_log WHERE estate = @estate AND divisi <> '' ORDER BY v",
     { estate }
   );
-  res.json({ jenis: jenis.map((r) => r.v), divisi: divisi.map((r) => r.v) });
+  // An estate with no pupuk history yet (KNS/WJA) is offered the divisi names used elsewhere.
+  const divisiList = divisi.length
+    ? divisi
+    : await queryMany<{ v: string }>("SELECT DISTINCT divisi v FROM pupuk_log WHERE divisi <> '' ORDER BY v");
+  res.json({ jenis: jenis.map((r) => r.v), divisi: divisiList.map((r) => r.v) });
 });
 
 app.get("/api/pupuk", async (req, res) => {

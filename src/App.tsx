@@ -29,6 +29,8 @@ function App() {
             <Route element={<MainLayout />}>
               {[
                 { path: "/inventory-pupuk", estate: "NILAM" },
+                { path: "/inventory-pupuk-kns", estate: "KNS" },
+                { path: "/inventory-pupuk-wja", estate: "WJA" },
                 { path: "/inventory-pupuk-zamrud", estate: "ZAMRUD" },
                 { path: "/inventory-pupuk-firus", estate: "FIRUS" },
               ].map(({ path, estate }) => (

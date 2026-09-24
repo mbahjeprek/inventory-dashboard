@@ -52,13 +52,14 @@ const BBM_GROUP: DropdownGroup = {
   ],
 };
 
-// Only Nilam, Zamrud and Firus have fertiliser stock; KNS/WJA have no Pupuk page.
 const PUPUK_GROUP: DropdownGroup = {
   key: "pupuk",
   icon: Sprout,
   title: "Pupuk",
   options: [
     { to: "/inventory-pupuk", label: "Nilam" },
+    { to: "/inventory-pupuk-kns", label: "KNS" },
+    { to: "/inventory-pupuk-wja", label: "WJA" },
     { to: "/inventory-pupuk-zamrud", label: "Zamrud" },
     { to: "/inventory-pupuk-firus", label: "Firus" },
   ],

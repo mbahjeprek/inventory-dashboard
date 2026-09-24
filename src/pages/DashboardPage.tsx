@@ -23,9 +23,10 @@ const BBM = [
 ];
 
 // Postgres COUNT/SUM can arrive as strings, so coerce before formatting or comparing.
-// Only these estates keep fertiliser stock.
 const PUPUK = [
   { estate: "NILAM", label: "Nilam", to: "/inventory-pupuk" },
+  { estate: "KNS", label: "KNS", to: "/inventory-pupuk-kns" },
+  { estate: "WJA", label: "WJA", to: "/inventory-pupuk-wja" },
   { estate: "ZAMRUD", label: "Zamrud", to: "/inventory-pupuk-zamrud" },
   { estate: "FIRUS", label: "Firus", to: "/inventory-pupuk-firus" },
 ];
