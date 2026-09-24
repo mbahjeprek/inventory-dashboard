@@ -3,6 +3,7 @@ import { Search, ChevronLeft, ChevronRight, Fuel, Droplet, PackagePlus, Pencil, 
 import { api, type BbmRecord, type BbmSummary } from "../lib/api";
 import { StatCard } from "../components/StatCard";
 import { ExportButtons } from "../components/ExportButtons";
+import { ActivityLogButton } from "../components/ActivityLogButton";
 import { fetchAllRows, type TableReport } from "../lib/printTable";
 import { BbmTransactionModal } from "../components/BbmTransactionModal";
 import { EditBbmModal } from "../components/EditBbmModal";
@@ -166,6 +167,7 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
           <p className="text-sm text-[var(--text-secondary)]">Monitoring stok & histori pemakaian Solar dan Bensin per lokasi</p>
         </div>
         <div className="flex items-center gap-2">
+          {(lokasiLock || lokasi) && <ActivityLogButton key={lokasiLock || lokasi} module="BBM" estate={lokasiLock || lokasi} />}
           <ExportButtons
             total={total}
             buildReport={buildReport}

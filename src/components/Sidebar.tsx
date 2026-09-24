@@ -15,7 +15,6 @@ import {
   LogOut,
   X,
   KeyRound,
-  History,
   LayoutDashboard,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
@@ -59,10 +58,8 @@ const navSections: NavSection[] = [
   {
     title: "Inventory",
     collapsible: true,
-    items: [
-      { to: "/log-barang", label: "Log Barang", icon: History },
-      { to: "/log-bbm", label: "Log BBM", icon: History },
-    ],
+    items: [],
+
   },
   {
     title: "Transaksi",

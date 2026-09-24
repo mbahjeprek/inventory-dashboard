@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Search, ChevronLeft, ChevronRight } from "lucide-react";
+import { Search, ChevronLeft, ChevronRight, X } from "lucide-react";
 import { api, type ActivityLog } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { ExportButtons } from "../components/ExportButtons";
@@ -22,17 +22,26 @@ function aksiTone(aksi: string) {
 }
 
 // Separate audit logs for Inventory Barang and Inventory BBM: who changed what, when, and how.
-export function ActivityLogPage({ module }: { module: "BARANG" | "BBM" }) {
+// Opened from each inventory page's Log button with `estateLock` set to that page's gudang/lokasi.
+export function ActivityLogPage({
+  module,
+  estateLock,
+  onClose,
+}: {
+  module: "BARANG" | "BBM";
+  estateLock?: string;
+  onClose?: () => void;
+}) {
   const { user } = useAuth();
   const isSuperuser = user?.role === "superuser";
   const estateLabel = module === "BBM" ? "Lokasi" : "Gudang";
-  const title = module === "BBM" ? "Log Activity BBM" : "Log Activity Barang";
+  const title = `${module === "BBM" ? "Log Activity BBM" : "Log Activity Barang"}${estateLock ? ` - ${estateLock}` : ""}`;
 
   const [rows, setRows] = useState<ActivityLog[]>([]);
   const [total, setTotal] = useState(0);
   const [aksiOptions, setAksiOptions] = useState<string[]>([]);
   const [search, setSearch] = useState("");
-  const [estate, setEstate] = useState("");
+  const [estate, setEstate] = useState(estateLock ?? "");
   const [aksi, setAksi] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
@@ -73,13 +82,13 @@ export function ActivityLogPage({ module }: { module: "BARANG" | "BBM" }) {
     const tgl = (iso: string) => (iso ? iso.split("-").reverse().join("/") : "");
     const active = [
       search && `Cari: "${search}"`,
-      `${estateLabel}: ${(isSuperuser ? estate : user?.estate) || "Semua"}`,
+      !estateLock && `${estateLabel}: ${(isSuperuser ? estate : user?.estate) || "Semua"}`,
       aksi && `Aksi: ${aksi}`,
       (dateFrom || dateTo) && `Tanggal: ${tgl(dateFrom) || "awal"} - ${tgl(dateTo) || "akhir"}`,
     ].filter(Boolean);
     return {
       title,
-      subtitle: [`Filter: ${active.join(" · ")}`],
+      subtitle: active.length ? [`Filter: ${active.join(" · ")}`] : [],
       landscape: true,
       columns: [
         { label: "Waktu", nowrap: true },
@@ -106,7 +115,16 @@ export function ActivityLogPage({ module }: { module: "BARANG" | "BBM" }) {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <ExportButtons total={total} buildReport={buildReport} fileName={module === "BBM" ? "log-activity-bbm" : "log-activity-barang"} />
+          <ExportButtons
+            total={total}
+            buildReport={buildReport}
+            fileName={`${module === "BBM" ? "log-activity-bbm" : "log-activity-barang"}${estateLock ? `-${estateLock.toLowerCase()}` : ""}`}
+          />
+          {onClose && (
+            <button onClick={onClose} title="Tutup" className="p-2 rounded-md text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[#f1f5f9]">
+              <X size={18} />
+            </button>
+          )}
         </div>
       </div>
 
@@ -121,7 +139,7 @@ export function ActivityLogPage({ module }: { module: "BARANG" | "BBM" }) {
           />
         </div>
 
-        {isSuperuser ? (
+        {estateLock ? null : isSuperuser ? (
           <select
             value={estate}
             onChange={(e) => {

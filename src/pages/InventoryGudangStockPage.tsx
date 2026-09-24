@@ -18,6 +18,7 @@ import {
 import { api, type GudangStockItem, type GudangStockSummary } from "../lib/api";
 import { StatCard } from "../components/StatCard";
 import { ExportButtons } from "../components/ExportButtons";
+import { ActivityLogButton } from "../components/ActivityLogButton";
 import { fetchAllRows, type TableReport } from "../lib/printTable";
 import { AddGudangStockModal } from "../components/AddGudangStockModal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
@@ -206,6 +207,7 @@ export function InventoryGudangStockPage({ gudang }: { gudang: string }) {
           <p className="text-sm text-[var(--text-secondary)]">{total.toLocaleString("id-ID")} item barang</p>
         </div>
         <div className="flex items-center gap-2">
+          <ActivityLogButton module="BARANG" estate={gudang} />
           <ExportButtons total={total} buildReport={buildReport} fileName={`inventory-gudang-${gudang.toLowerCase()}`} />
           <button
             onClick={() => setShowAdd(true)}

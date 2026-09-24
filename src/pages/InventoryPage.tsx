@@ -22,6 +22,7 @@ import { EditItemModal } from "../components/EditItemModal";
 import { ItemPickerModal } from "../components/ItemPickerModal";
 import { StatCard } from "../components/StatCard";
 import { ExportButtons } from "../components/ExportButtons";
+import { ActivityLogButton } from "../components/ActivityLogButton";
 import { fetchAllRows, type TableReport } from "../lib/printTable";
 
 const STATUSES = ["AMAN", "BUFFER STOCK"];
@@ -198,6 +199,7 @@ export function InventoryPage() {
           <p className="text-sm text-[var(--text-secondary)]">{total.toLocaleString("id-ID")} item barang</p>
         </div>
         <div className="flex items-center gap-2">
+          <ActivityLogButton module="BARANG" estate="NILAM" />
           <ExportButtons total={total} buildReport={buildReport} fileName="inventory-gudang-nilam" />
           <button
             onClick={() => setShowPicker(true)}

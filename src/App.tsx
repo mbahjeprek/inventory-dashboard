@@ -16,7 +16,6 @@ import { InventoryBbmPage } from "./pages/InventoryBbmPage";
 import { AlatBeratPage } from "./pages/AlatBeratPage";
 import { MasterBarangPage } from "./pages/MasterBarangPage";
 import { UsersPage } from "./pages/UsersPage";
-import { ActivityLogPage } from "./pages/ActivityLogPage";
 import { DashboardPage } from "./pages/DashboardPage";
 
 function App() {
@@ -182,9 +181,7 @@ function App() {
                   </RequireSuperuser>
                 }
               />
-              {/* Open to every account: the server scopes an estate user to their own estate's log. */}
-              <Route path="/log-barang" element={<ActivityLogPage key="BARANG" module="BARANG" />} />
-              <Route path="/log-bbm" element={<ActivityLogPage key="BBM" module="BBM" />} />
+
             </Route>
           </Route>
         </Routes>
