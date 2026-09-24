@@ -25,7 +25,7 @@ const ESTATES = [
 ];
 type EstateInfo = (typeof ESTATES)[number];
 
-const MODULE_LABEL: Record<ActivityLog["module"], string> = { BARANG: "Gudang", BBM: "BBM", PUPUK: "Pupuk", KLINIK: "Klinik" };
+const MODULE_LABEL: Record<ActivityLog["module"], string> = { BARANG: "Gudang", BBM: "BBM", PUPUK: "Pupuk NPK", KLINIK: "Klinik" };
 
 // Postgres COUNT/SUM can arrive as strings, so coerce before formatting or comparing.
 const fmt = (n: number | string | undefined) => Number(n ?? 0).toLocaleString("id-ID");
@@ -149,7 +149,7 @@ function EstateRow({ e, d, monthLabel }: { e: EstateInfo; d: EstateData; monthLa
         )}
       </Panel>
 
-      <Panel to={e.pupuk} title="Pupuk" icon={<Sprout size={16} className="text-[var(--accent-green)]" />}>
+      <Panel to={e.pupuk} title="Pupuk NPK" icon={<Sprout size={16} className="text-[var(--accent-green)]" />}>
         {loading(d.pupuk) ? (
           <Muted>Memuat...</Muted>
         ) : failed(d.pupuk) ? (
@@ -263,7 +263,7 @@ function AttentionPanel({ e, d }: { e: EstateInfo; d: EstateData }) {
           {negativePupuk.length > 0 && (
             <Link to={e.pupuk} className="block py-2.5 group">
               <div className="flex items-center justify-between gap-2">
-                <span className="text-sm font-medium text-[var(--accent-red)]">Pupuk · saldo minus</span>
+                <span className="text-sm font-medium text-[var(--accent-red)]">Pupuk NPK · saldo minus</span>
                 <ChevronRight size={12} className="text-[var(--text-muted)] group-hover:text-[var(--text-primary)]" />
               </div>
               <div className="text-xs text-[var(--text-secondary)] mt-0.5">

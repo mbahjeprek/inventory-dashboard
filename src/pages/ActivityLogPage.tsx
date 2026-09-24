@@ -39,7 +39,7 @@ export function ActivityLogPage({
   const { user } = useAuth();
   const isSuperuser = user?.role === "superuser";
   const estateLabel = module === "BBM" ? "Lokasi" : module === "PUPUK" ? "Estate" : module === "KLINIK" ? "Klinik" : "Gudang";
-  const title = `${module === "BBM" ? "Log Activity BBM" : module === "PUPUK" ? "Log Activity Pupuk" : module === "KLINIK" ? "Log Activity Klinik" : "Log Activity Barang"}${estateLock ? ` - ${estateLock}` : ""}`;
+  const title = `${module === "BBM" ? "Log Activity BBM" : module === "PUPUK" ? "Log Activity Pupuk NPK" : module === "KLINIK" ? "Log Activity Klinik" : "Log Activity Barang"}${estateLock ? ` - ${estateLock}` : ""}`;
 
   const [rows, setRows] = useState<ActivityLog[]>([]);
   const [total, setTotal] = useState(0);
@@ -125,7 +125,7 @@ export function ActivityLogPage({
         <div>
           <h1 className="text-xl font-semibold text-[var(--text-primary)]">{title}</h1>
           <p className="text-sm text-[var(--text-secondary)]">
-            Riwayat perubahan data Inventory {module === "BBM" ? "BBM" : module === "PUPUK" ? "Pupuk" : module === "KLINIK" ? "Klinik" : "Gudang"} (tambah, edit, hapus, transaksi) beserta
+            Riwayat perubahan data Inventory {module === "BBM" ? "BBM" : module === "PUPUK" ? "Pupuk NPK" : module === "KLINIK" ? "Klinik" : "Gudang"} (tambah, edit, hapus, transaksi) beserta
             siapa yang melakukannya
           </p>
         </div>

@@ -54,7 +54,7 @@ const BBM_GROUP: DropdownGroup = {
 const PUPUK_GROUP: DropdownGroup = {
   key: "pupuk",
   icon: Sprout,
-  title: "Pupuk",
+  title: "Pupuk NPK",
   options: [
     { to: "/inventory-pupuk", label: "Nilam" },
     { to: "/inventory-pupuk-kns", label: "KNS" },

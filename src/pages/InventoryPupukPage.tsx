@@ -112,7 +112,7 @@ export function InventoryPupukPage({ estate }: { estate: string }) {
       (dateFrom || dateTo) && `Tanggal: ${tgl(dateFrom) || "awal"} - ${tgl(dateTo) || "akhir"}`,
     ].filter(Boolean);
     return {
-      title: `Inventory Pupuk - ${estate}`,
+      title: `Inventory Pupuk NPK - ${estate}`,
       subtitle: [
         ...(active.length ? [`Filter: ${active.join(" · ")}`] : []),
         `${total.toLocaleString("id-ID")} transaksi · total stok masuk ${diterimaSum.toLocaleString("id-ID")} KG · total stok keluar ${keluarSum.toLocaleString("id-ID")} KG`,
@@ -157,7 +157,7 @@ export function InventoryPupukPage({ estate }: { estate: string }) {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold text-[var(--text-primary)]">Inventory Pupuk - {estate}</h1>
+          <h1 className="text-xl font-semibold text-[var(--text-primary)]">Inventory Pupuk NPK - {estate}</h1>
           <p className="text-sm text-[var(--text-secondary)]">Monitoring stok, penerimaan & pemakaian pupuk per blok</p>
         </div>
         <div className="flex items-center gap-2">
