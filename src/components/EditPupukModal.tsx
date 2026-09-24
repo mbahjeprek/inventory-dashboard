@@ -93,7 +93,7 @@ export function EditPupukModal({
               <input type="number" min={0} step="any" value={form.diterima} onChange={set("diterima")} className={inputCls} />
             </div>
             <div>
-              <label className={labelCls}>Stok (KG)</label>
+              <label className={labelCls}>Saldo Stok (KG)</label>
               <input type="number" step="any" value={form.saldo_stock} onChange={set("saldo_stock")} className={inputCls} />
             </div>
           </div>

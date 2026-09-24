@@ -122,7 +122,7 @@ export function InventoryPupukPage({ estate }: { estate: string }) {
         { label: "Kode Barang" },
         { label: "Stok Masuk (KG)", align: "right" },
         { label: "Stok Keluar (KG)", align: "right" },
-        { label: "Stok (KG)", align: "right" },
+        { label: "Saldo Stok (KG)", align: "right" },
         { label: "Keterangan" },
         { label: "Blok" },
         { label: "HA", align: "right" },
@@ -284,7 +284,7 @@ export function InventoryPupukPage({ estate }: { estate: string }) {
                 <th className="px-4 py-2.5 whitespace-nowrap">Kode Barang</th>
                 <th className="px-4 py-2.5 text-right whitespace-nowrap">Stok Masuk (KG)</th>
                 <th className="px-4 py-2.5 text-right whitespace-nowrap">Stok Keluar (KG)</th>
-                <th className="px-4 py-2.5 text-right whitespace-nowrap">Stok (KG)</th>
+                <th className="px-4 py-2.5 text-right whitespace-nowrap">Saldo Stok (KG)</th>
                 <th className="px-4 py-2.5">Keterangan</th>
                 <th className="px-4 py-2.5">Blok</th>
                 <th className="px-4 py-2.5 text-right">HA</th>

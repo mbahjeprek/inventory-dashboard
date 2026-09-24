@@ -1807,7 +1807,7 @@ app.put("/api/pupuk/:id", async (req, res) => {
       kode_barang: "Kode Barang",
       diterima: "Stok Masuk",
       keluar: "Stok Keluar",
-      saldo_stock: "Stok",
+      saldo_stock: "Saldo Stok",
       keterangan: "Keterangan",
       blok: "Blok",
       ha: "HA",
@@ -1830,7 +1830,7 @@ app.delete("/api/pupuk/:id", async (req, res) => {
     detail: [
       existing.diterima && `Stok Masuk: ${existing.diterima}`,
       existing.keluar && `Stok Keluar: ${existing.keluar}`,
-      existing.saldo_stock !== null && `Stok: ${existing.saldo_stock}`,
+      existing.saldo_stock !== null && `Saldo Stok: ${existing.saldo_stock}`,
       existing.keterangan && `Keterangan: ${existing.keterangan}`,
     ]
       .filter(Boolean)
