@@ -5,9 +5,7 @@ import { RequireEstate, RequireSuperuser, RootRedirect } from "./components/Acce
 import { LoginPage } from "./pages/LoginPage";
 import { MainLayout } from "./layouts/MainLayout";
 import { InventoryPage } from "./pages/InventoryPage";
-import { InventoryGudangEmptyPage } from "./pages/InventoryGudangEmptyPage";
 import { InventoryGudangStockPage } from "./pages/InventoryGudangStockPage";
-import { Fuel as FuelIcon } from "lucide-react";
 import { TransactionsPage } from "./pages/TransactionsPage";
 import { ReportsPage } from "./pages/ReportsPage";
 import { StockInPage } from "./pages/StockInPage";
@@ -112,7 +110,7 @@ function App() {
                 path="/inventory-bbm-zamrud"
                 element={
                   <RequireEstate estate="ZAMRUD">
-                    <InventoryGudangEmptyPage gudang="Zamrud" titlePrefix="Inventory BBM" unitLabel="transaksi" icon={FuelIcon} />
+                    <InventoryBbmPage key="ZAMRUD" lokasiLock="ZAMRUD" />
                   </RequireEstate>
                 }
               />
@@ -120,7 +118,7 @@ function App() {
                 path="/inventory-bbm-firus"
                 element={
                   <RequireEstate estate="FIRUS">
-                    <InventoryGudangEmptyPage gudang="Firus" titlePrefix="Inventory BBM" unitLabel="transaksi" icon={FuelIcon} />
+                    <InventoryBbmPage key="FIRUS" lokasiLock="FIRUS" />
                   </RequireEstate>
                 }
               />

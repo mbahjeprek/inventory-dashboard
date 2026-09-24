@@ -123,10 +123,12 @@ function describeChanges(before: Record<string, any>, after: Record<string, any>
 // There is only one physical stock pool (the main warehouse, located at Nilam).
 const TUJUAN_OPTIONS = ["NILAM", "ZAMRUD", "FIRUS"];
 
-// BBM (fuel, Solar & Bensin) only has physical storage/gudang at 3 sites: Nilam, WJA, KNS.
+// BBM (fuel, Solar & Bensin) physical storage/gudang sites. Nilam, WJA and KNS hold the imported
+// history; Zamrud and Firus were added later as their own lokasi so they can record their own stock
+// from the first delivery on (their older Solar sheets stay filed under NILAM, estate=ZAMRUD/FIRUS).
 // Zamrud/Firus/AKSS/UKM (under Nilam), LUBAKAN/TAGUL (under WJA) and MALAPIAK/TAGANG (under KNS)
 // are distribution/consumption destinations, not separate warehouses - see `estate`.
-const BBM_LOKASI_OPTIONS = ["NILAM", "WJA", "KNS"];
+const BBM_LOKASI_OPTIONS = ["NILAM", "WJA", "KNS", "ZAMRUD", "FIRUS"];
 
 function isoToDisplay(iso: string): string {
   const m = (iso || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
@@ -1355,6 +1357,8 @@ const BBM_ESTATE_JUNK = ["BENSIN MASUK", "STOCK AWAL", "PEMINJAMAN"];
 const BBM_ESTATE_EXTRA: Record<string, string[]> = {
   WJA: ["TAGUL"],
   KNS: ["MALAPIAK"],
+  ZAMRUD: ["ZAMRUD"],
+  FIRUS: ["FIRUS"],
 };
 
 app.get("/api/bbm/estate-options", async (req, res) => {

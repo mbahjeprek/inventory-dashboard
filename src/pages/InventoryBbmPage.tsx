@@ -148,9 +148,10 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
   const saldoFor = (jenis: string, lok: string) =>
     summary?.saldoPerTanggal.find((s) => s.jenis_bbm === jenis && s.lokasi === lok)?.saldo_stock ?? 0;
 
+  // A locked lokasi always gets its Solar and Bensin cards, even before its first transaction
+  // (Zamrud/Firus start empty); the all-lokasi view shows whichever lokasi have data.
   const saldoCards = JENIS_OPTIONS.flatMap((jenis) =>
-    (summary?.saldoTerakhir.filter((s) => s.jenis_bbm === jenis).map((s) => s.lokasi) || [])
-      .filter((lok) => !lokasiLock || lok === lokasiLock)
+    (lokasiLock ? [lokasiLock] : summary ? summary.saldoTerakhir.filter((s) => s.jenis_bbm === jenis).map((s) => s.lokasi) : [])
       .sort()
       .map((lok) => ({ jenis, lok, saldo: saldoFor(jenis, lok) }))
   ).filter((c) => c.saldo !== undefined);

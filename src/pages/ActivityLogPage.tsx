@@ -7,7 +7,7 @@ import { fetchAllRows, type TableReport } from "../lib/printTable";
 
 const ESTATES_BY_MODULE = {
   BARANG: ["NILAM", "KNS", "WJA", "ZAMRUD", "FIRUS"],
-  BBM: ["NILAM", "WJA", "KNS"],
+  BBM: ["NILAM", "WJA", "KNS", "ZAMRUD", "FIRUS"],
 };
 
 const formatWaktu = (iso: string) =>

@@ -3,11 +3,11 @@ import { X } from "lucide-react";
 import { api, type BbmSummary } from "../lib/api";
 
 const JENIS_OPTIONS = ["SOLAR", "BENSIN"] as const;
-// Both SOLAR and BENSIN only have physical storage at these 3 sites - Zamrud/Firus/AKSS/UKM etc.
-// are distribution destinations under Nilam, not separate warehouses (picked via the Estate field).
+// BBM storage sites (see BBM_LOKASI_OPTIONS in server/src/app.ts). Sub-locations like AKSS/UKM are
+// distribution destinations picked via the Estate field, not separate storage.
 const LOKASI_BY_JENIS: Record<string, string[]> = {
-  SOLAR: ["NILAM", "WJA", "KNS"],
-  BENSIN: ["NILAM", "WJA", "KNS"],
+  SOLAR: ["NILAM", "WJA", "KNS", "ZAMRUD", "FIRUS"],
+  BENSIN: ["NILAM", "WJA", "KNS", "ZAMRUD", "FIRUS"],
 };
 
 function todayIso(): string {
