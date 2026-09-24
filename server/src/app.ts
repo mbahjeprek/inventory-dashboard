@@ -71,7 +71,8 @@ app.use("/api", (req, res, next) => {
 });
 
 // A 'superuser' sees/manages everything; an 'estate' user is locked to their own estate's
-// Gudang/BBM data. These two helpers gate routes accordingly - see schema.sql's comment on
+// Gudang/BBM data and may only add to it - editing, deleting and stock corrections are
+// superuser-only. These two helpers gate routes accordingly - see schema.sql's comment on
 // users.role/estate for the reasoning.
 function requireSuperuser(req: express.Request, res: express.Response, next: express.NextFunction) {
   if (req.user!.role !== "superuser") return res.status(403).json({ error: "Akses ditolak" });
@@ -90,7 +91,7 @@ function requireEstate(estate: string) {
 }
 
 // ---- Activity log (audit trail), see schema.sql's activity_log ----
-type LogModule = "BARANG" | "BBM" | "PUPUK";
+type LogModule = "BARANG" | "BBM" | "PUPUK" | "KLINIK";
 
 // Records who changed what. Called after the change succeeded; a logging failure is reported but
 // never fails the user's action itself.
@@ -121,7 +122,7 @@ function describeChanges(before: Record<string, any>, after: Record<string, any>
 
 // Nilam/Zamrud/Firus are consumer/destination estates, NOT separate physical warehouses.
 // There is only one physical stock pool (the main warehouse, located at Nilam).
-const TUJUAN_OPTIONS = ["NILAM", "ZAMRUD", "FIRUS"];
+const TUJUAN_OPTIONS = ["NILAM", "KNS", "WJA", "ZAMRUD", "FIRUS"];
 
 // BBM (fuel, Solar & Bensin) physical storage/gudang sites. Nilam, WJA and KNS hold the imported
 // history; Zamrud and Firus were added later as their own lokasi so they can record their own stock
@@ -230,6 +231,66 @@ app.get("/api/summary", requireEstate("NILAM"), async (_req, res) => {
   res.json({ totalItems, lowStock, outOfStock, totalStock, totalStockIn, totalStockOut, statusBreakdown, perTujuan });
 });
 
+// ---- Top barang keluar (dashboard ranking) ----
+// Ranks the items that went out most, over the chosen estates and period, either by total qty or
+// by number of transactions. Gudang: Nilam's outflow is stock_out_log (manual OUTs are mirrored
+// there, corrections are not), the other gudang use gudang_stock_tx. Klinik uses klinik_stock_tx.
+// Koreksi rows are left out - they fix a count, they aren't usage.
+app.get("/api/top-keluar", async (req, res) => {
+  const { source = "gudang", estates = "", sortBy = "trx", dateFrom = "", dateTo = "", tz = "", limit = "10" } =
+    req.query as Record<string, string>;
+  if (!["gudang", "klinik"].includes(source)) return res.status(400).json({ error: "Sumber tidak valid" });
+  const requested = estates ? estates.split(",") : [...ESTATES];
+  const allowed = requested.filter((e) => (ESTATES as readonly string[]).includes(e) && estateAllowed(req.user!, e));
+  if (!allowed.length) return res.json({ rows: [], totalQty: 0, totalTrx: 0 });
+
+  const params: any = {
+    tz: /^[A-Za-z_]+(\/[A-Za-z0-9_+-]+)*$/.test(tz) ? tz : "Asia/Jakarta",
+    dateFrom: dateFrom || "1900-01-01",
+    dateTo: dateTo || "9999-12-31",
+    limit: Math.min(Math.max(parseInt(limit) || 10, 1), 50),
+  };
+  const txDate = "(t.created_at AT TIME ZONE @tz)::date BETWEEN @dateFrom::date AND @dateTo::date";
+
+  let srcSql: string;
+  let master: string;
+  if (source === "gudang") {
+    const parts: string[] = [];
+    if (allowed.includes("NILAM")) {
+      parts.push(`SELECT s.kode, s.qty FROM stock_out_log s
+        WHERE s.kode IS NOT NULL AND s.tanggal_keluar_iso BETWEEN @dateFrom AND @dateTo`);
+    }
+    params.gudangs = allowed.filter((e) => GUDANG_STOCK_OPTIONS.includes(e));
+    if (params.gudangs.length) {
+      parts.push(`SELECT t.item_kode, t.qty FROM gudang_stock_tx t
+        WHERE t.type = 'OUT' AND t.is_correction = 0 AND t.gudang = ANY(@gudangs::text[]) AND ${txDate}`);
+    }
+    srcSql = parts.join(" UNION ALL ");
+    master = "items";
+  } else {
+    params.kliniks = allowed;
+    srcSql = `SELECT t.obat_kode, t.qty FROM klinik_stock_tx t
+      WHERE t.type = 'OUT' AND t.is_correction = 0 AND t.klinik = ANY(@kliniks::text[]) AND ${txDate}`;
+    master = "obat";
+  }
+
+  const order = sortBy === "trx" ? "trx DESC, qty DESC" : "qty DESC, trx DESC";
+  const rows = await queryMany(
+    `WITH src(kode, qty) AS (${srcSql}),
+     agg AS (SELECT kode, SUM(qty)::float qty, COUNT(*)::int trx FROM src GROUP BY kode)
+     SELECT agg.kode, m.id, COALESCE(m.nama, agg.kode) nama, m.satuan, agg.qty, agg.trx,
+       SUM(agg.qty) OVER ()::float "totalQty", SUM(agg.trx) OVER ()::int "totalTrx"
+     FROM agg LEFT JOIN ${master} m ON m.kode = agg.kode
+     ORDER BY ${order}, nama LIMIT @limit`,
+    params
+  );
+  res.json({
+    rows: rows.map(({ totalQty: _q, totalTrx: _t, ...r }) => r),
+    totalQty: rows[0]?.totalQty ?? 0,
+    totalTrx: rows[0]?.totalTrx ?? 0,
+  });
+});
+
 // ---- Distinct satuan values (for filter dropdown) ----
 app.get("/api/satuan-options", async (_req, res) => {
   const rows = await queryMany<{ satuan: string }>(
@@ -237,6 +298,31 @@ app.get("/api/satuan-options", async (_req, res) => {
   );
   res.json(rows.map((r) => r.satuan));
 });
+
+// Every word must appear somewhere in kode or nama, in any order, so "filter oli klx" finds
+// "FILTER OLI MOTOR KLX". `alias` is the items table alias in the query ("" or "i.").
+// Every search word must appear in at least one of `cols` (so "pipa 4" finds "PIPA PVC 4 IN").
+function wordSearch(search: string, cols: string[], conditions: string[], params: Record<string, any>) {
+  search
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 10)
+    .forEach((word, i) => {
+      conditions.push(`(${cols.map((c) => `${c} ILIKE @search${i}`).join(" OR ")})`);
+      params[`search${i}`] = `%${word}%`;
+    });
+}
+
+// Word search over a master table's kode + nama plus `extra` columns; a bare column name gets the
+// table `alias`, a qualified one ("t.note") is used as is.
+function addWordSearch(search: string, alias: string, conditions: string[], params: Record<string, any>, extra: string[] = []) {
+  const cols = ["kode", "nama", ...extra].map((c) => (c.includes(".") ? c : `${alias}${c}`));
+  wordSearch(search, cols, conditions, params);
+}
+
+// Obat can also be found by their kategori, jenis (kelompok obat) or deskripsi, e.g. "antibiotik".
+const OBAT_SEARCH = ["kategori", "jenis", "deskripsi"];
 
 // ---- Items list with search/filter/sort/pagination ----
 app.get("/api/items", async (req, res) => {
@@ -258,10 +344,7 @@ app.get("/api/items", async (req, res) => {
   const conditions: string[] = [];
   const params: any = {};
 
-  if (search) {
-    conditions.push("(kode ILIKE @search OR nama ILIKE @search)");
-    params.search = `%${search}%`;
-  }
+  addWordSearch(search, "", conditions, params, ["satuan"]);
   if (status) {
     conditions.push("keterangan = @status");
     params.status = status;
@@ -331,7 +414,7 @@ app.post("/api/items", requireEstate("NILAM"), async (req, res) => {
   }
 });
 
-app.put("/api/items/:id", requireEstate("NILAM"), async (req, res) => {
+app.put("/api/items/:id", requireSuperuser, async (req, res) => {
   const { kode, nama, satuan, buffer_stock } = req.body;
   const existing = await queryOne("SELECT * FROM items WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Not found" });
@@ -370,7 +453,7 @@ app.put("/api/items/:id", requireEstate("NILAM"), async (req, res) => {
   res.json({ success: true });
 });
 
-app.delete("/api/items/:id", requireEstate("NILAM"), async (req, res) => {
+app.delete("/api/items/:id", requireSuperuser, async (req, res) => {
   const { id } = req.params;
   const existing = await queryOne("SELECT * FROM items WHERE id = @id", { id });
   if (!existing) return res.status(404).json({ error: "Not found" });
@@ -399,6 +482,15 @@ app.delete("/api/items/:id", requireEstate("NILAM"), async (req, res) => {
 // Nilam's stock lives directly on `items`; these gudang instead keep their own buffer/stock
 // quantities in `gudang_stock`, picking the item name/satuan from that same master item list.
 const GUDANG_STOCK_OPTIONS = ["KNS", "WJA", "ZAMRUD", "FIRUS"];
+// The estates each of these sites supplies (KNS and WJA each supply two): the Stok Keluar tujuan of
+// their gudang and the BBM Estate choices of their lokasi. Only Gudang Nilam supplies other estates.
+// Keep in sync with GUDANG_TUJUAN in src/lib/api.ts.
+const GUDANG_TUJUAN: Record<string, string[]> = {
+  KNS: ["MALAPIAK", "TAGANG"],
+  WJA: ["LUBAKAN", "TAGUL"],
+  ZAMRUD: ["ZAMRUD"],
+  FIRUS: ["FIRUS"],
+};
 
 app.get("/api/gudang-stock/summary", async (req, res) => {
   const { gudang = "" } = req.query as Record<string, string>;
@@ -444,10 +536,7 @@ app.get("/api/gudang-stock", async (req, res) => {
   const conditions: string[] = ["gs.gudang = @gudang"];
   const params: any = { gudang };
 
-  if (search) {
-    conditions.push("(i.kode ILIKE @search OR i.nama ILIKE @search)");
-    params.search = `%${search}%`;
-  }
+  addWordSearch(search, "i.", conditions, params, ["satuan"]);
   if (satuan) {
     conditions.push("i.satuan = @satuan");
     params.satuan = satuan;
@@ -513,7 +602,7 @@ app.post("/api/gudang-stock", async (req, res) => {
   }
 });
 
-app.put("/api/gudang-stock/:id", async (req, res) => {
+app.put("/api/gudang-stock/:id", requireSuperuser, async (req, res) => {
   const existing = await queryOne<any>("SELECT * FROM gudang_stock WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Not found" });
   if (!estateAllowed(req.user!, existing.gudang)) return res.status(403).json({ error: "Akses ditolak" });
@@ -539,7 +628,7 @@ app.put("/api/gudang-stock/:id", async (req, res) => {
   res.json({ success: true });
 });
 
-app.delete("/api/gudang-stock/:id", async (req, res) => {
+app.delete("/api/gudang-stock/:id", requireSuperuser, async (req, res) => {
   const existing = await queryOne<any>("SELECT * FROM gudang_stock WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Not found" });
   if (!estateAllowed(req.user!, existing.gudang)) return res.status(403).json({ error: "Akses ditolak" });
@@ -557,6 +646,186 @@ app.delete("/api/gudang-stock/:id", async (req, res) => {
 });
 
 // ---- Combined movement history for one item (stock in + stock out + manual transactions) ----
+// ---- Stock In / Stock Out / Koreksi for the non-Nilam gudang (same form as Nilam) ----
+
+// Picker list for the transaction form: every master barang with its stock in this gudang
+// (0 when the gudang doesn't hold it yet - a Stock In adds it).
+app.get("/api/gudang-stock/pick", async (req, res) => {
+  const { gudang = "", search = "", page = "1", pageSize = "50" } = req.query as Record<string, string>;
+  if (!GUDANG_STOCK_OPTIONS.includes(gudang)) return res.status(400).json({ error: "Gudang tidak valid" });
+  if (!estateAllowed(req.user!, gudang)) return res.status(403).json({ error: "Akses ditolak" });
+
+  const conditions: string[] = [];
+  const params: any = { gudang };
+  addWordSearch(search, "i.", conditions, params, ["satuan"]);
+  const where = conditions.length ? "WHERE " + conditions.join(" AND ") : "";
+  const joinSql = `FROM items i LEFT JOIN gudang_stock gs ON gs.item_kode = i.kode AND gs.gudang = @gudang ${where}`;
+
+  const total = (await queryOne<any>(`SELECT COUNT(*) c ${joinSql}`, params))!.c;
+  const limit = Math.min(parseInt(pageSize) || 50, 500);
+  const offset = (Math.max(parseInt(page) || 1, 1) - 1) * limit;
+  const data = await queryMany(
+    `SELECT i.id, i.kode, i.nama, i.satuan, COALESCE(gs.buffer_stock, 0) buffer_stock,
+            COALESCE(gs.stock_tersedia, 0) stock_tersedia,
+            CASE WHEN COALESCE(gs.stock_tersedia, 0) > 0 THEN 'AMAN' ELSE 'BUFFER STOCK' END AS keterangan
+     ${joinSql} ORDER BY i.kode LIMIT @limit OFFSET @offset`,
+    { ...params, limit, offset }
+  );
+  res.json({ data, total: Number(total), page: parseInt(page), pageSize: limit });
+});
+
+// A per-location stock ledger: the stock table, its movement table and their column names.
+// Gudang (KNS/WJA/Zamrud/Firus) and Klinik share the same Stock In/Out/Koreksi logic.
+type StockLedger = { stock: string; tx: string; scope: string; item: string };
+const GUDANG_LEDGER: StockLedger = { stock: "gudang_stock", tx: "gudang_stock_tx", scope: "gudang", item: "item_kode" };
+const KLINIK_LEDGER: StockLedger = { stock: "klinik_stock", tx: "klinik_stock_tx", scope: "klinik", item: "obat_kode" };
+
+// Gudang (KNS/WJA/Zamrud/Firus) qty may be decimal (see schema.sql); Klinik qty is a whole number.
+const round3 = (n: number) => Math.round(n * 1000) / 1000;
+const validQty = (l: StockLedger, v: unknown): v is number =>
+  typeof v === "number" && Number.isFinite(v) && (l === GUDANG_LEDGER || Number.isInteger(v));
+
+type Movement = {
+  scope: string;
+  item: string;
+  type: "IN" | "OUT";
+  qty: number;
+  tujuan: string;
+  penerima: string;
+  note: string | null;
+  is_correction: number;
+  // Only on gudang_stock_tx: the Nilam Stok Keluar (transactions.id) this Stok Masuk came from.
+  transferFromId?: number;
+};
+
+// Applies one movement to a location's stock, creating its stock row on first use.
+// Returns the stock before the change.
+async function applyMovement(client: PoolClient, req: express.Request, l: StockLedger, m: Movement) {
+  await execute(
+    `INSERT INTO ${l.stock} (${l.scope}, ${l.item}, buffer_stock, stock_tersedia) VALUES (@scope, @item, 0, 0)
+     ON CONFLICT (${l.scope}, ${l.item}) DO NOTHING`,
+    m,
+    client
+  );
+  const row = (await queryOne<any>(
+    `SELECT id, stock_tersedia FROM ${l.stock} WHERE ${l.scope} = @scope AND ${l.item} = @item FOR UPDATE`,
+    m,
+    client
+  ))!;
+  const link = m.transferFromId !== undefined;
+  await execute(
+    `INSERT INTO ${l.tx} (${l.scope}, ${l.item}, type, qty, tujuan, penerima, note, is_correction, user_id${link ? ", transfer_from_id" : ""})
+     VALUES (@scope, @item, @type, @qty, @tujuan, @penerima, @note, @is_correction, @user_id${link ? ", @transferFromId" : ""})`,
+    { ...m, user_id: req.user!.id },
+    client
+  );
+  await execute(
+    `UPDATE ${l.stock} SET stock_tersedia = ROUND((stock_tersedia + @delta)::numeric, 3) WHERE id = @id`,
+    { delta: m.type === "IN" ? m.qty : -m.qty, id: row.id },
+    client
+  );
+  return row.stock_tersedia as number;
+}
+
+// Stock In / Stock Out; a Stock Out larger than the stock is rolled back. Returns an error message or null.
+async function recordMovement(req: express.Request, l: StockLedger, m: Movement): Promise<string | null> {
+  try {
+    await withTransaction(async (client) => {
+      const before = await applyMovement(client, req, l, m);
+      // Thrown inside the transaction so the movement is rolled back.
+      if (m.type === "OUT" && m.qty > before) throw Object.assign(new Error("insufficient stock"), { stockAvailable: before });
+    });
+    return null;
+  } catch (e: any) {
+    if (e.stockAvailable !== undefined) return `Stock tersedia hanya ${e.stockAvailable}`;
+    throw e;
+  }
+}
+
+// Koreksi: sets the stock to the counted quantity via one IN/OUT movement. Returns the stock before.
+async function recordCorrection(req: express.Request, l: StockLedger, scope: string, item: string, actual: number, note: string) {
+  let before = 0;
+  await withTransaction(async (client) => {
+    const current = await queryOne<any>(
+      `SELECT stock_tersedia FROM ${l.stock} WHERE ${l.scope} = @scope AND ${l.item} = @item FOR UPDATE`,
+      { scope, item },
+      client
+    );
+    before = current?.stock_tersedia ?? 0;
+    const delta = round3(actual - before);
+    if (delta === 0) return;
+    await applyMovement(client, req, l, {
+      scope,
+      item,
+      type: delta > 0 ? "IN" : "OUT",
+      qty: Math.abs(delta),
+      tujuan: "",
+      penerima: "",
+      note: `Koreksi Stok (Opname)${note ? `: ${note}` : ""}`,
+      is_correction: 1,
+    });
+  });
+  return before;
+}
+
+const movementDetail = (qty: number, tujuan?: string, penerima?: string, note?: string) =>
+  [`Jumlah: ${qty}`, tujuan && `Tujuan: ${tujuan}`, penerima && `Penerima: ${penerima}`, note && `Catatan: ${note}`].filter(Boolean).join("; ");
+
+app.post("/api/gudang-stock/transactions", async (req, res) => {
+  const { gudang, item_kode, type, qty, tujuan, penerima, note } = req.body;
+  if (!GUDANG_STOCK_OPTIONS.includes(gudang)) return res.status(400).json({ error: "Gudang tidak valid" });
+  if (!estateAllowed(req.user!, gudang)) return res.status(403).json({ error: "Akses ditolak" });
+  if (!["IN", "OUT"].includes(type) || !validQty(GUDANG_LEDGER, qty) || qty <= 0) return res.status(400).json({ error: "Invalid payload" });
+  if (tujuan && !GUDANG_TUJUAN[gudang].includes(tujuan)) {
+    return res.status(400).json({ error: `Gudang ${gudang} hanya bisa menyuplai ${GUDANG_TUJUAN[gudang].join(", ")}` });
+  }
+
+  const item = await queryOne<any>("SELECT kode, nama FROM items WHERE kode = @item_kode", { item_kode });
+  if (!item) return res.status(404).json({ error: "Barang tidak ditemukan di master data" });
+
+  const err = await recordMovement(req, GUDANG_LEDGER, {
+    scope: gudang,
+    item: item_kode,
+    type,
+    qty: round3(qty),
+    tujuan: tujuan || "",
+    penerima: penerima || "",
+    note: note || null,
+    is_correction: 0,
+  });
+  if (err) return res.status(400).json({ error: err });
+
+  await logActivity(req, {
+    module: "BARANG",
+    estate: gudang,
+    aksi: type === "IN" ? "Stok Masuk" : "Stok Keluar",
+    objek: `${item.kode} - ${item.nama}`,
+    detail: movementDetail(qty, tujuan, penerima, note),
+  });
+  res.json({ success: true });
+});
+
+app.post("/api/gudang-stock/correction", requireSuperuser, async (req, res) => {
+  const { gudang, item_kode, actual_qty, note } = req.body;
+  if (!GUDANG_STOCK_OPTIONS.includes(gudang)) return res.status(400).json({ error: "Gudang tidak valid" });
+  if (!validQty(GUDANG_LEDGER, actual_qty) || actual_qty < 0) return res.status(400).json({ error: "Invalid payload" });
+
+  const item = await queryOne<any>("SELECT kode, nama FROM items WHERE kode = @item_kode", { item_kode });
+  if (!item) return res.status(404).json({ error: "Barang tidak ditemukan di master data" });
+
+  const before = await recordCorrection(req, GUDANG_LEDGER, gudang, item_kode, actual_qty, note);
+  const delta = actual_qty - before;
+
+  await logActivity(req, {
+    module: "BARANG",
+    estate: gudang,
+    aksi: "Koreksi Stok",
+    objek: `${item.kode} - ${item.nama}`,
+    detail: `Stock: ${before} → ${actual_qty} (selisih ${delta > 0 ? "+" : ""}${delta})${note ? `; Catatan: ${note}` : ""}`,
+  });
+  res.json({ success: true, delta });
+});
+
 app.get("/api/items/:id/movements", requireEstate("NILAM"), async (req, res) => {
   const itemId = req.params.id;
 
@@ -654,6 +923,62 @@ async function applyStockEffect(
   );
 }
 
+// ---- Transfer Gudang Nilam -> gudang estate lain ----
+// Gudang Nilam supplies every estate; a Nilam Stok Keluar whose tujuan is KNS/WJA/Zamrud/Firus books
+// the same qty as Stok Masuk in that estate's gudang. The receiving gudang_stock_tx row points back
+// via transfer_from_id (see schema.sql), is rebuilt when the Stok Keluar is edited, removed with it,
+// and can't be edited or deleted on its own. The other gudang only supply their own estate (GUDANG_TUJUAN).
+type TransferChange = { estate: string; qty: number } | null;
+const TRANSFER_LOCKED = "Stok masuk ini otomatis dari Gudang NILAM. Ubah atau hapus lewat stok keluar di Gudang NILAM.";
+
+async function addTransfer(
+  client: PoolClient,
+  req: express.Request,
+  nilamTxId: number,
+  itemKode: string,
+  tujuan: string | undefined,
+  qty: number,
+  penerima: string | undefined,
+  note: string | null | undefined
+): Promise<TransferChange> {
+  if (!tujuan || !GUDANG_STOCK_OPTIONS.includes(tujuan)) return null;
+  await applyMovement(client, req, GUDANG_LEDGER, {
+    scope: tujuan,
+    item: itemKode,
+    type: "IN",
+    qty,
+    tujuan: "",
+    penerima: penerima || "",
+    note: `Transfer dari Gudang NILAM${note ? `: ${note}` : ""}`,
+    is_correction: 0,
+    transferFromId: nilamTxId,
+  });
+  return { estate: tujuan, qty };
+}
+
+// Undoes the Stok Masuk a Nilam Stok Keluar transferred into another gudang, if any.
+async function removeTransfer(client: PoolClient, nilamTxId: number): Promise<TransferChange> {
+  const g = await queryOne<any>(`DELETE FROM gudang_stock_tx WHERE transfer_from_id = @id RETURNING *`, { id: nilamTxId }, client);
+  if (!g) return null;
+  await execute(
+    `UPDATE gudang_stock SET stock_tersedia = ROUND((stock_tersedia - @qty)::numeric, 3) WHERE gudang = @gudang AND item_kode = @item`,
+    { qty: g.qty, gudang: g.gudang, item: g.item_kode },
+    client
+  );
+  return { estate: g.gudang, qty: g.qty };
+}
+
+// Logs the receiving side of a transfer in the receiving estate's activity log.
+async function logTransfer(req: express.Request, objek: string, removed: TransferChange, added: TransferChange) {
+  if (removed && added && removed.estate === added.estate) {
+    if (removed.qty === added.qty) return;
+    await logActivity(req, { module: "BARANG", estate: added.estate, aksi: "Edit Stok Masuk", objek, detail: `Transfer: Jumlah ${removed.qty} → ${added.qty}` });
+    return;
+  }
+  if (removed) await logActivity(req, { module: "BARANG", estate: removed.estate, aksi: "Hapus Stok Masuk", objek, detail: `Transfer dibatalkan; Jumlah: ${removed.qty}` });
+  if (added) await logActivity(req, { module: "BARANG", estate: added.estate, aksi: "Stok Masuk", objek, detail: `Transfer masuk; Jumlah: ${added.qty}` });
+}
+
 app.post("/api/transactions", requireEstate("NILAM"), async (req, res) => {
   const { item_id, tujuan, type, qty, note, penerima } = req.body;
 
@@ -664,6 +989,7 @@ app.post("/api/transactions", requireEstate("NILAM"), async (req, res) => {
   const item = await queryOne<any>("SELECT * FROM items WHERE id = @id", { id: item_id });
   if (!item) return res.status(404).json({ error: "Not found" });
 
+  let transfer: TransferChange = null;
   await withTransaction(async (client) => {
     const result = await queryOne<{ id: number }>(
       `INSERT INTO transactions (item_id, tujuan, type, qty, note, penerima) VALUES (@item_id, @tujuan, @type, @qty, @note, @penerima) RETURNING id`,
@@ -679,6 +1005,7 @@ app.post("/api/transactions", requireEstate("NILAM"), async (req, res) => {
     );
 
     await applyStockEffect(client, item_id, type, qty, 1);
+    if (type === "OUT") transfer = await addTransfer(client, req, result!.id, item.kode, tujuan, qty, penerima, note);
   });
 
   await logActivity(req, {
@@ -690,10 +1017,11 @@ app.post("/api/transactions", requireEstate("NILAM"), async (req, res) => {
       .filter(Boolean)
       .join("; "),
   });
+  await logTransfer(req, `${item.kode} - ${item.nama}`, null, transfer);
   res.json({ success: true });
 });
 
-app.put("/api/transactions/:id", requireEstate("NILAM"), async (req, res) => {
+app.put("/api/transactions/:id", requireSuperuser, async (req, res) => {
   const existing = await queryOne<any>("SELECT * FROM transactions WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Not found" });
 
@@ -704,7 +1032,13 @@ app.put("/api/transactions/:id", requireEstate("NILAM"), async (req, res) => {
 
   const item = await queryOne<any>("SELECT * FROM items WHERE id = @id", { id: existing.item_id });
 
+  let removed: TransferChange = null;
+  let added: TransferChange = null;
   await withTransaction(async (client) => {
+    removed = await removeTransfer(client, existing.id);
+    if (type === "OUT" && !existing.is_correction) {
+      added = await addTransfer(client, req, existing.id, item.kode, tujuan, qty, penerima, note);
+    }
     await applyStockEffect(client, existing.item_id, existing.type, existing.qty, -1);
     await applyStockEffect(client, existing.item_id, type, qty, 1);
     await execute(
@@ -735,14 +1069,16 @@ app.put("/api/transactions/:id", requireEstate("NILAM"), async (req, res) => {
       { type: "Tipe", qty: "Jumlah", tujuan: "Tujuan", penerima: "Penerima", note: "Catatan" }
     ),
   });
+  await logTransfer(req, `${item?.kode} - ${item?.nama}`, removed, added);
   res.json({ success: true });
 });
 
-app.delete("/api/transactions/:id", requireEstate("NILAM"), async (req, res) => {
+app.delete("/api/transactions/:id", requireSuperuser, async (req, res) => {
   const existing = await queryOne<any>("SELECT * FROM transactions WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Not found" });
-
+  let removed: TransferChange = null;
   await withTransaction(async (client) => {
+    removed = await removeTransfer(client, existing.id);
     await applyStockEffect(client, existing.item_id, existing.type, existing.qty, -1);
     if (!existing.is_correction) await deleteMirror(client, existing.mirror_source, existing.mirror_id);
     await execute("DELETE FROM transactions WHERE id = @id", { id: req.params.id }, client);
@@ -756,11 +1092,12 @@ app.delete("/api/transactions/:id", requireEstate("NILAM"), async (req, res) => 
     objek: `${item?.kode} - ${item?.nama}`,
     detail: `${existing.type === "IN" ? "Stok Masuk" : "Stok Keluar"} ${existing.qty}${existing.tujuan ? `; Tujuan: ${existing.tujuan}` : ""}`,
   });
+  await logTransfer(req, `${item?.kode} - ${item?.nama}`, removed, null);
   res.json({ success: true });
 });
 
 // ---- Stock correction (stock opname / physical count adjustment) ----
-app.post("/api/stock-correction", requireEstate("NILAM"), async (req, res) => {
+app.post("/api/stock-correction", requireSuperuser, async (req, res) => {
   const { item_id, actual_qty, note } = req.body;
 
   if (!item_id || actual_qty === undefined || actual_qty < 0) {
@@ -828,10 +1165,7 @@ app.get("/api/stock-in", requireEstate("NILAM"), async (req, res) => {
   const conditions: string[] = [];
   const params: any = {};
 
-  if (search) {
-    conditions.push("(kode ILIKE @search OR nama ILIKE @search)");
-    params.search = `%${search}%`;
-  }
+  addWordSearch(search, "", conditions, params, ["satuan", "nama_vendor", "tujuan", "divisi", "po_in_akss", "no_pr", "keterangan"]);
   if (tujuan && TUJUAN_OPTIONS.includes(tujuan)) {
     conditions.push("tujuan = @tujuan");
     params.tujuan = tujuan;
@@ -872,7 +1206,7 @@ app.get("/api/stock-in/vendors", requireEstate("NILAM"), async (_req, res) => {
   res.json(rows.map((r) => r.nama_vendor));
 });
 
-app.put("/api/stock-in/:id", requireEstate("NILAM"), async (req, res) => {
+app.put("/api/stock-in/:id", requireSuperuser, async (req, res) => {
   const existing = await queryOne("SELECT * FROM stock_in_log WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Not found" });
 
@@ -904,7 +1238,7 @@ app.put("/api/stock-in/:id", requireEstate("NILAM"), async (req, res) => {
   res.json({ success: true });
 });
 
-app.delete("/api/stock-in/:id", requireEstate("NILAM"), async (req, res) => {
+app.delete("/api/stock-in/:id", requireSuperuser, async (req, res) => {
   const existing = await queryOne<any>("SELECT * FROM stock_in_log WHERE id = @id", { id: req.params.id });
   const result = await execute("DELETE FROM stock_in_log WHERE id = @id", { id: req.params.id });
   if (result.rowCount === 0) return res.status(404).json({ error: "Not found" });
@@ -932,10 +1266,7 @@ app.get("/api/stock-out", requireEstate("NILAM"), async (req, res) => {
   const conditions: string[] = [];
   const params: any = {};
 
-  if (search) {
-    conditions.push("(kode ILIKE @search OR nama ILIKE @search OR penerima ILIKE @search)");
-    params.search = `%${search}%`;
-  }
+  addWordSearch(search, "", conditions, params, ["satuan", "penerima", "tujuan", "divisi", "req_by", "no_request", "no_embrace_gudang", "keterangan"]);
   if (tujuan && TUJUAN_OPTIONS.includes(tujuan)) {
     conditions.push("tujuan = @tujuan");
     params.tujuan = tujuan;
@@ -965,7 +1296,7 @@ app.get("/api/stock-out", requireEstate("NILAM"), async (req, res) => {
   res.json({ data, total: Number(total), qtySum: Number(qtySum), page: parseInt(page), pageSize: limit });
 });
 
-app.put("/api/stock-out/:id", requireEstate("NILAM"), async (req, res) => {
+app.put("/api/stock-out/:id", requireSuperuser, async (req, res) => {
   const existing = await queryOne("SELECT * FROM stock_out_log WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Not found" });
 
@@ -997,7 +1328,7 @@ app.put("/api/stock-out/:id", requireEstate("NILAM"), async (req, res) => {
   res.json({ success: true });
 });
 
-app.delete("/api/stock-out/:id", requireEstate("NILAM"), async (req, res) => {
+app.delete("/api/stock-out/:id", requireSuperuser, async (req, res) => {
   const existing = await queryOne<any>("SELECT * FROM stock_out_log WHERE id = @id", { id: req.params.id });
   const result = await execute("DELETE FROM stock_out_log WHERE id = @id", { id: req.params.id });
   if (result.rowCount === 0) return res.status(404).json({ error: "Not found" });
@@ -1135,6 +1466,22 @@ app.get("/api/karyawan/estate-options", requireSuperuser, async (_req, res) => {
   res.json(rows.map((r) => r.estate));
 });
 
+// Penerima picker in the transaction forms: only the karyawan of the estate the transaction belongs
+// to. Open to that estate's users (the full list above is superuser-only). karyawan.estate is
+// stored as e.g. "Nilam", hence the case-insensitive match.
+app.get("/api/karyawan/pick", async (req, res) => {
+  const { estate = "", search = "" } = req.query as Record<string, string>;
+  if (!(ESTATES as readonly string[]).includes(estate)) return res.status(400).json({ error: "Estate tidak valid" });
+  if (!estateAllowed(req.user!, estate)) return res.status(403).json({ error: "Akses ditolak" });
+  const data = await queryMany(
+    `SELECT nik, nama FROM karyawan
+     WHERE UPPER(estate) = @estate AND (@search = '' OR nama ILIKE @like OR nik ILIKE @like)
+     ORDER BY nama LIMIT 8`,
+    { estate, search, like: `%${search}%` }
+  );
+  res.json(data);
+});
+
 app.get("/api/karyawan", requireSuperuser, async (req, res) => {
   const { search = "", status = "", estate = "", sortBy = "nama", sortDir = "asc", page = "1", pageSize = "50" } =
     req.query as Record<string, string>;
@@ -1261,10 +1608,7 @@ app.get("/api/alat-berat", requireSuperuser, async (req, res) => {
   const conditions: string[] = [];
   const params: any = {};
 
-  if (search) {
-    conditions.push("(kode ILIKE @search OR nama ILIKE @search)");
-    params.search = `%${search}%`;
-  }
+  addWordSearch(search, "", conditions, params, ["jenis_unit"]);
   if (jenis_unit) {
     conditions.push("jenis_unit = @jenis_unit");
     params.jenis_unit = jenis_unit;
@@ -1355,8 +1699,6 @@ const BBM_ESTATE_JUNK = ["BENSIN MASUK", "STOCK AWAL", "PEMINJAMAN"];
 // Known sub-locations that don't have any historical transactions yet, so they wouldn't otherwise
 // appear in the distinct-estate query - added manually so they're selectable from the start.
 const BBM_ESTATE_EXTRA: Record<string, string[]> = {
-  WJA: ["TAGUL"],
-  KNS: ["MALAPIAK"],
   ZAMRUD: ["ZAMRUD"],
   FIRUS: ["FIRUS"],
 };
@@ -1364,6 +1706,8 @@ const BBM_ESTATE_EXTRA: Record<string, string[]> = {
 app.get("/api/bbm/estate-options", async (req, res) => {
   const { lokasi = "" } = req.query as Record<string, string>;
   if (lokasi && !estateAllowed(req.user!, lokasi)) return res.status(403).json({ error: "Akses ditolak" });
+  // KNS and WJA supply a fixed pair of estates, same as their gudang (see GUDANG_TUJUAN).
+  if (lokasi === "KNS" || lokasi === "WJA") return res.json(GUDANG_TUJUAN[lokasi]);
   const conditions = ["estate IS NOT NULL", "TRIM(estate) != ''"];
   const params: any = {};
   // Shared across Solar and Bensin on purpose: a sub-location (e.g. AKSS/UKM, only ever recorded
@@ -1534,7 +1878,7 @@ app.post("/api/bbm", async (req, res) => {
   res.json({ success: true, id: result!.id, saldo_stock: saldoBaru });
 });
 
-app.put("/api/bbm/:id", async (req, res) => {
+app.put("/api/bbm/:id", requireSuperuser, async (req, res) => {
   const existing = await queryOne<any>("SELECT * FROM bbm_log WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Not found" });
   if (!estateAllowed(req.user!, existing.lokasi)) return res.status(403).json({ error: "Akses ditolak" });
@@ -1584,7 +1928,7 @@ app.put("/api/bbm/:id", async (req, res) => {
   res.json({ success: true });
 });
 
-app.delete("/api/bbm/:id", async (req, res) => {
+app.delete("/api/bbm/:id", requireSuperuser, async (req, res) => {
   const existing = await queryOne<any>("SELECT * FROM bbm_log WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Not found" });
   if (!estateAllowed(req.user!, existing.lokasi)) return res.status(403).json({ error: "Akses ditolak" });
@@ -1622,10 +1966,7 @@ function pupukFilters(q: Record<string, string>) {
     conditions.push("divisi = @divisi");
     params.divisi = q.divisi;
   }
-  if (q.search) {
-    conditions.push("(keterangan ILIKE @search OR blok ILIKE @search OR no_embrace ILIKE @search)");
-    params.search = `%${q.search}%`;
-  }
+  wordSearch(q.search || "", ["jenis_pupuk", "divisi", "blok", "no_embrace", "kode_barang", "keterangan"], conditions, params);
   if (/^\d{4}-\d{2}-\d{2}$/.test(q.dateFrom || "")) {
     conditions.push("tanggal_iso >= @dateFrom");
     params.dateFrom = q.dateFrom;
@@ -1768,7 +2109,7 @@ app.post("/api/pupuk", async (req, res) => {
   res.json({ success: true, id: row!.id, saldo_stock: saldoBaru });
 });
 
-app.put("/api/pupuk/:id", async (req, res) => {
+app.put("/api/pupuk/:id", requireSuperuser, async (req, res) => {
   const existing = await queryOne<any>("SELECT * FROM pupuk_log WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Not found" });
   if (!estateAllowed(req.user!, existing.estate)) return res.status(403).json({ error: "Akses ditolak" });
@@ -1821,7 +2162,7 @@ app.put("/api/pupuk/:id", async (req, res) => {
   res.json({ success: true });
 });
 
-app.delete("/api/pupuk/:id", async (req, res) => {
+app.delete("/api/pupuk/:id", requireSuperuser, async (req, res) => {
   const existing = await queryOne<any>("SELECT * FROM pupuk_log WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Not found" });
   if (!estateAllowed(req.user!, existing.estate)) return res.status(403).json({ error: "Akses ditolak" });
@@ -1843,11 +2184,396 @@ app.delete("/api/pupuk/:id", async (req, res) => {
   res.json({ success: true });
 });
 
+// ---- Master obat (medicines/medical supplies for the clinics) ----
+const OBAT_FIELDS = ["kode", "nama", "kategori", "jenis", "deskripsi", "satuan"] as const;
+const obatPayload = (body: any) =>
+  Object.fromEntries(OBAT_FIELDS.map((f) => [f, String(body[f] ?? "").replace(/\s+/g, " ").trim()])) as Record<(typeof OBAT_FIELDS)[number], string>;
+
+app.get("/api/obat/options", requireSuperuser, async (_req, res) => {
+  const kategori = await queryMany<{ v: string }>("SELECT DISTINCT kategori v FROM obat WHERE kategori <> '' ORDER BY 1");
+  const satuan = await queryMany<{ v: string }>("SELECT DISTINCT satuan v FROM obat WHERE satuan <> '' ORDER BY 1");
+  res.json({ kategori: kategori.map((r) => r.v), satuan: satuan.map((r) => r.v) });
+});
+
+app.get("/api/obat", requireSuperuser, async (req, res) => {
+  const { search = "", kategori = "", satuan = "", sortBy = "kode", sortDir = "asc", page = "1", pageSize = "50" } = req.query as Record<string, string>;
+  const sortCol = ["kode", "nama", "kategori", "jenis", "satuan"].includes(sortBy) ? sortBy : "kode";
+  const dir = sortDir === "desc" ? "DESC" : "ASC";
+  const conditions: string[] = [];
+  const params: any = {};
+  addWordSearch(search, "", conditions, params, OBAT_SEARCH);
+  if (kategori) {
+    conditions.push("kategori = @kategori");
+    params.kategori = kategori;
+  }
+  if (satuan) {
+    conditions.push("satuan = @satuan");
+    params.satuan = satuan;
+  }
+  const where = conditions.length ? "WHERE " + conditions.join(" AND ") : "";
+  const total = (await queryOne<any>(`SELECT COUNT(*) c FROM obat ${where}`, params))!.c;
+  const limit = Math.min(parseInt(pageSize) || 50, 500);
+  const offset = (Math.max(parseInt(page) || 1, 1) - 1) * limit;
+  const data = await queryMany(`SELECT * FROM obat ${where} ORDER BY ${sortCol} ${dir}, kode LIMIT @limit OFFSET @offset`, { ...params, limit, offset });
+  res.json({ data, total: Number(total), page: parseInt(page), pageSize: limit });
+});
+
+app.post("/api/obat", requireSuperuser, async (req, res) => {
+  const o = obatPayload(req.body);
+  if (!o.kode || !o.nama) return res.status(400).json({ error: "Kode dan nama wajib diisi" });
+  try {
+    const row = await queryOne<{ id: number }>(
+      `INSERT INTO obat (kode, nama, kategori, jenis, deskripsi, satuan) VALUES (@kode, @nama, @kategori, @jenis, @deskripsi, @satuan) RETURNING id`,
+      o
+    );
+    await logActivity(req, { module: "KLINIK", estate: null, aksi: "Tambah Obat", objek: `${o.kode} - ${o.nama}`, detail: `Kategori: ${o.kategori || "-"}; Satuan: ${o.satuan || "-"}` });
+    res.json({ success: true, id: row!.id });
+  } catch (e: any) {
+    if (e.code === "23505") return res.status(409).json({ error: "Kode sudah digunakan obat lain" });
+    throw e;
+  }
+});
+
+app.put("/api/obat/:id", requireSuperuser, async (req, res) => {
+  const existing = await queryOne<any>("SELECT * FROM obat WHERE id = @id", { id: req.params.id });
+  if (!existing) return res.status(404).json({ error: "Not found" });
+  const o = obatPayload(req.body);
+  if (!o.kode || !o.nama) return res.status(400).json({ error: "Kode dan nama wajib diisi" });
+  try {
+    await execute(
+      "UPDATE obat SET kode = @kode, nama = @nama, kategori = @kategori, jenis = @jenis, deskripsi = @deskripsi, satuan = @satuan WHERE id = @id",
+      { ...o, id: req.params.id }
+    );
+  } catch (e: any) {
+    if (e.code === "23505") return res.status(409).json({ error: "Kode sudah digunakan obat lain" });
+    throw e;
+  }
+  await logActivity(req, {
+    module: "KLINIK",
+    estate: null,
+    aksi: "Edit Obat",
+    objek: `${o.kode} - ${o.nama}`,
+    detail: describeChanges(existing, o, { kode: "Kode", nama: "Nama", kategori: "Kategori", jenis: "Jenis", deskripsi: "Deskripsi", satuan: "Satuan" }),
+  });
+  res.json({ success: true });
+});
+
+app.delete("/api/obat/:id", requireSuperuser, async (req, res) => {
+  const existing = await queryOne<any>("SELECT * FROM obat WHERE id = @id", { id: req.params.id });
+  if (!existing) return res.status(404).json({ error: "Not found" });
+  try {
+    await execute("DELETE FROM obat WHERE id = @id", { id: req.params.id });
+  } catch (e: any) {
+    // Still held in a clinic's stock or its history.
+    if (e.code === "23503") return res.status(409).json({ error: "Obat ini masih ada di stok/riwayat klinik" });
+    throw e;
+  }
+  await logActivity(req, { module: "KLINIK", estate: null, aksi: "Hapus Obat", objek: `${existing.kode} - ${existing.nama}` });
+  res.json({ success: true });
+});
+
+// ---- Inventory Klinik per estate ----
+const KLINIK_OPTIONS = ["NILAM", "KNS", "WJA", "ZAMRUD", "FIRUS"];
+
+// Days before expiry that count as "segera expired" on the Klinik page.
+const EXPIRY_WARNING_DAYS = 30;
+
+function checkKlinik(req: express.Request, res: express.Response, klinik: string) {
+  if (!KLINIK_OPTIONS.includes(klinik)) {
+    res.status(400).json({ error: "Klinik tidak valid" });
+    return false;
+  }
+  if (!estateAllowed(req.user!, klinik)) {
+    res.status(403).json({ error: "Akses ditolak" });
+    return false;
+  }
+  return true;
+}
+
+// expired_date is stored as YYYY-MM-DD text, so it compares with CURRENT_DATE via ::date.
+const EXPIRING_SQL = `(ks.expired_date IS NOT NULL AND ks.expired_date <> '' AND ks.expired_date::date <= CURRENT_DATE + ${EXPIRY_WARNING_DAYS})`;
+
+app.get("/api/klinik-stock/summary", async (req, res) => {
+  const { klinik = "" } = req.query as Record<string, string>;
+  if (!checkKlinik(req, res, klinik)) return;
+  const row = await queryOne<any>(
+    `SELECT COUNT(*)::int "totalItems", COALESCE(SUM(stock_tersedia), 0)::int "totalStock",
+       COUNT(*) FILTER (WHERE stock_tersedia <= buffer_stock AND buffer_stock > 0)::int "lowStock",
+       COUNT(*) FILTER (WHERE stock_tersedia <= 0)::int "outOfStock",
+       COUNT(*) FILTER (WHERE ${EXPIRING_SQL})::int "expiring"
+     FROM klinik_stock ks WHERE klinik = @klinik`,
+    { klinik }
+  );
+  res.json(row);
+});
+
+app.get("/api/klinik-stock", async (req, res) => {
+  const { klinik = "", search = "", kategori = "", status = "", stock = "", sortBy = "kode", sortDir = "asc", page = "1", pageSize = "50" } =
+    req.query as Record<string, string>;
+  if (!checkKlinik(req, res, klinik)) return;
+
+  const sortCols: Record<string, string> = {
+    kode: "o.kode",
+    nama: "o.nama",
+    kategori: "o.kategori",
+    jenis: "o.jenis",
+    stock_tersedia: "ks.stock_tersedia",
+    buffer_stock: "ks.buffer_stock",
+    expired_date: "NULLIF(ks.expired_date, '')",
+  };
+  const sortCol = sortCols[sortBy] ?? "o.kode";
+  const dir = sortDir === "desc" ? "DESC" : "ASC";
+
+  const conditions = ["ks.klinik = @klinik"];
+  const params: any = { klinik };
+  addWordSearch(search, "o.", conditions, params, OBAT_SEARCH);
+  if (kategori) {
+    conditions.push("o.kategori = @kategori");
+    params.kategori = kategori;
+  }
+  if (status === "AMAN") conditions.push("ks.stock_tersedia > 0");
+  else if (status === "BUFFER STOCK") conditions.push("ks.stock_tersedia <= 0");
+  if (stock === "menipis") conditions.push("ks.stock_tersedia <= ks.buffer_stock AND ks.buffer_stock > 0");
+  if (stock === "habis") conditions.push("ks.stock_tersedia <= 0");
+  if (stock === "expired") conditions.push(EXPIRING_SQL);
+
+  const joinSql = `FROM klinik_stock ks JOIN obat o ON o.kode = ks.obat_kode WHERE ${conditions.join(" AND ")}`;
+  const total = (await queryOne<any>(`SELECT COUNT(*) c ${joinSql}`, params))!.c;
+  const limit = Math.min(parseInt(pageSize) || 50, 500);
+  const offset = (Math.max(parseInt(page) || 1, 1) - 1) * limit;
+  const data = await queryMany(
+    `SELECT ks.id, o.id obat_id, o.kode, o.nama, o.kategori, o.jenis, o.deskripsi, o.satuan, ks.buffer_stock, ks.stock_tersedia,
+            ks.expired_date, ks.catatan,
+            CASE WHEN ks.stock_tersedia > 0 THEN 'AMAN' ELSE 'BUFFER STOCK' END AS keterangan
+     ${joinSql} ORDER BY ${sortCol} ${dir} NULLS LAST, o.kode LIMIT @limit OFFSET @offset`,
+    { ...params, limit, offset }
+  );
+  const kategoriOptions = (await queryMany<{ v: string }>("SELECT DISTINCT kategori v FROM obat WHERE kategori <> '' ORDER BY 1")).map((r) => r.v);
+  res.json({ data, total: Number(total), page: parseInt(page), pageSize: limit, kategoriOptions });
+});
+
+// Picker list for the transaction form: every obat with its stock in this clinic (0 if not held yet).
+app.get("/api/klinik-stock/pick", async (req, res) => {
+  const { klinik = "", search = "", page = "1", pageSize = "50" } = req.query as Record<string, string>;
+  if (!checkKlinik(req, res, klinik)) return;
+  const conditions: string[] = [];
+  const params: any = { klinik };
+  addWordSearch(search, "o.", conditions, params, OBAT_SEARCH);
+  const where = conditions.length ? "WHERE " + conditions.join(" AND ") : "";
+  const joinSql = `FROM obat o LEFT JOIN klinik_stock ks ON ks.obat_kode = o.kode AND ks.klinik = @klinik ${where}`;
+  const total = (await queryOne<any>(`SELECT COUNT(*) c ${joinSql}`, params))!.c;
+  const limit = Math.min(parseInt(pageSize) || 50, 500);
+  const offset = (Math.max(parseInt(page) || 1, 1) - 1) * limit;
+  const data = await queryMany(
+    `SELECT o.id, o.kode, o.nama, o.satuan, COALESCE(ks.buffer_stock, 0) buffer_stock, COALESCE(ks.stock_tersedia, 0) stock_tersedia,
+            CASE WHEN COALESCE(ks.stock_tersedia, 0) > 0 THEN 'AMAN' ELSE 'BUFFER STOCK' END AS keterangan
+     ${joinSql} ORDER BY o.kode LIMIT @limit OFFSET @offset`,
+    { ...params, limit, offset }
+  );
+  res.json({ data, total: Number(total), page: parseInt(page), pageSize: limit });
+});
+
+app.post("/api/klinik-stock/transactions", async (req, res) => {
+  const { klinik, obat_kode, type, qty, tujuan, penerima, note } = req.body;
+  if (!checkKlinik(req, res, klinik)) return;
+  if (!["IN", "OUT"].includes(type) || !Number.isInteger(qty) || qty <= 0) return res.status(400).json({ error: "Invalid payload" });
+  const obat = await queryOne<any>("SELECT kode, nama FROM obat WHERE kode = @obat_kode", { obat_kode });
+  if (!obat) return res.status(404).json({ error: "Obat tidak ditemukan di master data" });
+
+  const err = await recordMovement(req, KLINIK_LEDGER, {
+    scope: klinik,
+    item: obat_kode,
+    type,
+    qty,
+    tujuan: tujuan || "",
+    penerima: penerima || "",
+    note: note || null,
+    is_correction: 0,
+  });
+  if (err) return res.status(400).json({ error: err });
+
+  await logActivity(req, {
+    module: "KLINIK",
+    estate: klinik,
+    aksi: type === "IN" ? "Stok Masuk" : "Stok Keluar",
+    objek: `${obat.kode} - ${obat.nama}`,
+    detail: movementDetail(qty, tujuan, penerima, note),
+  });
+  res.json({ success: true });
+});
+
+app.post("/api/klinik-stock/correction", requireSuperuser, async (req, res) => {
+  const { klinik, obat_kode, actual_qty, note } = req.body;
+  if (!checkKlinik(req, res, klinik)) return;
+  if (!Number.isInteger(actual_qty) || actual_qty < 0) return res.status(400).json({ error: "Invalid payload" });
+  const obat = await queryOne<any>("SELECT kode, nama FROM obat WHERE kode = @obat_kode", { obat_kode });
+  if (!obat) return res.status(404).json({ error: "Obat tidak ditemukan di master data" });
+
+  const before = await recordCorrection(req, KLINIK_LEDGER, klinik, obat_kode, actual_qty, note);
+  const delta = actual_qty - before;
+  await logActivity(req, {
+    module: "KLINIK",
+    estate: klinik,
+    aksi: "Koreksi Stok",
+    objek: `${obat.kode} - ${obat.nama}`,
+    detail: `Stock: ${before} → ${actual_qty} (selisih ${delta > 0 ? "+" : ""}${delta})${note ? `; Catatan: ${note}` : ""}`,
+  });
+  res.json({ success: true, delta });
+});
+
+// Buffer, expiry date and note of one clinic stock row. The quantity itself only changes through
+// Stock In/Out/Koreksi so every change has a history row.
+app.put("/api/klinik-stock/:id", requireSuperuser, async (req, res) => {
+  const existing = await queryOne<any>("SELECT * FROM klinik_stock WHERE id = @id", { id: req.params.id });
+  if (!existing) return res.status(404).json({ error: "Not found" });
+  const { buffer_stock, expired_date, catatan } = req.body;
+  if (expired_date && !/^\d{4}-\d{2}-\d{2}$/.test(expired_date)) return res.status(400).json({ error: "Tanggal expired tidak valid" });
+  const next = { buffer_stock: Number(buffer_stock) || 0, expired_date: expired_date || null, catatan: String(catatan ?? "").trim() };
+  await execute("UPDATE klinik_stock SET buffer_stock = @buffer_stock, expired_date = @expired_date, catatan = @catatan WHERE id = @id", {
+    ...next,
+    id: req.params.id,
+  });
+  const obat = await queryOne<any>("SELECT nama FROM obat WHERE kode = @k", { k: existing.obat_kode });
+  await logActivity(req, {
+    module: "KLINIK",
+    estate: existing.klinik,
+    aksi: "Edit Stok",
+    objek: `${existing.obat_kode} - ${obat?.nama ?? ""}`,
+    detail: describeChanges(existing, next, { buffer_stock: "Buffer", expired_date: "Expired", catatan: "Catatan" }),
+  });
+  res.json({ success: true });
+});
+
+app.delete("/api/klinik-stock/:id", requireSuperuser, async (req, res) => {
+  const existing = await queryOne<any>("SELECT * FROM klinik_stock WHERE id = @id", { id: req.params.id });
+  if (!existing) return res.status(404).json({ error: "Not found" });
+  await execute("DELETE FROM klinik_stock WHERE id = @id", { id: req.params.id });
+  const obat = await queryOne<any>("SELECT nama FROM obat WHERE kode = @k", { k: existing.obat_kode });
+  await logActivity(req, {
+    module: "KLINIK",
+    estate: existing.klinik,
+    aksi: "Hapus Item",
+    objek: `${existing.obat_kode} - ${obat?.nama ?? ""}`,
+    detail: `Stock Tersedia: ${existing.stock_tersedia}`,
+  });
+  res.json({ success: true });
+});
+
+// ---- Stock In / Stock Out history of a gudang (KNS/WJA/Zamrud/Firus) or klinik ----
+// One set of handlers for both ledgers; `master` is the table holding the item names.
+type LedgerRoute = { path: string; ledger: StockLedger; master: string; options: string[]; module: LogModule };
+const LEDGER_ROUTES: LedgerRoute[] = [
+  { path: "gudang-stock", ledger: GUDANG_LEDGER, master: "items", options: GUDANG_STOCK_OPTIONS, module: "BARANG" },
+  { path: "klinik-stock", ledger: KLINIK_LEDGER, master: "obat", options: KLINIK_OPTIONS, module: "KLINIK" },
+];
+
+for (const lr of LEDGER_ROUTES) {
+  const { ledger: l, master } = lr;
+
+  app.get(`/api/${lr.path}/history`, async (req, res) => {
+    const { scope = "", type = "", search = "", dateFrom = "", dateTo = "", tz = "", page = "1", pageSize = "50" } = req.query as Record<string, string>;
+    if (!lr.options.includes(scope)) return res.status(400).json({ error: "Lokasi tidak valid" });
+    if (!estateAllowed(req.user!, scope)) return res.status(403).json({ error: "Akses ditolak" });
+    if (!["IN", "OUT"].includes(type)) return res.status(400).json({ error: "Tipe tidak valid" });
+
+    const conditions = [`t.${l.scope} = @scope`, "t.type = @type"];
+    const params: any = { scope, type, tz: /^[A-Za-z_]+(\/[A-Za-z0-9_+-]+)*$/.test(tz) ? tz : "Asia/Jakarta" };
+    addWordSearch(search, "m.", conditions, params, [...(master === "obat" ? OBAT_SEARCH : ["satuan"]), "t.penerima", "t.tujuan", "t.note"]);
+    if (dateFrom) {
+      conditions.push("(t.created_at AT TIME ZONE @tz)::date >= @dateFrom::date");
+      params.dateFrom = dateFrom;
+    }
+    if (dateTo) {
+      conditions.push("(t.created_at AT TIME ZONE @tz)::date <= @dateTo::date");
+      params.dateTo = dateTo;
+    }
+    const fromSql = `FROM ${l.tx} t JOIN ${master} m ON m.kode = t.${l.item} LEFT JOIN users u ON u.id = t.user_id WHERE ${conditions.join(" AND ")}`;
+    const agg = (await queryOne<any>(`SELECT COUNT(*)::int c, COALESCE(SUM(t.qty), 0)::int q ${fromSql}`, params))!;
+    const limit = Math.min(parseInt(pageSize) || 50, 500);
+    const offset = (Math.max(parseInt(page) || 1, 1) - 1) * limit;
+    const data = await queryMany(
+      `SELECT t.id, t.created_at, t.type, t.qty, t.tujuan, t.penerima, t.note, t.is_correction,
+              ${l === GUDANG_LEDGER ? "t.transfer_from_id IS NOT NULL" : "false"} AS is_transfer,
+              m.kode, m.nama, m.satuan, COALESCE(u.nama, u.username, '') AS input_oleh
+       ${fromSql} ORDER BY t.created_at DESC, t.id DESC LIMIT @limit OFFSET @offset`,
+      { ...params, limit, offset }
+    );
+    res.json({ data, total: agg.c, qtySum: agg.q, page: parseInt(page), pageSize: limit });
+  });
+
+  // Edit a movement's qty/tujuan/penerima/note; the stock is adjusted by the qty difference.
+  app.put(`/api/${lr.path}/history/:id`, requireSuperuser, async (req, res) => {
+    const existing = await queryOne<any>(`SELECT * FROM ${l.tx} WHERE id = @id`, { id: req.params.id });
+    if (!existing) return res.status(404).json({ error: "Not found" });
+    if (existing.transfer_from_id) return res.status(400).json({ error: TRANSFER_LOCKED });
+    const { qty, tujuan, penerima, note } = req.body;
+    if (!validQty(l, qty) || qty <= 0) return res.status(400).json({ error: "Jumlah harus lebih dari 0" });
+    // An older row keeps the tujuan it already had.
+    if (l === GUDANG_LEDGER && tujuan && !GUDANG_TUJUAN[existing.gudang].includes(tujuan) && tujuan !== existing.tujuan) {
+      return res.status(400).json({ error: `Gudang ${existing.gudang} hanya bisa menyuplai ${GUDANG_TUJUAN[existing.gudang].join(", ")}` });
+    }
+
+    const sign = existing.type === "IN" ? 1 : -1;
+    const delta = round3(sign * (qty - existing.qty));
+    await withTransaction(async (client) => {
+      await execute(`UPDATE ${l.tx} SET qty = @qty, tujuan = @tujuan, penerima = @penerima, note = @note WHERE id = @id`, {
+        qty,
+        tujuan: tujuan ?? "",
+        penerima: penerima ?? "",
+        note: note || null,
+        id: existing.id,
+      }, client);
+      await execute(
+        `UPDATE ${l.stock} SET stock_tersedia = ROUND((stock_tersedia + @delta)::numeric, 3) WHERE ${l.scope} = @scope AND ${l.item} = @item`,
+        { delta, scope: existing[l.scope], item: existing[l.item] },
+        client
+      );
+    });
+    const m = await queryOne<any>(`SELECT nama FROM ${master} WHERE kode = @k`, { k: existing[l.item] });
+    await logActivity(req, {
+      module: lr.module,
+      estate: existing[l.scope],
+      aksi: existing.type === "IN" ? "Edit Stok Masuk" : "Edit Stok Keluar",
+      objek: `${existing[l.item]} - ${m?.nama ?? ""}`,
+      detail: describeChanges(
+        existing,
+        { qty, tujuan: tujuan ?? "", penerima: penerima ?? "", note: note || null },
+        { qty: "Jumlah", tujuan: "Tujuan", penerima: "Penerima", note: "Catatan" }
+      ),
+    });
+    res.json({ success: true });
+  });
+
+  // Delete a movement and reverse its effect on the stock.
+  app.delete(`/api/${lr.path}/history/:id`, requireSuperuser, async (req, res) => {
+    const existing = await queryOne<any>(`SELECT * FROM ${l.tx} WHERE id = @id`, { id: req.params.id });
+    if (!existing) return res.status(404).json({ error: "Not found" });
+    if (existing.transfer_from_id) return res.status(400).json({ error: TRANSFER_LOCKED });
+    await withTransaction(async (client) => {
+      await execute(`DELETE FROM ${l.tx} WHERE id = @id`, { id: existing.id }, client);
+      await execute(
+        `UPDATE ${l.stock} SET stock_tersedia = ROUND((stock_tersedia - @delta)::numeric, 3) WHERE ${l.scope} = @scope AND ${l.item} = @item`,
+        { delta: existing.type === "IN" ? existing.qty : -existing.qty, scope: existing[l.scope], item: existing[l.item] },
+        client
+      );
+    });
+    const m = await queryOne<any>(`SELECT nama FROM ${master} WHERE kode = @k`, { k: existing[l.item] });
+    await logActivity(req, {
+      module: lr.module,
+      estate: existing[l.scope],
+      aksi: existing.type === "IN" ? "Hapus Stok Masuk" : "Hapus Stok Keluar",
+      objek: `${existing[l.item]} - ${m?.nama ?? ""}`,
+      detail: `Jumlah: ${existing.qty}${existing.penerima ? `; Penerima: ${existing.penerima}` : ""}${existing.note ? `; Catatan: ${existing.note}` : ""}`,
+    });
+    res.json({ success: true });
+  });
+}
+
 // ---- Activity log listing: separate logs per module, scoped to the caller's estate ----
 app.get("/api/activity-log", async (req, res) => {
   const { module = "", estate = "", aksi = "", search = "", dateFrom = "", dateTo = "", tz = "", page = "1", pageSize = "50" } =
     req.query as Record<string, string>;
-  if (!["BARANG", "BBM", "PUPUK"].includes(module)) return res.status(400).json({ error: "Modul tidak valid" });
+  if (!["BARANG", "BBM", "PUPUK", "KLINIK"].includes(module)) return res.status(400).json({ error: "Modul tidak valid" });
 
   const conditions = ["module = @module"];
   const params: any = { module };
@@ -1893,6 +2619,32 @@ app.get("/api/activity-log", async (req, res) => {
   res.json({ data, total: Number(total), page: parseInt(page), pageSize: limit, aksiOptions });
 });
 
+// Superusers may correct or remove a log entry's text. This only touches the log itself - the
+// stock data the entry describes is left as is.
+app.put("/api/activity-log/:id", requireSuperuser, async (req, res) => {
+  const existing = await queryOne("SELECT id FROM activity_log WHERE id = @id", { id: req.params.id });
+  if (!existing) return res.status(404).json({ error: "Not found" });
+
+  const { aksi, objek, detail } = req.body;
+  if (!String(aksi ?? "").trim()) return res.status(400).json({ error: "Aksi tidak boleh kosong" });
+
+  await execute("UPDATE activity_log SET aksi = @aksi, objek = @objek, detail = @detail WHERE id = @id", {
+    id: req.params.id,
+    aksi: String(aksi).trim(),
+    objek: String(objek ?? "").trim(),
+    detail: String(detail ?? "").trim(),
+  });
+  res.json({ success: true });
+});
+
+app.delete("/api/activity-log/:id", requireSuperuser, async (req, res) => {
+  const existing = await queryOne("SELECT id FROM activity_log WHERE id = @id", { id: req.params.id });
+  if (!existing) return res.status(404).json({ error: "Not found" });
+
+  await execute("DELETE FROM activity_log WHERE id = @id", { id: req.params.id });
+  res.json({ success: true });
+});
+
 app.get("/api/bbm", async (req, res) => {
   const {
     search = "",
@@ -1919,10 +2671,7 @@ app.get("/api/bbm", async (req, res) => {
   const conditions: string[] = [];
   const params: any = {};
 
-  if (search) {
-    conditions.push("(keterangan ILIKE @search OR no_spb ILIKE @search OR estate ILIKE @search)");
-    params.search = `%${search}%`;
-  }
+  wordSearch(search, ["jenis_bbm", "estate", "no_spb", "kode_kendaraan", "keterangan"], conditions, params);
   if (jenis_bbm && ["SOLAR", "BENSIN"].includes(jenis_bbm)) {
     conditions.push("jenis_bbm = @jenis_bbm");
     params.jenis_bbm = jenis_bbm;

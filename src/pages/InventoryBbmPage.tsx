@@ -8,6 +8,8 @@ import { fetchAllRows, type TableReport } from "../lib/printTable";
 import { BbmTransactionModal } from "../components/BbmTransactionModal";
 import { EditBbmModal } from "../components/EditBbmModal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { useAuth } from "../context/AuthContext";
+import { useDragScroll } from "../hooks/useDragScroll";
 
 const JENIS_OPTIONS = ["SOLAR", "BENSIN"];
 
@@ -28,6 +30,9 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [showTransaksi, setShowTransaksi] = useState(false);
+  const { user } = useAuth();
+  const isSuperuser = user?.role === "superuser";
+  const tableScrollRef = useDragScroll<HTMLDivElement>();
   const [editing, setEditing] = useState<BbmRecord | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<BbmRecord | null>(null);
   const pageSize = 25;
@@ -229,7 +234,7 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Cari keterangan, no. SPB, atau estate..."
+            placeholder="Cari jenis BBM, estate, no. SPB, kendaraan, atau keterangan..."
             className="w-full pl-9 pr-3 py-2 text-sm rounded-md border border-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-blue-border)]"
           />
         </div>
@@ -316,7 +321,7 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
       </div>
 
       <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg overflow-hidden">
-        <div className="overflow-x-auto">
+        <div ref={tableScrollRef} className="overflow-x-auto">
           <table className="grid-table w-full text-sm">
             <thead>
               <tr className="bg-[#f8fafc] text-left text-[var(--text-secondary)] text-xs uppercase">
@@ -331,19 +336,19 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
                 <th className="px-4 py-2.5">Kode Kendaraan</th>
                 <th className="px-4 py-2.5 min-w-[150px]">HM Terakhir Sebelum Permintaan Solar</th>
                 <th className="px-4 py-2.5 text-right min-w-[130px]">Total HM Sebelum Pengisian</th>
-                <th className="px-4 py-2.5 text-right">Aksi</th>
+                {isSuperuser && <th className="px-4 py-2.5 text-right">Aksi</th>}
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={12} className="px-4 py-8 text-center text-[var(--text-muted)]">
+                  <td colSpan={isSuperuser ? 12 : 11} className="px-4 py-8 text-center text-[var(--text-muted)]">
                     Memuat...
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={12} className="px-4 py-8 text-center text-[var(--text-muted)]">
+                  <td colSpan={isSuperuser ? 12 : 11} className="px-4 py-8 text-center text-[var(--text-muted)]">
                     Tidak ada data
                   </td>
                 </tr>
@@ -371,24 +376,26 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
                     <td className="px-4 py-2.5 text-right text-xs">
                       {r.total_hm != null ? r.total_hm.toLocaleString("id-ID", { maximumFractionDigits: 1 }) : "-"}
                     </td>
-                    <td className="px-4 py-2.5 text-right">
-                      <div className="inline-flex gap-1.5">
-                        <button
-                          onClick={() => setEditing(r)}
-                          title="Edit"
-                          className="p-1.5 rounded-md border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[#f1f5f9]"
-                        >
-                          <Pencil size={14} />
-                        </button>
-                        <button
-                          onClick={() => setConfirmDelete(r)}
-                          title="Hapus"
-                          className="p-1.5 rounded-md border border-[var(--accent-red-border)] text-[var(--accent-red)] hover:bg-[var(--accent-red-bg)]"
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
-                    </td>
+                    {isSuperuser && (
+                      <td className="px-4 py-2.5 text-right">
+                        <div className="inline-flex gap-1.5">
+                          <button
+                            onClick={() => setEditing(r)}
+                            title="Edit"
+                            className="p-1.5 rounded-md border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[#f1f5f9]"
+                          >
+                            <Pencil size={14} />
+                          </button>
+                          <button
+                            onClick={() => setConfirmDelete(r)}
+                            title="Hapus"
+                            className="p-1.5 rounded-md border border-[var(--accent-red-border)] text-[var(--accent-red)] hover:bg-[var(--accent-red-bg)]"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </td>
+                    )}
                   </tr>
                 ))
               )}

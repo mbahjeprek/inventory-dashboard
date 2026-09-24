@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { X } from "lucide-react";
 import { api, type BbmRecord } from "../lib/api";
 
@@ -18,10 +18,17 @@ export function EditBbmModal({
   const [saldoStock, setSaldoStock] = useState(record.saldo_stock ?? "");
   const [keterangan, setKeterangan] = useState(record.keterangan || "");
   const [estate, setEstate] = useState(record.estate || "");
+  const [estateOptions, setEstateOptions] = useState<string[]>([]);
   const [kodeKendaraan, setKodeKendaraan] = useState(record.kode_kendaraan || "");
   const [hmTerakhir, setHmTerakhir] = useState(record.hm_terakhir || "");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+
+  // Same Estate choices as the input form; an older record keeps the estate it already had.
+  useEffect(() => {
+    api.bbmEstateOptions(record.jenis_bbm, record.lokasi).then(setEstateOptions).catch(() => setEstateOptions([]));
+  }, [record.jenis_bbm, record.lokasi]);
+  const estateList = !record.estate || estateOptions.includes(record.estate) ? estateOptions : [record.estate, ...estateOptions];
 
   const submit = async () => {
     setSubmitting(true);
@@ -112,7 +119,14 @@ export function EditBbmModal({
 
           <div>
             <label className="text-xs text-[var(--text-secondary)] mb-1 block">Estate</label>
-            <input value={estate} onChange={(e) => setEstate(e.target.value)} className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-2" />
+            <select value={estate} onChange={(e) => setEstate(e.target.value)} className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-2">
+              <option value="">- Tidak ditentukan -</option>
+              {estateList.map((e) => (
+                <option key={e} value={e}>
+                  {e}
+                </option>
+              ))}
+            </select>
           </div>
 
           <div className="grid grid-cols-2 gap-3">

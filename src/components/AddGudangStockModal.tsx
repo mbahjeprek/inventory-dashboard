@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { X } from "lucide-react";
-import { api, type Item } from "../lib/api";
+import { api, type PickerItem } from "../lib/api";
 import { ItemPickerModal } from "./ItemPickerModal";
 
 export function AddGudangStockModal({
@@ -12,7 +12,7 @@ export function AddGudangStockModal({
   onClose: () => void;
   onSuccess: () => void;
 }) {
-  const [item, setItem] = useState<Item | null>(null);
+  const [item, setItem] = useState<PickerItem | null>(null);
   const [bufferStock, setBufferStock] = useState(0);
   const [stockTersedia, setStockTersedia] = useState(0);
   const [submitting, setSubmitting] = useState(false);
@@ -68,7 +68,8 @@ export function AddGudangStockModal({
                 type="number"
                 min={0}
                 value={bufferStock}
-                onChange={(e) => setBufferStock(parseInt(e.target.value) || 0)}
+                step="any"
+                onChange={(e) => setBufferStock(parseFloat(e.target.value) || 0)}
                 className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-2"
               />
             </div>
@@ -78,7 +79,8 @@ export function AddGudangStockModal({
                 type="number"
                 min={0}
                 value={stockTersedia}
-                onChange={(e) => setStockTersedia(parseInt(e.target.value) || 0)}
+                step="any"
+                onChange={(e) => setStockTersedia(parseFloat(e.target.value) || 0)}
                 className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-2"
               />
             </div>

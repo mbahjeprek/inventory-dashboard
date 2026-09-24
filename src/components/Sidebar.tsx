@@ -2,10 +2,6 @@ import { useEffect, useState } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import {
   Package,
-  ArrowLeftRight,
-  FileDown,
-  ArrowDownCircle,
-  ArrowUpCircle,
   Users,
   Fuel,
   Truck,
@@ -17,8 +13,11 @@ import {
   KeyRound,
   LayoutDashboard,
   Sprout,
+  Pill,
+  Stethoscope,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
+import { useEstateFilter } from "../hooks/useEstateFilter";
 
 type NavItem = { to: string; label: string; icon: typeof Package };
 type NavSection = { title?: string; collapsible?: boolean; items: NavItem[] };
@@ -65,7 +64,20 @@ const PUPUK_GROUP: DropdownGroup = {
   ],
 };
 
-const DROPDOWN_GROUPS: DropdownGroup[] = [GUDANG_GROUP, BBM_GROUP, PUPUK_GROUP];
+const KLINIK_GROUP: DropdownGroup = {
+  key: "klinik",
+  icon: Stethoscope,
+  title: "Klinik",
+  options: [
+    { to: "/inventory-klinik", label: "Nilam" },
+    { to: "/inventory-klinik-kns", label: "KNS" },
+    { to: "/inventory-klinik-wja", label: "WJA" },
+    { to: "/inventory-klinik-zamrud", label: "Zamrud" },
+    { to: "/inventory-klinik-firus", label: "Firus" },
+  ],
+};
+
+const DROPDOWN_GROUPS: DropdownGroup[] = [GUDANG_GROUP, BBM_GROUP, PUPUK_GROUP, KLINIK_GROUP];
 
 const navSections: NavSection[] = [
   { items: [{ to: "/", label: "Dashboard", icon: LayoutDashboard }] },
@@ -76,20 +88,11 @@ const navSections: NavSection[] = [
 
   },
   {
-    title: "Transaksi",
-    collapsible: true,
-    items: [
-      { to: "/stock-in", label: "Stock In", icon: ArrowDownCircle },
-      { to: "/stock-out", label: "Stock Out", icon: ArrowUpCircle },
-      { to: "/transactions", label: "Riwayat Transaksi", icon: ArrowLeftRight },
-      { to: "/reports", label: "Laporan", icon: FileDown },
-    ],
-  },
-  {
     title: "Master Data",
     collapsible: true,
     items: [
       { to: "/master-barang", label: "Barang", icon: Package },
+      { to: "/master-obat", label: "Obat", icon: Pill },
       { to: "/karyawan", label: "Karyawan", icon: Users },
       { to: "/alat-berat", label: "Alat Berat", icon: Truck },
       { to: "/users", label: "Pengguna", icon: KeyRound },
@@ -139,18 +142,20 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: { mobileOpen?: bo
   const minimized = minimizedPref && isDesktop;
 
   const isSuperuser = user?.role === "superuser";
+  const pickedEstates = useEstateFilter((s) => s.picked);
 
-  // An estate account only ever sees its own Gudang/BBM option and none of the cross-estate
-  // admin sections - Transaksi and Master Data are Nilam/superuser-only, see server-side
-  // requireEstate("NILAM") / requireSuperuser in app.ts for the matching enforcement.
-  const dropdownGroups: DropdownGroup[] = isSuperuser
-    ? DROPDOWN_GROUPS
-    : DROPDOWN_GROUPS.map((g) => ({ ...g, options: g.options.filter((o) => o.label.toUpperCase() === user?.estate) })).filter(
+  // An estate account only ever sees its own estate's options and not Master Data, which is
+  // superuser-only - see requireEstate / requireSuperuser in app.ts for the matching enforcement.
+  // A superuser who picked estates on the dashboard only sees those. Stock In / Stock Out live as
+  // tabs inside each Gudang/Klinik page.
+  const shownEstates: (string | null | undefined)[] | null = isSuperuser ? (pickedEstates.length ? pickedEstates : null) : [user?.estate];
+  const dropdownGroups: DropdownGroup[] = shownEstates
+    ? DROPDOWN_GROUPS.map((g) => ({ ...g, options: g.options.filter((o) => shownEstates.includes(o.label.toUpperCase())) })).filter(
         (g) => g.options.length > 0
-      );
+      )
+    : DROPDOWN_GROUPS;
 
   const visibleSections = navSections.filter((s) => {
-    if (s.title === "Transaksi") return isSuperuser || user?.estate === "NILAM";
     if (s.title === "Master Data") return isSuperuser;
     return true;
   });

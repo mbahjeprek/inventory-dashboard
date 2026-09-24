@@ -2,6 +2,15 @@ export type Role = "superuser" | "estate";
 export const ESTATES = ["NILAM", "KNS", "WJA", "ZAMRUD", "FIRUS"] as const;
 export type Estate = (typeof ESTATES)[number];
 
+// The estates each non-Nilam site supplies (KNS and WJA each supply two): Stok Keluar tujuan of
+// their gudang and the BBM Estate choices. Keep in sync with GUDANG_TUJUAN in server/src/app.ts.
+export const GUDANG_TUJUAN: Record<string, string[]> = {
+  KNS: ["MALAPIAK", "TAGANG"],
+  WJA: ["LUBAKAN", "TAGUL"],
+  ZAMRUD: ["ZAMRUD"],
+  FIRUS: ["FIRUS"],
+};
+
 export type AuthUser = {
   id: number;
   username: string;
@@ -31,6 +40,65 @@ export type Item = {
   stock_out: number;
   stock_fisik: number;
   selisih_stock: number;
+};
+
+// What the Pilih Barang list and the transaction form need; filled from items (Nilam) or from a
+// gudang's own stock (KNS/WJA/Zamrud/Firus, via /api/gudang-stock/pick).
+export type PickerItem = Pick<Item, "id" | "kode" | "nama" | "satuan" | "buffer_stock" | "stock_tersedia" | "keterangan">;
+
+// Where a Stock In/Out/Koreksi goes when it isn't Nilam's gudang (which uses items directly).
+export type StockScope = { kind: "gudang" | "klinik"; name: string };
+
+// One Stock In / Stock Out row of a gudang (KNS/WJA/Zamrud/Firus) or klinik ledger.
+export type LedgerTx = {
+  id: number;
+  created_at: string;
+  type: "IN" | "OUT";
+  qty: number;
+  tujuan: string;
+  penerima: string;
+  note: string | null;
+  is_correction: number;
+  // Stok Masuk booked automatically by a Stok Keluar from another gudang; changed only from there.
+  is_transfer: boolean;
+  kode: string;
+  nama: string;
+  satuan: string;
+  input_oleh: string;
+};
+
+export type Obat = {
+  id: number;
+  kode: string;
+  nama: string;
+  kategori: string;
+  jenis: string;
+  deskripsi: string;
+  satuan: string;
+};
+
+export type KlinikStockItem = {
+  id: number;
+  obat_id: number;
+  kode: string;
+  nama: string;
+  kategori: string;
+  jenis: string;
+  deskripsi: string;
+  satuan: string;
+  buffer_stock: number;
+  stock_tersedia: number;
+  expired_date: string | null;
+  catatan: string;
+  keterangan: string;
+};
+
+export type KlinikSummary = {
+  totalItems: number;
+  totalStock: number;
+  lowStock: number;
+  outOfStock: number;
+  expiring: number;
 };
 
 export type Summary = {
@@ -182,7 +250,7 @@ export type PupukSummary = {
 export type ActivityLog = {
   id: number;
   created_at: string;
-  module: "BARANG" | "BBM" | "PUPUK";
+  module: "BARANG" | "BBM" | "PUPUK" | "KLINIK";
   estate: string | null;
   aksi: string;
   objek: string | null;
@@ -211,6 +279,9 @@ export type Movement = {
   refCode: string | null;
 };
 
+export type TopKeluarRow = { kode: string; id: number | null; nama: string; satuan: string | null; qty: number; trx: number };
+export type TopKeluar = { rows: TopKeluarRow[]; totalQty: number; totalTrx: number };
+
 async function req<T>(url: string, opts?: RequestInit): Promise<T> {
   const res = await fetch(url, {
     headers: { "Content-Type": "application/json" },
@@ -229,6 +300,18 @@ export const api = {
   me: () => req<{ user: AuthUser }>("/api/auth/me"),
 
   summary: () => req<Summary>("/api/summary"),
+
+  topKeluar: (p: { source: "gudang" | "klinik"; estates: string[]; sortBy: "qty" | "trx"; dateFrom?: string; dateTo?: string }) => {
+    const qs = new URLSearchParams({
+      source: p.source,
+      estates: p.estates.join(","),
+      sortBy: p.sortBy,
+      dateFrom: p.dateFrom ?? "",
+      dateTo: p.dateTo ?? "",
+      tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    });
+    return req<TopKeluar>(`/api/top-keluar?${qs}`);
+  },
 
   satuanOptions: () => req<string[]>("/api/satuan-options"),
 
@@ -259,6 +342,92 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
+
+  gudangPickItems: (params: Record<string, string | number>) => {
+    const qs = new URLSearchParams(params as any).toString();
+    return req<{ data: PickerItem[]; total: number; page: number; pageSize: number }>(`/api/gudang-stock/pick?${qs}`);
+  },
+
+  createGudangTransaction: (payload: {
+    gudang: string;
+    item_kode: string;
+    type: "IN" | "OUT";
+    qty: number;
+    tujuan?: string;
+    penerima?: string;
+    note?: string;
+  }) => req<{ success: boolean }>("/api/gudang-stock/transactions", { method: "POST", body: JSON.stringify(payload) }),
+
+  gudangStockCorrection: (payload: { gudang: string; item_kode: string; actual_qty: number; note?: string }) =>
+    req<{ success: boolean; delta: number }>("/api/gudang-stock/correction", { method: "POST", body: JSON.stringify(payload) }),
+
+  obatOptions: () => req<{ kategori: string[]; satuan: string[] }>("/api/obat/options"),
+
+  obat: (params: Record<string, string | number>) => {
+    const qs = new URLSearchParams(params as any).toString();
+    return req<{ data: Obat[]; total: number; page: number; pageSize: number }>(`/api/obat?${qs}`);
+  },
+
+  createObat: (payload: Omit<Obat, "id">) =>
+    req<{ success: boolean; id: number }>("/api/obat", { method: "POST", body: JSON.stringify(payload) }),
+
+  updateObat: (id: number, payload: Omit<Obat, "id">) =>
+    req<{ success: boolean }>(`/api/obat/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
+
+  deleteObat: (id: number) => req<{ success: boolean }>(`/api/obat/${id}`, { method: "DELETE" }),
+
+  klinikSummary: (klinik: string) => req<KlinikSummary>(`/api/klinik-stock/summary?klinik=${klinik}`),
+
+  klinikStock: (params: Record<string, string | number>) => {
+    const qs = new URLSearchParams(params as any).toString();
+    return req<{ data: KlinikStockItem[]; total: number; page: number; pageSize: number; kategoriOptions: string[] }>(
+      `/api/klinik-stock?${qs}`
+    );
+  },
+
+  klinikPickItems: (params: Record<string, string | number>) => {
+    const qs = new URLSearchParams(params as any).toString();
+    return req<{ data: PickerItem[]; total: number; page: number; pageSize: number }>(`/api/klinik-stock/pick?${qs}`);
+  },
+
+  createKlinikTransaction: (payload: {
+    klinik: string;
+    obat_kode: string;
+    type: "IN" | "OUT";
+    qty: number;
+    tujuan?: string;
+    penerima?: string;
+    note?: string;
+  }) => req<{ success: boolean }>("/api/klinik-stock/transactions", { method: "POST", body: JSON.stringify(payload) }),
+
+  klinikStockCorrection: (payload: { klinik: string; obat_kode: string; actual_qty: number; note?: string }) =>
+    req<{ success: boolean; delta: number }>("/api/klinik-stock/correction", { method: "POST", body: JSON.stringify(payload) }),
+
+  updateKlinikStock: (id: number, payload: { buffer_stock: number; expired_date: string; catatan: string }) =>
+    req<{ success: boolean }>(`/api/klinik-stock/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
+
+  deleteKlinikStock: (id: number) => req<{ success: boolean }>(`/api/klinik-stock/${id}`, { method: "DELETE" }),
+
+  // Stock In / Stock Out history of a gudang or klinik ledger.
+  ledgerHistory: (scope: StockScope, params: Record<string, string | number>) => {
+    const qs = new URLSearchParams({
+      ...(params as any),
+      scope: scope.name,
+      tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    }).toString();
+    return req<{ data: LedgerTx[]; total: number; qtySum: number; page: number; pageSize: number }>(
+      `/api/${scope.kind === "klinik" ? "klinik-stock" : "gudang-stock"}/history?${qs}`
+    );
+  },
+
+  updateLedgerTx: (scope: StockScope, id: number, payload: { qty: number; tujuan: string; penerima: string; note: string }) =>
+    req<{ success: boolean }>(`/api/${scope.kind === "klinik" ? "klinik-stock" : "gudang-stock"}/history/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    }),
+
+  deleteLedgerTx: (scope: StockScope, id: number) =>
+    req<{ success: boolean }>(`/api/${scope.kind === "klinik" ? "klinik-stock" : "gudang-stock"}/history/${id}`, { method: "DELETE" }),
 
   transactions: (limit = 100) => req<Transaction[]>(`/api/transactions?limit=${limit}`),
 
@@ -295,6 +464,11 @@ export const api = {
       `/api/activity-log?${qs}`
     );
   },
+
+  updateActivityLog: (id: number, payload: { aksi: string; objek: string; detail: string }) =>
+    req<{ success: boolean }>(`/api/activity-log/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
+
+  deleteActivityLog: (id: number) => req<{ success: boolean }>(`/api/activity-log/${id}`, { method: "DELETE" }),
 
   pupuk: (params: Record<string, string | number>) => {
     const qs = new URLSearchParams(params as any).toString();
@@ -370,6 +544,9 @@ export const api = {
     const qs = new URLSearchParams(params as any).toString();
     return req<{ data: Karyawan[]; total: number; page: number; pageSize: number }>(`/api/karyawan?${qs}`);
   },
+
+  karyawanPick: (estate: string, search: string) =>
+    req<{ nik: string; nama: string }[]>(`/api/karyawan/pick?${new URLSearchParams({ estate, search })}`),
 
   karyawanStatusOptions: () => req<string[]>("/api/karyawan/status-options"),
 

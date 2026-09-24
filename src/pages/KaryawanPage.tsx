@@ -3,6 +3,8 @@ import { Search, ChevronLeft, ChevronRight, ArrowUp, ArrowDown, ArrowUpDown, Fil
 import { api, type Karyawan } from "../lib/api";
 import { EditKaryawanModal } from "../components/EditKaryawanModal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { ExportButtons } from "../components/ExportButtons";
+import { fetchAllRows, type TableReport } from "../lib/printTable";
 
 type SortKey = "nik" | "nama" | "status" | "estate" | "lokasi_kerja";
 
@@ -145,6 +147,26 @@ export function KaryawanPage() {
     }
   };
 
+  // Download follows the current search, filters and sort, like the table on screen.
+  const buildReport = async (): Promise<TableReport> => {
+    const all = await fetchAllRows((p, ps) => api.karyawan({ search, status, estate, sortBy, sortDir, page: p, pageSize: ps }));
+    const active = [search && `Cari: "${search}"`, status && `Status: ${status}`, estate && `Estate: ${estate}`].filter(Boolean);
+    return {
+      title: "Master Data Karyawan",
+      subtitle: active.length ? [`Filter: ${active.join(" · ")}`] : [],
+      landscape: true,
+      columns: [
+        { label: "NIK / NPP", nowrap: true },
+        { label: "Nama" },
+        { label: "Status" },
+        { label: "Estate" },
+        { label: "Lokasi Kerja" },
+        { label: "NIK KTP", nowrap: true },
+      ],
+      rows: all.map((k) => [k.nik, k.nama, k.status, k.estate, k.lokasi_kerja, k.nik_ktp]),
+    };
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -152,13 +174,16 @@ export function KaryawanPage() {
           <h1 className="text-xl font-semibold text-[var(--text-primary)]">Master Data Karyawan</h1>
           <p className="text-sm text-[var(--text-secondary)]">{total.toLocaleString("id-ID")} karyawan</p>
         </div>
-        <button
-          onClick={() => setCreating(true)}
-          className="flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium bg-[var(--accent-blue)] text-white hover:opacity-90"
-        >
-          <Plus size={16} />
-          Tambah Karyawan
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <ExportButtons total={total} buildReport={buildReport} fileName="master-karyawan" />
+          <button
+            onClick={() => setCreating(true)}
+            className="flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium bg-[var(--accent-blue)] text-white hover:opacity-90"
+          >
+            <Plus size={16} />
+            Tambah Karyawan
+          </button>
+        </div>
       </div>
 
       <div className="flex flex-wrap items-center gap-3 bg-[var(--bg-card)] border border-[var(--border)] rounded-lg p-3">

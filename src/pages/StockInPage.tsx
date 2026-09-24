@@ -3,10 +3,16 @@ import { Search, ChevronLeft, ChevronRight, ArrowDownCircle, Pencil, Trash2 } fr
 import { api, type StockInRecord } from "../lib/api";
 import { EditStockInModal } from "../components/EditStockInModal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { useAuth } from "../context/AuthContext";
+import { ExportButtons } from "../components/ExportButtons";
+import { fetchAllRows, type TableReport } from "../lib/printTable";
+import { useDragScroll } from "../hooks/useDragScroll";
 
-const TUJUAN_OPTIONS = ["NILAM", "ZAMRUD", "FIRUS"];
+const TUJUAN_OPTIONS = ["NILAM", "KNS", "WJA", "ZAMRUD", "FIRUS"];
 
-export function StockInPage() {
+// Nilam's gudang Stock In history, shown as a tab of Inventory Gudang - Nilam
+// (`embedded` drops the page title there).
+export function StockInPage({ embedded = false }: { embedded?: boolean }) {
   const [items, setItems] = useState<StockInRecord[]>([]);
   const [total, setTotal] = useState(0);
   const [qtySum, setQtySum] = useState(0);
@@ -18,8 +24,11 @@ export function StockInPage() {
   const [dateTo, setDateTo] = useState("");
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
+  const { user } = useAuth();
+  const isSuperuser = user?.role === "superuser";
   const [editing, setEditing] = useState<StockInRecord | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<StockInRecord | null>(null);
+  const tableScrollRef = useDragScroll<HTMLDivElement>();
   const pageSize = 25;
 
   const load = () => {
@@ -52,6 +61,34 @@ export function StockInPage() {
 
   const totalPages = Math.max(Math.ceil(total / pageSize), 1);
 
+  const buildReport = async (): Promise<TableReport> => {
+    const all = await fetchAllRows((p, ps) => api.stockIn({ search, tujuan, vendor, dateFrom, dateTo, page: p, pageSize: ps }));
+    const tgl = (iso: string) => (iso ? iso.split("-").reverse().join("/") : "");
+    const active = [
+      search && `Cari: "${search}"`,
+      tujuan && `Tujuan: ${tujuan}`,
+      vendor && `Vendor: ${vendor}`,
+      (dateFrom || dateTo) && `Tanggal: ${tgl(dateFrom) || "awal"} - ${tgl(dateTo) || "akhir"}`,
+    ].filter(Boolean);
+    return {
+      title: "Stock In Gudang - Nilam",
+      subtitle: active.length ? [`Filter: ${active.join(" · ")}`] : [],
+      landscape: true,
+      columns: [
+        { label: "Tgl Terima", nowrap: true },
+        { label: "Kode", nowrap: true },
+        { label: "Nama Barang" },
+        { label: "Vendor" },
+        { label: "PO / PR" },
+        { label: "Qty", align: "right" },
+        { label: "Satuan" },
+        { label: "Tujuan" },
+        { label: "Keterangan" },
+      ],
+      rows: all.map((r) => [r.tanggal_terima, r.kode, r.nama, r.nama_vendor, r.po_in_akss || r.no_pr, r.qty, r.satuan, r.tujuan, r.keterangan]),
+    };
+  };
+
   const handleDelete = async (r: StockInRecord) => {
     await api.deleteStockIn(r.id);
     load();
@@ -61,13 +98,16 @@ export function StockInPage() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold text-[var(--text-primary)] flex items-center gap-2">
-            <ArrowDownCircle size={20} className="text-[var(--accent-green)]" /> Stock In
-          </h1>
+          {!embedded && (
+            <h1 className="text-xl font-semibold text-[var(--text-primary)] flex items-center gap-2">
+              <ArrowDownCircle size={20} className="text-[var(--accent-green)]" /> Stock In
+            </h1>
+          )}
           <p className="text-sm text-[var(--text-secondary)]">
             {total.toLocaleString("id-ID")} transaksi · total {qtySum.toLocaleString("id-ID")} unit masuk
           </p>
         </div>
+        <ExportButtons total={total} buildReport={buildReport} fileName="stock-in-gudang-nilam" />
       </div>
 
       <div className="flex flex-wrap items-center gap-3 bg-[var(--bg-card)] border border-[var(--border)] rounded-lg p-3">
@@ -76,7 +116,7 @@ export function StockInPage() {
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Cari kode atau nama barang..."
+            placeholder="Cari barang, vendor, tujuan, no. PR/PO, atau keterangan..."
             className="w-full pl-9 pr-3 py-2 text-sm rounded-md border border-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-blue-border)]"
           />
         </div>
@@ -135,8 +175,8 @@ export function StockInPage() {
       </div>
 
       <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+        <div ref={tableScrollRef} className="overflow-x-auto">
+          <table className="grid-table w-full text-sm">
             <thead>
               <tr className="bg-[#f8fafc] text-left text-[var(--text-secondary)] text-xs uppercase">
                 <th className="px-4 py-2.5 whitespace-nowrap">Tgl Terima</th>
@@ -147,19 +187,19 @@ export function StockInPage() {
                 <th className="px-4 py-2.5 text-right">Qty</th>
                 <th className="px-4 py-2.5">Tujuan</th>
                 <th className="px-4 py-2.5">Keterangan</th>
-                <th className="px-4 py-2.5 text-right">Aksi</th>
+                {isSuperuser && <th className="px-4 py-2.5 text-right">Aksi</th>}
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={9} className="px-4 py-8 text-center text-[var(--text-muted)]">
+                  <td colSpan={isSuperuser ? 9 : 8} className="px-4 py-8 text-center text-[var(--text-muted)]">
                     Memuat...
                   </td>
                 </tr>
               ) : items.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="px-4 py-8 text-center text-[var(--text-muted)]">
+                  <td colSpan={isSuperuser ? 9 : 8} className="px-4 py-8 text-center text-[var(--text-muted)]">
                     Tidak ada data
                   </td>
                 </tr>
@@ -176,24 +216,26 @@ export function StockInPage() {
                     <td className="px-4 py-2.5 text-[var(--text-secondary)] text-xs max-w-[220px] truncate" title={r.keterangan}>
                       {r.keterangan || "-"}
                     </td>
-                    <td className="px-4 py-2.5 text-right">
-                      <div className="inline-flex gap-1.5">
-                        <button
-                          onClick={() => setEditing(r)}
-                          title="Edit"
-                          className="p-1.5 rounded-md border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[#f1f5f9]"
-                        >
-                          <Pencil size={14} />
-                        </button>
-                        <button
-                          onClick={() => setConfirmDelete(r)}
-                          title="Hapus"
-                          className="p-1.5 rounded-md border border-[var(--accent-red-border)] text-[var(--accent-red)] hover:bg-[var(--accent-red-bg)]"
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
-                    </td>
+                    {isSuperuser && (
+                      <td className="px-4 py-2.5 text-right">
+                        <div className="inline-flex gap-1.5">
+                          <button
+                            onClick={() => setEditing(r)}
+                            title="Edit"
+                            className="p-1.5 rounded-md border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[#f1f5f9]"
+                          >
+                            <Pencil size={14} />
+                          </button>
+                          <button
+                            onClick={() => setConfirmDelete(r)}
+                            title="Hapus"
+                            className="p-1.5 rounded-md border border-[var(--accent-red-border)] text-[var(--accent-red)] hover:bg-[var(--accent-red-bg)]"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </td>
+                    )}
                   </tr>
                 ))
               )}

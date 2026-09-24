@@ -2,7 +2,7 @@ import { useState } from "react";
 import { X } from "lucide-react";
 import { api, type StockOutRecord } from "../lib/api";
 
-const TUJUAN_OPTIONS = ["NILAM", "ZAMRUD", "FIRUS"];
+const TUJUAN_OPTIONS = ["NILAM", "KNS", "WJA", "ZAMRUD", "FIRUS"];
 
 export function EditStockOutModal({
   record,

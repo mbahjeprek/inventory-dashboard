@@ -5,8 +5,10 @@ import { api, type Item, type Movement } from "../lib/api";
 import { TransactionModal } from "../components/TransactionModal";
 import { EditItemModal } from "../components/EditItemModal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { useAuth } from "../context/AuthContext";
+import { useDragScroll } from "../hooks/useDragScroll";
 
-const TUJUAN_OPTIONS = ["NILAM", "ZAMRUD", "FIRUS"];
+const TUJUAN_OPTIONS = ["NILAM", "KNS", "WJA", "ZAMRUD", "FIRUS"];
 
 const SOURCE_LABEL: Record<Movement["source"], string> = {
   STOCK_IN: "Penerimaan Vendor",
@@ -30,6 +32,9 @@ export function ItemDetailPage() {
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
+  const { user } = useAuth();
+  const isSuperuser = user?.role === "superuser";
+  const tableScrollRef = useDragScroll<HTMLDivElement>();
   const [confirmDeleteMovement, setConfirmDeleteMovement] = useState<Movement | null>(null);
 
   const load = () => {
@@ -82,12 +87,14 @@ export function ItemDetailPage() {
           <p className="text-sm text-[var(--text-secondary)] font-mono">{item.kode}</p>
         </div>
         <div className="flex gap-2">
-          <button
-            onClick={() => setShowEditModal(true)}
-            className="inline-flex items-center gap-2 text-sm px-4 py-2 rounded-md border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[#f8fafc]"
-          >
-            <Pencil size={16} /> Edit Barang
-          </button>
+          {isSuperuser && (
+            <button
+              onClick={() => setShowEditModal(true)}
+              className="inline-flex items-center gap-2 text-sm px-4 py-2 rounded-md border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[#f8fafc]"
+            >
+              <Pencil size={16} /> Edit Barang
+            </button>
+          )}
           <button
             onClick={() => setShowModal(true)}
             className="inline-flex items-center gap-2 text-sm px-4 py-2 rounded-md bg-[var(--accent-blue)] text-white hover:opacity-90"
@@ -163,7 +170,7 @@ export function ItemDetailPage() {
         </div>
 
         <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg overflow-hidden">
-          <div className="overflow-x-auto max-h-[520px] overflow-y-auto">
+          <div ref={tableScrollRef} className="overflow-x-auto max-h-[520px] overflow-y-auto">
             <table className="w-full text-sm">
               <thead className="sticky top-0">
                 <tr className="bg-[#f8fafc] text-left text-[var(--text-secondary)] text-xs uppercase">
@@ -174,13 +181,13 @@ export function ItemDetailPage() {
                   <th className="px-4 py-2.5 text-right">Qty</th>
                   <th className="px-4 py-2.5">Referensi</th>
                   <th className="px-4 py-2.5">Keterangan</th>
-                  <th className="px-4 py-2.5 text-right">Aksi</th>
+                  {isSuperuser && <th className="px-4 py-2.5 text-right">Aksi</th>}
                 </tr>
               </thead>
               <tbody>
                 {filtered.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="px-4 py-8 text-center text-[var(--text-muted)]">
+                    <td colSpan={isSuperuser ? 8 : 7} className="px-4 py-8 text-center text-[var(--text-muted)]">
                       Belum ada riwayat pergerakan
                     </td>
                   </tr>
@@ -213,15 +220,17 @@ export function ItemDetailPage() {
                       <td className="px-4 py-2.5 text-xs text-[var(--text-secondary)] max-w-[220px] truncate" title={m.note || ""}>
                         {m.note || "-"}
                       </td>
-                      <td className="px-4 py-2.5 text-right">
-                        <button
-                          onClick={() => setConfirmDeleteMovement(m)}
-                          title="Hapus riwayat"
-                          className="p-1.5 rounded-md border border-[var(--accent-red-border)] text-[var(--accent-red)] hover:bg-[var(--accent-red-bg)]"
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      </td>
+                      {isSuperuser && (
+                        <td className="px-4 py-2.5 text-right">
+                          <button
+                            onClick={() => setConfirmDeleteMovement(m)}
+                            title="Hapus riwayat"
+                            className="p-1.5 rounded-md border border-[var(--accent-red-border)] text-[var(--accent-red)] hover:bg-[var(--accent-red-bg)]"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </td>
+                      )}
                     </tr>
                   ))
                 )}

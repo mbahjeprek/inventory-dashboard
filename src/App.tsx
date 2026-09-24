@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider } from "./context/AuthContext";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 import { RequireEstate, RequireSuperuser } from "./components/AccessGate";
@@ -6,10 +6,6 @@ import { LoginPage } from "./pages/LoginPage";
 import { MainLayout } from "./layouts/MainLayout";
 import { InventoryPage } from "./pages/InventoryPage";
 import { InventoryGudangStockPage } from "./pages/InventoryGudangStockPage";
-import { TransactionsPage } from "./pages/TransactionsPage";
-import { ReportsPage } from "./pages/ReportsPage";
-import { StockInPage } from "./pages/StockInPage";
-import { StockOutPage } from "./pages/StockOutPage";
 import { ItemDetailPage } from "./pages/ItemDetailPage";
 import { KaryawanPage } from "./pages/KaryawanPage";
 import { InventoryBbmPage } from "./pages/InventoryBbmPage";
@@ -18,6 +14,8 @@ import { MasterBarangPage } from "./pages/MasterBarangPage";
 import { UsersPage } from "./pages/UsersPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { InventoryPupukPage } from "./pages/InventoryPupukPage";
+import { InventoryKlinikPage } from "./pages/InventoryKlinikPage";
+import { MasterObatPage } from "./pages/MasterObatPage";
 
 function App() {
   return (
@@ -40,6 +38,23 @@ function App() {
                   element={
                     <RequireEstate estate={estate}>
                       <InventoryPupukPage key={estate} estate={estate} />
+                    </RequireEstate>
+                  }
+                />
+              ))}
+              {[
+                { path: "/inventory-klinik", estate: "NILAM" },
+                { path: "/inventory-klinik-kns", estate: "KNS" },
+                { path: "/inventory-klinik-wja", estate: "WJA" },
+                { path: "/inventory-klinik-zamrud", estate: "ZAMRUD" },
+                { path: "/inventory-klinik-firus", estate: "FIRUS" },
+              ].map(({ path, estate }) => (
+                <Route
+                  key={path}
+                  path={path}
+                  element={
+                    <RequireEstate estate={estate}>
+                      <InventoryKlinikPage key={estate} klinik={estate} />
                     </RequireEstate>
                   }
                 />
@@ -135,43 +150,24 @@ function App() {
                   </RequireEstate>
                 }
               />
-              <Route
-                path="/stock-in"
-                element={
-                  <RequireEstate estate="NILAM">
-                    <StockInPage />
-                  </RequireEstate>
-                }
-              />
-              <Route
-                path="/stock-out"
-                element={
-                  <RequireEstate estate="NILAM">
-                    <StockOutPage />
-                  </RequireEstate>
-                }
-              />
-              <Route
-                path="/transactions"
-                element={
-                  <RequireEstate estate="NILAM">
-                    <TransactionsPage />
-                  </RequireEstate>
-                }
-              />
-              <Route
-                path="/reports"
-                element={
-                  <RequireEstate estate="NILAM">
-                    <ReportsPage />
-                  </RequireEstate>
-                }
-              />
+              {/* The old Transaksi menu now lives as tabs on Inventory Gudang - Nilam. */}
+              <Route path="/stock-in" element={<Navigate to="/inventory?tab=in" replace />} />
+              <Route path="/stock-out" element={<Navigate to="/inventory?tab=out" replace />} />
+              <Route path="/transactions" element={<Navigate to="/inventory?tab=in" replace />} />
+              <Route path="/reports" element={<Navigate to="/inventory" replace />} />
               <Route
                 path="/master-barang"
                 element={
                   <RequireSuperuser>
                     <MasterBarangPage />
+                  </RequireSuperuser>
+                }
+              />
+              <Route
+                path="/master-obat"
+                element={
+                  <RequireSuperuser>
+                    <MasterObatPage />
                   </RequireSuperuser>
                 }
               />

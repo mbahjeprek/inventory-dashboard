@@ -4,6 +4,8 @@ import { api, type UserAccount } from "../lib/api";
 import { UserFormModal } from "../components/UserFormModal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useAuth } from "../context/AuthContext";
+import { ExportButtons } from "../components/ExportButtons";
+import { fetchAllRows, type TableReport } from "../lib/printTable";
 
 type SortKey = "username" | "nama" | "created_at";
 
@@ -99,6 +101,22 @@ export function UsersPage() {
     }
   };
 
+  // Download follows the current search and sort. Passwords are never included.
+  const buildReport = async (): Promise<TableReport> => {
+    const all = await fetchAllRows((p, ps) => api.users({ search, sortBy, sortDir, page: p, pageSize: ps }));
+    return {
+      title: "Master Data Pengguna",
+      subtitle: search ? [`Filter: Cari: "${search}"`] : [],
+      columns: [{ label: "Username", nowrap: true }, { label: "Nama" }, { label: "Akses" }, { label: "Dibuat", nowrap: true }],
+      rows: all.map((u) => [
+        u.username,
+        u.nama,
+        u.role === "superuser" ? "Super User" : u.estate,
+        new Date(u.created_at).toLocaleDateString("id-ID"),
+      ]),
+    };
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -106,13 +124,16 @@ export function UsersPage() {
           <h1 className="text-xl font-semibold text-[var(--text-primary)]">Master Data Pengguna</h1>
           <p className="text-sm text-[var(--text-secondary)]">{total.toLocaleString("id-ID")} akun login</p>
         </div>
-        <button
-          onClick={() => setCreating(true)}
-          className="flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium bg-[var(--accent-blue)] text-white hover:opacity-90"
-        >
-          <Plus size={16} />
-          Tambah Akun
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <ExportButtons total={total} buildReport={buildReport} fileName="master-pengguna" />
+          <button
+            onClick={() => setCreating(true)}
+            className="flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium bg-[var(--accent-blue)] text-white hover:opacity-90"
+          >
+            <Plus size={16} />
+            Tambah Akun
+          </button>
+        </div>
       </div>
 
       <div className="flex flex-wrap items-center gap-3 bg-[var(--bg-card)] border border-[var(--border)] rounded-lg p-3">

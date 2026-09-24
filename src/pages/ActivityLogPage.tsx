@@ -1,14 +1,17 @@
 import { useEffect, useState } from "react";
-import { Search, ChevronLeft, ChevronRight, X } from "lucide-react";
+import { Search, ChevronLeft, ChevronRight, X, Pencil, Trash2 } from "lucide-react";
 import { api, type ActivityLog } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { ExportButtons } from "../components/ExportButtons";
 import { fetchAllRows, type TableReport } from "../lib/printTable";
+import { EditActivityLogModal } from "../components/EditActivityLogModal";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 
 const ESTATES_BY_MODULE = {
   BARANG: ["NILAM", "KNS", "WJA", "ZAMRUD", "FIRUS"],
   BBM: ["NILAM", "WJA", "KNS", "ZAMRUD", "FIRUS"],
   PUPUK: ["NILAM", "KNS", "WJA", "ZAMRUD", "FIRUS"],
+  KLINIK: ["NILAM", "KNS", "WJA", "ZAMRUD", "FIRUS"],
 };
 
 const formatWaktu = (iso: string) =>
@@ -29,14 +32,14 @@ export function ActivityLogPage({
   estateLock,
   onClose,
 }: {
-  module: "BARANG" | "BBM" | "PUPUK";
+  module: "BARANG" | "BBM" | "PUPUK" | "KLINIK";
   estateLock?: string;
   onClose?: () => void;
 }) {
   const { user } = useAuth();
   const isSuperuser = user?.role === "superuser";
-  const estateLabel = module === "BBM" ? "Lokasi" : module === "PUPUK" ? "Estate" : "Gudang";
-  const title = `${module === "BBM" ? "Log Activity BBM" : module === "PUPUK" ? "Log Activity Pupuk" : "Log Activity Barang"}${estateLock ? ` - ${estateLock}` : ""}`;
+  const estateLabel = module === "BBM" ? "Lokasi" : module === "PUPUK" ? "Estate" : module === "KLINIK" ? "Klinik" : "Gudang";
+  const title = `${module === "BBM" ? "Log Activity BBM" : module === "PUPUK" ? "Log Activity Pupuk" : module === "KLINIK" ? "Log Activity Klinik" : "Log Activity Barang"}${estateLock ? ` - ${estateLock}` : ""}`;
 
   const [rows, setRows] = useState<ActivityLog[]>([]);
   const [total, setTotal] = useState(0);
@@ -48,7 +51,11 @@ export function ActivityLogPage({
   const [dateTo, setDateTo] = useState("");
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
+  const [editing, setEditing] = useState<ActivityLog | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<ActivityLog | null>(null);
   const pageSize = 25;
+  const objekLabel = module === "BARANG" ? "Barang" : module === "KLINIK" ? "Obat" : "Transaksi";
+  const colCount = isSuperuser ? 7 : 6;
 
   const filters = () => ({ module, estate, aksi, search, dateFrom, dateTo });
 
@@ -78,6 +85,13 @@ export function ActivityLogPage({
 
   const totalPages = Math.max(Math.ceil(total / pageSize), 1);
 
+  const remove = async (log: ActivityLog) => {
+    await api.deleteActivityLog(log.id);
+    // Step back a page when the last row of the last page was removed.
+    if (rows.length === 1 && page > 1) setPage((p) => p - 1);
+    else load();
+  };
+
   const buildReport = async (): Promise<TableReport> => {
     const all = await fetchAllRows((p, ps) => api.activityLog({ ...filters(), page: p, pageSize: ps }));
     const tgl = (iso: string) => (iso ? iso.split("-").reverse().join("/") : "");
@@ -96,7 +110,7 @@ export function ActivityLogPage({
         { label: "User" },
         { label: estateLabel },
         { label: "Aksi", nowrap: true },
-        { label: module === "BARANG" ? "Barang" : "Transaksi" },
+        { label: objekLabel },
         { label: "Detail" },
       ],
       rows: all.map((r) => [formatWaktu(r.created_at), r.nama || r.username, r.estate, r.aksi, r.objek, r.detail]),
@@ -111,7 +125,7 @@ export function ActivityLogPage({
         <div>
           <h1 className="text-xl font-semibold text-[var(--text-primary)]">{title}</h1>
           <p className="text-sm text-[var(--text-secondary)]">
-            Riwayat perubahan data Inventory {module === "BBM" ? "BBM" : module === "PUPUK" ? "Pupuk" : "Gudang"} (tambah, edit, hapus, transaksi) beserta
+            Riwayat perubahan data Inventory {module === "BBM" ? "BBM" : module === "PUPUK" ? "Pupuk" : module === "KLINIK" ? "Klinik" : "Gudang"} (tambah, edit, hapus, transaksi) beserta
             siapa yang melakukannya
           </p>
         </div>
@@ -135,7 +149,7 @@ export function ActivityLogPage({
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder={`Cari ${module === "BARANG" ? "barang" : "transaksi"}, detail, atau user...`}
+            placeholder={`Cari ${module === "BARANG" ? "barang" : module === "KLINIK" ? "obat" : "transaksi"}, detail, atau user...`}
             className="w-full pl-9 pr-3 py-2 text-sm rounded-md border border-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-blue-border)]"
           />
         </div>
@@ -210,20 +224,21 @@ export function ActivityLogPage({
                 <th className="px-4 py-2.5">User</th>
                 <th className="px-4 py-2.5">{estateLabel}</th>
                 <th className="px-4 py-2.5">Aksi</th>
-                <th className="px-4 py-2.5">{module === "BARANG" ? "Barang" : "Transaksi"}</th>
+                <th className="px-4 py-2.5">{objekLabel}</th>
                 <th className="px-4 py-2.5">Detail</th>
+                {isSuperuser && <th className="px-4 py-2.5 text-right">Aksi Log</th>}
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-[var(--text-muted)]">
+                  <td colSpan={colCount} className="px-4 py-8 text-center text-[var(--text-muted)]">
                     Memuat...
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-[var(--text-muted)]">
+                  <td colSpan={colCount} className="px-4 py-8 text-center text-[var(--text-muted)]">
                     Belum ada aktivitas
                   </td>
                 </tr>
@@ -238,6 +253,26 @@ export function ActivityLogPage({
                     </td>
                     <td className="px-4 py-2.5">{r.objek || "-"}</td>
                     <td className="px-4 py-2.5 text-xs text-[var(--text-secondary)] max-w-[420px]">{r.detail || "-"}</td>
+                    {isSuperuser && (
+                      <td className="px-4 py-2.5 text-right">
+                        <div className="inline-flex gap-1.5">
+                          <button
+                            onClick={() => setEditing(r)}
+                            title="Edit log"
+                            className="p-1.5 rounded-md border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[#f1f5f9]"
+                          >
+                            <Pencil size={14} />
+                          </button>
+                          <button
+                            onClick={() => setConfirmDelete(r)}
+                            title="Hapus log"
+                            className="p-1.5 rounded-md border border-[var(--accent-red-border)] text-[var(--accent-red)] hover:bg-[var(--accent-red-bg)]"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </td>
+                    )}
                   </tr>
                 ))
               )}
@@ -267,6 +302,29 @@ export function ActivityLogPage({
           </div>
         </div>
       </div>
+
+      {editing && (
+        <EditActivityLogModal
+          log={editing}
+          objekLabel={objekLabel}
+          onClose={() => setEditing(null)}
+          onSuccess={() => {
+            setEditing(null);
+            load();
+          }}
+        />
+      )}
+
+      {confirmDelete && (
+        <ConfirmDialog
+          message={`Hapus log "${confirmDelete.aksi}" untuk "${confirmDelete.objek || "-"}"? Data stok tidak ikut berubah. Tindakan ini tidak bisa dibatalkan.`}
+          onCancel={() => setConfirmDelete(null)}
+          onConfirm={() => {
+            remove(confirmDelete);
+            setConfirmDelete(null);
+          }}
+        />
+      )}
     </div>
   );
 }

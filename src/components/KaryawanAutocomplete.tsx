@@ -1,11 +1,15 @@
 import { useEffect, useId, useState } from "react";
 import { api } from "../lib/api";
 
+// Suggests only the karyawan of `estate` (the estate the transaction belongs to); any name can
+// still be typed by hand.
 export function KaryawanAutocomplete({
+  estate,
   value,
   onChange,
   placeholder,
 }: {
+  estate: string;
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;
@@ -15,12 +19,13 @@ export function KaryawanAutocomplete({
 
   useEffect(() => {
     const t = setTimeout(() => {
-      api.karyawan({ search: value, pageSize: 8, page: 1 }).then((res) => {
-        setOptions(res.data.map((k) => ({ nik: k.nik, nama: k.nama })));
-      });
+      api
+        .karyawanPick(estate, value)
+        .then(setOptions)
+        .catch(() => setOptions([]));
     }, 250);
     return () => clearTimeout(t);
-  }, [value]);
+  }, [estate, value]);
 
   return (
     <>

@@ -8,6 +8,8 @@ import { ConfirmDialog } from "../components/ConfirmDialog";
 import { PupukTransactionModal } from "../components/PupukTransactionModal";
 import { EditPupukModal } from "../components/EditPupukModal";
 import { fetchAllRows, type TableReport } from "../lib/printTable";
+import { useDragScroll } from "../hooks/useDragScroll";
+import { useAuth } from "../context/AuthContext";
 
 const localIso = (d: Date) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -22,6 +24,7 @@ export function InventoryPupukPage({ estate }: { estate: string }) {
   const [options, setOptions] = useState<{ jenis: string[]; divisi: string[] }>({ jenis: [], divisi: [] });
   const [rows, setRows] = useState<PupukRecord[]>([]);
   const [total, setTotal] = useState(0);
+  const tableScrollRef = useDragScroll<HTMLDivElement>();
   const [keluarSum, setKeluarSum] = useState(0);
   const [diterimaSum, setDiterimaSum] = useState(0);
   const [search, setSearch] = useState("");
@@ -32,6 +35,8 @@ export function InventoryPupukPage({ estate }: { estate: string }) {
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [showTransaksi, setShowTransaksi] = useState(false);
+  const { user } = useAuth();
+  const isSuperuser = user?.role === "superuser";
   const [editing, setEditing] = useState<PupukRecord | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<PupukRecord | null>(null);
   const pageSize = 25;
@@ -210,7 +215,7 @@ export function InventoryPupukPage({ estate }: { estate: string }) {
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Cari keterangan, blok, atau no. embrace..."
+            placeholder="Cari jenis pupuk, divisi, blok, no. embrace, atau keterangan..."
             className="w-full pl-9 pr-3 py-2 text-sm rounded-md border border-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-blue-border)]"
           />
         </div>
@@ -272,7 +277,7 @@ export function InventoryPupukPage({ estate }: { estate: string }) {
       </div>
 
       <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg overflow-hidden">
-        <div className="overflow-x-auto">
+        <div ref={tableScrollRef} className="overflow-x-auto">
           <table className="grid-table w-full text-sm">
             <thead>
               <tr className="text-left text-xs uppercase">
@@ -289,19 +294,19 @@ export function InventoryPupukPage({ estate }: { estate: string }) {
                 <th className="px-4 py-2.5">Blok</th>
                 <th className="px-4 py-2.5 text-right">HA</th>
                 <th className="px-4 py-2.5 text-right">Pokok</th>
-                <th className="px-4 py-2.5 text-right">Aksi</th>
+                {isSuperuser && <th className="px-4 py-2.5 text-right">Aksi</th>}
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={14} className="px-4 py-8 text-center text-[var(--text-muted)]">
+                  <td colSpan={isSuperuser ? 14 : 13} className="px-4 py-8 text-center text-[var(--text-muted)]">
                     Memuat...
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={14} className="px-4 py-8 text-center text-[var(--text-muted)]">
+                  <td colSpan={isSuperuser ? 14 : 13} className="px-4 py-8 text-center text-[var(--text-muted)]">
                     Tidak ada data
                   </td>
                 </tr>
@@ -325,24 +330,26 @@ export function InventoryPupukPage({ estate }: { estate: string }) {
                     <td className="px-4 py-2.5 text-xs whitespace-nowrap">{r.blok || "-"}</td>
                     <td className="px-4 py-2.5 text-right text-xs">{r.ha != null ? r.ha.toLocaleString("id-ID", { maximumFractionDigits: 2 }) : "-"}</td>
                     <td className="px-4 py-2.5 text-right text-xs">{r.pokok != null ? r.pokok.toLocaleString("id-ID", { maximumFractionDigits: 0 }) : "-"}</td>
-                    <td className="px-4 py-2.5 text-right">
-                      <div className="inline-flex gap-1.5">
-                        <button
-                          onClick={() => setEditing(r)}
-                          title="Edit"
-                          className="p-1.5 rounded-md border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[#f1f5f9]"
-                        >
-                          <Pencil size={14} />
-                        </button>
-                        <button
-                          onClick={() => setConfirmDelete(r)}
-                          title="Hapus"
-                          className="p-1.5 rounded-md border border-[var(--accent-red-border)] text-[var(--accent-red)] hover:bg-[var(--accent-red-bg)]"
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
-                    </td>
+                    {isSuperuser && (
+                      <td className="px-4 py-2.5 text-right">
+                        <div className="inline-flex gap-1.5">
+                          <button
+                            onClick={() => setEditing(r)}
+                            title="Edit"
+                            className="p-1.5 rounded-md border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[#f1f5f9]"
+                          >
+                            <Pencil size={14} />
+                          </button>
+                          <button
+                            onClick={() => setConfirmDelete(r)}
+                            title="Hapus"
+                            className="p-1.5 rounded-md border border-[var(--accent-red-border)] text-[var(--accent-red)] hover:bg-[var(--accent-red-bg)]"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </td>
+                    )}
                   </tr>
                 ))
               )}

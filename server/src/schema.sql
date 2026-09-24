@@ -88,6 +88,77 @@ CREATE TABLE IF NOT EXISTS gudang_stock (
   UNIQUE(gudang, item_kode)
 );
 
+-- Stock In / Stock Out / Koreksi history for those gudang, entered through the same transaction
+-- form as Nilam. Each row has already been applied to gudang_stock.stock_tersedia.
+CREATE TABLE IF NOT EXISTS gudang_stock_tx (
+  id SERIAL PRIMARY KEY,
+  gudang TEXT NOT NULL,
+  item_kode TEXT NOT NULL REFERENCES items(kode),
+  type TEXT NOT NULL CHECK(type IN ('IN','OUT')),
+  qty INTEGER NOT NULL,
+  tujuan TEXT DEFAULT '',
+  penerima TEXT DEFAULT '',
+  note TEXT,
+  is_correction INTEGER DEFAULT 0,
+  user_id INTEGER,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_gudang_tx_item ON gudang_stock_tx(gudang, item_kode);
+
+-- Transfer Gudang Nilam -> gudang estate lain: a Nilam Stok Keluar (transactions) whose tujuan is
+-- KNS/WJA/Zamrud/Firus automatically books a Stok Masuk in that gudang. The receiving row points
+-- back at it via transfer_from_id (transactions.id), so it follows that Stok Keluar on edit/delete
+-- and cannot be changed on its own. The other gudang only supply their own estate.
+ALTER TABLE gudang_stock_tx ADD COLUMN IF NOT EXISTS transfer_from_id INTEGER;
+
+-- These gudang also hold goods counted in fractions (e.g. 2.5 KG of pestisida), so their stock and
+-- movement qty are decimal, like pupuk_log. The app rounds stock to 3 decimals after every change.
+-- Nilam (items/transactions) and Klinik stay whole numbers.
+ALTER TABLE gudang_stock ALTER COLUMN stock_tersedia TYPE DOUBLE PRECISION;
+ALTER TABLE gudang_stock ALTER COLUMN buffer_stock TYPE DOUBLE PRECISION;
+ALTER TABLE gudang_stock_tx ALTER COLUMN qty TYPE DOUBLE PRECISION;
+CREATE INDEX IF NOT EXISTS idx_gudang_tx_transfer ON gudang_stock_tx(transfer_from_id);
+
+-- Medicines and medical supplies for the estate clinics, kept apart from the Gudang master barang.
+CREATE TABLE IF NOT EXISTS obat (
+  id SERIAL PRIMARY KEY,
+  kode TEXT UNIQUE NOT NULL,
+  nama TEXT NOT NULL,
+  kategori TEXT DEFAULT '',
+  jenis TEXT DEFAULT '',
+  deskripsi TEXT DEFAULT '',
+  satuan TEXT DEFAULT ''
+);
+
+-- Per-clinic stock (Klinik NILAM/KNS/WJA/ZAMRUD/FIRUS), same shape as gudang_stock plus an expiry
+-- date. ON UPDATE CASCADE lets a kode be corrected in master obat without breaking the stock rows.
+CREATE TABLE IF NOT EXISTS klinik_stock (
+  id SERIAL PRIMARY KEY,
+  klinik TEXT NOT NULL,
+  obat_kode TEXT NOT NULL REFERENCES obat(kode) ON UPDATE CASCADE,
+  buffer_stock INTEGER DEFAULT 0,
+  stock_tersedia INTEGER DEFAULT 0,
+  expired_date TEXT,
+  catatan TEXT DEFAULT '',
+  UNIQUE(klinik, obat_kode)
+);
+
+-- Stock In / Stock Out / Koreksi history per clinic, entered through the shared transaction form.
+CREATE TABLE IF NOT EXISTS klinik_stock_tx (
+  id SERIAL PRIMARY KEY,
+  klinik TEXT NOT NULL,
+  obat_kode TEXT NOT NULL REFERENCES obat(kode) ON UPDATE CASCADE,
+  type TEXT NOT NULL CHECK(type IN ('IN','OUT')),
+  qty INTEGER NOT NULL,
+  tujuan TEXT DEFAULT '',
+  penerima TEXT DEFAULT '',
+  note TEXT,
+  is_correction INTEGER DEFAULT 0,
+  user_id INTEGER,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_klinik_tx_item ON klinik_stock_tx(klinik, obat_kode);
+
 CREATE TABLE IF NOT EXISTS bbm_log (
   id SERIAL PRIMARY KEY,
   jenis_bbm TEXT NOT NULL,

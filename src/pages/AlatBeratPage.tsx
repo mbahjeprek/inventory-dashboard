@@ -3,6 +3,8 @@ import { Search, ChevronLeft, ChevronRight, ArrowUp, ArrowDown, ArrowUpDown, Fil
 import { api, type AlatBerat } from "../lib/api";
 import { EditAlatBeratModal } from "../components/EditAlatBeratModal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { ExportButtons } from "../components/ExportButtons";
+import { fetchAllRows, type TableReport } from "../lib/printTable";
 
 type SortKey = "kode" | "jenis_unit" | "nama";
 
@@ -142,6 +144,18 @@ export function AlatBeratPage() {
     }
   };
 
+  // Download follows the current search, jenis unit filter and sort, like the table on screen.
+  const buildReport = async (): Promise<TableReport> => {
+    const all = await fetchAllRows((p, ps) => api.alatBerat({ search, jenis_unit: jenisUnit, sortBy, sortDir, page: p, pageSize: ps }));
+    const active = [search && `Cari: "${search}"`, jenisUnit && `Jenis Unit: ${jenisUnit}`].filter(Boolean);
+    return {
+      title: "Master Data Alat Berat",
+      subtitle: active.length ? [`Filter: ${active.join(" · ")}`] : [],
+      columns: [{ label: "Kode", nowrap: true }, { label: "Jenis Unit" }, { label: "Nama / Model" }],
+      rows: all.map((a) => [a.kode, a.jenis_unit, a.nama]),
+    };
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -149,13 +163,16 @@ export function AlatBeratPage() {
           <h1 className="text-xl font-semibold text-[var(--text-primary)]">Master Data Alat Berat</h1>
           <p className="text-sm text-[var(--text-secondary)]">{total.toLocaleString("id-ID")} kendaraan/alat pengguna BBM</p>
         </div>
-        <button
-          onClick={() => setCreating(true)}
-          className="flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium bg-[var(--accent-blue)] text-white hover:opacity-90"
-        >
-          <Plus size={16} />
-          Tambah Alat
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <ExportButtons total={total} buildReport={buildReport} fileName="master-alat-berat" />
+          <button
+            onClick={() => setCreating(true)}
+            className="flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium bg-[var(--accent-blue)] text-white hover:opacity-90"
+          >
+            <Plus size={16} />
+            Tambah Alat
+          </button>
+        </div>
       </div>
 
       <div className="flex flex-wrap items-center gap-3 bg-[var(--bg-card)] border border-[var(--border)] rounded-lg p-3">
@@ -164,7 +181,7 @@ export function AlatBeratPage() {
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Cari kode atau nama/model..."
+            placeholder="Cari kode, nama/model, atau jenis unit..."
             className="w-full pl-9 pr-3 py-2 text-sm rounded-md border border-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-blue-border)]"
           />
         </div>

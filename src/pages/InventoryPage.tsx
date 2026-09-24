@@ -16,7 +16,7 @@ import {
   AlertTriangle,
   XCircle,
 } from "lucide-react";
-import { api, type Item, type Summary } from "../lib/api";
+import { api, type Item, type PickerItem, type Summary } from "../lib/api";
 import { TransactionModal } from "../components/TransactionModal";
 import { EditItemModal } from "../components/EditItemModal";
 import { ItemPickerModal } from "../components/ItemPickerModal";
@@ -24,6 +24,11 @@ import { StatCard } from "../components/StatCard";
 import { ExportButtons } from "../components/ExportButtons";
 import { ActivityLogButton } from "../components/ActivityLogButton";
 import { fetchAllRows, type TableReport } from "../lib/printTable";
+import { useAuth } from "../context/AuthContext";
+import { useDragScroll } from "../hooks/useDragScroll";
+import { InventoryTabs, useInventoryTab } from "../components/InventoryTabs";
+import { StockInPage } from "./StockInPage";
+import { StockOutPage } from "./StockOutPage";
 
 const STATUSES = ["AMAN", "BUFFER STOCK"];
 
@@ -113,9 +118,15 @@ export function InventoryPage() {
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
-  const [selectedItem, setSelectedItem] = useState<Item | null>(null);
+  const [selectedItem, setSelectedItem] = useState<PickerItem | null>(null);
+  const [tab, setTab] = useInventoryTab();
+  // Bumped after a new transaction so an open Stock In/Out tab reloads.
+  const [historyKey, setHistoryKey] = useState(0);
+  const { user } = useAuth();
+  const isSuperuser = user?.role === "superuser";
   const [editingItem, setEditingItem] = useState<Item | null>(null);
   const [showPicker, setShowPicker] = useState(false);
+  const tableScrollRef = useDragScroll<HTMLDivElement>();
   const pageSize = 25;
 
   const load = () => {
@@ -200,7 +211,7 @@ export function InventoryPage() {
         </div>
         <div className="flex items-center gap-2">
           <ActivityLogButton module="BARANG" estate="NILAM" />
-          <ExportButtons total={total} buildReport={buildReport} fileName="inventory-gudang-nilam" />
+          {tab === "stok" && <ExportButtons total={total} buildReport={buildReport} fileName="inventory-gudang-nilam" />}
           <button
             onClick={() => setShowPicker(true)}
             className="inline-flex items-center gap-1.5 text-sm px-3.5 py-2 rounded-md border border-[var(--accent-blue-border)] text-[var(--accent-blue)] hover:bg-[var(--accent-blue-bg)]"
@@ -210,156 +221,168 @@ export function InventoryPage() {
         </div>
       </div>
 
-      {summary && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <StatCard label="Total Item Barang" value={summary.totalItems.toLocaleString("id-ID")} icon={Package} tone="blue" />
-          <StatCard label="Total Stock Tersedia" value={summary.totalStock.toLocaleString("id-ID")} icon={Boxes} tone="green" />
-          <StatCard
-            label="Stock Menipis (Buffer)"
-            value={summary.lowStock.toLocaleString("id-ID")}
-            icon={AlertTriangle}
-            tone="amber"
-            active={stockFilter === "menipis"}
-            onClick={() => toggleStockFilter("menipis")}
-          />
-          <StatCard
-            label="Stock Habis"
-            value={summary.outOfStock.toLocaleString("id-ID")}
-            icon={XCircle}
-            tone="red"
-            active={stockFilter === "habis"}
-            onClick={() => toggleStockFilter("habis")}
-          />
-        </div>
-      )}
+      <InventoryTabs value={tab} onChange={setTab} />
 
-      <div className="flex flex-wrap items-center gap-3 bg-[var(--bg-card)] border border-[var(--border)] rounded-lg p-3">
-        <div className="relative flex-1 min-w-[220px]">
-          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Cari kode atau nama barang..."
-            className="w-full pl-9 pr-3 py-2 text-sm rounded-md border border-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-blue-border)]"
-          />
-        </div>
-      </div>
+      {tab === "in" ? (
+        <StockInPage embedded key={historyKey} />
+      ) : tab === "out" ? (
+        <StockOutPage embedded key={historyKey} />
+      ) : (
+        <>
+          {summary && (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <StatCard label="Total Item Barang" value={summary.totalItems.toLocaleString("id-ID")} icon={Package} tone="blue" />
+              <StatCard label="Total Stock Tersedia" value={summary.totalStock.toLocaleString("id-ID")} icon={Boxes} tone="green" />
+              <StatCard
+                label="Stock Menipis (Buffer)"
+                value={summary.lowStock.toLocaleString("id-ID")}
+                icon={AlertTriangle}
+                tone="amber"
+                active={stockFilter === "menipis"}
+                onClick={() => toggleStockFilter("menipis")}
+              />
+              <StatCard
+                label="Stock Habis"
+                value={summary.outOfStock.toLocaleString("id-ID")}
+                icon={XCircle}
+                tone="red"
+                active={stockFilter === "habis"}
+                onClick={() => toggleStockFilter("habis")}
+              />
+            </div>
+          )}
 
-      <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="grid-table w-full text-sm">
-            <thead>
-              <tr className="bg-[#f8fafc] text-[var(--text-secondary)] text-xs uppercase">
-                <SortableHeader label="Kode" sortKey="kode" currentSort={sortBy} currentDir={sortDir} onSort={toggleSort} />
-                <SortableHeader label="Nama Barang" sortKey="nama" currentSort={sortBy} currentDir={sortDir} onSort={toggleSort} />
-                <FilterHeader label="Satuan" value={satuan} options={satuanOptions} onChange={(v) => { setSatuan(v); setPage(1); }} />
-                <SortableHeader
-                  label="Buffer"
-                  sortKey="buffer_stock"
-                  align="right"
-                  currentSort={sortBy}
-                  currentDir={sortDir}
-                  onSort={toggleSort}
-                />
-                <SortableHeader
-                  label="Stock Tersedia"
-                  sortKey="stock_tersedia"
-                  align="right"
-                  currentSort={sortBy}
-                  currentDir={sortDir}
-                  onSort={toggleSort}
-                />
-                <FilterHeader label="Status" value={status} options={STATUSES} onChange={(v) => { setStatus(v); setPage(1); }} />
-                <th className="px-4 py-2.5 text-right">Aksi</th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-[var(--text-muted)]">
-                    Memuat...
-                  </td>
-                </tr>
-              ) : items.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-[var(--text-muted)]">
-                    Tidak ada data
-                  </td>
-                </tr>
-              ) : (
-                items.map((item) => (
-                  <tr key={item.id} className="border-t border-[var(--border)] hover:bg-[#f8fafc]">
-                    <td className="px-4 py-2.5 font-mono text-xs">
-                      <Link to={`/inventory/${item.id}`} className="text-[var(--accent-blue)] hover:underline">
-                        {item.kode}
-                      </Link>
-                    </td>
-                    <td className="px-4 py-2.5">
-                      <Link to={`/inventory/${item.id}`} className="hover:underline">
-                        {item.nama}
-                      </Link>
-                    </td>
-                    <td className="px-4 py-2.5 text-[var(--text-secondary)]">{item.satuan}</td>
-                    <td className="px-4 py-2.5 text-right text-[var(--text-secondary)]">{item.buffer_stock}</td>
-                    <td className="px-4 py-2.5 text-right font-medium">{item.stock_tersedia.toLocaleString("id-ID")}</td>
-                    <td className="px-4 py-2.5">
-                      <span
-                        className={`text-xs px-2 py-0.5 rounded-full border ${
-                          item.keterangan === "AMAN"
-                            ? "bg-[var(--accent-green-bg)] text-[var(--accent-green)] border-[var(--accent-green-border)]"
-                            : "bg-[var(--accent-amber-bg)] text-[var(--accent-amber)] border-[var(--accent-amber-border)]"
-                        }`}
-                      >
-                        {item.keterangan}
-                      </span>
-                    </td>
-                    <td className="px-4 py-2.5 text-right">
-                      <div className="inline-flex gap-1.5">
-                        <Link
-                          to={`/inventory/${item.id}`}
-                          title="Riwayat pergerakan"
-                          className="p-1.5 rounded-md border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[#f1f5f9]"
-                        >
-                          <History size={14} />
-                        </Link>
-                        <button
-                          onClick={() => setEditingItem(item)}
-                          title="Edit data barang"
-                          className="p-1.5 rounded-md border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[#f1f5f9]"
-                        >
-                          <Pencil size={14} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        <div className="flex items-center justify-between px-4 py-3 border-t border-[var(--border)] text-sm text-[var(--text-secondary)]">
-          <span>
-            Halaman {page} dari {totalPages}
-          </span>
-          <div className="flex gap-2">
-            <button
-              disabled={page <= 1}
-              onClick={() => setPage((p) => p - 1)}
-              className="p-1.5 rounded-md border border-[var(--border)] disabled:opacity-40"
-            >
-              <ChevronLeft size={16} />
-            </button>
-            <button
-              disabled={page >= totalPages}
-              onClick={() => setPage((p) => p + 1)}
-              className="p-1.5 rounded-md border border-[var(--border)] disabled:opacity-40"
-            >
-              <ChevronRight size={16} />
-            </button>
+          <div className="flex flex-wrap items-center gap-3 bg-[var(--bg-card)] border border-[var(--border)] rounded-lg p-3">
+            <div className="relative flex-1 min-w-[220px]">
+              <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Cari kode, nama, atau satuan barang..."
+                className="w-full pl-9 pr-3 py-2 text-sm rounded-md border border-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-blue-border)]"
+              />
+            </div>
           </div>
-        </div>
-      </div>
+
+          <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg overflow-hidden">
+            <div ref={tableScrollRef} className="overflow-x-auto">
+              <table className="grid-table w-full text-sm">
+                <thead>
+                  <tr className="bg-[#f8fafc] text-[var(--text-secondary)] text-xs uppercase">
+                    <SortableHeader label="Kode" sortKey="kode" currentSort={sortBy} currentDir={sortDir} onSort={toggleSort} />
+                    <SortableHeader label="Nama Barang" sortKey="nama" currentSort={sortBy} currentDir={sortDir} onSort={toggleSort} />
+                    <FilterHeader label="Satuan" value={satuan} options={satuanOptions} onChange={(v) => { setSatuan(v); setPage(1); }} />
+                    <SortableHeader
+                      label="Buffer"
+                      sortKey="buffer_stock"
+                      align="right"
+                      currentSort={sortBy}
+                      currentDir={sortDir}
+                      onSort={toggleSort}
+                    />
+                    <SortableHeader
+                      label="Stock Tersedia"
+                      sortKey="stock_tersedia"
+                      align="right"
+                      currentSort={sortBy}
+                      currentDir={sortDir}
+                      onSort={toggleSort}
+                    />
+                    <FilterHeader label="Status" value={status} options={STATUSES} onChange={(v) => { setStatus(v); setPage(1); }} />
+                    <th className="px-4 py-2.5 text-right">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {loading ? (
+                    <tr>
+                      <td colSpan={7} className="px-4 py-8 text-center text-[var(--text-muted)]">
+                        Memuat...
+                      </td>
+                    </tr>
+                  ) : items.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="px-4 py-8 text-center text-[var(--text-muted)]">
+                        Tidak ada data
+                      </td>
+                    </tr>
+                  ) : (
+                    items.map((item) => (
+                      <tr key={item.id} className="border-t border-[var(--border)] hover:bg-[#f8fafc]">
+                        <td className="px-4 py-2.5 font-mono text-xs">
+                          <Link to={`/inventory/${item.id}`} className="text-[var(--accent-blue)] hover:underline">
+                            {item.kode}
+                          </Link>
+                        </td>
+                        <td className="px-4 py-2.5">
+                          <Link to={`/inventory/${item.id}`} className="hover:underline">
+                            {item.nama}
+                          </Link>
+                        </td>
+                        <td className="px-4 py-2.5 text-[var(--text-secondary)]">{item.satuan}</td>
+                        <td className="px-4 py-2.5 text-right text-[var(--text-secondary)]">{item.buffer_stock}</td>
+                        <td className="px-4 py-2.5 text-right font-medium">{item.stock_tersedia.toLocaleString("id-ID")}</td>
+                        <td className="px-4 py-2.5">
+                          <span
+                            className={`text-xs px-2 py-0.5 rounded-full border ${
+                              item.keterangan === "AMAN"
+                                ? "bg-[var(--accent-green-bg)] text-[var(--accent-green)] border-[var(--accent-green-border)]"
+                                : "bg-[var(--accent-amber-bg)] text-[var(--accent-amber)] border-[var(--accent-amber-border)]"
+                            }`}
+                          >
+                            {item.keterangan}
+                          </span>
+                        </td>
+                        <td className="px-4 py-2.5 text-right">
+                          <div className="inline-flex gap-1.5">
+                            <Link
+                              to={`/inventory/${item.id}`}
+                              title="Riwayat pergerakan"
+                              className="p-1.5 rounded-md border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[#f1f5f9]"
+                            >
+                              <History size={14} />
+                            </Link>
+                            {isSuperuser && (
+                              <button
+                                onClick={() => setEditingItem(item)}
+                                title="Edit data barang"
+                                className="p-1.5 rounded-md border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[#f1f5f9]"
+                              >
+                                <Pencil size={14} />
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="flex items-center justify-between px-4 py-3 border-t border-[var(--border)] text-sm text-[var(--text-secondary)]">
+              <span>
+                Halaman {page} dari {totalPages}
+              </span>
+              <div className="flex gap-2">
+                <button
+                  disabled={page <= 1}
+                  onClick={() => setPage((p) => p - 1)}
+                  className="p-1.5 rounded-md border border-[var(--border)] disabled:opacity-40"
+                >
+                  <ChevronLeft size={16} />
+                </button>
+                <button
+                  disabled={page >= totalPages}
+                  onClick={() => setPage((p) => p + 1)}
+                  className="p-1.5 rounded-md border border-[var(--border)] disabled:opacity-40"
+                >
+                  <ChevronRight size={16} />
+                </button>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
 
       {showPicker && (
         <ItemPickerModal
@@ -377,6 +400,7 @@ export function InventoryPage() {
           onClose={() => setSelectedItem(null)}
           onSuccess={() => {
             setSelectedItem(null);
+            setHistoryKey((k) => k + 1);
             api.summary().then(setSummary);
             load();
           }}

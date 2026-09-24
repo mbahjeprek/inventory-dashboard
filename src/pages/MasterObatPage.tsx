@@ -1,24 +1,24 @@
 import { useEffect, useState } from "react";
 import { Search, ChevronLeft, ChevronRight, ArrowUp, ArrowDown, ArrowUpDown, Filter, Pencil, Plus, Trash2 } from "lucide-react";
-import { api, type Item } from "../lib/api";
-import { EditItemModal } from "../components/EditItemModal";
+import { api, type Obat } from "../lib/api";
+import { EditObatModal } from "../components/EditObatModal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { ExportButtons } from "../components/ExportButtons";
+import { ActivityLogButton } from "../components/ActivityLogButton";
 import { fetchAllRows, type TableReport } from "../lib/printTable";
+import { useDragScroll } from "../hooks/useDragScroll";
 
-type SortKey = "kode" | "nama" | "buffer_stock";
+type SortKey = "kode" | "nama" | "kategori" | "jenis";
 
 function SortableHeader({
   label,
   sortKey,
-  align = "left",
   currentSort,
   currentDir,
   onSort,
 }: {
   label: string;
   sortKey: SortKey;
-  align?: "left" | "right";
   currentSort: SortKey;
   currentDir: "asc" | "desc";
   onSort: (key: SortKey) => void;
@@ -26,12 +26,10 @@ function SortableHeader({
   const active = currentSort === sortKey;
   const Icon = active ? (currentDir === "asc" ? ArrowUp : ArrowDown) : ArrowUpDown;
   return (
-    <th className={`px-4 py-2.5 ${align === "right" ? "text-right" : "text-left"}`}>
+    <th className="px-4 py-2.5 text-left whitespace-nowrap">
       <button
         onClick={() => onSort(sortKey)}
-        className={`inline-flex items-center gap-1 hover:text-[var(--text-primary)] ${
-          active ? "text-[var(--accent-blue)]" : ""
-        }`}
+        className={`inline-flex items-center gap-1 hover:text-[var(--text-primary)] ${active ? "text-[var(--accent-blue)]" : ""}`}
       >
         {label}
         <Icon size={12} />
@@ -79,39 +77,46 @@ function FilterHeader({
   );
 }
 
-export function MasterBarangPage() {
-  const [rows, setRows] = useState<Item[]>([]);
+// Master list of medicines and medical supplies used by every estate clinic.
+export function MasterObatPage() {
+  const [rows, setRows] = useState<Obat[]>([]);
   const [total, setTotal] = useState(0);
   const [search, setSearch] = useState("");
+  const [kategori, setKategori] = useState("");
   const [satuan, setSatuan] = useState("");
-  const [satuanOptions, setSatuanOptions] = useState<string[]>([]);
+  const [options, setOptions] = useState<{ kategori: string[]; satuan: string[] }>({ kategori: [], satuan: [] });
   const [sortBy, setSortBy] = useState<SortKey>("kode");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
-  const [editingItem, setEditingItem] = useState<Item | null>(null);
+  const [editing, setEditing] = useState<Obat | null>(null);
   const [creating, setCreating] = useState(false);
   const [deleteError, setDeleteError] = useState("");
-  const [confirmDelete, setConfirmDelete] = useState<Item | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<Obat | null>(null);
+  const tableScrollRef = useDragScroll<HTMLDivElement>();
   const pageSize = 25;
+
+  const query = () => ({ search, kategori, satuan, sortBy, sortDir });
 
   const load = () => {
     setLoading(true);
-    api.items({ search, satuan, sortBy, sortDir, page, pageSize }).then((res) => {
+    api.obat({ ...query(), page, pageSize }).then((res) => {
       setRows(res.data);
       setTotal(res.total);
       setLoading(false);
     });
   };
 
+  const loadOptions = () => api.obatOptions().then(setOptions);
+
   useEffect(() => {
-    api.satuanOptions().then(setSatuanOptions);
+    loadOptions();
   }, []);
 
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, satuan, sortBy, sortDir]);
+  }, [page, kategori, satuan, sortBy, sortDir]);
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -125,36 +130,45 @@ export function MasterBarangPage() {
   const totalPages = Math.max(Math.ceil(total / pageSize), 1);
 
   const toggleSort = (key: SortKey) => {
-    if (sortBy === key) {
-      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    } else {
+    if (sortBy === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    else {
       setSortBy(key);
       setSortDir("asc");
     }
     setPage(1);
   };
 
-  const remove = async (item: Item) => {
+  const remove = async (o: Obat) => {
     setDeleteError("");
     try {
-      await api.deleteItem(item.id);
+      await api.deleteObat(o.id);
       load();
+      loadOptions();
     } catch (e: any) {
       setDeleteError(
-        e?.message?.includes("409") ? "Barang ini punya riwayat transaksi, tidak bisa dihapus" : "Gagal menghapus barang"
+        e?.message?.includes("409") ? `"${o.nama}" masih ada di stok atau riwayat klinik, tidak bisa dihapus` : "Gagal menghapus obat"
       );
     }
   };
 
-  // Download follows the current search, satuan filter and sort, like the table on screen.
+  // Download follows the current search, filters and sort, like the table on screen.
   const buildReport = async (): Promise<TableReport> => {
-    const all = await fetchAllRows((p, ps) => api.items({ search, satuan, sortBy, sortDir, page: p, pageSize: ps }));
-    const active = [search && `Cari: "${search}"`, satuan && `Satuan: ${satuan}`].filter(Boolean);
+    const all = await fetchAllRows((p, ps) => api.obat({ ...query(), page: p, pageSize: ps }));
+    const active = [search && `Cari: "${search}"`, kategori && `Kategori: ${kategori}`, satuan && `Satuan: ${satuan}`].filter(Boolean);
     return {
-      title: "Master Data Barang",
+      title: "Master Data Obat",
       subtitle: active.length ? [`Filter: ${active.join(" · ")}`] : [],
-      columns: [{ label: "Kode", nowrap: true }, { label: "Nama Barang" }, { label: "Satuan" }, { label: "Buffer Stock", align: "right" }],
-      rows: all.map((i) => [i.kode, i.nama, i.satuan, i.buffer_stock]),
+      landscape: true,
+      columns: [
+        { label: "No", align: "right" },
+        { label: "Kode Barang", nowrap: true },
+        { label: "Nama Obat/Barang" },
+        { label: "Kategori" },
+        { label: "Jenis/Kelompok" },
+        { label: "Deskripsi / Kegunaan" },
+        { label: "Satuan" },
+      ],
+      rows: all.map((o, n) => [n + 1, o.kode, o.nama, o.kategori, o.jenis, o.deskripsi, o.satuan]),
     };
   };
 
@@ -162,19 +176,20 @@ export function MasterBarangPage() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold text-[var(--text-primary)]">Master Data Barang</h1>
+          <h1 className="text-xl font-semibold text-[var(--text-primary)]">Master Data Obat</h1>
           <p className="text-sm text-[var(--text-secondary)]">
-            {total.toLocaleString("id-ID")} jenis barang · diambil dari daftar barang Gudang Nilam
+            {total.toLocaleString("id-ID")} obat & alat medis · dipakai oleh semua Inventory Klinik
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <ExportButtons total={total} buildReport={buildReport} fileName="master-barang" />
+          <ActivityLogButton module="KLINIK" estate="" />
+          <ExportButtons total={total} buildReport={buildReport} fileName="master-obat" />
           <button
             onClick={() => setCreating(true)}
             className="flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium bg-[var(--accent-blue)] text-white hover:opacity-90"
           >
             <Plus size={16} />
-            Tambah Barang
+            Tambah Obat
           </button>
         </div>
       </div>
@@ -185,7 +200,7 @@ export function MasterBarangPage() {
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Cari kode, nama, atau satuan barang..."
+            placeholder="Cari kode, nama, jenis atau kegunaan obat..."
             className="w-full pl-9 pr-3 py-2 text-sm rounded-md border border-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-blue-border)]"
           />
         </div>
@@ -194,20 +209,32 @@ export function MasterBarangPage() {
       {deleteError && <p className="text-xs text-[var(--accent-red)]">{deleteError}</p>}
 
       <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+        <div ref={tableScrollRef} className="overflow-x-auto">
+          <table className="grid-table w-full text-sm">
             <thead>
               <tr className="bg-[#f8fafc] text-[var(--text-secondary)] text-xs uppercase">
-                <SortableHeader label="Kode" sortKey="kode" currentSort={sortBy} currentDir={sortDir} onSort={toggleSort} />
-                <SortableHeader label="Nama Barang" sortKey="nama" currentSort={sortBy} currentDir={sortDir} onSort={toggleSort} />
-                <FilterHeader label="Satuan" value={satuan} options={satuanOptions} onChange={(v) => { setSatuan(v); setPage(1); }} />
-                <SortableHeader
-                  label="Buffer Stock"
-                  sortKey="buffer_stock"
-                  align="right"
-                  currentSort={sortBy}
-                  currentDir={sortDir}
-                  onSort={toggleSort}
+                <th className="px-4 py-2.5 text-right">No</th>
+                <SortableHeader label="Kode Barang" sortKey="kode" currentSort={sortBy} currentDir={sortDir} onSort={toggleSort} />
+                <SortableHeader label="Nama Obat/Barang" sortKey="nama" currentSort={sortBy} currentDir={sortDir} onSort={toggleSort} />
+                <FilterHeader
+                  label="Kategori"
+                  value={kategori}
+                  options={options.kategori}
+                  onChange={(v) => {
+                    setKategori(v);
+                    setPage(1);
+                  }}
+                />
+                <SortableHeader label="Jenis/Kelompok" sortKey="jenis" currentSort={sortBy} currentDir={sortDir} onSort={toggleSort} />
+                <th className="px-4 py-2.5 text-left">Deskripsi / Kegunaan</th>
+                <FilterHeader
+                  label="Satuan"
+                  value={satuan}
+                  options={options.satuan}
+                  onChange={(v) => {
+                    setSatuan(v);
+                    setPage(1);
+                  }}
                 />
                 <th className="px-4 py-2.5 text-right">Aksi</th>
               </tr>
@@ -215,35 +242,38 @@ export function MasterBarangPage() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={5} className="px-4 py-8 text-center text-[var(--text-muted)]">
+                  <td colSpan={8} className="px-4 py-8 text-center text-[var(--text-muted)]">
                     Memuat...
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="px-4 py-8 text-center text-[var(--text-muted)]">
-                    Tidak ada data
+                  <td colSpan={8} className="px-4 py-8 text-center text-[var(--text-muted)]">
+                    Tidak ada obat
                   </td>
                 </tr>
               ) : (
-                rows.map((item) => (
-                  <tr key={item.id} className="border-t border-[var(--border)] hover:bg-[#f8fafc]">
-                    <td className="px-4 py-2.5 font-mono text-xs">{item.kode}</td>
-                    <td className="px-4 py-2.5">{item.nama}</td>
-                    <td className="px-4 py-2.5 text-[var(--text-secondary)]">{item.satuan}</td>
-                    <td className="px-4 py-2.5 text-right text-[var(--text-secondary)]">{item.buffer_stock}</td>
+                rows.map((o, idx) => (
+                  <tr key={o.id} className="border-t border-[var(--border)] hover:bg-[#f8fafc]">
+                    <td className="px-4 py-2.5 text-right text-[var(--text-muted)]">{(page - 1) * pageSize + idx + 1}</td>
+                    <td className="px-4 py-2.5 font-mono text-xs whitespace-nowrap">{o.kode}</td>
+                    <td className="px-4 py-2.5">{o.nama}</td>
+                    <td className="px-4 py-2.5 text-[var(--text-secondary)]">{o.kategori || "-"}</td>
+                    <td className="px-4 py-2.5 text-[var(--text-secondary)]">{o.jenis || "-"}</td>
+                    <td className="px-4 py-2.5 text-xs text-[var(--text-secondary)] max-w-[360px]">{o.deskripsi || "-"}</td>
+                    <td className="px-4 py-2.5 text-[var(--text-secondary)]">{o.satuan}</td>
                     <td className="px-4 py-2.5 text-right">
                       <div className="inline-flex gap-1.5">
                         <button
-                          onClick={() => setEditingItem(item)}
-                          title="Edit data barang"
+                          onClick={() => setEditing(o)}
+                          title="Edit data obat"
                           className="p-1.5 rounded-md border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[#f1f5f9]"
                         >
                           <Pencil size={14} />
                         </button>
                         <button
-                          onClick={() => setConfirmDelete(item)}
-                          title="Hapus barang"
+                          onClick={() => setConfirmDelete(o)}
+                          title="Hapus obat"
                           className="p-1.5 rounded-md border border-[var(--accent-red-border)] text-[var(--accent-red)] hover:bg-[var(--accent-red-bg)]"
                         >
                           <Trash2 size={14} />
@@ -280,31 +310,27 @@ export function MasterBarangPage() {
         </div>
       </div>
 
-      {editingItem && (
-        <EditItemModal
-          item={editingItem}
-          onClose={() => setEditingItem(null)}
-          onSuccess={() => {
-            setEditingItem(null);
-            load();
+      {(editing || creating) && (
+        <EditObatModal
+          obat={editing}
+          kategoriOptions={options.kategori}
+          satuanOptions={options.satuan}
+          onClose={() => {
+            setEditing(null);
+            setCreating(false);
           }}
-        />
-      )}
-
-      {creating && (
-        <EditItemModal
-          item={null}
-          onClose={() => setCreating(false)}
           onSuccess={() => {
+            setEditing(null);
             setCreating(false);
             load();
+            loadOptions();
           }}
         />
       )}
 
       {confirmDelete && (
         <ConfirmDialog
-          message={`Hapus barang "${confirmDelete.nama}" (${confirmDelete.kode})? Tindakan ini tidak bisa dibatalkan.`}
+          message={`Hapus obat "${confirmDelete.nama}" (${confirmDelete.kode})? Tindakan ini tidak bisa dibatalkan.`}
           onCancel={() => setConfirmDelete(null)}
           onConfirm={() => {
             remove(confirmDelete);
