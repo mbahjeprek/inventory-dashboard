@@ -185,11 +185,14 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: { mobileOpen?: bo
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.pathname]);
 
+  // The remembered page is only used while it's still one of this account's options (the browser
+  // may have been used by another account before).
   const selectedFor = (group: DropdownGroup) =>
     activeByGroup[group.key] ??
     (() => {
       try {
-        return localStorage.getItem(`last-${group.key}`) ?? group.options[0].to;
+        const last = localStorage.getItem(`last-${group.key}`);
+        return group.options.some((o) => o.to === last) ? last! : group.options[0].to;
       } catch {
         return group.options[0].to;
       }
@@ -265,19 +268,24 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: { mobileOpen?: bo
                   const active = !!activeByGroup[group.key];
                   const GroupIcon = group.icon;
 
-                  if (minimized) {
+                  // Icon-only sidebar, or a group with just one estate (an estate account): the
+                  // menu opens that page directly instead of first asking for the estate.
+                  if (minimized || group.options.length === 1) {
                     return (
                       <NavLink
                         key={group.key}
                         to={selected}
                         title={group.title}
-                        className={`flex items-center justify-center py-2.5 rounded-md text-sm font-semibold transition-colors ${
+                        className={`flex items-center py-2.5 rounded-md text-sm font-semibold transition-colors ${
+                          minimized ? "justify-center" : "gap-3 px-3"
+                        } ${
                           active
                             ? "bg-white/15 text-white"
                             : "text-white/70 hover:bg-white/10 hover:text-white"
                         }`}
                       >
                         <GroupIcon size={17} className="shrink-0 text-[#b9f0c9]" />
+                        {!minimized && <span className="flex-1 text-left">{group.title}</span>}
                       </NavLink>
                     );
                   }
