@@ -202,7 +202,12 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: { mobileOpen?: bo
 
       <nav className="flex-1 px-3 space-y-4 overflow-y-auto overflow-x-hidden">
         {visibleSections.map((section, i) => {
-          const isOpen = minimized || !section.collapsible ? true : !(groupCollapsed[section.title!] ?? false);
+          // Sections start closed so the sidebar stays short; a closed section that holds the
+          // current page shows a dot so it's still clear where you are.
+          const isOpen = minimized || !section.collapsible ? true : !(groupCollapsed[section.title!] ?? true);
+          const hasActive =
+            section.items.some((it) => it.to === location.pathname) ||
+            (section.title === "Inventory" && dropdownGroups.some((g) => !!activeByGroup[g.key]));
 
           return (
             <div key={section.title ?? i} className="space-y-1">
@@ -215,11 +220,14 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: { mobileOpen?: bo
               {section.title && !minimized && section.collapsible && (
                 <button
                   onClick={() =>
-                    setGroupCollapsed((c) => ({ ...c, [section.title!]: !(c[section.title!] ?? false) }))
+                    setGroupCollapsed((c) => ({ ...c, [section.title!]: !(c[section.title!] ?? true) }))
                   }
-                  className="w-full flex items-center justify-between px-3 pt-1 pb-1 text-[10px] font-semibold tracking-wider text-white/55 uppercase hover:text-white/60"
+                  className="w-full flex items-center justify-between px-3 py-1.5 rounded-md text-[10px] font-semibold tracking-wider text-white/55 uppercase hover:text-white hover:bg-white/5"
                 >
-                  {section.title}
+                  <span className="flex items-center gap-2">
+                    {section.title}
+                    {!isOpen && hasActive && <span className="w-1.5 h-1.5 rounded-full bg-[#b9f0c9]" />}
+                  </span>
                   <ChevronDown size={12} className={`transition-transform ${isOpen ? "" : "-rotate-90"}`} />
                 </button>
               )}
@@ -248,7 +256,7 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: { mobileOpen?: bo
                     );
                   }
 
-                  const expanded = expandedGroups[group.key] ?? active;
+                  const expanded = expandedGroups[group.key] ?? false;
 
                   return (
                     <div key={group.key}>
