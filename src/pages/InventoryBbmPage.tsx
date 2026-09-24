@@ -43,7 +43,7 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
     if (!dateFrom && !dateTo) return new Date().toLocaleDateString("id-ID", { month: "long", year: "numeric" });
     return `${flowRange.dateFrom ? fmt(flowRange.dateFrom) : "Awal"} – ${flowRange.dateTo ? fmt(flowRange.dateTo) : "Sekarang"}`;
   })();
-  const loadSummary = () => api.bbmSummary(lokasiLock, flowRange).then(setSummary);
+  const loadSummary = () => api.bbmSummary(lokasiLock, { ...flowRange, asOf: dateTo }).then(setSummary);
 
   const load = () => {
     setLoading(true);
@@ -143,8 +143,10 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
 
   const flowFor = (jenis: string, lok: string) => summary?.perLokasi.find((s) => s.jenis_bbm === jenis && s.lokasi === lok);
 
+  // The cards show the closing balance as of the date filter's end (or today's balance when there
+  // is no end date); 0 when that jenis/lokasi had no transactions yet by then.
   const saldoFor = (jenis: string, lok: string) =>
-    summary?.saldoTerakhir.find((s) => s.jenis_bbm === jenis && s.lokasi === lok)?.saldo_stock;
+    summary?.saldoPerTanggal.find((s) => s.jenis_bbm === jenis && s.lokasi === lok)?.saldo_stock ?? 0;
 
   const saldoCards = JENIS_OPTIONS.flatMap((jenis) =>
     (summary?.saldoTerakhir.filter((s) => s.jenis_bbm === jenis).map((s) => s.lokasi) || [])
@@ -183,7 +185,7 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
           return (
             <StatCard
               key={`${jenis}-${lok}`}
-              label={`Stok ${jenis === "SOLAR" ? "Solar" : "Bensin"} - ${lok}`}
+              label={`Stok ${jenis === "SOLAR" ? "Solar" : "Bensin"} - ${lok}${dateTo ? ` (per ${new Date(`${dateTo}T00:00:00`).toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" })})` : ""}`}
               value={(saldo ?? 0).toLocaleString("id-ID")}
               suffix="LTR"
               icon={jenis === "SOLAR" ? Fuel : Droplet}

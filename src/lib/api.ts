@@ -168,6 +168,7 @@ export type ActivityLog = {
 export type BbmSummary = {
   perLokasi: { jenis_bbm: string; lokasi: string; diterima: number; pemakaian: number }[];
   saldoTerakhir: { jenis_bbm: string; lokasi: string; saldo_stock: number; tanggal: string; tanggal_iso: string }[];
+  saldoPerTanggal: { jenis_bbm: string; lokasi: string; saldo_stock: number; tanggal: string; tanggal_iso: string }[];
 };
 
 export type Movement = {
@@ -339,7 +340,7 @@ export const api = {
 
   deleteAlatBerat: (id: number) => req<{ success: boolean }>(`/api/alat-berat/${id}`, { method: "DELETE" }),
 
-  bbmSummary: (lokasi?: string, range?: { dateFrom?: string; dateTo?: string }) => {
+  bbmSummary: (lokasi?: string, range?: { dateFrom?: string; dateTo?: string; asOf?: string }) => {
     const qs = new URLSearchParams(
       Object.entries({ lokasi, ...range }).filter((e): e is [string, string] => !!e[1])
     ).toString();

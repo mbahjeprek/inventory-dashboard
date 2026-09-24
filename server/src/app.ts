@@ -1421,18 +1421,25 @@ app.get("/api/bbm/summary", async (req, res) => {
   // tanggal_iso (multiple dispensing events per day), so picking "the" latest needs a real
   // tie-break (insertion order via id) - a plain GROUP BY on the max date alone doesn't guarantee
   // which same-day row's saldo_stock comes back, so a window function picks it deterministically.
-  const saldoTerakhir = await queryMany(
-    `SELECT jenis_bbm, lokasi, saldo_stock, tanggal, tanggal_iso FROM (
-       SELECT jenis_bbm, lokasi, saldo_stock, tanggal, tanggal_iso,
-              ROW_NUMBER() OVER (PARTITION BY jenis_bbm, lokasi ORDER BY tanggal_iso DESC, id DESC) AS rn
-       FROM bbm_log
-       WHERE saldo_stock IS NOT NULL ${lokasi ? "AND lokasi = @lokasi" : ""}
-     ) sub
-     WHERE rn = 1`,
-    params
-  );
+  const latestSaldo = (asOf?: string) =>
+    queryMany(
+      `SELECT jenis_bbm, lokasi, saldo_stock, tanggal, tanggal_iso FROM (
+         SELECT jenis_bbm, lokasi, saldo_stock, tanggal, tanggal_iso,
+                ROW_NUMBER() OVER (PARTITION BY jenis_bbm, lokasi ORDER BY tanggal_iso DESC, id DESC) AS rn
+         FROM bbm_log
+         WHERE saldo_stock IS NOT NULL ${lokasi ? "AND lokasi = @lokasi" : ""} ${asOf ? "AND tanggal_iso <= @asOf" : ""}
+       ) sub
+       WHERE rn = 1`,
+      { ...params, ...(asOf ? { asOf } : {}) }
+    );
 
-  res.json({ perLokasi, saldoTerakhir });
+  // saldoTerakhir is always today's real balance (new transactions continue from it). saldoPerTanggal
+  // is the closing balance as of the filter's end date - what the stock cards show while filtered.
+  const { asOf = "" } = req.query as Record<string, string>;
+  const saldoTerakhir = await latestSaldo();
+  const saldoPerTanggal = isoDate.test(asOf) ? await latestSaldo(asOf) : saldoTerakhir;
+
+  res.json({ perLokasi, saldoTerakhir, saldoPerTanggal });
 });
 
 const INDO_MONTHS = [
