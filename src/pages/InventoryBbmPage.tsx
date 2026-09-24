@@ -171,7 +171,7 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
           </h1>
           <p className="text-sm text-[var(--text-secondary)]">Monitoring stok & histori pemakaian Solar dan Bensin per lokasi</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {(lokasiLock || lokasi) && <ActivityLogButton key={lokasiLock || lokasi} module="BBM" estate={lokasiLock || lokasi} />}
           <ExportButtons
             total={total}

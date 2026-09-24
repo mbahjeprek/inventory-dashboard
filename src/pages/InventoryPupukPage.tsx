@@ -160,7 +160,7 @@ export function InventoryPupukPage({ estate }: { estate: string }) {
           <h1 className="text-xl font-semibold text-[var(--text-primary)]">Inventory Pupuk NPK - {estate}</h1>
           <p className="text-sm text-[var(--text-secondary)]">Monitoring stok, penerimaan & pemakaian pupuk per blok</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <ActivityLogButton module="PUPUK" estate={estate} />
           <ExportButtons total={total} buildReport={buildReport} fileName={`inventory-pupuk-${estate.toLowerCase()}`} />
           <button

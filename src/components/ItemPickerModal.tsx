@@ -73,7 +73,7 @@ export function ItemPickerModal({
                 setSearch(e.target.value);
                 setPage(1);
               }}
-              placeholder={noun === "obat" ? "Cari kode, nama, jenis atau kegunaan obat..." : `Cari kode atau nama ${noun}...`}
+              placeholder={noun === "obat" ? "Cari kode, nama, jenis atau kegunaan obat..." : "Cari kode, nama, atau satuan barang..."}
               className="w-full pl-9 pr-3 py-2 text-sm rounded-md border border-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-blue-border)]"
             />
           </div>

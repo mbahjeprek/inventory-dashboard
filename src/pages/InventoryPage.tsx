@@ -209,7 +209,7 @@ export function InventoryPage() {
           <h1 className="text-xl font-semibold text-[var(--text-primary)]">Inventory Gudang - Nilam</h1>
           <p className="text-sm text-[var(--text-secondary)]">{total.toLocaleString("id-ID")} item barang</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <ActivityLogButton module="BARANG" estate="NILAM" />
           {tab === "stok" && <ExportButtons total={total} buildReport={buildReport} fileName="inventory-gudang-nilam" />}
           <button
