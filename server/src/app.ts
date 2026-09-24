@@ -1805,8 +1805,8 @@ app.put("/api/pupuk/:id", async (req, res) => {
       divisi: "Divisi",
       no_embrace: "No. Embrace",
       kode_barang: "Kode Barang",
-      keluar: "Keluar",
-      diterima: "Diterima",
+      diterima: "Stok Masuk",
+      keluar: "Stok Keluar",
       saldo_stock: "Stok",
       keterangan: "Keterangan",
       blok: "Blok",
@@ -1828,8 +1828,8 @@ app.delete("/api/pupuk/:id", async (req, res) => {
     aksi: "Hapus Transaksi",
     objek: pupukObjek(existing),
     detail: [
-      existing.diterima && `Diterima: ${existing.diterima}`,
-      existing.keluar && `Keluar: ${existing.keluar}`,
+      existing.diterima && `Stok Masuk: ${existing.diterima}`,
+      existing.keluar && `Stok Keluar: ${existing.keluar}`,
       existing.saldo_stock !== null && `Stok: ${existing.saldo_stock}`,
       existing.keterangan && `Keterangan: ${existing.keterangan}`,
     ]

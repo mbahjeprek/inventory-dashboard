@@ -200,7 +200,7 @@ export function DashboardPage() {
       {pupukList.length > 0 && (
         <section className="space-y-3">
           <h2 className="text-sm font-semibold uppercase tracking-wide text-[var(--text-secondary)]">
-            Inventory Pupuk <span className="normal-case font-normal text-[var(--text-muted)]">· diterima/keluar {monthLabel}</span>
+            Inventory Pupuk <span className="normal-case font-normal text-[var(--text-muted)]">· masuk/keluar {monthLabel}</span>
           </h2>
           <div className={grid}>
             {pupukList.map((p) => {
@@ -222,7 +222,7 @@ export function DashboardPage() {
                         return (
                           <div key={j} className="grid grid-cols-3 gap-3">
                             <Figure label={`Stok ${j.replace(/^PUPUK /, "")}`} value={fmt(saldo)} suffix="KG" tone={saldo < 0 ? "negative" : undefined} />
-                            <Figure label="Diterima" value={fmt(flow?.diterima)} tone="green" />
+                            <Figure label="Masuk" value={fmt(flow?.diterima)} tone="green" />
                             <Figure label="Keluar" value={fmt(flow?.keluar)} tone="red" />
                           </div>
                         );
