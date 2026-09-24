@@ -3,6 +3,8 @@ import { Link, useNavigate } from "react-router-dom";
 import { Bar, BarChart, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { TrendingUp } from "lucide-react";
 import { api, type TopKeluar, type TopKeluarRow } from "../lib/api";
+import { useAuth } from "../context/AuthContext";
+import { canModule } from "../lib/access";
 
 type EstateLink = { estate: string; label: string; gudang: string; klinik: string };
 type Source = "gudang" | "klinik";
@@ -54,7 +56,13 @@ function Segmented<T extends string>({ value, options, onChange }: { value: T; o
 // screen; total qty is shown alongside. Koreksi is not counted.
 export function TopKeluarPanel({ estates }: { estates: EstateLink[] }) {
   const navigate = useNavigate();
-  const [source, setSource] = useState<Source>("gudang");
+  const { user } = useAuth();
+  // An admin limited to some modules only ranks those (Gudang and/or Klinik).
+  const sources = ([
+    { key: "gudang", label: "Gudang" },
+    { key: "klinik", label: "Klinik" },
+  ] as { key: Source; label: string }[]).filter((o) => canModule(user, o.key === "gudang" ? "GUDANG" : "KLINIK"));
+  const [source, setSource] = useState<Source>(sources[0]?.key ?? "gudang");
   const [period, setPeriod] = useState<Period>("bulan");
   const [custom, setCustom] = useState(() => periodRange("bulan", { from: "", to: "" }));
   const [data, setData] = useState<TopKeluar | null>(null);
@@ -66,6 +74,7 @@ export function TopKeluarPanel({ estates }: { estates: EstateLink[] }) {
   const codesKey = codes.join(",");
 
   useEffect(() => {
+    if (!sources.length) return;
     let stale = false;
     setData(null);
     setError(false);
@@ -91,6 +100,8 @@ export function TopKeluarPanel({ estates }: { estates: EstateLink[] }) {
   const chartData = rows.map((r) => ({ ...r, label: short(r.nama) }));
   const scope = single ? `Estate ${single.label}` : estates.length === 0 ? "" : `${estates.length} estate`;
 
+  if (!sources.length) return null;
+
   return (
     <section className="min-w-0 bg-[var(--bg-card)] border border-[var(--border)] rounded-lg p-4 space-y-3">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -105,7 +116,7 @@ export function TopKeluarPanel({ estates }: { estates: EstateLink[] }) {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Segmented<Source> value={source} onChange={setSource} options={[{ key: "gudang", label: "Gudang" }, { key: "klinik", label: "Klinik" }]} />
+          {sources.length > 1 && <Segmented<Source> value={source} onChange={setSource} options={sources} />}
           <Segmented<Period> value={period} onChange={setPeriod} options={PERIODS} />
           {period === "custom" && (
             <div className="flex items-center gap-1 text-xs">

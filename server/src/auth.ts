@@ -12,7 +12,17 @@ export type Role = "superuser" | "estate";
 export const ESTATES = ["NILAM", "KNS", "WJA", "ZAMRUD", "FIRUS"] as const;
 export type Estate = (typeof ESTATES)[number];
 
-export type SessionUser = { id: number; username: string; nama: string; role: Role; estate: Estate | null };
+export const MODULES = ["GUDANG", "BBM", "PUPUK", "KLINIK"] as const;
+export type Module = (typeof MODULES)[number];
+
+// `modules`: the inventory modules an estate account may open; null = all of them.
+export type SessionUser = { id: number; username: string; nama: string; role: Role; estate: Estate | null; modules?: Module[] | null };
+
+// users.modules text -> list (null when unrestricted).
+export function parseModules(v: string | null | undefined): Module[] | null {
+  const list = (v ?? "").split(",").map((s) => s.trim()).filter((s): s is Module => (MODULES as readonly string[]).includes(s));
+  return list.length ? list : null;
+}
 
 export function hashPassword(password: string): string {
   const salt = randomBytes(16).toString("hex");

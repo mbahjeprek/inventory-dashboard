@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { homeRouteFor } from "../components/AccessGate";
 import plantationWelcome from "../assets/plantation-welcome.jpg";
+import { PasswordInput } from "../components/PasswordInput";
 
 export function LoginPage() {
   const { status, user, login, logout } = useAuth();
@@ -95,10 +96,10 @@ export function LoginPage() {
 
             <div>
               <label className="text-sm font-medium text-[var(--text-secondary)] mb-1.5 block">Password</label>
-              <input
-                type="password"
+              <PasswordInput
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                onChange={setPassword}
+                autoComplete="current-password"
                 className="w-full text-sm rounded-lg border border-[var(--border)] px-3.5 py-3"
               />
             </div>

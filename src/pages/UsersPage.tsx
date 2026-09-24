@@ -6,6 +6,7 @@ import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useAuth } from "../context/AuthContext";
 import { ExportButtons } from "../components/ExportButtons";
 import { fetchAllRows, type TableReport } from "../lib/printTable";
+import { MODULE_LABELS, type Module } from "../lib/access";
 
 type SortKey = "username" | "nama" | "created_at";
 
@@ -38,6 +39,15 @@ function SortableHeader({
     </th>
   );
 }
+
+// "Gudang, BBM, Pupuk NPK" for an account limited to some modules, "Semua modul" otherwise.
+const accessLabel = (u: UserAccount) =>
+  u.modules
+    ? u.modules
+        .split(",")
+        .map((m) => MODULE_LABELS[m as Module] ?? m)
+        .join(", ")
+    : "Semua modul";
 
 export function UsersPage() {
   const { user: currentUser } = useAuth();
@@ -111,7 +121,7 @@ export function UsersPage() {
       rows: all.map((u) => [
         u.username,
         u.nama,
-        u.role === "superuser" ? "Super User" : u.estate,
+        u.role === "superuser" ? "Super User" : `${u.estate} · ${accessLabel(u)}`,
         new Date(u.created_at).toLocaleDateString("id-ID"),
       ]),
     };
@@ -192,7 +202,7 @@ export function UsersPage() {
                         </span>
                       ) : (
                         <span className="text-xs px-2 py-0.5 rounded-full border bg-[var(--accent-green-bg)] text-[var(--accent-green)] border-[var(--accent-green-border)]">
-                          {u.estate}
+                          {u.estate} · {accessLabel(u)}
                         </span>
                       )}
                     </td>

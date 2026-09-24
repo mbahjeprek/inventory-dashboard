@@ -11,6 +11,9 @@ CREATE TABLE IF NOT EXISTS users (
 -- Existing rows default to 'superuser' so accounts that predate this column keep full access.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'superuser';
 ALTER TABLE users ADD COLUMN IF NOT EXISTS estate TEXT;
+-- Which inventory modules an estate account may open, comma separated from GUDANG, BBM, PUPUK,
+-- KLINIK (e.g. an admin entry data "GUDANG,BBM,PUPUK" or "KLINIK"). NULL = every module.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS modules TEXT;
 
 CREATE TABLE IF NOT EXISTS items (
   id SERIAL PRIMARY KEY,

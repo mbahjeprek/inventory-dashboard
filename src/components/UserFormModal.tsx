@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { X } from "lucide-react";
 import { api, ESTATES, type UserAccount, type Role, type Estate } from "../lib/api";
+import { MODULES, MODULE_LABELS, type Module } from "../lib/access";
+import { PasswordInput } from "./PasswordInput";
 
 export function UserFormModal({
   user,
@@ -17,12 +19,22 @@ export function UserFormModal({
   const [password, setPassword] = useState("");
   const [role, setRole] = useState<Role>(user?.role ?? "superuser");
   const [estate, setEstate] = useState<Estate>(user?.estate ?? ESTATES[0]);
+  // Modules an estate account may open; all ticked = no limit (stored as null).
+  const [modules, setModules] = useState<Module[]>(() => {
+    const saved = (user?.modules ?? "").split(",").filter((m): m is Module => (MODULES as readonly string[]).includes(m));
+    return saved.length ? saved : [...MODULES];
+  });
+  const toggleModule = (m: Module) => setModules((cur) => (cur.includes(m) ? cur.filter((x) => x !== m) : [...cur, m]));
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
   const submit = async () => {
     if (!username.trim() || !nama.trim() || (!isEdit && !password)) {
       setError("Username, nama, dan password wajib diisi");
+      return;
+    }
+    if (role === "estate" && modules.length === 0) {
+      setError("Pilih minimal satu modul");
       return;
     }
     setSubmitting(true);
@@ -33,6 +45,7 @@ export function UserFormModal({
         nama: nama.trim(),
         role,
         estate: role === "estate" ? estate : null,
+        modules: role === "estate" ? modules : undefined,
       };
       if (isEdit) {
         await api.updateUser(user.id, { ...payload, password: password || undefined });
@@ -82,10 +95,10 @@ export function UserFormModal({
             <label className="text-xs text-[var(--text-secondary)] mb-1 block">
               Password{isEdit ? " (kosongkan kalau tidak ganti)" : ""}
             </label>
-            <input
-              type="password"
+            <PasswordInput
               value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              onChange={setPassword}
+              autoComplete="new-password"
               className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-2"
             />
           </div>
@@ -119,6 +132,21 @@ export function UserFormModal({
               </div>
             )}
           </div>
+
+          {role === "estate" && (
+            <div>
+              <label className="text-xs text-[var(--text-secondary)] mb-1 block">Modul yang bisa diakses</label>
+              <div className="flex flex-wrap gap-2">
+                {MODULES.map((m) => (
+                  <label key={m} className="flex items-center gap-1.5 text-sm px-2.5 py-1.5 rounded-md border border-[var(--border)] cursor-pointer">
+                    <input type="checkbox" checked={modules.includes(m)} onChange={() => toggleModule(m)} />
+                    {MODULE_LABELS[m]}
+                  </label>
+                ))}
+              </div>
+              <p className="text-[11px] text-[var(--text-muted)] mt-1">Contoh: admin entry data Gudang/BBM/Pupuk, atau admin Klinik saja.</p>
+            </div>
+          )}
 
           {error && <p className="text-xs text-[var(--accent-red)]">{error}</p>}
 

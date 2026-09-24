@@ -18,6 +18,8 @@ import {
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { useEstateFilter } from "../hooks/useEstateFilter";
+import { ChangePasswordModal } from "./ChangePasswordModal";
+import { canModule, type Module } from "../lib/access";
 
 type NavItem = { to: string; label: string; icon: typeof Package };
 type NavSection = { title?: string; collapsible?: boolean; items: NavItem[] };
@@ -117,6 +119,7 @@ function useIsDesktop() {
 
 export function Sidebar({ mobileOpen = false, onMobileClose }: { mobileOpen?: boolean; onMobileClose?: () => void }) {
   const { user, logout } = useAuth();
+  const [changingPassword, setChangingPassword] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
   const [groupCollapsed, setGroupCollapsed] = useState<Record<string, boolean>>({});
@@ -149,11 +152,14 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: { mobileOpen?: bo
   // A superuser who picked estates on the dashboard only sees those. Stock In / Stock Out live as
   // tabs inside each Gudang/Klinik page.
   const shownEstates: (string | null | undefined)[] | null = isSuperuser ? (pickedEstates.length ? pickedEstates : null) : [user?.estate];
-  const dropdownGroups: DropdownGroup[] = shownEstates
-    ? DROPDOWN_GROUPS.map((g) => ({ ...g, options: g.options.filter((o) => shownEstates.includes(o.label.toUpperCase())) })).filter(
-        (g) => g.options.length > 0
-      )
-    : DROPDOWN_GROUPS;
+  // An admin limited to some modules (users.modules) only gets those groups.
+  const dropdownGroups: DropdownGroup[] = (
+    shownEstates
+      ? DROPDOWN_GROUPS.map((g) => ({ ...g, options: g.options.filter((o) => shownEstates.includes(o.label.toUpperCase())) })).filter(
+          (g) => g.options.length > 0
+        )
+      : DROPDOWN_GROUPS
+  ).filter((g) => canModule(user, g.key.toUpperCase() as Module));
 
   const visibleSections = navSections.filter((s) => {
     if (s.title === "Master Data") return isSuperuser;
@@ -349,6 +355,16 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: { mobileOpen?: bo
           </div>
         )}
         <button
+          onClick={() => setChangingPassword(true)}
+          title="Ganti Password"
+          className={`flex items-center gap-2 py-2 rounded-md text-sm text-white/60 hover:bg-white/10 hover:text-white ${
+            minimized ? "justify-center px-0 w-full" : "px-2 w-full"
+          }`}
+        >
+          <KeyRound size={16} className="shrink-0" />
+          {!minimized && "Ganti Password"}
+        </button>
+        <button
           onClick={async () => {
             await logout();
             navigate("/login", { replace: true });
@@ -363,6 +379,7 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: { mobileOpen?: bo
         </button>
       </div>
     </aside>
+    {changingPassword && <ChangePasswordModal onClose={() => setChangingPassword(false)} />}
     </>
   );
 }

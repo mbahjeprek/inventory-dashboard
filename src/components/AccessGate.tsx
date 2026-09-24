@@ -1,7 +1,8 @@
-import { Navigate } from "react-router-dom";
+import { Navigate, useLocation } from "react-router-dom";
 import type { ReactNode } from "react";
 import { useAuth } from "../context/AuthContext";
 import type { AuthUser } from "../lib/api";
+import { canModule, moduleOfPath } from "../lib/access";
 
 const ESTATE_HOME: Record<string, string> = {
   NILAM: "/inventory",
@@ -21,10 +22,13 @@ export function homeRouteFor(user: AuthUser | null): string {
 
 // Mirrors the server's requireEstate()/requireSuperuser() in app.ts - this is convenience
 // routing (redirect to where the user actually belongs), not the security boundary itself.
+// An account limited to some modules (e.g. admin Klinik) is also kept out of the other modules' pages.
 export function RequireEstate({ estate, children }: { estate: string; children: ReactNode }) {
   const { user } = useAuth();
+  const { pathname } = useLocation();
   if (!user) return null;
-  if (user.role === "superuser" || user.estate === estate) return <>{children}</>;
+  const m = moduleOfPath(pathname);
+  if ((user.role === "superuser" || user.estate === estate) && (!m || canModule(user, m))) return <>{children}</>;
   return <Navigate to={homeRouteFor(user)} replace />;
 }
 

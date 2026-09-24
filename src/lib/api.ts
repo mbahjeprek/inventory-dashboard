@@ -17,6 +17,8 @@ export type AuthUser = {
   nama: string;
   role: Role;
   estate: Estate | null;
+  // Inventory modules this estate account may open (see src/lib/access.ts); null/absent = all.
+  modules?: string[] | null;
 };
 
 export type UserAccount = {
@@ -25,6 +27,8 @@ export type UserAccount = {
   nama: string;
   role: Role;
   estate: Estate | null;
+  // Comma separated, e.g. "GUDANG,BBM,PUPUK"; null = every module.
+  modules: string | null;
   created_at: string;
 };
 
@@ -298,6 +302,9 @@ export const api = {
   logout: () => req<{ success: boolean }>("/api/auth/logout", { method: "POST" }),
 
   me: () => req<{ user: AuthUser }>("/api/auth/me"),
+
+  changePassword: (currentPassword: string, newPassword: string) =>
+    req<{ success: boolean }>("/api/auth/change-password", { method: "POST", body: JSON.stringify({ currentPassword, newPassword }) }),
 
   summary: () => req<Summary>("/api/summary"),
 
@@ -633,12 +640,12 @@ export const api = {
     return req<{ data: UserAccount[]; total: number; page: number; pageSize: number }>(`/api/users?${qs}`);
   },
 
-  createUser: (payload: { username: string; password: string; nama: string; role: Role; estate?: Estate | null }) =>
+  createUser: (payload: { username: string; password: string; nama: string; role: Role; estate?: Estate | null; modules?: string[] }) =>
     req<{ success: boolean; id: number }>("/api/users", { method: "POST", body: JSON.stringify(payload) }),
 
   updateUser: (
     id: number,
-    payload: { username: string; nama: string; password?: string; role: Role; estate?: Estate | null }
+    payload: { username: string; nama: string; password?: string; role: Role; estate?: Estate | null; modules?: string[] }
   ) => req<{ success: boolean }>(`/api/users/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
 
   deleteUser: (id: number) => req<{ success: boolean }>(`/api/users/${id}`, { method: "DELETE" }),
