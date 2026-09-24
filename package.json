@@ -11,6 +11,7 @@
     "preview": "vite preview",
     "db:schema": "tsx server/src/applySchema.ts",
     "db:migrate": "tsx server/src/migrateSqliteToSupabase.ts",
+    "db:import-pupuk": "tsx server/src/importPupuk.ts",
     "import": "tsx server/src/import.ts",
     "import:logs": "tsx server/src/importLogs.ts",
     "import:karyawan": "tsx server/src/importKaryawan.ts",

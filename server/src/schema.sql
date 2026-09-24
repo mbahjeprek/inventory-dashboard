@@ -164,3 +164,27 @@ CREATE TABLE IF NOT EXISTS activity_log (
 );
 CREATE INDEX IF NOT EXISTS idx_activity_module_time ON activity_log(module, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_activity_estate ON activity_log(estate);
+
+-- Fertiliser (pupuk) ledger, one running balance per estate + jenis pupuk. Imported from the
+-- "STOCK PUPUK" Google Sheet tab (see importPupuk.ts) and extended by manual transactions. The
+-- sheet's own STOK column is one balance across all estates; saldo_stock here is per estate.
+CREATE TABLE IF NOT EXISTS pupuk_log (
+  id SERIAL PRIMARY KEY,
+  estate TEXT NOT NULL,
+  jenis_pupuk TEXT NOT NULL,
+  periode TEXT,
+  tanggal TEXT,
+  tanggal_iso TEXT,
+  divisi TEXT,
+  no_embrace TEXT,
+  kode_barang TEXT,
+  keluar DOUBLE PRECISION,
+  diterima DOUBLE PRECISION,
+  saldo_stock DOUBLE PRECISION,
+  keterangan TEXT,
+  blok TEXT,
+  ha DOUBLE PRECISION,
+  pokok DOUBLE PRECISION,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_pupuk_estate_date ON pupuk_log(estate, tanggal_iso);

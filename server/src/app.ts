@@ -90,7 +90,7 @@ function requireEstate(estate: string) {
 }
 
 // ---- Activity log (audit trail), see schema.sql's activity_log ----
-type LogModule = "BARANG" | "BBM";
+type LogModule = "BARANG" | "BBM" | "PUPUK";
 
 // Records who changed what. Called after the change succeeded; a logging failure is reported but
 // never fails the user's action itself.
@@ -1607,11 +1607,243 @@ app.delete("/api/bbm/:id", async (req, res) => {
   res.json({ success: true });
 });
 
+// ---- Inventory Pupuk (fertiliser), see schema.sql's pupuk_log ----
+// Only these estates have fertiliser stock (KNS/WJA have none in the source sheet).
+const PUPUK_ESTATES = ["NILAM", "ZAMRUD", "FIRUS"];
+
+function pupukFilters(q: Record<string, string>) {
+  const conditions = ["estate = @estate"];
+  const params: any = { estate: q.estate };
+  if (q.jenis_pupuk) {
+    conditions.push("jenis_pupuk = @jenis_pupuk");
+    params.jenis_pupuk = q.jenis_pupuk;
+  }
+  if (q.divisi) {
+    conditions.push("divisi = @divisi");
+    params.divisi = q.divisi;
+  }
+  if (q.search) {
+    conditions.push("(keterangan ILIKE @search OR blok ILIKE @search OR no_embrace ILIKE @search)");
+    params.search = `%${q.search}%`;
+  }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(q.dateFrom || "")) {
+    conditions.push("tanggal_iso >= @dateFrom");
+    params.dateFrom = q.dateFrom;
+  }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(q.dateTo || "")) {
+    conditions.push("tanggal_iso <= @dateTo");
+    params.dateTo = q.dateTo;
+  }
+  return { where: "WHERE " + conditions.join(" AND "), params };
+}
+
+function checkPupukEstate(req: express.Request, res: express.Response, estate: string) {
+  if (!PUPUK_ESTATES.includes(estate)) {
+    res.status(400).json({ error: "Estate tidak valid" });
+    return false;
+  }
+  if (!estateAllowed(req.user!, estate)) {
+    res.status(403).json({ error: "Akses ditolak" });
+    return false;
+  }
+  return true;
+}
+
+const latestPupukSaldo = (estate: string, asOf?: string) =>
+  queryMany<{ jenis_pupuk: string; saldo_stock: number; tanggal: string }>(
+    `SELECT jenis_pupuk, saldo_stock, tanggal FROM (
+       SELECT jenis_pupuk, saldo_stock, tanggal,
+              ROW_NUMBER() OVER (PARTITION BY jenis_pupuk ORDER BY tanggal_iso DESC, id DESC) AS rn
+       FROM pupuk_log WHERE estate = @estate AND saldo_stock IS NOT NULL ${asOf ? "AND tanggal_iso <= @asOf" : ""}
+     ) sub WHERE rn = 1 ORDER BY jenis_pupuk`,
+    { estate, ...(asOf ? { asOf } : {}) }
+  );
+
+app.get("/api/pupuk/summary", async (req, res) => {
+  const q = req.query as Record<string, string>;
+  if (!checkPupukEstate(req, res, q.estate)) return;
+  const isoDate = /^\d{4}-\d{2}-\d{2}$/;
+  const flow = pupukFilters({ estate: q.estate, dateFrom: q.dateFrom, dateTo: q.dateTo });
+  const perJenis = await queryMany(
+    `SELECT jenis_pupuk, COALESCE(SUM(diterima), 0)::float8 diterima, COALESCE(SUM(keluar), 0)::float8 keluar
+     FROM pupuk_log ${flow.where} GROUP BY jenis_pupuk ORDER BY jenis_pupuk`,
+    flow.params
+  );
+  // Same split as BBM: saldoTerakhir is today's real balance (new entries continue from it);
+  // saldoPerTanggal is the balance as of the date filter's end, which the cards show.
+  const saldoTerakhir = await latestPupukSaldo(q.estate);
+  const saldoPerTanggal = isoDate.test(q.asOf || "") ? await latestPupukSaldo(q.estate, q.asOf) : saldoTerakhir;
+  res.json({ perJenis, saldoTerakhir, saldoPerTanggal });
+});
+
+app.get("/api/pupuk/options", async (req, res) => {
+  const { estate = "" } = req.query as Record<string, string>;
+  if (!checkPupukEstate(req, res, estate)) return;
+  const jenis = await queryMany<{ v: string }>("SELECT DISTINCT jenis_pupuk v FROM pupuk_log ORDER BY v");
+  const divisi = await queryMany<{ v: string }>(
+    "SELECT DISTINCT divisi v FROM pupuk_log WHERE estate = @estate AND divisi <> '' ORDER BY v",
+    { estate }
+  );
+  res.json({ jenis: jenis.map((r) => r.v), divisi: divisi.map((r) => r.v) });
+});
+
+app.get("/api/pupuk", async (req, res) => {
+  const q = req.query as Record<string, string>;
+  if (!checkPupukEstate(req, res, q.estate)) return;
+  const { where, params } = pupukFilters(q);
+  const totals = (await queryOne<any>(
+    `SELECT COUNT(*)::int c, COALESCE(SUM(keluar), 0)::float8 keluar, COALESCE(SUM(diterima), 0)::float8 diterima FROM pupuk_log ${where}`,
+    params
+  ))!;
+  const limit = Math.min(parseInt(q.pageSize) || 50, 500);
+  const offset = (Math.max(parseInt(q.page) || 1, 1) - 1) * limit;
+  const data = await queryMany(
+    `SELECT * FROM pupuk_log ${where} ORDER BY tanggal_iso DESC, id DESC LIMIT @limit OFFSET @offset`,
+    { ...params, limit, offset }
+  );
+  res.json({ data, total: totals.c, keluarSum: totals.keluar, diterimaSum: totals.diterima, page: parseInt(q.page) || 1, pageSize: limit });
+});
+
+const pupukObjek = (r: { jenis_pupuk: string; tanggal: string; blok?: string | null }) =>
+  `${r.jenis_pupuk} · ${r.tanggal}${r.blok ? ` · Blok ${r.blok}` : ""}`;
+
+const optNum = (v: any) => (v === "" || v === undefined || v === null ? null : Number(v));
+
+app.post("/api/pupuk", async (req, res) => {
+  const { estate, jenis_pupuk, tanggal_iso, tipe, jumlah, divisi, no_embrace, kode_barang, keterangan, blok, ha, pokok } = req.body;
+  if (!checkPupukEstate(req, res, estate)) return;
+  if (!jenis_pupuk || !String(jenis_pupuk).trim()) return res.status(400).json({ error: "Jenis pupuk wajib diisi" });
+  if (!["MASUK", "KELUAR"].includes(tipe)) return res.status(400).json({ error: "Tipe transaksi tidak valid" });
+  if (!jumlah || Number(jumlah) <= 0) return res.status(400).json({ error: "Jumlah harus lebih dari 0" });
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(tanggal_iso || "")) return res.status(400).json({ error: "Tanggal tidak valid" });
+
+  const jenis = String(jenis_pupuk).trim().toUpperCase();
+  const last = await queryOne<{ saldo_stock: number }>(
+    `SELECT saldo_stock FROM pupuk_log WHERE estate = @estate AND jenis_pupuk = @jenis AND saldo_stock IS NOT NULL
+     ORDER BY tanggal_iso DESC, id DESC LIMIT 1`,
+    { estate, jenis }
+  );
+  const lastSaldo = last?.saldo_stock ?? 0;
+  const qty = Number(jumlah);
+  const saldoBaru = tipe === "MASUK" ? lastSaldo + qty : lastSaldo - qty;
+  const [y, m, d] = tanggal_iso.split("-");
+  const tanggal = `${d}/${m}/${y}`;
+  const periode = `${INDO_MONTHS[Number(m) - 1]} ${y}`;
+
+  const row = await queryOne<{ id: number }>(
+    `INSERT INTO pupuk_log (estate, jenis_pupuk, periode, tanggal, tanggal_iso, divisi, no_embrace, kode_barang, keluar, diterima, saldo_stock, keterangan, blok, ha, pokok)
+     VALUES (@estate, @jenis, @periode, @tanggal, @tanggal_iso, @divisi, @no_embrace, @kode_barang, @keluar, @diterima, @saldo, @keterangan, @blok, @ha, @pokok)
+     RETURNING id`,
+    {
+      estate,
+      jenis,
+      periode,
+      tanggal,
+      tanggal_iso,
+      divisi: divisi || "",
+      no_embrace: no_embrace || "",
+      kode_barang: kode_barang || "",
+      keluar: tipe === "KELUAR" ? qty : null,
+      diterima: tipe === "MASUK" ? qty : null,
+      saldo: saldoBaru,
+      keterangan: keterangan || (tipe === "MASUK" ? "PUPUK MASUK" : ""),
+      blok: blok || "",
+      ha: optNum(ha),
+      pokok: optNum(pokok),
+    }
+  );
+  await logActivity(req, {
+    module: "PUPUK",
+    estate,
+    aksi: tipe === "MASUK" ? "Stok Masuk" : "Stok Keluar",
+    objek: pupukObjek({ jenis_pupuk: jenis, tanggal, blok }),
+    detail: [`Jumlah: ${qty} KG`, `Saldo: ${lastSaldo} → ${saldoBaru}`, divisi && `Divisi: ${divisi}`, keterangan && `Keterangan: ${keterangan}`]
+      .filter(Boolean)
+      .join("; "),
+  });
+  res.json({ success: true, id: row!.id, saldo_stock: saldoBaru });
+});
+
+app.put("/api/pupuk/:id", async (req, res) => {
+  const existing = await queryOne<any>("SELECT * FROM pupuk_log WHERE id = @id", { id: req.params.id });
+  if (!existing) return res.status(404).json({ error: "Not found" });
+  if (!estateAllowed(req.user!, existing.estate)) return res.status(403).json({ error: "Akses ditolak" });
+  const b = req.body;
+  if (b.tanggal_iso && !/^\d{4}-\d{2}-\d{2}$/.test(b.tanggal_iso)) return res.status(400).json({ error: "Tanggal tidak valid" });
+
+  const iso = b.tanggal_iso || existing.tanggal_iso;
+  const [y, m, d] = String(iso).split("-");
+  const updated = {
+    tanggal_iso: iso,
+    tanggal: `${d}/${m}/${y}`,
+    periode: `${INDO_MONTHS[Number(m) - 1]} ${y}`,
+    divisi: b.divisi ?? existing.divisi ?? "",
+    no_embrace: b.no_embrace ?? existing.no_embrace ?? "",
+    kode_barang: b.kode_barang ?? existing.kode_barang ?? "",
+    keluar: b.keluar === undefined ? existing.keluar : optNum(b.keluar),
+    diterima: b.diterima === undefined ? existing.diterima : optNum(b.diterima),
+    saldo_stock: b.saldo_stock === undefined ? existing.saldo_stock : optNum(b.saldo_stock),
+    keterangan: b.keterangan ?? existing.keterangan ?? "",
+    blok: b.blok ?? existing.blok ?? "",
+    ha: b.ha === undefined ? existing.ha : optNum(b.ha),
+    pokok: b.pokok === undefined ? existing.pokok : optNum(b.pokok),
+  };
+  await execute(
+    `UPDATE pupuk_log SET tanggal_iso = @tanggal_iso, tanggal = @tanggal, periode = @periode, divisi = @divisi, no_embrace = @no_embrace,
+       kode_barang = @kode_barang, keluar = @keluar, diterima = @diterima, saldo_stock = @saldo_stock, keterangan = @keterangan,
+       blok = @blok, ha = @ha, pokok = @pokok
+     WHERE id = @id`,
+    { ...updated, id: req.params.id }
+  );
+  await logActivity(req, {
+    module: "PUPUK",
+    estate: existing.estate,
+    aksi: "Edit Transaksi",
+    objek: pupukObjek(existing),
+    detail: describeChanges(existing, updated, {
+      tanggal: "Tanggal",
+      divisi: "Divisi",
+      no_embrace: "No. Embrace",
+      kode_barang: "Kode Barang",
+      keluar: "Keluar",
+      diterima: "Diterima",
+      saldo_stock: "Stok",
+      keterangan: "Keterangan",
+      blok: "Blok",
+      ha: "HA",
+      pokok: "Pokok",
+    }),
+  });
+  res.json({ success: true });
+});
+
+app.delete("/api/pupuk/:id", async (req, res) => {
+  const existing = await queryOne<any>("SELECT * FROM pupuk_log WHERE id = @id", { id: req.params.id });
+  if (!existing) return res.status(404).json({ error: "Not found" });
+  if (!estateAllowed(req.user!, existing.estate)) return res.status(403).json({ error: "Akses ditolak" });
+  await execute("DELETE FROM pupuk_log WHERE id = @id", { id: req.params.id });
+  await logActivity(req, {
+    module: "PUPUK",
+    estate: existing.estate,
+    aksi: "Hapus Transaksi",
+    objek: pupukObjek(existing),
+    detail: [
+      existing.diterima && `Diterima: ${existing.diterima}`,
+      existing.keluar && `Keluar: ${existing.keluar}`,
+      existing.saldo_stock !== null && `Stok: ${existing.saldo_stock}`,
+      existing.keterangan && `Keterangan: ${existing.keterangan}`,
+    ]
+      .filter(Boolean)
+      .join("; "),
+  });
+  res.json({ success: true });
+});
+
 // ---- Activity log listing: separate logs per module, scoped to the caller's estate ----
 app.get("/api/activity-log", async (req, res) => {
   const { module = "", estate = "", aksi = "", search = "", dateFrom = "", dateTo = "", tz = "", page = "1", pageSize = "50" } =
     req.query as Record<string, string>;
-  if (module !== "BARANG" && module !== "BBM") return res.status(400).json({ error: "Modul tidak valid" });
+  if (!["BARANG", "BBM", "PUPUK"].includes(module)) return res.status(400).json({ error: "Modul tidak valid" });
 
   const conditions = ["module = @module"];
   const params: any = { module };

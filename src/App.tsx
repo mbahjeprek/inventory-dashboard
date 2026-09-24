@@ -17,6 +17,7 @@ import { AlatBeratPage } from "./pages/AlatBeratPage";
 import { MasterBarangPage } from "./pages/MasterBarangPage";
 import { UsersPage } from "./pages/UsersPage";
 import { DashboardPage } from "./pages/DashboardPage";
+import { InventoryPupukPage } from "./pages/InventoryPupukPage";
 
 function App() {
   return (
@@ -26,6 +27,21 @@ function App() {
           <Route path="/login" element={<LoginPage />} />
           <Route element={<ProtectedRoute />}>
             <Route element={<MainLayout />}>
+              {[
+                { path: "/inventory-pupuk", estate: "NILAM" },
+                { path: "/inventory-pupuk-zamrud", estate: "ZAMRUD" },
+                { path: "/inventory-pupuk-firus", estate: "FIRUS" },
+              ].map(({ path, estate }) => (
+                <Route
+                  key={path}
+                  path={path}
+                  element={
+                    <RequireEstate estate={estate}>
+                      <InventoryPupukPage key={estate} estate={estate} />
+                    </RequireEstate>
+                  }
+                />
+              ))}
               {/* Landing page for every account; it only shows the estates the account can open. */}
               <Route path="/" element={<DashboardPage />} />
 

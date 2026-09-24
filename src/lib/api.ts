@@ -153,10 +153,36 @@ export type BbmRecord = {
   total_hm?: number | null;
 };
 
+export type PupukRecord = {
+  id: number;
+  estate: string;
+  jenis_pupuk: string;
+  periode: string;
+  tanggal: string;
+  tanggal_iso: string | null;
+  divisi: string;
+  no_embrace: string;
+  kode_barang: string;
+  keluar: number | null;
+  diterima: number | null;
+  saldo_stock: number | null;
+  keterangan: string;
+  blok: string;
+  ha: number | null;
+  pokok: number | null;
+};
+
+export type PupukSaldo = { jenis_pupuk: string; saldo_stock: number; tanggal: string };
+export type PupukSummary = {
+  perJenis: { jenis_pupuk: string; diterima: number; keluar: number }[];
+  saldoTerakhir: PupukSaldo[];
+  saldoPerTanggal: PupukSaldo[];
+};
+
 export type ActivityLog = {
   id: number;
   created_at: string;
-  module: "BARANG" | "BBM";
+  module: "BARANG" | "BBM" | "PUPUK";
   estate: string | null;
   aksi: string;
   objek: string | null;
@@ -269,6 +295,40 @@ export const api = {
       `/api/activity-log?${qs}`
     );
   },
+
+  pupuk: (params: Record<string, string | number>) => {
+    const qs = new URLSearchParams(params as any).toString();
+    return req<{ data: PupukRecord[]; total: number; keluarSum: number; diterimaSum: number; page: number; pageSize: number }>(
+      `/api/pupuk?${qs}`
+    );
+  },
+
+  pupukSummary: (estate: string, range: { dateFrom?: string; dateTo?: string; asOf?: string } = {}) => {
+    const qs = new URLSearchParams(Object.entries({ estate, ...range }).filter((e): e is [string, string] => !!e[1])).toString();
+    return req<PupukSummary>(`/api/pupuk/summary?${qs}`);
+  },
+
+  pupukOptions: (estate: string) => req<{ jenis: string[]; divisi: string[] }>(`/api/pupuk/options?estate=${estate}`),
+
+  createPupuk: (payload: {
+    estate: string;
+    jenis_pupuk: string;
+    tanggal_iso: string;
+    tipe: "MASUK" | "KELUAR";
+    jumlah: number;
+    divisi?: string;
+    no_embrace?: string;
+    kode_barang?: string;
+    keterangan?: string;
+    blok?: string;
+    ha?: number | "";
+    pokok?: number | "";
+  }) => req<{ success: boolean; id: number; saldo_stock: number }>("/api/pupuk", { method: "POST", body: JSON.stringify(payload) }),
+
+  updatePupuk: (id: number, payload: Record<string, unknown>) =>
+    req<{ success: boolean }>(`/api/pupuk/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
+
+  deletePupuk: (id: number) => req<{ success: boolean }>(`/api/pupuk/${id}`, { method: "DELETE" }),
 
   gudangStockSummary: (gudang: string) => req<GudangStockSummary>(`/api/gudang-stock/summary?gudang=${gudang}`),
 

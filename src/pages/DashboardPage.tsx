@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { Package, Fuel, AlertTriangle, XCircle, ChevronRight } from "lucide-react";
-import { api, type BbmSummary } from "../lib/api";
+import { Package, Fuel, Sprout, AlertTriangle, XCircle, ChevronRight } from "lucide-react";
+import { api, type BbmSummary, type PupukSummary } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 
 type GudangStat = { totalItems: number; totalStock: number; lowStock: number; outOfStock: number };
@@ -23,6 +23,13 @@ const BBM = [
 ];
 
 // Postgres COUNT/SUM can arrive as strings, so coerce before formatting or comparing.
+// Only these estates keep fertiliser stock.
+const PUPUK = [
+  { estate: "NILAM", label: "Nilam", to: "/inventory-pupuk" },
+  { estate: "ZAMRUD", label: "Zamrud", to: "/inventory-pupuk-zamrud" },
+  { estate: "FIRUS", label: "Firus", to: "/inventory-pupuk-firus" },
+];
+
 const fmt = (n: number | string | undefined) => Number(n ?? 0).toLocaleString("id-ID");
 
 const localIso = (d: Date) =>
@@ -46,8 +53,9 @@ function Panel({ to, title, icon, children }: { to: string; title: string; icon:
   );
 }
 
-function Figure({ label, value, suffix, tone }: { label: string; value: string; suffix?: string; tone?: "green" | "red" }) {
-  const color = tone === "green" ? "text-[var(--accent-green)]" : tone === "red" ? "text-[var(--accent-red)]" : "text-[var(--text-primary)]";
+function Figure({ label, value, suffix, tone }: { label: string; value: string; suffix?: string; tone?: "green" | "red" | "negative" }) {
+  const color =
+    tone === "green" ? "text-[var(--accent-green)]" : tone === "red" || tone === "negative" ? "text-[var(--accent-red)]" : "text-[var(--text-primary)]";
   return (
     <div className="min-w-0">
       <div className="text-[11px] text-[var(--text-secondary)]">{label}</div>
@@ -83,9 +91,11 @@ export function DashboardPage() {
   const allowed = (estate: string) => user?.role === "superuser" || user?.estate === estate;
   const gudangList = GUDANG.filter((g) => allowed(g.estate));
   const bbmList = BBM.filter((b) => allowed(b.estate));
+  const pupukList = PUPUK.filter((p) => allowed(p.estate));
 
   const [gudang, setGudang] = useState<Record<string, GudangStat | null>>({});
   const [bbm, setBbm] = useState<Record<string, BbmSummary | null>>({});
+  const [pupuk, setPupuk] = useState<Record<string, PupukSummary | null>>({});
 
   const now = new Date();
   const monthRange = { dateFrom: localIso(new Date(now.getFullYear(), now.getMonth(), 1)), dateTo: localIso(now) };
@@ -101,6 +111,12 @@ export function DashboardPage() {
         .bbmSummary(b.estate, monthRange)
         .then((s) => setBbm((cur) => ({ ...cur, [b.estate]: s })))
         .catch(() => setBbm((cur) => ({ ...cur, [b.estate]: null })));
+    }
+    for (const p of pupukList) {
+      api
+        .pupukSummary(p.estate, monthRange)
+        .then((s) => setPupuk((cur) => ({ ...cur, [p.estate]: s })))
+        .catch(() => setPupuk((cur) => ({ ...cur, [p.estate]: null })));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
@@ -173,6 +189,44 @@ export function DashboardPage() {
                           <Figure label="Keluar" value={fmt(flow(jenis)?.pemakaian)} tone="red" />
                         </div>
                       ))}
+                    </div>
+                  )}
+                </Panel>
+              );
+            })}
+          </div>
+        </section>
+      )}
+      {pupukList.length > 0 && (
+        <section className="space-y-3">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-[var(--text-secondary)]">
+            Inventory Pupuk <span className="normal-case font-normal text-[var(--text-muted)]">· diterima/keluar {monthLabel}</span>
+          </h2>
+          <div className={grid}>
+            {pupukList.map((p) => {
+              const s = pupuk[p.estate];
+              const jenisList = s ? Array.from(new Set(s.saldoTerakhir.map((x) => x.jenis_pupuk))) : [];
+              return (
+                <Panel key={p.estate} to={p.to} title={`Pupuk ${p.label}`} icon={<Sprout size={16} className="text-[var(--accent-green)]" />}>
+                  {s === undefined ? (
+                    <div className="text-sm text-[var(--text-muted)]">Memuat...</div>
+                  ) : s === null ? (
+                    <div className="text-sm text-[var(--text-muted)]">Gagal memuat data</div>
+                  ) : jenisList.length === 0 ? (
+                    <div className="text-sm text-[var(--text-muted)]">Belum ada data pupuk</div>
+                  ) : (
+                    <div className="space-y-3">
+                      {jenisList.map((j) => {
+                        const saldo = Number(s.saldoTerakhir.find((x) => x.jenis_pupuk === j)?.saldo_stock ?? 0);
+                        const flow = s.perJenis.find((x) => x.jenis_pupuk === j);
+                        return (
+                          <div key={j} className="grid grid-cols-3 gap-3">
+                            <Figure label={`Stok ${j.replace(/^PUPUK /, "")}`} value={fmt(saldo)} suffix="KG" tone={saldo < 0 ? "negative" : undefined} />
+                            <Figure label="Diterima" value={fmt(flow?.diterima)} tone="green" />
+                            <Figure label="Keluar" value={fmt(flow?.keluar)} tone="red" />
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                 </Panel>

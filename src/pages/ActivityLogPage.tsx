@@ -8,6 +8,7 @@ import { fetchAllRows, type TableReport } from "../lib/printTable";
 const ESTATES_BY_MODULE = {
   BARANG: ["NILAM", "KNS", "WJA", "ZAMRUD", "FIRUS"],
   BBM: ["NILAM", "WJA", "KNS", "ZAMRUD", "FIRUS"],
+  PUPUK: ["NILAM", "ZAMRUD", "FIRUS"],
 };
 
 const formatWaktu = (iso: string) =>
@@ -28,14 +29,14 @@ export function ActivityLogPage({
   estateLock,
   onClose,
 }: {
-  module: "BARANG" | "BBM";
+  module: "BARANG" | "BBM" | "PUPUK";
   estateLock?: string;
   onClose?: () => void;
 }) {
   const { user } = useAuth();
   const isSuperuser = user?.role === "superuser";
-  const estateLabel = module === "BBM" ? "Lokasi" : "Gudang";
-  const title = `${module === "BBM" ? "Log Activity BBM" : "Log Activity Barang"}${estateLock ? ` - ${estateLock}` : ""}`;
+  const estateLabel = module === "BBM" ? "Lokasi" : module === "PUPUK" ? "Estate" : "Gudang";
+  const title = `${module === "BBM" ? "Log Activity BBM" : module === "PUPUK" ? "Log Activity Pupuk" : "Log Activity Barang"}${estateLock ? ` - ${estateLock}` : ""}`;
 
   const [rows, setRows] = useState<ActivityLog[]>([]);
   const [total, setTotal] = useState(0);
@@ -95,7 +96,7 @@ export function ActivityLogPage({
         { label: "User" },
         { label: estateLabel },
         { label: "Aksi", nowrap: true },
-        { label: module === "BBM" ? "Transaksi" : "Barang" },
+        { label: module === "BARANG" ? "Barang" : "Transaksi" },
         { label: "Detail" },
       ],
       rows: all.map((r) => [formatWaktu(r.created_at), r.nama || r.username, r.estate, r.aksi, r.objek, r.detail]),
@@ -110,7 +111,7 @@ export function ActivityLogPage({
         <div>
           <h1 className="text-xl font-semibold text-[var(--text-primary)]">{title}</h1>
           <p className="text-sm text-[var(--text-secondary)]">
-            Riwayat perubahan data Inventory {module === "BBM" ? "BBM" : "Gudang"} (tambah, edit, hapus, transaksi) beserta
+            Riwayat perubahan data Inventory {module === "BBM" ? "BBM" : module === "PUPUK" ? "Pupuk" : "Gudang"} (tambah, edit, hapus, transaksi) beserta
             siapa yang melakukannya
           </p>
         </div>
@@ -118,7 +119,7 @@ export function ActivityLogPage({
           <ExportButtons
             total={total}
             buildReport={buildReport}
-            fileName={`${module === "BBM" ? "log-activity-bbm" : "log-activity-barang"}${estateLock ? `-${estateLock.toLowerCase()}` : ""}`}
+            fileName={`log-activity-${module === "BARANG" ? "barang" : module.toLowerCase()}${estateLock ? `-${estateLock.toLowerCase()}` : ""}`}
           />
           {onClose && (
             <button onClick={onClose} title="Tutup" className="p-2 rounded-md text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[#f1f5f9]">
@@ -134,7 +135,7 @@ export function ActivityLogPage({
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder={`Cari ${module === "BBM" ? "transaksi" : "barang"}, detail, atau user...`}
+            placeholder={`Cari ${module === "BARANG" ? "barang" : "transaksi"}, detail, atau user...`}
             className="w-full pl-9 pr-3 py-2 text-sm rounded-md border border-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-blue-border)]"
           />
         </div>
@@ -209,7 +210,7 @@ export function ActivityLogPage({
                 <th className="px-4 py-2.5">User</th>
                 <th className="px-4 py-2.5">{estateLabel}</th>
                 <th className="px-4 py-2.5">Aksi</th>
-                <th className="px-4 py-2.5">{module === "BBM" ? "Transaksi" : "Barang"}</th>
+                <th className="px-4 py-2.5">{module === "BARANG" ? "Barang" : "Transaksi"}</th>
                 <th className="px-4 py-2.5">Detail</th>
               </tr>
             </thead>

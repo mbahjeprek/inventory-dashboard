@@ -16,6 +16,7 @@ import {
   X,
   KeyRound,
   LayoutDashboard,
+  Sprout,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 
@@ -51,7 +52,19 @@ const BBM_GROUP: DropdownGroup = {
   ],
 };
 
-const DROPDOWN_GROUPS: DropdownGroup[] = [GUDANG_GROUP, BBM_GROUP];
+// Only Nilam, Zamrud and Firus have fertiliser stock; KNS/WJA have no Pupuk page.
+const PUPUK_GROUP: DropdownGroup = {
+  key: "pupuk",
+  icon: Sprout,
+  title: "Pupuk",
+  options: [
+    { to: "/inventory-pupuk", label: "Nilam" },
+    { to: "/inventory-pupuk-zamrud", label: "Zamrud" },
+    { to: "/inventory-pupuk-firus", label: "Firus" },
+  ],
+};
+
+const DROPDOWN_GROUPS: DropdownGroup[] = [GUDANG_GROUP, BBM_GROUP, PUPUK_GROUP];
 
 const navSections: NavSection[] = [
   { items: [{ to: "/", label: "Dashboard", icon: LayoutDashboard }] },
@@ -131,7 +144,9 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: { mobileOpen?: bo
   // requireEstate("NILAM") / requireSuperuser in app.ts for the matching enforcement.
   const dropdownGroups: DropdownGroup[] = isSuperuser
     ? DROPDOWN_GROUPS
-    : DROPDOWN_GROUPS.map((g) => ({ ...g, options: g.options.filter((o) => o.label.toUpperCase() === user?.estate) }));
+    : DROPDOWN_GROUPS.map((g) => ({ ...g, options: g.options.filter((o) => o.label.toUpperCase() === user?.estate) })).filter(
+        (g) => g.options.length > 0
+      );
 
   const visibleSections = navSections.filter((s) => {
     if (s.title === "Transaksi") return isSuperuser || user?.estate === "NILAM";
