@@ -17,6 +17,8 @@ import { InventoryPupukPage } from "./pages/InventoryPupukPage";
 import { InventoryKlinikPage } from "./pages/InventoryKlinikPage";
 import { MasterObatPage } from "./pages/MasterObatPage";
 import { UserActivityPage } from "./pages/UserActivityPage";
+import { StokOpnamePage } from "./pages/StokOpnamePage";
+import { StokOpnameDetailPage } from "./pages/StokOpnameDetailPage";
 
 function App() {
   return (
@@ -193,6 +195,22 @@ function App() {
                 element={
                   <RequirePageAccess>
                     <UsersPage />
+                  </RequirePageAccess>
+                }
+              />
+              <Route
+                path="/stok-opname"
+                element={
+                  <RequirePageAccess>
+                    <StokOpnamePage />
+                  </RequirePageAccess>
+                }
+              />
+              <Route
+                path="/stok-opname/:id"
+                element={
+                  <RequirePageAccess>
+                    <StokOpnameDetailPage />
                   </RequirePageAccess>
                 }
               />

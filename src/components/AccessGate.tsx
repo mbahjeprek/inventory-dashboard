@@ -2,7 +2,7 @@ import { Navigate, useLocation } from "react-router-dom";
 import type { ReactNode } from "react";
 import { useAuth } from "../context/AuthContext";
 import type { AuthUser } from "../lib/api";
-import { can, canModule, moduleOfPath, PAGE_PERMS, userEstates } from "../lib/access";
+import { canModule, moduleOfPath, pageAllowed, userEstates } from "../lib/access";
 
 // Everyone lands on the dashboard ("/"), which shows only what the account may open. An account
 // with no estate and no page permission has nowhere to go, so it's sent back to /login (which
@@ -24,12 +24,11 @@ export function RequireEstate({ estate, children }: { estate: string; children: 
   return <Navigate to={homeRouteFor(user)} replace />;
 }
 
-// Master data / monitoring pages: the page's permission (PAGE_PERMS), superuser for anything else.
+// Master data / monitoring / Stok Opname pages (pageAllowed), superuser for anything else.
 export function RequirePageAccess({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const { pathname } = useLocation();
   if (!user) return null;
-  const perm = PAGE_PERMS[pathname];
-  if (user.role === "superuser" || (perm && can(user, perm))) return <>{children}</>;
+  if (pageAllowed(user, pathname)) return <>{children}</>;
   return <Navigate to={homeRouteFor(user)} replace />;
 }

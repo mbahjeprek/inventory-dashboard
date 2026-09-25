@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { ArrowLeft, ArrowDownCircle, ArrowUpCircle, PackagePlus, Wrench, Pencil, Trash2 } from "lucide-react";
-import { api, type Item, type Movement } from "../lib/api";
+import { api, errorText, type Item, type Movement } from "../lib/api";
 import { TransactionModal } from "../components/TransactionModal";
 import { EditItemModal } from "../components/EditItemModal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
@@ -73,12 +73,17 @@ export function ItemDetailPage() {
   const totalOut = movements.filter((m) => m.type === "OUT").reduce((s, m) => s + m.qty, 0);
 
   const handleDeleteMovement = async (m: Movement) => {
-    if (m.source === "MANUAL") {
-      await api.deleteTransaction(m.id);
-    } else if (m.source === "STOCK_IN") {
-      await api.deleteStockIn(m.id);
-    } else {
-      await api.deleteStockOut(m.id);
+    try {
+      if (m.source === "MANUAL") {
+        await api.deleteTransaction(m.id);
+      } else if (m.source === "STOCK_IN") {
+        await api.deleteStockIn(m.id);
+      } else {
+        await api.deleteStockOut(m.id);
+      }
+    } catch (e) {
+      window.alert(errorText(e, "Gagal menghapus transaksi"));
+      return;
     }
     load();
   };

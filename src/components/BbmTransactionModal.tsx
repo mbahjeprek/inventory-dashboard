@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { X } from "lucide-react";
-import { api, type BbmSummary } from "../lib/api";
+import { api, errorText, type BbmSummary } from "../lib/api";
 
 const JENIS_OPTIONS = ["SOLAR", "BENSIN"] as const;
 // BBM storage sites (see BBM_LOKASI_OPTIONS in server/src/app.ts). Sub-locations like AKSS/UKM are
@@ -76,8 +76,8 @@ export function BbmTransactionModal({
         hm_terakhir: hmTerakhir,
       });
       onSuccess();
-    } catch {
-      setError("Gagal menyimpan transaksi");
+    } catch (e) {
+      setError(errorText(e, "Gagal menyimpan transaksi"));
     } finally {
       setSubmitting(false);
     }

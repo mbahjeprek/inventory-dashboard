@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Search, ChevronLeft, ChevronRight, Fuel, Droplet, PackagePlus, Pencil, Trash2 } from "lucide-react";
-import { api, type BbmRecord, type BbmSummary } from "../lib/api";
+import { api, errorText, type BbmRecord, type BbmSummary } from "../lib/api";
 import { StatCard } from "../components/StatCard";
 import { ExportButtons } from "../components/ExportButtons";
 import { ActivityLogButton } from "../components/ActivityLogButton";
@@ -150,7 +150,12 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
   };
 
   const handleDelete = async (r: BbmRecord) => {
-    await api.deleteBbm(r.id);
+    try {
+      await api.deleteBbm(r.id);
+    } catch (e) {
+      window.alert(errorText(e, "Gagal menghapus transaksi"));
+      return;
+    }
     loadSummary();
     load();
   };

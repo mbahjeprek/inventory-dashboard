@@ -15,7 +15,7 @@ import {
   AlertTriangle,
   XCircle,
 } from "lucide-react";
-import { api, type GudangStockItem, type GudangStockSummary, type PickerItem } from "../lib/api";
+import { api, errorText, type GudangStockItem, type GudangStockSummary, type PickerItem } from "../lib/api";
 import { StatCard } from "../components/StatCard";
 import { ExportButtons } from "../components/ExportButtons";
 import { ActivityLogButton } from "../components/ActivityLogButton";
@@ -216,8 +216,8 @@ export function InventoryGudangStockPage({ gudang }: { gudang: string }) {
       await api.deleteGudangStockItem(item.id);
       load();
       loadSummary();
-    } catch {
-      setDeleteError("Gagal menghapus barang");
+    } catch (e) {
+      setDeleteError(errorText(e, "Gagal menghapus barang"));
     }
   };
 

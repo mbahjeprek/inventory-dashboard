@@ -16,11 +16,12 @@ import {
   Pill,
   Stethoscope,
   Activity,
+  ClipboardCheck,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { useEstateFilter } from "../hooks/useEstateFilter";
 import { ChangePasswordModal } from "./ChangePasswordModal";
-import { can, canModule, PAGE_PERMS, userEstates, type Module } from "../lib/access";
+import { canModule, pageAllowed, userEstates, OPNAME_PATH, type Module } from "../lib/access";
 
 type NavItem = { to: string; label: string; icon: typeof Package };
 type NavSection = { title?: string; collapsible?: boolean; items: NavItem[] };
@@ -87,8 +88,7 @@ const navSections: NavSection[] = [
   {
     title: "Inventory",
     collapsible: true,
-    items: [],
-
+    items: [{ to: OPNAME_PATH, label: "Stok Opname", icon: ClipboardCheck }],
   },
   {
     title: "Master Data",
@@ -165,7 +165,7 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: { mobileOpen?: bo
   })).filter((g) => g.options.length > 0 && canModule(user, g.key.toUpperCase() as Module));
 
   const visibleSections = navSections
-    .map((s) => ({ ...s, items: s.items.filter((it) => !PAGE_PERMS[it.to] || can(user, PAGE_PERMS[it.to])) }))
+    .map((s) => ({ ...s, items: s.items.filter((it) => it.to === "/" || pageAllowed(user, it.to)) }))
     .filter((s) => !s.title || s.title === "Inventory" || s.items.length > 0);
 
   const normalizedPathname = location.pathname;
@@ -237,7 +237,7 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: { mobileOpen?: bo
           // current page shows a dot so it's still clear where you are.
           const isOpen = minimized || !section.collapsible ? true : !(groupCollapsed[section.title!] ?? true);
           const hasActive =
-            section.items.some((it) => it.to === location.pathname) ||
+            section.items.some((it) => it.to === location.pathname || (it.to !== "/" && location.pathname.startsWith(`${it.to}/`))) ||
             (section.title === "Inventory" && dropdownGroups.some((g) => !!activeByGroup[g.key]));
 
           return (

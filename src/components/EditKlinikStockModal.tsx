@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Plus, Trash2, X } from "lucide-react";
-import { api, type KlinikStockItem } from "../lib/api";
+import { api, errorText, type KlinikStockItem } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { can } from "../lib/access";
 
@@ -61,8 +61,8 @@ export function EditKlinikStockModal({
         }
       }
       onSuccess();
-    } catch {
-      setError("Gagal menyimpan perubahan");
+    } catch (e) {
+      setError(errorText(e, "Gagal menyimpan perubahan"));
     } finally {
       setSubmitting(false);
     }

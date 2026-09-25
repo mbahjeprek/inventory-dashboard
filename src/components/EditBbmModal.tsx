@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { X } from "lucide-react";
-import { api, type BbmRecord } from "../lib/api";
+import { api, errorText, type BbmRecord } from "../lib/api";
 
 export function EditBbmModal({
   record,
@@ -46,8 +46,8 @@ export function EditBbmModal({
         hm_terakhir: hmTerakhir,
       });
       onSuccess();
-    } catch {
-      setError("Gagal menyimpan perubahan");
+    } catch (e) {
+      setError(errorText(e, "Gagal menyimpan perubahan"));
     } finally {
       setSubmitting(false);
     }

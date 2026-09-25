@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { X } from "lucide-react";
-import { api, type PupukSummary } from "../lib/api";
+import { api, errorText, type PupukSummary } from "../lib/api";
 
 const todayIso = () => {
   const d = new Date();
@@ -65,8 +65,8 @@ export function PupukTransactionModal({
         pokok: tipe === "KELUAR" && pokok !== "" ? Number(pokok) : "",
       });
       onSuccess();
-    } catch {
-      setError("Gagal menyimpan transaksi");
+    } catch (e) {
+      setError(errorText(e, "Gagal menyimpan transaksi"));
     } finally {
       setSubmitting(false);
     }

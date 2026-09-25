@@ -311,14 +311,75 @@ export type Movement = {
 };
 
 export type TopKeluarRow = { kode: string; id: number | null; nama: string; satuan: string | null; qty: number; trx: number };
+// ---- Stok Opname (server/src/app.ts "Stok Opname") ----
+export type OpnameModule = "GUDANG" | "KLINIK" | "BBM" | "PUPUK";
+export type OpnameStatus = "DRAFT" | "SUBMITTED" | "APPROVED" | "BATAL";
+export type Opname = {
+  id: number;
+  module: OpnameModule;
+  estate: string;
+  status: OpnameStatus;
+  tanggal: string;
+  catatan: string;
+  catatan_review: string;
+  created_by: number | null;
+  created_by_nama: string | null;
+  created_at: string;
+  submitted_by: number | null;
+  submitted_by_nama: string | null;
+  submitted_at: string | null;
+  approved_by: number | null;
+  approved_by_nama: string | null;
+  approved_at: string | null;
+};
+export type OpnameListRow = Opname & { total: number; dihitung: number; selisih: number };
+export type OpnameLine = {
+  id: number;
+  kode: string;
+  nama: string;
+  satuan: string;
+  // Klinik batch expiry ('' = none); '' for the other modules.
+  exp: string;
+  stok_sistem: number;
+  stok_fisik: number | null;
+  keterangan: string;
+  ditambahkan: boolean;
+};
+
 export type TopKeluar = { rows: TopKeluarRow[]; totalQty: number; totalTrx: number };
+
+// Keeps the status in the message ("API error 409") for the callers that check it, plus the
+// server's own explanation (its { error }) for showing to the user.
+export class ApiError extends Error {
+  status: number;
+  serverMessage: string;
+  constructor(status: number, serverMessage: string) {
+    super(`API error ${status}`);
+    this.status = status;
+    this.serverMessage = serverMessage;
+  }
+}
+
+// 423 = the location is locked by an open Stok Opname (see server/src/app.ts).
+export const isOpnameLock = (e: unknown) => e instanceof ApiError && e.status === 423;
+
+// Text for a failed request: the lock explanation when a Stok Opname blocks it, otherwise
+// `fallback` (or the server's message when `useServer` is set, for screens whose server messages
+// are written for users).
+export function errorText(e: unknown, fallback: string, useServer = false): string {
+  if (e instanceof ApiError && e.serverMessage && (useServer || e.status === 423)) return e.serverMessage;
+  return fallback;
+}
 
 async function req<T>(url: string, opts?: RequestInit): Promise<T> {
   const res = await fetch(url, {
     headers: { "Content-Type": "application/json" },
     ...opts,
   });
-  if (!res.ok) throw new Error(`API error ${res.status}`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new ApiError(res.status, typeof body?.error === "string" ? body.error : "");
+  }
   return res.json();
 }
 
@@ -689,4 +750,19 @@ export const api = {
   ) => req<{ success: boolean }>(`/api/users/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
 
   deleteUser: (id: number) => req<{ success: boolean }>(`/api/users/${id}`, { method: "DELETE" }),
+
+  opnameList: (params: Record<string, string | number>) =>
+    req<{ data: OpnameListRow[]; total: number; page: number; pageSize: number }>(
+      `/api/stock-opname?${new URLSearchParams(params as any)}`
+    ),
+  createOpname: (payload: { module: OpnameModule; estate: string; tanggal: string; catatan?: string }) =>
+    req<{ success: boolean; id: number }>("/api/stock-opname", { method: "POST", body: JSON.stringify(payload) }),
+  opname: (id: number) => req<{ opname: Opname; lines: OpnameLine[] }>(`/api/stock-opname/${id}`),
+  saveOpname: (id: number, payload: { catatan?: string; lines: { id: number; stok_fisik: number | null; keterangan: string }[] }) =>
+    req<{ success: boolean }>(`/api/stock-opname/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
+  addOpnameLine: (id: number, kode: string, exp = "") =>
+    req<OpnameLine>(`/api/stock-opname/${id}/lines`, { method: "POST", body: JSON.stringify({ kode, exp }) }),
+  deleteOpnameLine: (id: number, lineId: number) => req<{ success: boolean }>(`/api/stock-opname/${id}/lines/${lineId}`, { method: "DELETE" }),
+  opnameAction: (id: number, action: "submit" | "return" | "approve" | "cancel", catatan = "") =>
+    req<{ success: boolean; corrected?: number }>(`/api/stock-opname/${id}/${action}`, { method: "POST", body: JSON.stringify({ catatan }) }),
 };

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { X } from "lucide-react";
-import { api, GUDANG_TUJUAN, type LedgerTx, type StockScope } from "../lib/api";
+import { api, errorText, GUDANG_TUJUAN, type LedgerTx, type StockScope } from "../lib/api";
 import { KaryawanAutocomplete } from "./KaryawanAutocomplete";
 
 // Superuser correction of one Stock In/Out row of a gudang or klinik; the stock follows the qty change.
@@ -37,7 +37,7 @@ export function EditLedgerTxModal({
       await api.updateLedgerTx(scope, tx.id, { qty, tujuan, penerima, note, ...(klinikIn ? { expired_date: expired } : {}) });
       onSuccess();
     } catch (e: any) {
-      setError(e?.message?.includes("400") ? "Tidak bisa disimpan: stok batch tidak mencukupi atau sudah terpakai" : "Gagal menyimpan perubahan");
+      setError(errorText(e, e?.message?.includes("400") ? "Tidak bisa disimpan: stok batch tidak mencukupi atau sudah terpakai" : "Gagal menyimpan perubahan"));
     } finally {
       setSubmitting(false);
     }

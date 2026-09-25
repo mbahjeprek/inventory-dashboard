@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { X } from "lucide-react";
-import { api, type PickerItem } from "../lib/api";
+import { api, errorText, type PickerItem } from "../lib/api";
 import { ItemPickerModal } from "./ItemPickerModal";
 
 export function AddGudangStockModal({
@@ -34,7 +34,7 @@ export function AddGudangStockModal({
       });
       onSuccess();
     } catch (e: any) {
-      setError(e?.message?.includes("409") ? "Barang ini sudah ada di gudang ini" : "Gagal menambahkan barang");
+      setError(errorText(e, e?.message?.includes("409") ? "Barang ini sudah ada di gudang ini" : "Gagal menambahkan barang"));
     } finally {
       setSubmitting(false);
     }

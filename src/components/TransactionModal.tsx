@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { X, ClipboardCheck } from "lucide-react";
-import { api, GUDANG_TUJUAN, type KlinikBatch, type PickerItem, type StockScope } from "../lib/api";
+import { api, errorText, GUDANG_TUJUAN, type KlinikBatch, type PickerItem, type StockScope } from "../lib/api";
 import { KaryawanAutocomplete } from "./KaryawanAutocomplete";
 import { useAuth } from "../context/AuthContext";
 import { can } from "../lib/access";
@@ -102,8 +102,8 @@ export function TransactionModal({
         else if (scope?.kind === "gudang") await api.gudangStockCorrection({ gudang: scope.name, item_kode: item.kode, actual_qty: actualQty, note });
         else await api.stockCorrection({ item_id: item.id, actual_qty: actualQty, note });
         onSuccess();
-      } catch {
-        setError("Gagal menyimpan koreksi stok");
+      } catch (e) {
+        setError(errorText(e, "Gagal menyimpan koreksi stok"));
       } finally {
         setSubmitting(false);
       }
@@ -135,8 +135,8 @@ export function TransactionModal({
         await api.createGudangTransaction({ gudang: scope.name, item_kode: item.kode, tujuan, type: mode, qty, note, penerima });
       else await api.createTransaction({ item_id: item.id, tujuan, type: mode, qty, note, penerima });
       onSuccess();
-    } catch {
-      setError("Gagal menyimpan transaksi");
+    } catch (e) {
+      setError(errorText(e, "Gagal menyimpan transaksi"));
     } finally {
       setSubmitting(false);
     }

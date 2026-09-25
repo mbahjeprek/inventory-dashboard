@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { X } from "lucide-react";
-import { api, type PupukRecord } from "../lib/api";
+import { api, errorText, type PupukRecord } from "../lib/api";
 
 const inputCls = "w-full text-sm rounded-md border border-[var(--border)] px-3 py-1.5";
 const labelCls = "text-xs text-[var(--text-secondary)] mb-1 block";
@@ -40,8 +40,8 @@ export function EditPupukModal({
     try {
       await api.updatePupuk(record.id, { ...form, tanggal_iso: form.tanggal_iso || undefined });
       onSuccess();
-    } catch {
-      setError("Gagal menyimpan perubahan");
+    } catch (e) {
+      setError(errorText(e, "Gagal menyimpan perubahan"));
     } finally {
       setSubmitting(false);
     }

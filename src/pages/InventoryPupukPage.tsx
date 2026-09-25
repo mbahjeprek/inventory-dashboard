@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Search, ChevronLeft, ChevronRight, Sprout, PackagePlus, Pencil, Trash2 } from "lucide-react";
-import { api, type PupukRecord, type PupukSummary } from "../lib/api";
+import { api, errorText, type PupukRecord, type PupukSummary } from "../lib/api";
 import { StatCard } from "../components/StatCard";
 import { ExportButtons } from "../components/ExportButtons";
 import { ActivityLogButton } from "../components/ActivityLogButton";
@@ -415,8 +415,13 @@ export function InventoryPupukPage({ estate }: { estate: string }) {
           message={`Hapus transaksi ${confirmDelete.jenis_pupuk} tanggal ${confirmDelete.tanggal}${confirmDelete.blok ? ` blok ${confirmDelete.blok}` : ""}? Tindakan ini tidak bisa dibatalkan.`}
           onCancel={() => setConfirmDelete(null)}
           onConfirm={async () => {
-            await api.deletePupuk(confirmDelete.id);
             setConfirmDelete(null);
+            try {
+              await api.deletePupuk(confirmDelete.id);
+            } catch (e) {
+              window.alert(errorText(e, "Gagal menghapus transaksi"));
+              return;
+            }
             refresh();
           }}
         />

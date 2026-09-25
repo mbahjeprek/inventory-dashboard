@@ -304,3 +304,55 @@ CREATE TABLE IF NOT EXISTS pupuk_log (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_pupuk_estate_date ON pupuk_log(estate, tanggal_iso);
+
+-- Stok Opname: a physical count of one location (module + estate) as one document. Creating it
+-- snapshots the system stock into opname_line; the counter fills stok_fisik (NULL = not counted,
+-- left unchanged), submits, and someone with the approve permission approves it, which books one
+-- Koreksi per line whose count differs. While a session is DRAFT/SUBMITTED every stock movement of
+-- that location is refused (see opnameLocks in app.ts), so the snapshot stays the real stock.
+-- module: GUDANG | KLINIK | BBM | PUPUK; status: DRAFT | SUBMITTED | APPROVED | BATAL.
+CREATE TABLE IF NOT EXISTS opname (
+  id SERIAL PRIMARY KEY,
+  module TEXT NOT NULL,
+  estate TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'DRAFT',
+  tanggal TEXT NOT NULL,
+  catatan TEXT NOT NULL DEFAULT '',
+  -- Why it was sent back to the counter or cancelled.
+  catatan_review TEXT NOT NULL DEFAULT '',
+  created_by INTEGER,
+  created_by_nama TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  submitted_by INTEGER,
+  submitted_by_nama TEXT,
+  submitted_at TIMESTAMPTZ,
+  approved_by INTEGER,
+  approved_by_nama TEXT,
+  approved_at TIMESTAMPTZ
+);
+-- At most one open opname per location.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_opname_open ON opname(module, estate) WHERE status IN ('DRAFT', 'SUBMITTED');
+CREATE INDEX IF NOT EXISTS idx_opname_created ON opname(created_at DESC);
+
+-- One counted thing: a barang (items/gudang_stock), an obat batch (exp = expiry, '' = none), a jenis
+-- BBM or a jenis pupuk. stok_sistem is the snapshot, refreshed to the stock at approval.
+CREATE TABLE IF NOT EXISTS opname_line (
+  id SERIAL PRIMARY KEY,
+  opname_id INTEGER NOT NULL REFERENCES opname(id) ON DELETE CASCADE,
+  kode TEXT NOT NULL,
+  nama TEXT NOT NULL DEFAULT '',
+  satuan TEXT NOT NULL DEFAULT '',
+  exp TEXT NOT NULL DEFAULT '',
+  stok_sistem DOUBLE PRECISION NOT NULL DEFAULT 0,
+  stok_fisik DOUBLE PRECISION,
+  keterangan TEXT NOT NULL DEFAULT '',
+  -- Found during the count but not in the snapshot (can be removed again while DRAFT).
+  ditambahkan BOOLEAN NOT NULL DEFAULT false,
+  UNIQUE(opname_id, kode, exp)
+);
+
+-- BBM / pupuk have no movement table, only a running saldo: an approved opname adds a row whose
+-- saldo_stock is the counted amount and `koreksi` the difference, with diterima/pemakaian/keluar left
+-- empty so stok masuk/keluar totals don't count it.
+ALTER TABLE bbm_log ADD COLUMN IF NOT EXISTS koreksi DOUBLE PRECISION;
+ALTER TABLE pupuk_log ADD COLUMN IF NOT EXISTS koreksi DOUBLE PRECISION;

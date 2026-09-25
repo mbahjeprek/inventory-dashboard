@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Search, ChevronLeft, ChevronRight, Pencil, Trash2 } from "lucide-react";
-import { api, type LedgerTx, type StockScope } from "../lib/api";
+import { api, errorText, type LedgerTx, type StockScope } from "../lib/api";
 import { ExportButtons } from "./ExportButtons";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { EditLedgerTxModal } from "./EditLedgerTxModal";
@@ -110,7 +110,12 @@ export function LedgerHistory({ scope, type, refreshKey }: { scope: StockScope; 
   };
 
   const remove = async (r: LedgerTx) => {
-    await api.deleteLedgerTx(scope, r.id);
+    try {
+      await api.deleteLedgerTx(scope, r.id);
+    } catch (e) {
+      window.alert(errorText(e, "Gagal menghapus transaksi", true));
+      return;
+    }
     if (rows.length === 1 && page > 1) setPage((p) => p - 1);
     else load();
   };

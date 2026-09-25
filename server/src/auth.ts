@@ -13,13 +13,14 @@ export const ESTATES = ["NILAM", "KNS", "WJA", "ZAMRUD", "FIRUS"] as const;
 export type Estate = (typeof ESTATES)[number];
 
 // Checkable permissions of an estate account (a superuser has all of them). Each inventory module
-// has view / input / edit / delete, Gudang and Klinik also koreksi (stock opname); then the master
-// data pages and monitoring. Keep in sync with PERM_GROUPS in src/lib/access.ts.
+// has view / input / edit / delete, Gudang and Klinik also koreksi (one-item correction), and every
+// module opname (create + count a Stok Opname) and approve (approve / send back an opname); then the
+// master data pages and monitoring. Keep in sync with MODULE_ACTIONS in src/lib/access.ts.
 export const MODULE_ACTIONS: Record<string, string[]> = {
-  gudang: ["view", "input", "edit", "delete", "koreksi"],
-  bbm: ["view", "input", "edit", "delete"],
-  pupuk: ["view", "input", "edit", "delete"],
-  klinik: ["view", "input", "edit", "delete", "koreksi"],
+  gudang: ["view", "input", "edit", "delete", "koreksi", "opname", "approve"],
+  bbm: ["view", "input", "edit", "delete", "opname", "approve"],
+  pupuk: ["view", "input", "edit", "delete", "opname", "approve"],
+  klinik: ["view", "input", "edit", "delete", "koreksi", "opname", "approve"],
 };
 export const ALL_PERMS: string[] = [
   ...Object.entries(MODULE_ACTIONS).flatMap(([m, acts]) => acts.map((a) => `${m}.${a}`)),

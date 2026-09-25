@@ -16,7 +16,7 @@ import {
   XCircle,
   CalendarClock,
 } from "lucide-react";
-import { api, type KlinikStockItem, type KlinikSummary, type PickerItem } from "../lib/api";
+import { api, errorText, type KlinikStockItem, type KlinikSummary, type PickerItem } from "../lib/api";
 import { StatCard } from "../components/StatCard";
 import { ExportButtons } from "../components/ExportButtons";
 import { ActivityLogButton } from "../components/ActivityLogButton";
@@ -253,8 +253,8 @@ export function InventoryKlinikPage({ klinik }: { klinik: string }) {
       await api.deleteKlinikStock(item.id);
       load();
       loadSummary();
-    } catch {
-      setDeleteError("Gagal menghapus obat dari klinik");
+    } catch (e) {
+      setDeleteError(errorText(e, "Gagal menghapus obat dari klinik"));
     }
   };
 

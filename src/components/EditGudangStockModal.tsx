@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { X } from "lucide-react";
-import { api, type GudangStockItem } from "../lib/api";
+import { api, errorText, type GudangStockItem } from "../lib/api";
 
 export function EditGudangStockModal({
   item,
@@ -22,8 +22,8 @@ export function EditGudangStockModal({
     try {
       await api.updateGudangStockItem(item.id, { buffer_stock: bufferStock, stock_tersedia: stockTersedia });
       onSuccess();
-    } catch {
-      setError("Gagal menyimpan perubahan");
+    } catch (e) {
+      setError(errorText(e, "Gagal menyimpan perubahan"));
     } finally {
       setSubmitting(false);
     }

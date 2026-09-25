@@ -13,15 +13,18 @@ export const ACTIONS = [
   { key: "edit", label: "Edit" },
   { key: "delete", label: "Hapus" },
   { key: "koreksi", label: "Koreksi" },
+  { key: "opname", label: "Opname" },
+  { key: "approve", label: "Approve Opname" },
 ] as const;
 export type Action = (typeof ACTIONS)[number]["key"];
 
-// Which actions each module has (only Gudang and Klinik have Koreksi / stock opname).
+// Which actions each module has (only Gudang and Klinik have Koreksi of a single item; every module
+// has Stok Opname: Opname = create + count, Approve Opname = approve / send back).
 export const MODULE_ACTIONS: Record<Module, Action[]> = {
-  GUDANG: ["view", "input", "edit", "delete", "koreksi"],
-  BBM: ["view", "input", "edit", "delete"],
-  PUPUK: ["view", "input", "edit", "delete"],
-  KLINIK: ["view", "input", "edit", "delete", "koreksi"],
+  GUDANG: ["view", "input", "edit", "delete", "koreksi", "opname", "approve"],
+  BBM: ["view", "input", "edit", "delete", "opname", "approve"],
+  PUPUK: ["view", "input", "edit", "delete", "opname", "approve"],
+  KLINIK: ["view", "input", "edit", "delete", "koreksi", "opname", "approve"],
 };
 export const modulePerm = (m: Module, a: Action) => `${m.toLowerCase()}.${a}`;
 
@@ -86,6 +89,23 @@ export const PAGE_PERMS: Record<string, string> = {
   "/users": "master.users",
   "/log-user": "monitor.log_user",
 };
+
+// Stok Opname of a module: seen with its Lihat, Opname or Approve permission (as on the server).
+export function canOpname(user: AuthUser | null, m: Module, a: "view" | "opname" | "approve" = "view"): boolean {
+  return (a === "view" ? (["view", "opname", "approve"] as const) : [a]).some((x) => can(user, modulePerm(m, x)));
+}
+
+// The Stok Opname page is open to anyone with an opname permission of some module.
+export const OPNAME_PATH = "/stok-opname";
+const hasOpnameAccess = (user: AuthUser | null) => MODULES.some((m) => can(user, modulePerm(m, "opname")) || can(user, modulePerm(m, "approve")));
+
+// Whether a non-inventory page (sidebar / router) may be opened.
+export function pageAllowed(user: AuthUser | null, path: string): boolean {
+  if (!user) return false;
+  if (user.role === "superuser") return true;
+  if (path === OPNAME_PATH || path.startsWith(`${OPNAME_PATH}/`)) return hasOpnameAccess(user);
+  return !!PAGE_PERMS[path] && can(user, PAGE_PERMS[path]);
+}
 
 // One-line summary of an account's access for lists and reports, e.g.
 // "ZAMRUD, FIRUS · Gudang (Lihat, Input) · BBM (Lihat) · Master Obat".

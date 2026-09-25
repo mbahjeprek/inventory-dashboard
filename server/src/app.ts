@@ -116,6 +116,8 @@ function requiredPerms(req: express.Request): Need {
   const is = (re: RegExp) => re.test(p);
 
   if (is(/^\/auth\//) || is(/^\/karyawan\/pick$/)) return null;
+  // Stok Opname: each route checks the opname's own module (view / opname / approve) and estate.
+  if (is(/^\/stock-opname(\/|$)/)) return null;
   if (is(/^\/(stock-correction|gudang-stock\/correction)$/)) return ["gudang.koreksi"];
   if (is(/^\/klinik-stock\/correction$/)) return ["klinik.koreksi"];
   // items = the master barang list, which is also Nilam's gudang stock.
@@ -143,6 +145,64 @@ app.use("/api", (req, res, next) => {
     return res.status(403).json({ error: "Akses ditolak" });
   }
   next();
+});
+
+// ---- Stok Opname lock: while a location has an open opname (DRAFT / SUBMITTED) its stock can't move ----
+type OpnameModule = "GUDANG" | "KLINIK" | "BBM" | "PUPUK";
+type StockLocation = { module: OpnameModule; estate: string };
+
+// The locations whose stock a request would change. Only stock-moving routes are listed: master
+// data, buffer/catatan edits and the imported Nilam stock in/out history don't change the stock.
+async function stockLocations(req: express.Request): Promise<StockLocation[]> {
+  const m = req.method;
+  if (m === "GET") return [];
+  const p = (req.baseUrl + req.path).replace(/^\/api/, "");
+  const b = req.body ?? {};
+  const id = p.match(/\/(\d+)$/)?.[1];
+  const col = async (table: string, column: string) =>
+    id ? (await queryOne<{ v: string }>(`SELECT ${column} v FROM ${table} WHERE id = @id`, { id }))?.v : undefined;
+  const at = (module: OpnameModule) => (estate: unknown) => (typeof estate === "string" && estate ? [{ module, estate }] : []);
+  const [G, K, B, P] = (["GUDANG", "KLINIK", "BBM", "PUPUK"] as const).map(at);
+  // A Nilam Stok Keluar to another estate's gudang also books a Stok Masuk there (see addTransfer).
+  const transferTo = (tujuan: unknown, type: unknown) => (type === "OUT" && GUDANG_STOCK_OPTIONS.includes(String(tujuan)) ? G(tujuan) : []);
+
+  if (p === "/stock-correction") return G("NILAM");
+  if (p === "/transactions" && m === "POST") return [...G("NILAM"), ...transferTo(b.tujuan, b.type)];
+  if (/^\/transactions\/\d+$/.test(p)) {
+    const t = await queryOne<{ gudang: string }>("SELECT gudang FROM gudang_stock_tx WHERE transfer_from_id = @id", { id });
+    return [...G("NILAM"), ...G(t?.gudang), ...(m === "PUT" ? transferTo(b.tujuan, b.type) : [])];
+  }
+  if (/^\/gudang-stock(\/transactions|\/correction)?$/.test(p) && m === "POST") return G(b.gudang);
+  if (/^\/gudang-stock\/\d+$/.test(p)) return G(await col("gudang_stock", "gudang"));
+  if (/^\/gudang-stock\/history\/\d+$/.test(p)) return G(await col("gudang_stock_tx", "gudang"));
+  if (/^\/klinik-stock\/(transactions|correction)$/.test(p)) return K(b.klinik);
+  if (/^\/klinik-stock\/batch\/\d+$/.test(p)) return K(await col("klinik_batch", "klinik"));
+  if (/^\/klinik-stock\/\d+$/.test(p) && m === "DELETE") return K(await col("klinik_stock", "klinik"));
+  if (/^\/klinik-stock\/history\/\d+$/.test(p)) return K(await col("klinik_stock_tx", "klinik"));
+  if (p === "/bbm" && m === "POST") return B(b.lokasi);
+  if (/^\/bbm\/\d+$/.test(p)) return B(await col("bbm_log", "lokasi"));
+  if (p === "/pupuk" && m === "POST") return P(b.estate);
+  if (/^\/pupuk\/\d+$/.test(p)) return P(await col("pupuk_log", "estate"));
+  return [];
+}
+
+const OPNAME_MODULE_LABEL: Record<OpnameModule, string> = { GUDANG: "Gudang", KLINIK: "Klinik", BBM: "BBM", PUPUK: "Pupuk" };
+
+app.use("/api", async (req, res, next) => {
+  const locs = await stockLocations(req);
+  if (!locs.length) return next();
+  const open = await queryOne<{ id: number; module: OpnameModule; estate: string; status: string }>(
+    `SELECT id, module, estate, status FROM opname
+     WHERE status IN ('DRAFT', 'SUBMITTED') AND module || ':' || estate = ANY(@keys::text[]) ORDER BY id LIMIT 1`,
+    { keys: locs.map((l) => `${l.module}:${l.estate}`) }
+  );
+  if (!open) return next();
+  res.status(423).json({
+    error:
+      `${OPNAME_MODULE_LABEL[open.module]} ${open.estate} sedang Stok Opname #${open.id} ` +
+      `(${open.status === "DRAFT" ? "sedang dihitung" : "menunggu approval"}). ` +
+      "Transaksi stok dikunci sampai opname disetujui atau dibatalkan.",
+  });
 });
 
 // Routes that used to be superuser-only: the gate above has already checked the account's
@@ -818,26 +878,28 @@ async function recordMovement(req: express.Request, l: StockLedger, m: Movement)
 
 // Koreksi: sets the stock to the counted quantity via one IN/OUT movement. Returns the stock before.
 async function recordCorrection(req: express.Request, l: StockLedger, scope: string, item: string, actual: number, note: string) {
-  let before = 0;
-  await withTransaction(async (client) => {
-    const current = await queryOne<any>(
-      `SELECT stock_tersedia FROM ${l.stock} WHERE ${l.scope} = @scope AND ${l.item} = @item FOR UPDATE`,
-      { scope, item },
-      client
-    );
-    before = current?.stock_tersedia ?? 0;
-    const delta = round3(actual - before);
-    if (delta === 0) return;
-    await applyMovement(client, req, l, {
-      scope,
-      item,
-      type: delta > 0 ? "IN" : "OUT",
-      qty: Math.abs(delta),
-      tujuan: "",
-      penerima: "",
-      note: `Koreksi Stok (Opname)${note ? `: ${note}` : ""}`,
-      is_correction: 1,
-    });
+  return withTransaction((client) => ledgerCorrection(client, req, l, scope, item, actual, `Koreksi Stok (Opname)${note ? `: ${note}` : ""}`));
+}
+
+// The movement of a Koreksi inside an open transaction (also used by an approved Stok Opname).
+async function ledgerCorrection(client: PoolClient, req: express.Request, l: StockLedger, scope: string, item: string, actual: number, note: string) {
+  const current = await queryOne<any>(
+    `SELECT stock_tersedia FROM ${l.stock} WHERE ${l.scope} = @scope AND ${l.item} = @item FOR UPDATE`,
+    { scope, item },
+    client
+  );
+  const before: number = current?.stock_tersedia ?? 0;
+  const delta = round3(actual - before);
+  if (delta === 0) return before;
+  await applyMovement(client, req, l, {
+    scope,
+    item,
+    type: delta > 0 ? "IN" : "OUT",
+    qty: Math.abs(delta),
+    tujuan: "",
+    penerima: "",
+    note,
+    is_correction: 1,
   });
   return before;
 }
@@ -1182,26 +1244,7 @@ app.post("/api/stock-correction", requireSuperuser, async (req, res) => {
   if (!item) return res.status(404).json({ error: "Not found" });
 
   const delta = actual_qty - item.stock_tersedia;
-
-  await withTransaction(async (client) => {
-    if (delta !== 0) {
-      const type: "IN" | "OUT" = delta > 0 ? "IN" : "OUT";
-      const qty = Math.abs(delta);
-      const finalNote = `Koreksi Stok (Opname)${note ? `: ${note}` : ""}`;
-      await execute(
-        `INSERT INTO transactions (item_id, tujuan, type, qty, note, is_correction) VALUES (@item_id, '', @type, @qty, @note, 1)`,
-        { item_id, type, qty, note: finalNote },
-        client
-      );
-      await applyStockEffect(client, item_id, type, qty, 1);
-    }
-
-    await execute(
-      `UPDATE items SET stock_fisik = @stock_fisik, selisih_stock = @selisih_stock WHERE id = @id`,
-      { stock_fisik: actual_qty, selisih_stock: delta, id: item_id },
-      client
-    );
-  });
+  await withTransaction((client) => nilamCorrection(client, item_id, actual_qty, `Koreksi Stok (Opname)${note ? `: ${note}` : ""}`));
 
   await logActivity(req, {
     module: "BARANG",
@@ -1212,6 +1255,29 @@ app.post("/api/stock-correction", requireSuperuser, async (req, res) => {
   });
   res.json({ success: true, delta });
 });
+
+// Sets a Nilam item's stock to the counted quantity (one correction transaction, never mirrored into
+// the stock in/out logs). Returns the stock before.
+async function nilamCorrection(client: PoolClient, itemId: number, actual: number, note: string) {
+  const item = (await queryOne<any>("SELECT id, stock_tersedia FROM items WHERE id = @id FOR UPDATE", { id: itemId }, client))!;
+  const delta = actual - item.stock_tersedia;
+  if (delta !== 0) {
+    const type: "IN" | "OUT" = delta > 0 ? "IN" : "OUT";
+    const qty = Math.abs(delta);
+    await execute(
+      `INSERT INTO transactions (item_id, tujuan, type, qty, note, is_correction) VALUES (@item_id, '', @type, @qty, @note, 1)`,
+      { item_id: itemId, type, qty, note },
+      client
+    );
+    await applyStockEffect(client, itemId, type, qty, 1);
+  }
+  await execute(
+    `UPDATE items SET stock_fisik = @stock_fisik, selisih_stock = @selisih_stock WHERE id = @id`,
+    { stock_fisik: actual, selisih_stock: delta, id: itemId },
+    client
+  );
+  return item.stock_tersedia as number;
+}
 
 app.get("/api/transactions", requireEstate("NILAM"), async (req, res) => {
   const { limit = "100" } = req.query as Record<string, string>;
@@ -2507,21 +2573,24 @@ async function recordKlinikMove(
   m: { klinik: string; obat: string; type: "IN" | "OUT"; qty: number; exp?: string; tujuan: string; penerima: string; note: string | null; is_correction: number }
 ): Promise<string | null> {
   try {
-    await withTransaction(async (client) => {
-      const alloc = await klinikApply(client, m.klinik, m.obat, m.type, m.qty, m.exp);
-      await execute(
-        `INSERT INTO klinik_stock_tx (klinik, obat_kode, type, qty, tujuan, penerima, note, is_correction, user_id, alloc)
-         VALUES (@klinik, @obat, @type, @qty, @tujuan, @penerima, @note, @is_correction, @user_id, @alloc::jsonb)`,
-        { ...m, user_id: req.user!.id, alloc: JSON.stringify(alloc) },
-        client
-      );
-      await syncKlinikStock(client, m.klinik, m.obat);
-    });
+    await withTransaction((client) => klinikMoveTx(client, req, m));
     return null;
   } catch (e) {
     if (e instanceof StockError) return e.message;
     throw e;
   }
+}
+
+type KlinikMove = Parameters<typeof recordKlinikMove>[1];
+async function klinikMoveTx(client: PoolClient, req: express.Request, m: KlinikMove) {
+  const alloc = await klinikApply(client, m.klinik, m.obat, m.type, m.qty, m.exp);
+  await execute(
+    `INSERT INTO klinik_stock_tx (klinik, obat_kode, type, qty, tujuan, penerima, note, is_correction, user_id, alloc)
+     VALUES (@klinik, @obat, @type, @qty, @tujuan, @penerima, @note, @is_correction, @user_id, @alloc::jsonb)`,
+    { ...m, user_id: req.user!.id, alloc: JSON.stringify(alloc) },
+    client
+  );
+  await syncKlinikStock(client, m.klinik, m.obat);
 }
 
 app.get("/api/klinik-stock/summary", async (req, res) => {
@@ -3108,4 +3177,457 @@ app.get("/api/bbm", async (req, res) => {
     page: parseInt(page),
     pageSize: limit,
   });
+});
+
+// ---- Stok Opname (see schema.sql opname / opname_line and the lock middleware near the top) ----
+// Flow: create (snapshot of the system stock) -> count (stok_fisik per line, DRAFT) -> submit ->
+// approve (one Koreksi per line whose count differs) or send back to DRAFT; DRAFT/SUBMITTED can be
+// cancelled. Every module uses the same five estates.
+const OPNAME_MODULES: OpnameModule[] = ["GUDANG", "KLINIK", "BBM", "PUPUK"];
+const OPNAME_LOG_MODULE: Record<OpnameModule, LogModule> = { GUDANG: "BARANG", KLINIK: "KLINIK", BBM: "BBM", PUPUK: "PUPUK" };
+const BBM_JENIS = ["SOLAR", "BENSIN"];
+// Nilam items, klinik batches and BBM saldo (INTEGER) are whole numbers; other gudang and pupuk take decimals.
+const opnameWhole = (o: { module: string; estate: string }) => o.module === "KLINIK" || o.module === "BBM" || (o.module === "GUDANG" && o.estate === "NILAM");
+
+type OpnameAction = "view" | "opname" | "approve";
+// view = the module's Lihat, Opname or Approve permission; the others need that exact permission.
+function opnameCan(user: SessionUser, module: string, action: OpnameAction) {
+  if (user.role === "superuser") return true;
+  const m = module.toLowerCase();
+  return (action === "view" ? ["view", "opname", "approve"] : [action]).some((a) => user.perms.includes(`${m}.${a}`));
+}
+
+type OpnameRow = { id: number; module: OpnameModule; estate: string; status: string; tanggal: string; submitted_by: number | null; [k: string]: any };
+type OpnameLine = { id?: number; kode: string; nama: string; satuan: string; exp: string; stok_sistem: number; stok_fisik?: number | null; keterangan?: string };
+
+// Loads an opname the account may act on, or answers the request itself and returns null.
+async function loadOpname(req: express.Request, res: express.Response, action: OpnameAction, client?: PoolClient) {
+  const o = await queryOne<OpnameRow>(`SELECT * FROM opname WHERE id = @id${client ? " FOR UPDATE" : ""}`, { id: Number(req.params.id) || 0 }, client);
+  if (!o) {
+    res.status(404).json({ error: "Stok opname tidak ditemukan" });
+    return null;
+  }
+  if (!estateAllowed(req.user!, o.estate) || !opnameCan(req.user!, o.module, action)) {
+    res.status(403).json({ error: "Akses ditolak" });
+    return null;
+  }
+  return o;
+}
+
+// Answers a request with an error and returns null, for the early exits inside a transaction.
+function refuse(res: express.Response, status: number, error: string): null {
+  res.status(status).json({ error });
+  return null;
+}
+
+const opnameName = (o: { module: OpnameModule; estate: string }) => `${OPNAME_MODULE_LABEL[o.module]} ${o.estate}`;
+const signed = (n: number) => `${n > 0 ? "+" : ""}${n}`;
+
+// The system stock of a location, one line per thing to count.
+async function opnameSnapshot(module: OpnameModule, estate: string, client?: PoolClient): Promise<OpnameLine[]> {
+  if (module === "GUDANG" && estate === "NILAM") {
+    return queryMany(
+      `SELECT kode, nama, COALESCE(satuan, '') satuan, '' exp, COALESCE(stock_tersedia, 0)::float8 stok_sistem FROM items ORDER BY kode`,
+      {},
+      client
+    );
+  }
+  if (module === "GUDANG") {
+    return queryMany(
+      `SELECT gs.item_kode kode, i.nama, COALESCE(i.satuan, '') satuan, '' exp, gs.stock_tersedia::float8 stok_sistem
+       FROM gudang_stock gs JOIN items i ON i.kode = gs.item_kode WHERE gs.gudang = @estate ORDER BY i.kode`,
+      { estate },
+      client
+    );
+  }
+  if (module === "KLINIK") {
+    // Every batch in stock, plus a no-expiry line for obat the clinic holds without any stock left.
+    return queryMany(
+      `SELECT * FROM (
+         SELECT b.obat_kode kode, o.nama, COALESCE(o.satuan, '') satuan, b.expired_date exp, b.qty::float8 stok_sistem
+         FROM klinik_batch b JOIN obat o ON o.kode = b.obat_kode WHERE b.klinik = @estate AND b.qty > 0
+         UNION ALL
+         SELECT ks.obat_kode, o.nama, COALESCE(o.satuan, ''), '', 0
+         FROM klinik_stock ks JOIN obat o ON o.kode = ks.obat_kode
+         WHERE ks.klinik = @estate AND NOT EXISTS (SELECT 1 FROM klinik_batch b WHERE b.klinik = ks.klinik AND b.obat_kode = ks.obat_kode AND b.qty > 0)
+       ) x ORDER BY kode, exp = '', exp`,
+      { estate },
+      client
+    );
+  }
+  if (module === "BBM") {
+    return queryMany(
+      `SELECT j kode, j nama, 'LTR' satuan, '' exp,
+         COALESCE((SELECT saldo_stock FROM bbm_log WHERE jenis_bbm = j AND lokasi = @estate AND saldo_stock IS NOT NULL
+                   ORDER BY tanggal_iso DESC, id DESC LIMIT 1), 0)::float8 stok_sistem
+       FROM unnest(@jenis::text[]) j`,
+      { estate, jenis: BBM_JENIS },
+      client
+    );
+  }
+  return queryMany(
+    `SELECT jenis_pupuk kode, jenis_pupuk nama, 'KG' satuan, '' exp, saldo_stock::float8 stok_sistem FROM (
+       SELECT jenis_pupuk, saldo_stock, ROW_NUMBER() OVER (PARTITION BY jenis_pupuk ORDER BY tanggal_iso DESC, id DESC) rn
+       FROM pupuk_log WHERE estate = @estate AND saldo_stock IS NOT NULL
+     ) s WHERE rn = 1 ORDER BY jenis_pupuk`,
+    { estate },
+    client
+  );
+}
+
+// Latest BBM / pupuk saldo row of one jenis (the running balance new entries continue from).
+const latestSaldoRow = (module: "BBM" | "PUPUK", estate: string, jenis: string, client?: PoolClient) =>
+  queryOne<{ saldo_stock: number }>(
+    module === "BBM"
+      ? `SELECT saldo_stock FROM bbm_log WHERE jenis_bbm = @jenis AND lokasi = @estate AND saldo_stock IS NOT NULL ORDER BY tanggal_iso DESC, id DESC LIMIT 1`
+      : `SELECT saldo_stock FROM pupuk_log WHERE jenis_pupuk = @jenis AND estate = @estate AND saldo_stock IS NOT NULL ORDER BY tanggal_iso DESC, id DESC LIMIT 1`,
+    { estate, jenis },
+    client
+  );
+
+// One line as it stands now (for a line added during the count); null = not in the master data.
+async function opnameCurrent(module: OpnameModule, estate: string, kode: string, exp: string): Promise<OpnameLine | null> {
+  if (module === "GUDANG") {
+    const r = await queryOne<any>(
+      `SELECT i.kode, i.nama, COALESCE(i.satuan, '') satuan, ${
+        estate === "NILAM" ? "COALESCE(i.stock_tersedia, 0)" : "COALESCE(gs.stock_tersedia, 0)"
+      }::float8 stok_sistem
+       FROM items i LEFT JOIN gudang_stock gs ON gs.item_kode = i.kode AND gs.gudang = @estate WHERE i.kode = @kode`,
+      { estate, kode }
+    );
+    return r ? { ...r, exp: "" } : null;
+  }
+  if (module === "KLINIK") {
+    const r = await queryOne<any>(
+      `SELECT o.kode, o.nama, COALESCE(o.satuan, '') satuan, COALESCE(b.qty, 0)::float8 stok_sistem
+       FROM obat o LEFT JOIN klinik_batch b ON b.obat_kode = o.kode AND b.klinik = @estate AND b.expired_date = @exp WHERE o.kode = @kode`,
+      { estate, kode, exp }
+    );
+    return r ? { ...r, exp } : null;
+  }
+  if (module === "BBM" && !BBM_JENIS.includes(kode)) return null;
+  const last = await latestSaldoRow(module, estate, kode);
+  return { kode, nama: kode, satuan: module === "BBM" ? "LTR" : "KG", exp: "", stok_sistem: last?.saldo_stock ?? 0 };
+}
+
+// Books the count of one line as a Koreksi. Returns the stock before (the count is the stock after).
+async function applyOpnameLine(client: PoolClient, req: express.Request, o: OpnameRow, line: OpnameLine & { stok_fisik: number }) {
+  const note = `Koreksi Stok (Opname #${o.id})${line.keterangan ? `: ${line.keterangan}` : ""}`;
+  const actual = line.stok_fisik;
+  if (o.module === "GUDANG" && o.estate === "NILAM") {
+    const item = await queryOne<{ id: number }>("SELECT id FROM items WHERE kode = @kode", { kode: line.kode }, client);
+    if (!item) throw new StockError(`Barang ${line.kode} sudah tidak ada di master data`);
+    return nilamCorrection(client, item.id, actual, note);
+  }
+  if (o.module === "GUDANG") return ledgerCorrection(client, req, GUDANG_LEDGER, o.estate, line.kode, actual, note);
+  if (o.module === "KLINIK") {
+    const before =
+      (await queryOne<{ q: number }>(
+        "SELECT qty q FROM klinik_batch WHERE klinik = @k AND obat_kode = @o AND expired_date = @exp FOR UPDATE",
+        { k: o.estate, o: line.kode, exp: line.exp },
+        client
+      ))?.q ?? 0;
+    const delta = actual - before;
+    if (delta !== 0) {
+      await klinikMoveTx(client, req, {
+        klinik: o.estate,
+        obat: line.kode,
+        type: delta > 0 ? "IN" : "OUT",
+        qty: Math.abs(delta),
+        exp: line.exp,
+        tujuan: "",
+        penerima: "",
+        note: `Koreksi Stok (Opname #${o.id}) batch ${expText(line.exp)}${line.keterangan ? `: ${line.keterangan}` : ""}`,
+        is_correction: 1,
+      });
+    }
+    return before;
+  }
+
+  // BBM / pupuk: a saldo row dated the opname day, or after the latest row so it becomes the saldo.
+  const before = (await latestSaldoRow(o.module, o.estate, line.kode, client))?.saldo_stock ?? 0;
+  const delta = round3(actual - before);
+  if (delta === 0) return before;
+  const lastIso =
+    (await queryOne<{ d: string | null }>(
+      o.module === "BBM"
+        ? "SELECT MAX(tanggal_iso) d FROM bbm_log WHERE jenis_bbm = @jenis AND lokasi = @estate"
+        : "SELECT MAX(tanggal_iso) d FROM pupuk_log WHERE jenis_pupuk = @jenis AND estate = @estate",
+      { jenis: line.kode, estate: o.estate },
+      client
+    ))?.d ?? "";
+  const iso = lastIso > o.tanggal ? lastIso : o.tanggal;
+  if (o.module === "BBM") {
+    const { tanggal, periode } = isoToIndoDate(iso);
+    await execute(
+      `INSERT INTO bbm_log (jenis_bbm, lokasi, estate, periode, tanggal, tanggal_iso, no_spb, saldo_stock, keterangan, kode_kendaraan, hm_terakhir, koreksi)
+       VALUES (@jenis, @estate, @estate, @periode, @tanggal, @iso, '', @saldo, @note, '', '', @delta)`,
+      { jenis: line.kode, estate: o.estate, periode, tanggal, iso, saldo: actual, note, delta },
+      client
+    );
+  } else {
+    const [y, m, d] = iso.split("-");
+    await execute(
+      `INSERT INTO pupuk_log (estate, jenis_pupuk, periode, tanggal, tanggal_iso, divisi, no_embrace, kode_barang, saldo_stock, keterangan, blok, koreksi)
+       VALUES (@estate, @jenis, @periode, @tanggal, @iso, '', '', '', @saldo, @note, '', @delta)`,
+      { estate: o.estate, jenis: line.kode, periode: `${INDO_MONTHS[Number(m) - 1]} ${y}`, tanggal: `${d}/${m}/${y}`, iso, saldo: actual, note, delta },
+      client
+    );
+  }
+  return before;
+}
+
+async function logOpname(req: express.Request, o: OpnameRow, aksi: string, detail = "") {
+  await logActivity(req, { module: OPNAME_LOG_MODULE[o.module], estate: o.estate, aksi, objek: `Stok Opname #${o.id} - ${opnameName(o)}`, detail });
+}
+
+const OPNAME_COUNTS = `COUNT(l.id)::int total, COUNT(l.stok_fisik)::int dihitung,
+  COUNT(*) FILTER (WHERE l.stok_fisik IS NOT NULL AND ROUND((l.stok_fisik - l.stok_sistem)::numeric, 3) <> 0)::int selisih`;
+
+app.get("/api/stock-opname", async (req, res) => {
+  const { module = "", estate = "", status = "", page = "1", pageSize = "25" } = req.query as Record<string, string>;
+  const u = req.user!;
+  const params: any = {
+    mods: OPNAME_MODULES.filter((m) => opnameCan(u, m, "view") && (!module || m === module)),
+    estates: ESTATES.filter((e) => estateAllowed(u, e) && (!estate || e === estate)),
+  };
+  const conditions = ["o.module = ANY(@mods::text[])", "o.estate = ANY(@estates::text[])"];
+  if (status === "OPEN") conditions.push("o.status IN ('DRAFT', 'SUBMITTED')");
+  else if (status) {
+    conditions.push("o.status = @status");
+    params.status = status;
+  }
+  const where = "WHERE " + conditions.join(" AND ");
+  const total = (await queryOne<{ c: number }>(`SELECT COUNT(*)::int c FROM opname o ${where}`, params))!.c;
+  const limit = Math.min(parseInt(pageSize) || 25, 200);
+  const offset = (Math.max(parseInt(page) || 1, 1) - 1) * limit;
+  const data = await queryMany(
+    `SELECT o.*, ${OPNAME_COUNTS} FROM opname o LEFT JOIN opname_line l ON l.opname_id = o.id ${where}
+     GROUP BY o.id ORDER BY o.created_at DESC, o.id DESC LIMIT @limit OFFSET @offset`,
+    { ...params, limit, offset }
+  );
+  res.json({ data, total, page: parseInt(page) || 1, pageSize: limit });
+});
+
+app.post("/api/stock-opname", async (req, res) => {
+  const { module, estate, tanggal, catatan } = req.body ?? {};
+  if (!OPNAME_MODULES.includes(module)) return res.status(400).json({ error: "Modul tidak valid" });
+  if (!(ESTATES as readonly string[]).includes(estate)) return res.status(400).json({ error: "Estate tidak valid" });
+  if (!ISO_DATE.test(tanggal || "")) return res.status(400).json({ error: "Tanggal tidak valid" });
+  if (!estateAllowed(req.user!, estate) || !opnameCan(req.user!, module, "opname")) return res.status(403).json({ error: "Akses ditolak" });
+
+  const u = req.user!;
+  let o: OpnameRow;
+  let count = 0;
+  try {
+    o = await withTransaction(async (client) => {
+      const row = (await queryOne<OpnameRow>(
+        `INSERT INTO opname (module, estate, tanggal, catatan, created_by, created_by_nama)
+         VALUES (@module, @estate, @tanggal, @catatan, @uid, @unama) RETURNING *`,
+        { module, estate, tanggal, catatan: String(catatan ?? "").trim(), uid: u.id, unama: u.nama },
+        client
+      ))!;
+      const lines = await opnameSnapshot(module, estate, client);
+      count = lines.length;
+      await execute(
+        `INSERT INTO opname_line (opname_id, kode, nama, satuan, exp, stok_sistem)
+         SELECT @id, x.kode, x.nama, x.satuan, x.exp, x.stok_sistem
+         FROM json_to_recordset(@lines::json) AS x(kode text, nama text, satuan text, exp text, stok_sistem float8)`,
+        { id: row.id, lines: JSON.stringify(lines) },
+        client
+      );
+      return row;
+    });
+  } catch (e: any) {
+    if (e.code === "23505") return res.status(409).json({ error: `${opnameName({ module, estate })} masih punya stok opname yang belum selesai` });
+    throw e;
+  }
+  await logOpname(req, o, "Buat Stok Opname", `Tanggal: ${isoToDisplay(tanggal)}; ${count} item; transaksi stok dikunci`);
+  res.json({ success: true, id: o.id });
+});
+
+app.get("/api/stock-opname/:id", async (req, res) => {
+  const o = await loadOpname(req, res, "view");
+  if (!o) return;
+  const lines = await queryMany("SELECT * FROM opname_line WHERE opname_id = @id ORDER BY ditambahkan, id", { id: o.id });
+  res.json({ opname: o, lines });
+});
+
+// Saves counts (stok_fisik null = not counted) and notes while DRAFT.
+app.put("/api/stock-opname/:id", async (req, res) => {
+  const { lines = [], catatan } = req.body ?? {};
+  if (!Array.isArray(lines)) return res.status(400).json({ error: "Data tidak valid" });
+  const ok = await withTransaction(async (client) => {
+    const o = await loadOpname(req, res, "opname", client);
+    if (!o) return null;
+    if (o.status !== "DRAFT") return refuse(res, 400, "Opname ini sudah diajukan, tidak bisa diubah");
+    const whole = opnameWhole(o);
+    const rows: { id: number; stok_fisik: number | null; keterangan: string }[] = [];
+    for (const l of lines) {
+      const v = l?.stok_fisik;
+      if (v !== null && (typeof v !== "number" || !Number.isFinite(v) || v < 0 || (whole && !Number.isInteger(v)))) {
+        return refuse(res, 400, whole ? "Stok fisik harus bilangan bulat, minimal 0" : "Stok fisik harus angka, minimal 0");
+      }
+      rows.push({ id: Number(l.id), stok_fisik: v === null ? null : round3(v), keterangan: String(l.keterangan ?? "").trim() });
+    }
+    if (rows.length) {
+      await execute(
+        `UPDATE opname_line l SET stok_fisik = x.stok_fisik, keterangan = x.keterangan
+         FROM json_to_recordset(@rows::json) AS x(id int, stok_fisik float8, keterangan text)
+         WHERE l.id = x.id AND l.opname_id = @oid`,
+        { rows: JSON.stringify(rows), oid: o.id },
+        client
+      );
+    }
+    if (typeof catatan === "string") await execute("UPDATE opname SET catatan = @c WHERE id = @id", { c: catatan.trim(), id: o.id }, client);
+    return o;
+  });
+  if (ok) res.json({ success: true });
+});
+
+// A barang / obat batch / jenis pupuk found during the count that isn't in the snapshot.
+app.post("/api/stock-opname/:id/lines", async (req, res) => {
+  const o = await loadOpname(req, res, "opname");
+  if (!o) return;
+  if (o.status !== "DRAFT") return res.status(400).json({ error: "Opname ini sudah diajukan, tidak bisa diubah" });
+  if (o.module === "BBM") return res.status(400).json({ error: "BBM selalu berisi Solar dan Bensin" });
+  let kode = String(req.body?.kode ?? "").trim();
+  if (o.module === "PUPUK") kode = kode.toUpperCase();
+  const exp = o.module === "KLINIK" ? String(req.body?.exp ?? "") : "";
+  if (!kode) return res.status(400).json({ error: "Barang wajib dipilih" });
+  if (exp && !ISO_DATE.test(exp)) return res.status(400).json({ error: "Tanggal expired tidak valid" });
+  const cur = await opnameCurrent(o.module, o.estate, kode, exp);
+  if (!cur) return res.status(404).json({ error: "Tidak ditemukan di master data" });
+  try {
+    const line = await queryOne(
+      `INSERT INTO opname_line (opname_id, kode, nama, satuan, exp, stok_sistem, ditambahkan)
+       VALUES (@oid, @kode, @nama, @satuan, @exp, @stok_sistem, true) RETURNING *`,
+      { oid: o.id, kode: cur.kode, nama: cur.nama, satuan: cur.satuan, exp: cur.exp, stok_sistem: cur.stok_sistem }
+    );
+    res.json(line);
+  } catch (e: any) {
+    if (e.code === "23505") return res.status(409).json({ error: "Sudah ada di daftar opname" });
+    throw e;
+  }
+});
+
+app.delete("/api/stock-opname/:id/lines/:lineId", async (req, res) => {
+  const o = await loadOpname(req, res, "opname");
+  if (!o) return;
+  if (o.status !== "DRAFT") return res.status(400).json({ error: "Opname ini sudah diajukan, tidak bisa diubah" });
+  const r = await execute("DELETE FROM opname_line WHERE id = @lid AND opname_id = @oid AND ditambahkan", { lid: Number(req.params.lineId) || 0, oid: o.id });
+  if (!r.rowCount) return res.status(400).json({ error: "Hanya baris yang ditambahkan saat opname yang bisa dihapus" });
+  res.json({ success: true });
+});
+
+app.post("/api/stock-opname/:id/submit", async (req, res) => {
+  const u = req.user!;
+  const done = await withTransaction(async (client) => {
+    const o = await loadOpname(req, res, "opname", client);
+    if (!o) return null;
+    if (o.status !== "DRAFT") return refuse(res, 400, "Opname ini sudah diajukan");
+    const c = (await queryOne<{ total: number; dihitung: number; selisih: number }>(
+      `SELECT ${OPNAME_COUNTS} FROM opname_line l WHERE l.opname_id = @id`,
+      { id: o.id },
+      client
+    ))!;
+    if (!c.dihitung) return refuse(res, 400, "Belum ada stok fisik yang diisi");
+    await execute(
+      `UPDATE opname SET status = 'SUBMITTED', submitted_by = @uid, submitted_by_nama = @unama, submitted_at = now() WHERE id = @id`,
+      { uid: u.id, unama: u.nama, id: o.id },
+      client
+    );
+    return { o, c };
+  });
+  if (!done) return;
+  await logOpname(req, done.o, "Ajukan Stok Opname", `Dihitung ${done.c.dihitung} dari ${done.c.total} item; ${done.c.selisih} item selisih`);
+  res.json({ success: true });
+});
+
+// Send a submitted opname back to the counter with a reason.
+app.post("/api/stock-opname/:id/return", async (req, res) => {
+  const catatan = String(req.body?.catatan ?? "").trim();
+  if (!catatan) return res.status(400).json({ error: "Alasan wajib diisi" });
+  const o = await withTransaction(async (client) => {
+    const o = await loadOpname(req, res, "approve", client);
+    if (!o) return null;
+    if (o.status !== "SUBMITTED") return refuse(res, 400, "Opname ini tidak sedang menunggu approval");
+    await execute(
+      `UPDATE opname SET status = 'DRAFT', catatan_review = @c, submitted_by = NULL, submitted_by_nama = NULL, submitted_at = NULL WHERE id = @id`,
+      { c: catatan, id: o.id },
+      client
+    );
+    return o;
+  });
+  if (!o) return;
+  await logOpname(req, o, "Kembalikan Stok Opname", `Alasan: ${catatan}`);
+  res.json({ success: true });
+});
+
+app.post("/api/stock-opname/:id/approve", async (req, res) => {
+  const u = req.user!;
+  type Change = { line: OpnameLine; before: number; after: number };
+  let done: { o: OpnameRow; changes: Change[]; counted: number } | null;
+  try {
+    done = await withTransaction(async (client) => {
+      const o = await loadOpname(req, res, "approve", client);
+      if (!o) return null;
+      if (o.status !== "SUBMITTED") return refuse(res, 400, "Opname ini tidak sedang menunggu approval");
+      // The count is checked by someone else; a superuser may approve their own.
+      if (o.submitted_by === u.id && u.role !== "superuser") return refuse(res, 403, "Opname yang Anda ajukan sendiri harus disetujui orang lain");
+      const lines = await queryMany<OpnameLine & { id: number; stok_fisik: number }>(
+        "SELECT * FROM opname_line WHERE opname_id = @id AND stok_fisik IS NOT NULL ORDER BY id",
+        { id: o.id },
+        client
+      );
+      const changes: Change[] = [];
+      for (const line of lines) {
+        const before = round3(await applyOpnameLine(client, req, o, line));
+        await execute("UPDATE opname_line SET stok_sistem = @before WHERE id = @id", { before, id: line.id }, client);
+        if (before !== line.stok_fisik) changes.push({ line, before, after: line.stok_fisik });
+      }
+      await execute(
+        `UPDATE opname SET status = 'APPROVED', approved_by = @uid, approved_by_nama = @unama, approved_at = now(), catatan_review = '' WHERE id = @id`,
+        { uid: u.id, unama: u.nama, id: o.id },
+        client
+      );
+      return { o, changes, counted: lines.length };
+    });
+  } catch (e) {
+    if (e instanceof StockError) return res.status(400).json({ error: e.message });
+    throw e;
+  }
+  if (!done) return;
+  const { o, changes } = done;
+  for (const { line, before, after } of changes) {
+    await logActivity(req, {
+      module: OPNAME_LOG_MODULE[o.module],
+      estate: o.estate,
+      aksi: "Koreksi Stok",
+      objek: o.module === "BBM" || o.module === "PUPUK" ? line.kode : `${line.kode} - ${line.nama}`,
+      detail: `Stok Opname #${o.id}${o.module === "KLINIK" ? `; Batch ${expText(line.exp)}` : ""}: ${before} → ${after} (selisih ${signed(round3(after - before))})${
+        line.keterangan ? `; Catatan: ${line.keterangan}` : ""
+      }`,
+    });
+  }
+  await logOpname(req, o, "Setujui Stok Opname", `${done.counted} item dihitung; ${changes.length} item dikoreksi; transaksi stok dibuka`);
+  res.json({ success: true, corrected: changes.length });
+});
+
+// DRAFT: by the counter or an approver; SUBMITTED: by an approver. Nothing is booked.
+app.post("/api/stock-opname/:id/cancel", async (req, res) => {
+  const catatan = String(req.body?.catatan ?? "").trim();
+  const o = await withTransaction(async (client) => {
+    const o = await loadOpname(req, res, "view", client);
+    if (!o) return null;
+    if (o.status !== "DRAFT" && o.status !== "SUBMITTED") return refuse(res, 400, "Opname ini sudah selesai");
+    const u = req.user!;
+    const allowed = opnameCan(u, o.module, "approve") || (o.status === "DRAFT" && opnameCan(u, o.module, "opname"));
+    if (!allowed) return refuse(res, 403, "Akses ditolak");
+    await execute("UPDATE opname SET status = 'BATAL', catatan_review = @c WHERE id = @id", { c: catatan, id: o.id }, client);
+    return o;
+  });
+  if (!o) return;
+  await logOpname(req, o, "Batalkan Stok Opname", `${catatan ? `Alasan: ${catatan}; ` : ""}transaksi stok dibuka`);
+  res.json({ success: true });
 });
