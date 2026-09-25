@@ -259,7 +259,7 @@ export function TransactionModal({
                   <option value={FEFO}>Otomatis: yang expired paling dekat dulu</option>
                   {batches.map((b) => (
                     <option key={b.id} value={b.expired_date}>
-                      Exp {tgl(b.expired_date)}
+                      {b.expired_date ? `Exp ${tgl(b.expired_date)}` : "Tanpa tanggal expired"}
                       {isPast(b.expired_date) ? " (sudah expired)" : ""} · sisa {b.qty.toLocaleString("id-ID")}
                     </option>
                   ))}
@@ -279,7 +279,7 @@ export function TransactionModal({
                 <select value={batchKor} onChange={(e) => setBatchKor(e.target.value)} className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-2">
                   {batches.map((b) => (
                     <option key={b.id} value={b.expired_date}>
-                      Exp {tgl(b.expired_date)} · tercatat {b.qty.toLocaleString("id-ID")}
+                      {b.expired_date ? `Exp ${tgl(b.expired_date)}` : "Tanpa tanggal expired"} · tercatat {b.qty.toLocaleString("id-ID")}
                     </option>
                   ))}
                   <option value={NEW_BATCH}>Batch lain (isi tanggal expired)</option>
