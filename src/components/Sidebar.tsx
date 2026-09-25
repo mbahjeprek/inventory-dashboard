@@ -18,6 +18,8 @@ import {
   Activity,
   ClipboardCheck,
   Droplet,
+  MapPin,
+  Check,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { useEstateFilter } from "../hooks/useEstateFilter";
@@ -157,6 +159,8 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: { mobileOpen?: bo
       : shownEstates.includes(chosenEstate)
         ? chosenEstate
         : shownEstateList[0]?.code;
+  const activeEstateLabel = ESTATES.find((e) => e.code === activeEstate)?.label ?? "";
+  const [estateMenuOpen, setEstateMenuOpen] = useState(false);
 
   useEffect(() => {
     if (!current) return;
@@ -249,23 +253,50 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: { mobileOpen?: bo
               )}
 
               {isOpen && section.title === "Inventory" && shownEstateList.length > 1 && (
-                <div className={`flex flex-wrap gap-1 pb-1 ${minimized ? "flex-col items-center" : "px-1"}`}>
-                  {shownEstateList.map((e) => (
-                    <button
-                      key={e.code}
-                      onClick={() => pickEstate(e.code)}
-                      title={`Estate ${e.label}`}
-                      className={`rounded-md font-semibold transition-colors ${
-                        minimized ? "w-11 py-1 text-[10px]" : "px-2 py-1 text-xs"
-                      } ${
-                        e.code === activeEstate
-                          ? "bg-[#b9f0c9] text-[var(--bg-sidebar)]"
-                          : "bg-white/10 text-white/70 hover:bg-white/20 hover:text-white"
-                      }`}
-                    >
-                      {minimized ? e.label.slice(0, 3).toUpperCase() : e.label}
-                    </button>
-                  ))}
+                <div className="pb-1">
+                  <button
+                    onClick={() => setEstateMenuOpen((o) => !o)}
+                    title="Pilih estate"
+                    className={`w-full flex items-center rounded-md bg-white/10 hover:bg-white/15 text-white transition-colors ${
+                      minimized ? "flex-col gap-0.5 py-1.5" : "gap-2 px-3 py-2"
+                    }`}
+                  >
+                    <MapPin size={minimized ? 14 : 16} className="shrink-0 text-[#b9f0c9]" />
+                    {minimized ? (
+                      <span className="text-[10px] font-semibold">{activeEstateLabel.slice(0, 3).toUpperCase()}</span>
+                    ) : (
+                      <>
+                        <span className="flex-1 text-left text-sm">
+                          <span className="text-white/55 text-xs">Estate </span>
+                          <span className="font-semibold">{activeEstateLabel}</span>
+                        </span>
+                        <ChevronDown size={14} className={`transition-transform ${estateMenuOpen ? "rotate-180" : ""}`} />
+                      </>
+                    )}
+                  </button>
+                  {estateMenuOpen && (
+                    <div className="mt-1 py-1 rounded-md bg-black/15">
+                      {shownEstateList.map((e) => (
+                        <button
+                          key={e.code}
+                          onClick={() => {
+                            pickEstate(e.code);
+                            setEstateMenuOpen(false);
+                          }}
+                          className={`w-full flex items-center py-1.5 text-sm transition-colors ${
+                            minimized ? "justify-center text-[11px]" : "gap-2 pl-9 pr-3"
+                          } ${
+                            e.code === activeEstate
+                              ? "text-white font-semibold"
+                              : "text-white/65 hover:bg-white/10 hover:text-white"
+                          }`}
+                        >
+                          <span className={`flex-1 ${minimized ? "text-center" : "text-left"}`}>{minimized ? e.label.slice(0, 3).toUpperCase() : e.label}</span>
+                          {!minimized && e.code === activeEstate && <Check size={14} className="text-[#b9f0c9]" />}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
 
