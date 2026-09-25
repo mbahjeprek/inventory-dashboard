@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { Camera, Image as ImageIcon, Loader2, RefreshCw } from "lucide-react";
+import { createPortal } from "react-dom";
+import { Camera, Download, Image as ImageIcon, Loader2, RefreshCw, X } from "lucide-react";
 import { api, errorText } from "../lib/api";
 
 // Photos are shrunk in the browser before upload: longest side at most 1280 px, JPEG at 70% - about
@@ -54,19 +55,69 @@ export function useEvidenceEnabled() {
 export const evidenceUrl = (id: string) => `/api/evidence/${id}`;
 
 export function EvidenceLink({ id, label }: { id: string | null | undefined; label?: string }) {
+  const [open, setOpen] = useState(false);
   if (!id) return null;
   return (
-    <a
-      href={evidenceUrl(id)}
-      target="_blank"
-      rel="noreferrer"
-      title="Lihat foto bukti"
-      onClick={(e) => e.stopPropagation()}
-      className="inline-flex items-center gap-1 text-[var(--accent-blue)] hover:underline"
-    >
-      <ImageIcon size={14} />
-      {label}
-    </a>
+    <>
+      <button
+        type="button"
+        title="Lihat foto bukti"
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen(true);
+        }}
+        className="inline-flex items-center gap-1 text-[var(--accent-blue)] hover:underline align-middle"
+      >
+        <ImageIcon size={14} />
+        {label}
+      </button>
+      {open && <EvidenceViewer id={id} onClose={() => setOpen(false)} />}
+    </>
+  );
+}
+
+// Pop-up with the photo on the page itself (no new tab); Download saves the original file.
+function EvidenceViewer({ id, onClose }: { id: string; onClose: () => void }) {
+  const [state, setState] = useState<"loading" | "ok" | "error">("loading");
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return createPortal(
+    <div className="fixed inset-0 z-[60] bg-black/80 flex flex-col" onClick={onClose}>
+      <div className="flex items-center justify-between gap-2 px-4 py-3 text-white" onClick={(e) => e.stopPropagation()}>
+        <span className="text-sm font-medium">Foto Bukti</span>
+        <div className="flex items-center gap-2">
+          <a
+            href={`${evidenceUrl(id)}?download=1`}
+            className="inline-flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-md bg-white/15 hover:bg-white/25"
+          >
+            <Download size={16} /> Download
+          </a>
+          <button onClick={onClose} title="Tutup (Esc)" className="p-1.5 rounded-md hover:bg-white/15">
+            <X size={20} />
+          </button>
+        </div>
+      </div>
+      <div className="flex-1 min-h-0 flex items-center justify-center p-4 pt-0">
+        {state === "loading" && <Loader2 size={28} className="animate-spin text-white/70 absolute" />}
+        {state === "error" ? (
+          <div className="text-sm text-white/80">Foto tidak bisa dimuat</div>
+        ) : (
+          <img
+            src={evidenceUrl(id)}
+            alt="Foto bukti"
+            onClick={(e) => e.stopPropagation()}
+            onLoad={() => setState("ok")}
+            onError={() => setState("error")}
+            className={`max-w-full max-h-full object-contain rounded shadow-2xl bg-white ${state === "ok" ? "" : "invisible"}`}
+          />
+        )}
+      </div>
+    </div>,
+    document.body
   );
 }
 

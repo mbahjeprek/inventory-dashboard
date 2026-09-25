@@ -4903,7 +4903,7 @@ app.post("/api/evidence", async (req, res) => {
 // Opens the photo (any logged-in account; the id is a random uuid only shown next to the transaction).
 app.get("/api/evidence/:id", async (req, res) => {
   if (!/^[0-9a-f-]{36}$/.test(req.params.id)) return res.status(404).send("Foto tidak ditemukan");
-  const ev = await queryOne<{ path: string }>("SELECT path FROM evidence WHERE id = @id::uuid", { id: req.params.id });
+  const ev = await queryOne<{ path: string; created_at: Date }>("SELECT path, created_at FROM evidence WHERE id = @id::uuid", { id: req.params.id });
   if (!ev || !STORAGE_URL) return res.status(404).send("Foto tidak ditemukan");
   const r = await fetch(`${STORAGE_URL}/storage/v1/object/sign/${EVIDENCE_BUCKET}/${ev.path}`, {
     method: "POST",
@@ -4912,7 +4912,10 @@ app.get("/api/evidence/:id", async (req, res) => {
   });
   const j: any = await r.json().catch(() => ({}));
   if (!r.ok || !j.signedURL) return res.status(502).send("Foto tidak bisa dibuka");
-  res.redirect(`${STORAGE_URL}/storage/v1${j.signedURL}`);
+  // ?download=1 makes the storage answer an attachment, so the browser saves it instead of showing it.
+  const name = `bukti-${new Date(ev.created_at.getTime() + 7 * 3600_000).toISOString().slice(0, 10)}-${req.params.id.slice(0, 8)}.${ev.path.split(".").pop()}`;
+  const download = req.query.download ? `&download=${encodeURIComponent(name)}` : "";
+  res.redirect(`${STORAGE_URL}/storage/v1${j.signedURL}${download}`);
 });
 
 // Takes the uploaded photo of a new transaction: it must exist, be uploaded by this account and not
