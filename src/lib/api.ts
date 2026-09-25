@@ -696,6 +696,8 @@ export const api = {
     return req<{ data: Karyawan[]; total: number; page: number; pageSize: number }>(`/api/karyawan?${qs}`);
   },
 
+  alatPick: (search: string) => req<{ kode: string; jenis_unit: string; nama: string }[]>(`/api/alat-berat/pick?${new URLSearchParams({ search })}`),
+
   karyawanPick: (estate: string, search: string) =>
     req<{ nik: string; nama: string }[]>(`/api/karyawan/pick?${new URLSearchParams({ estate, search })}`),
 

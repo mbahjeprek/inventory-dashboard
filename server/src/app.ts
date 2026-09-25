@@ -135,7 +135,7 @@ function requiredPerms(req: express.Request): Need {
   const act = m === "GET" ? "view" : m === "POST" ? "input" : m === "PUT" ? "edit" : m === "DELETE" ? "delete" : "";
   const is = (re: RegExp) => re.test(p);
 
-  if (is(/^\/auth\//) || is(/^\/karyawan\/pick$/)) return null;
+  if (is(/^\/auth\//) || is(/^\/karyawan\/pick$/) || is(/^\/alat-berat\/pick$/)) return null;
   // Stok Opname: each route checks the opname's own module (view / opname / approve) and estate.
   if (is(/^\/stock-opname(\/|$)/)) return null;
   if (is(/^\/(stock-correction|gudang-stock\/correction)$/)) return ["gudang.koreksi"];
@@ -1811,6 +1811,18 @@ app.delete("/api/karyawan/:id", requireSuperuser, async (req, res) => {
 });
 
 // ---- Alat Berat master data (heavy equipment/vehicles that consume fuel) ----
+// Suggestions for Kode Kendaraan on a BBM Stok Keluar; any logged-in account (like karyawan/pick).
+app.get("/api/alat-berat/pick", async (req, res) => {
+  const { search = "" } = req.query as Record<string, string>;
+  const data = await queryMany(
+    `SELECT kode, jenis_unit, nama FROM alat_berat
+     WHERE @search = '' OR kode ILIKE @like OR nama ILIKE @like OR jenis_unit ILIKE @like
+     ORDER BY kode LIMIT 100`,
+    { search, like: `%${search}%` }
+  );
+  res.json(data);
+});
+
 app.get("/api/alat-berat/jenis-options", requireSuperuser, async (_req, res) => {
   const rows = await queryMany<{ jenis_unit: string }>(
     "SELECT DISTINCT jenis_unit FROM alat_berat WHERE jenis_unit IS NOT NULL AND jenis_unit != '' ORDER BY jenis_unit"

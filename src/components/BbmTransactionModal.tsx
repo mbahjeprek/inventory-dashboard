@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { X } from "lucide-react";
 import { api, errorText, type BbmSummary } from "../lib/api";
+import { AlatAutocomplete, type AlatOption } from "./AlatAutocomplete";
 
 const JENIS_OPTIONS = ["SOLAR", "BENSIN"] as const;
 // BBM storage sites (see BBM_LOKASI_OPTIONS in server/src/app.ts). Sub-locations like AKSS/UKM are
@@ -44,8 +45,10 @@ export function BbmTransactionModal({
     api.bbmEstateOptions(jenisBbm, lokasi).then(setEstateOptions);
   }, [jenisBbm, lokasi]);
 
-  // A genset has no HM/KM reading, so the field is hidden once the kode kendaraan names one.
-  const isGenset = /genset/i.test(kodeKendaraan);
+  // A genset has no HM/KM reading, so the field is hidden once the kode kendaraan names one (by its
+  // code or its jenis unit in Master Alat Berat).
+  const [alat, setAlat] = useState<AlatOption>();
+  const isGenset = /genset/i.test(kodeKendaraan) || alat?.jenis_unit === "GENSET";
 
   const saldoSaatIni = summary?.saldoTerakhir.find((s) => s.jenis_bbm === jenisBbm && s.lokasi === lokasi)?.saldo_stock ?? 0;
   const saldoProyeksi = tipe === "DITERIMA" ? saldoSaatIni + jumlah : saldoSaatIni - jumlah;
@@ -226,11 +229,10 @@ export function BbmTransactionModal({
           <div className={isGenset ? "" : "grid grid-cols-2 gap-3"}>
             <div>
               <label className="text-xs text-[var(--text-secondary)] mb-1 block">Kode Kendaraan</label>
-              <input
-                value={kodeKendaraan}
-                onChange={(e) => setKodeKendaraan(e.target.value)}
-                className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-1.5"
-              />
+              <AlatAutocomplete value={kodeKendaraan} onChange={setKodeKendaraan} onAlat={setAlat} />
+              {alat && (alat.jenis_unit || alat.nama) && (
+                <p className="text-[11px] text-[var(--text-muted)] mt-0.5">{[alat.jenis_unit, alat.nama].filter(Boolean).join(" · ")}</p>
+              )}
             </div>
             {!isGenset && (
             <div>
