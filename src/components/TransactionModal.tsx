@@ -87,8 +87,20 @@ export function TransactionModal({
   const parseQty = (v: string) => (decimal ? Math.round((parseFloat(v) || 0) * 1000) / 1000 : parseInt(v) || 0);
   const selisih = Math.round((actualQty - korBase) * 1000) / 1000;
 
+  // Every field on the form is required; only a Klinik batch's expiry date may stay empty (alat/BHP
+  // without one), and nobody receives obat that is thrown away.
+  const missing = [
+    mode === "OUT" && !isKlinik && !tujuan && "Tujuan / Konsumen",
+    mode !== "KOREKSI" && !(mode === "OUT" && buang) && !penerima.trim() && (mode === "OUT" ? (isKlinik ? "Pasien / Penerima" : "Penerima / Pengambil") : "Diterima Oleh"),
+    !note.trim() && "Catatan",
+  ].filter(Boolean);
+
   const submit = async () => {
     setError("");
+    if (missing.length) {
+      setError(`Wajib diisi: ${missing.join(", ")}`);
+      return;
+    }
 
     if (mode === "KOREKSI") {
       if (actualQty < 0) {
@@ -220,13 +232,13 @@ export function TransactionModal({
 
           {mode === "OUT" && !isKlinik && (
             <div>
-              <label className="text-xs text-[var(--text-secondary)] mb-1 block">Tujuan / Konsumen (opsional)</label>
+              <label className="text-xs text-[var(--text-secondary)] mb-1 block">Tujuan / Konsumen</label>
               <select
                 value={tujuan}
                 onChange={(e) => setTujuan(e.target.value)}
                 className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-2"
               >
-                <option value="">- Tidak ditentukan -</option>
+                <option value="">- Pilih tujuan -</option>
                 {(scope ? (GUDANG_TUJUAN[scope.name] ?? [scope.name]) : NILAM_TUJUAN).map((w) => (
                   <option key={w} value={w}>
                     {w}
@@ -295,7 +307,7 @@ export function TransactionModal({
           {mode !== "KOREKSI" && (
             <div>
               <label className="text-xs text-[var(--text-secondary)] mb-1 block">
-                {mode === "OUT" ? (isKlinik ? "Pasien / Penerima (opsional)" : "Penerima / Pengambil (opsional)") : "Diterima Oleh (opsional)"}
+                {mode === "OUT" ? (isKlinik ? "Pasien / Penerima" : "Penerima / Pengambil") : "Diterima Oleh"}
               </label>
               <KaryawanAutocomplete estate={scope?.name ?? "NILAM"} value={penerima} onChange={setPenerima} />
             </div>
@@ -345,7 +357,7 @@ export function TransactionModal({
           )}
 
           <div>
-            <label className="text-xs text-[var(--text-secondary)] mb-1 block">Catatan (opsional)</label>
+            <label className="text-xs text-[var(--text-secondary)] mb-1 block">Catatan</label>
             <input
               value={note}
               onChange={(e) => setNote(e.target.value)}

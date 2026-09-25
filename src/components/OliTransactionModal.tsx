@@ -41,7 +41,8 @@ export function OliTransactionModal({
   const submit = async () => {
     setError("");
     if (jumlah <= 0) return setError("Jumlah harus lebih dari 0");
-    if (tipe === "PEMAKAIAN" && !keterangan.trim()) return setError("Isi unit / keterangan pemakaian");
+    const missing = [!noEmbrace.trim() && "No. Embrace", !keterangan.trim() && (tipe === "PEMAKAIAN" ? "Unit / Keterangan" : "Keterangan")].filter(Boolean);
+    if (missing.length) return setError(`Wajib diisi: ${missing.join(", ")}`);
     setSubmitting(true);
     try {
       await api.createOli({ estate, jenis_oli: jenis, tanggal_iso: tanggal, tipe, jumlah, no_embrace: noEmbrace, keterangan });
@@ -123,7 +124,7 @@ export function OliTransactionModal({
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className={labelCls}>No. Embrace (opsional)</label>
+              <label className={labelCls}>No. Embrace</label>
               <input value={noEmbrace} onChange={(e) => setNoEmbrace(e.target.value)} className={inputCls} />
             </div>
             <div>

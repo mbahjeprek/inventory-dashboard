@@ -49,8 +49,17 @@ export function BbmTransactionModal({
 
   const submit = async () => {
     setError("");
-    if (tipe === "PEMAKAIAN" && !estate) {
-      setError("Pilih estate/sub-lokasi terlebih dahulu");
+    // Every field is required; vehicle and HM/KM only apply to fuel that goes out.
+    const keluar = tipe === "PEMAKAIAN";
+    const missing = [
+      keluar && !estate && "Estate / Sub-lokasi",
+      keluar && !kodeKendaraan.trim() && "Kode Kendaraan",
+      keluar && !hmTerakhir.trim() && "HM/KM Terakhir",
+      !noSpb.trim() && "No. SPB",
+      !keterangan.trim() && "Keterangan",
+    ].filter(Boolean);
+    if (missing.length) {
+      setError(`Wajib diisi: ${missing.join(", ")}`);
       return;
     }
     if (jumlah <= 0) {
@@ -72,8 +81,8 @@ export function BbmTransactionModal({
         keterangan,
         no_spb: noSpb,
         estate: tipe === "DITERIMA" ? lokasi : estate,
-        kode_kendaraan: kodeKendaraan,
-        hm_terakhir: hmTerakhir,
+        kode_kendaraan: keluar ? kodeKendaraan : "",
+        hm_terakhir: keluar ? hmTerakhir : "",
       });
       onSuccess();
     } catch (e) {
@@ -210,10 +219,10 @@ export function BbmTransactionModal({
             </div>
           )}
 
-
+          {tipe === "PEMAKAIAN" && (
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-xs text-[var(--text-secondary)] mb-1 block">Kode Kendaraan (opsional)</label>
+              <label className="text-xs text-[var(--text-secondary)] mb-1 block">Kode Kendaraan</label>
               <input
                 value={kodeKendaraan}
                 onChange={(e) => setKodeKendaraan(e.target.value)}
@@ -221,7 +230,7 @@ export function BbmTransactionModal({
               />
             </div>
             <div>
-              <label className="text-xs text-[var(--text-secondary)] mb-1 block">HM/KM Terakhir (opsional)</label>
+              <label className="text-xs text-[var(--text-secondary)] mb-1 block">HM/KM Terakhir</label>
               <input
                 value={hmTerakhir}
                 onChange={(e) => setHmTerakhir(e.target.value)}
@@ -230,10 +239,11 @@ export function BbmTransactionModal({
               />
             </div>
           </div>
+          )}
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-xs text-[var(--text-secondary)] mb-1 block">No. SPB (opsional)</label>
+              <label className="text-xs text-[var(--text-secondary)] mb-1 block">No. SPB</label>
               <input value={noSpb} onChange={(e) => setNoSpb(e.target.value)} className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-1.5" />
             </div>
             <div>
