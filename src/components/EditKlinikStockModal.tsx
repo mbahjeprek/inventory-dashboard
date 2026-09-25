@@ -9,7 +9,7 @@ import { can } from "../lib/access";
 // them keeps the total and books nothing; a different total is saved as a Koreksi Stok (with reason).
 // Stock that just arrived goes through the Transaksi button (Stock In) instead.
 export function EditKlinikStockModal({
-  klinik,
+  klinik: _klinik,
   item,
   onClose,
   onSuccess,
