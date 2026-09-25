@@ -59,6 +59,11 @@ export function StokOpnameDetailPage() {
   const [dialog, setDialog] = useState<DialogSpec | null>(null);
   const [adding, setAdding] = useState<"" | "picker" | "pupuk">("");
   const [pickedObat, setPickedObat] = useState<PickerItem | null>(null);
+  // Rows typed into stay in the current filter (e.g. "Belum dihitung") until the filter or search
+  // changes, so the reason for a difference can be filled in right away instead of the row vanishing.
+  const viewKey = `${filter}|${search}`;
+  const [touched, setTouched] = useState<{ key: string; ids: Set<number> }>({ key: "", ids: new Set() });
+  const keep = touched.key === viewKey ? touched.ids : null;
 
   const load = () =>
     api
@@ -118,6 +123,7 @@ export function StokOpnameDetailPage() {
     return lines.filter((l) => {
       const hay = `${l.kode} ${l.nama}`.toLowerCase();
       if (!words.every((w) => hay.includes(w))) return false;
+      if (keep?.has(l.id)) return true;
       const s = selisihOf(l);
       if (filter === "belum") return s === null;
       if (filter === "selisih") return s !== null && s !== 0;
@@ -125,7 +131,7 @@ export function StokOpnameDetailPage() {
       return true;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lines, edits, search, filter]);
+  }, [lines, edits, search, filter, keep]);
 
   if (notFound) {
     return (
@@ -156,11 +162,13 @@ export function StokOpnameDetailPage() {
     return v === undefined || (v !== null && whole && !Number.isInteger(v));
   });
 
-  const setEdit = (l: OpnameLine, patch: Partial<Edit>) =>
+  const setEdit = (l: OpnameLine, patch: Partial<Edit>) => {
+    setTouched((t) => ({ key: viewKey, ids: new Set([...(t.key === viewKey ? t.ids : []), l.id]) }));
     setEdits((cur) => ({
       ...cur,
       [l.id]: { fisik: cur[l.id]?.fisik ?? (l.stok_fisik === null ? "" : String(l.stok_fisik)), ket: cur[l.id]?.ket ?? l.keterangan, ...patch },
     }));
+  };
 
   const save = async (): Promise<boolean> => {
     if (!dirty) return true;
@@ -221,12 +229,19 @@ export function StokOpnameDetailPage() {
     }
   };
 
-  // Enter jumps to the next row's Stok Fisik, for fast counting.
-  const nextOnEnter = (e: KeyboardEvent<HTMLInputElement>) => {
+  // Enter in Stok Fisik goes to the row's Keterangan when the count differs (the reason is needed),
+  // otherwise to the next row's Stok Fisik; Enter in Keterangan goes to the next row.
+  const nextOnEnter = (l: OpnameLine, field: "fisik" | "ket") => (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key !== "Enter") return;
     e.preventDefault();
+    const v = parseQty(e.currentTarget.value);
+    if (field === "fisik" && typeof v === "number" && round3(v - l.stok_sistem) !== 0) {
+      document.querySelector<HTMLInputElement>(`input[data-ket="${l.id}"]`)?.focus();
+      return;
+    }
     const inputs = Array.from(document.querySelectorAll<HTMLInputElement>("input[data-fisik]"));
-    inputs[inputs.indexOf(e.currentTarget) + 1]?.focus();
+    const here = document.querySelector<HTMLInputElement>(`input[data-fisik="${l.id}"]`);
+    inputs[inputs.indexOf(here!) + 1]?.focus();
   };
 
   const pickerScope: StockScope | undefined =
@@ -529,11 +544,11 @@ export function StokOpnameDetailPage() {
                         {canCount ? (
                           <div className="inline-flex items-center gap-1">
                             <input
-                              data-fisik
+                              data-fisik={l.id}
                               inputMode="decimal"
                               value={e ? e.fisik : l.stok_fisik === null ? "" : String(l.stok_fisik)}
                               onChange={(ev) => setEdit(l, { fisik: ev.target.value })}
-                              onKeyDown={nextOnEnter}
+                              onKeyDown={nextOnEnter(l, "fisik")}
                               placeholder="-"
                               aria-label={`Stok fisik ${l.nama}`}
                               className={`w-24 text-right text-sm rounded-md border px-2 py-1 ${
@@ -564,6 +579,8 @@ export function StokOpnameDetailPage() {
                       <td className="px-4 py-2 min-w-[180px]">
                         {canCount ? (
                           <input
+                            data-ket={l.id}
+                            onKeyDown={nextOnEnter(l, "ket")}
                             value={e ? e.ket : l.keterangan}
                             onChange={(ev) => setEdit(l, { ket: ev.target.value })}
                             placeholder={s ? "Alasan selisih" : ""}
@@ -596,7 +613,7 @@ export function StokOpnameDetailPage() {
         <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-t border-[var(--border)] text-sm text-[var(--text-secondary)]">
           <span>
             {filtered.length.toLocaleString("id-ID")} item · Halaman {page} dari {totalPages}
-            {canCount && <span className="text-xs text-[var(--text-muted)]"> · Enter = pindah ke baris berikutnya</span>}
+            {canCount && <span className="text-xs text-[var(--text-muted)]"> · Enter = lanjut (ke Keterangan kalau ada selisih)</span>}
           </span>
           <div className="flex gap-2">
             <button disabled={page <= 1} onClick={() => setPage((p) => p - 1)} className="p-1.5 rounded-md border border-[var(--border)] disabled:opacity-40">
