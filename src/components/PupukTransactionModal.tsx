@@ -36,7 +36,6 @@ export function PupukTransactionModal({
   const [blok, setBlok] = useState("");
   const [ha, setHa] = useState("");
   const [pokok, setPokok] = useState("");
-  const [kodeBarang, setKodeBarang] = useState("");
   const [keterangan, setKeterangan] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
@@ -47,15 +46,14 @@ export function PupukTransactionModal({
   const submit = async () => {
     setError("");
     if (jumlah <= 0) return setError("Jumlah harus lebih dari 0");
-    // Every field shown is required. Pupuk masuk only needs the keterangan; divisi, blok, HA, pokok
-    // and kode barang describe where it was applied.
+    // Every field shown is required. Pupuk masuk only needs the keterangan; divisi, blok, HA and
+    // pokok describe where it was applied.
     const keluar = tipe === "KELUAR";
     const missing = [
       keluar && !divisi && "Divisi",
       keluar && !blok.trim() && "Blok",
       keluar && ha === "" && "HA",
       keluar && pokok === "" && "Pokok",
-      keluar && !kodeBarang.trim() && "Kode Barang",
       !keterangan.trim() && "Keterangan",
     ].filter(Boolean);
     if (missing.length) return setError(`Wajib diisi: ${missing.join(", ")}`);
@@ -69,7 +67,7 @@ export function PupukTransactionModal({
         jumlah,
         divisi: tipe === "KELUAR" ? divisi : "",
         no_embrace: "",
-        kode_barang: tipe === "KELUAR" ? kodeBarang : "",
+        kode_barang: "",
         keterangan,
         blok: tipe === "KELUAR" ? blok.trim().toUpperCase().replace(/\./g, "") : "",
         ha: tipe === "KELUAR" && ha !== "" ? Number(ha) : "",
@@ -197,22 +195,14 @@ export function PupukTransactionModal({
             </>
           )}
 
-          <div className={tipe === "KELUAR" ? "grid grid-cols-2 gap-3" : ""}>
-            {tipe === "KELUAR" && (
-              <div>
-                <label className={labelCls}>Kode Barang</label>
-                <input value={kodeBarang} onChange={(e) => setKodeBarang(e.target.value)} className={inputCls} />
-              </div>
-            )}
-            <div>
-              <label className={labelCls}>Keterangan</label>
-              <input
-                value={keterangan}
-                onChange={(e) => setKeterangan(e.target.value)}
-                placeholder={tipe === "MASUK" ? "PUPUK MASUK" : "cth. PEMUPUKAN BLOK U23 ( DOSIS 1 KG )"}
-                className={inputCls}
-              />
-            </div>
+          <div>
+            <label className={labelCls}>Keterangan</label>
+            <input
+              value={keterangan}
+              onChange={(e) => setKeterangan(e.target.value)}
+              placeholder={tipe === "MASUK" ? "PUPUK MASUK" : "cth. PEMUPUKAN BLOK U23 ( DOSIS 1 KG )"}
+              className={inputCls}
+            />
           </div>
 
           {error && <p className="text-xs text-[var(--accent-red)]">{error}</p>}
