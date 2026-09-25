@@ -123,7 +123,7 @@ export function InventoryOliPage({ estate }: { estate: string }) {
         { label: "Periode", nowrap: true },
         { label: "Tanggal", nowrap: true },
         { label: "Jenis Oli", nowrap: true },
-        { label: "No. Embrace" },
+        { label: "No. BPB" },
         { label: "Diterima (LTR)", align: "right" },
         { label: "Pemakaian (LTR)", align: "right" },
         { label: "Stock (LTR)", align: "right" },
@@ -199,7 +199,7 @@ export function InventoryOliPage({ estate }: { estate: string }) {
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Cari jenis oli, no. embrace, atau keterangan (unit)..."
+            placeholder="Cari jenis oli, no. BPB, atau keterangan (unit)..."
             className="w-full pl-9 pr-3 py-2 text-sm rounded-md border border-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-blue-border)]"
           />
         </div>
@@ -252,7 +252,7 @@ export function InventoryOliPage({ estate }: { estate: string }) {
                 <th className="px-4 py-2.5 whitespace-nowrap">Periode</th>
                 <th className="px-4 py-2.5 whitespace-nowrap">Tanggal</th>
                 <th className="px-4 py-2.5 whitespace-nowrap">Jenis Oli</th>
-                <th className="px-4 py-2.5 whitespace-nowrap">No. Embrace</th>
+                <th className="px-4 py-2.5 whitespace-nowrap">No. BPB</th>
                 <th className="px-4 py-2.5 text-right whitespace-nowrap">Diterima (LTR)</th>
                 <th className="px-4 py-2.5 text-right whitespace-nowrap">Pemakaian (LTR)</th>
                 <th className="px-4 py-2.5 text-right whitespace-nowrap">Stock (LTR)</th>

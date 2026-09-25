@@ -115,7 +115,7 @@ export function EditPupukModal({
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className={labelCls}>No. Embrace</label>
+              <label className={labelCls}>No. BPB (Bon Permintaan Barang)</label>
               <input value={form.no_embrace} onChange={set("no_embrace")} className={inputCls} />
             </div>
             <div>

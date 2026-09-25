@@ -54,7 +54,7 @@ export function EditOliModal({ record, onClose, onSuccess }: { record: OliRecord
               <input type="date" value={form.tanggal_iso} onChange={set("tanggal_iso")} className={inputCls} />
             </div>
             <div>
-              <label className={labelCls}>No. Embrace</label>
+              <label className={labelCls}>No. BPB (Bon Permintaan Barang)</label>
               <input value={form.no_embrace} onChange={set("no_embrace")} className={inputCls} />
             </div>
           </div>

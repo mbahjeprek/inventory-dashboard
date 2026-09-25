@@ -131,7 +131,7 @@ export function InventoryPupukPage({ estate }: { estate: string }) {
         { label: "Tanggal", nowrap: true },
         { label: "Nama Barang" },
         { label: "Divisi" },
-        { label: "No. Embrace" },
+        { label: "No. BPB" },
         { label: "Kode Barang" },
         { label: "Stok Masuk (KG)", align: "right" },
         { label: "Stok Keluar (KG)", align: "right" },
@@ -223,7 +223,7 @@ export function InventoryPupukPage({ estate }: { estate: string }) {
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Cari jenis pupuk, divisi, blok, no. embrace, atau keterangan..."
+            placeholder="Cari jenis pupuk, divisi, blok, no. BPB, atau keterangan..."
             className="w-full pl-9 pr-3 py-2 text-sm rounded-md border border-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-blue-border)]"
           />
         </div>
@@ -293,7 +293,7 @@ export function InventoryPupukPage({ estate }: { estate: string }) {
                 <th className="px-4 py-2.5 whitespace-nowrap">Tanggal</th>
                 <th className="px-4 py-2.5 whitespace-nowrap">Nama Barang</th>
                 <th className="px-4 py-2.5">Divisi</th>
-                <th className="px-4 py-2.5 whitespace-nowrap">No. Embrace</th>
+                <th className="px-4 py-2.5 whitespace-nowrap">No. BPB</th>
                 <th className="px-4 py-2.5 whitespace-nowrap">Kode Barang</th>
                 <th className="px-4 py-2.5 text-right whitespace-nowrap">Stok Masuk (KG)</th>
                 <th className="px-4 py-2.5 text-right whitespace-nowrap">Stok Keluar (KG)</th>

@@ -2381,7 +2381,7 @@ app.put("/api/pupuk/:id", requireSuperuser, async (req, res) => {
     detail: describeChanges(existing, updated, {
       tanggal: "Tanggal",
       divisi: "Divisi",
-      no_embrace: "No. Embrace",
+      no_embrace: "No. BPB",
       kode_barang: "Kode Barang",
       diterima: "Stok Masuk",
       keluar: "Stok Keluar",
@@ -4086,7 +4086,7 @@ app.post("/api/oli", async (req, res) => {
     estate,
     aksi: tipe === "MASUK" ? "Stok Masuk" : "Stok Keluar",
     objek: oliObjek({ jenis_oli: jenis, tanggal }),
-    detail: [`Jumlah: ${qty} LTR`, `Saldo: ${lastSaldo} → ${saldoBaru}`, no_embrace && `No. Embrace: ${no_embrace}`, keterangan && `Keterangan: ${keterangan}`]
+    detail: [`Jumlah: ${qty} LTR`, `Saldo: ${lastSaldo} → ${saldoBaru}`, no_embrace && `No. BPB: ${no_embrace}`, keterangan && `Keterangan: ${keterangan}`]
       .filter(Boolean)
       .join("; "),
   });
@@ -4122,7 +4122,7 @@ app.put("/api/oli/:id", requireSuperuser, async (req, res) => {
     objek: oliObjek(existing),
     detail: describeChanges(existing, updated, {
       tanggal: "Tanggal",
-      no_embrace: "No. Embrace",
+      no_embrace: "No. BPB",
       diterima: "Stok Masuk",
       pemakaian: "Pemakaian",
       saldo_stock: "Saldo Stok",

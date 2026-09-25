@@ -41,7 +41,7 @@ export function OliTransactionModal({
   const submit = async () => {
     setError("");
     if (jumlah <= 0) return setError("Jumlah harus lebih dari 0");
-    const missing = [!noEmbrace.trim() && "No. Embrace", !keterangan.trim() && (tipe === "PEMAKAIAN" ? "Unit / Keterangan" : "Keterangan")].filter(Boolean);
+    const missing = [!noEmbrace.trim() && "No. BPB", !keterangan.trim() && (tipe === "PEMAKAIAN" ? "Unit / Keterangan" : "Keterangan")].filter(Boolean);
     if (missing.length) return setError(`Wajib diisi: ${missing.join(", ")}`);
     setSubmitting(true);
     try {
@@ -124,7 +124,7 @@ export function OliTransactionModal({
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className={labelCls}>No. Embrace</label>
+              <label className={labelCls}>No. BPB (Bon Permintaan Barang)</label>
               <input value={noEmbrace} onChange={(e) => setNoEmbrace(e.target.value)} className={inputCls} />
             </div>
             <div>
