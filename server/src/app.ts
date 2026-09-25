@@ -9,7 +9,8 @@ export const app = express();
 // locally) - no cross-origin requests happen, so no CORS middleware is needed. Keeping it out
 // matters now that auth uses a cookie: a permissive `cors()` would otherwise widen who can send
 // credentialed requests.
-app.use(express.json());
+// Photos (foto bukti) arrive as base64 JSON, already shrunk to a few hundred KB in the browser.
+app.use(express.json({ limit: "5mb" }));
 app.use(cookieParser());
 
 const isProd = process.env.NODE_ENV === "production";
@@ -102,6 +103,9 @@ app.post("/api/auth/logout", (_req, res) => {
   res.json({ success: true });
 });
 
+// Whether foto bukti is switched on (photo storage configured); public, no secrets.
+app.get("/api/evidence-status", (_req, res) => res.json({ enabled: evidenceEnabled() }));
+
 app.get("/api/auth/me", async (req, res) => {
   const user = await sessionFromCookie(req);
   if (!user) return res.status(401).json({ error: "Not authenticated" });
@@ -145,6 +149,8 @@ function requiredPerms(req: express.Request): Need {
   if (is(/^\/pinjaman(\/|$)/)) return null;
   // Perbandingan antar estate: the route checks the module's Lihat and the estates itself.
   if (is(/^\/perbandingan(\/|$)/)) return null;
+  // Foto bukti: any logged-in account uploads for its own transactions (the transaction route checks).
+  if (is(/^\/evidence(\/|$)/)) return null;
   if (is(/^\/(stock-correction|gudang-stock\/correction)$/)) return ["gudang.koreksi"];
   if (is(/^\/klinik-stock\/correction$/)) return ["klinik.koreksi"];
   // items = the master barang list, which is also Nilam's gudang stock.
@@ -919,6 +925,8 @@ type Movement = {
   transferFromId?: number;
   // The Pinjaman antar estate this movement belongs to (see "Pinjaman" at the end).
   pinjamanId?: number;
+  // Foto bukti (evidence.id) of a Stok Masuk / Keluar.
+  evidenceId?: string | null;
 };
 
 // Applies one movement to a location's stock, creating its stock row on first use.
@@ -938,9 +946,9 @@ async function applyMovement(client: PoolClient, req: express.Request, l: StockL
   const link = m.transferFromId !== undefined;
   const loan = m.pinjamanId !== undefined;
   await execute(
-    `INSERT INTO ${l.tx} (${l.scope}, ${l.item}, type, qty, tujuan, penerima, note, is_correction, user_id${link ? ", transfer_from_id" : ""}${loan ? ", pinjaman_id" : ""})
-     VALUES (@scope, @item, @type, @qty, @tujuan, @penerima, @note, @is_correction, @user_id${link ? ", @transferFromId" : ""}${loan ? ", @pinjamanId" : ""})`,
-    { ...m, user_id: req.user!.id },
+    `INSERT INTO ${l.tx} (${l.scope}, ${l.item}, type, qty, tujuan, penerima, note, is_correction, user_id, evidence_id${link ? ", transfer_from_id" : ""}${loan ? ", pinjaman_id" : ""})
+     VALUES (@scope, @item, @type, @qty, @tujuan, @penerima, @note, @is_correction, @user_id, @evidenceId::uuid${link ? ", @transferFromId" : ""}${loan ? ", @pinjamanId" : ""})`,
+    { ...m, evidenceId: m.evidenceId ?? null, user_id: req.user!.id },
     client
   );
   await execute(
@@ -1008,6 +1016,8 @@ app.post("/api/gudang-stock/transactions", async (req, res) => {
 
   const item = await queryOne<any>("SELECT kode, nama FROM items WHERE kode = @item_kode", { item_kode });
   if (!item) return res.status(404).json({ error: "Barang tidak ditemukan di master data" });
+  const evidenceId = await claimEvidence(req, res);
+  if (evidenceId === undefined) return;
 
   const err = await recordMovement(req, GUDANG_LEDGER, {
     scope: gudang,
@@ -1018,8 +1028,12 @@ app.post("/api/gudang-stock/transactions", async (req, res) => {
     penerima: penerima || "",
     note: note || null,
     is_correction: 0,
+    evidenceId,
   });
-  if (err) return res.status(400).json({ error: err });
+  if (err) {
+    await releaseEvidence(evidenceId);
+    return res.status(400).json({ error: err });
+  }
 
   await logActivity(req, {
     module: "BARANG",
@@ -1056,13 +1070,13 @@ app.get("/api/items/:id/movements", requireEstate("NILAM"), async (req, res) => 
   const itemId = req.params.id;
 
   const stockIn = await queryMany<any>(
-    `SELECT id, tanggal_terima_iso as date, tanggal_terima as "dateDisplay", qty, satuan, tujuan, keterangan as note, nama_vendor as ref, po_in_akss as "refCode"
+    `SELECT id, tanggal_terima_iso as date, tanggal_terima as "dateDisplay", qty, satuan, tujuan, keterangan as note, nama_vendor as ref, po_in_akss as "refCode", evidence_id
      FROM stock_in_log WHERE item_id = @id`,
     { id: itemId }
   );
 
   const stockOut = await queryMany<any>(
-    `SELECT id, tanggal_keluar_iso as date, tanggal_keluar as "dateDisplay", qty, satuan, tujuan, keterangan as note, penerima as ref, no_embrace_gudang as "refCode"
+    `SELECT id, tanggal_keluar_iso as date, tanggal_keluar as "dateDisplay", qty, satuan, tujuan, keterangan as note, penerima as ref, no_embrace_gudang as "refCode", evidence_id
      FROM stock_out_log WHERE item_id = @id`,
     { id: itemId }
   );
@@ -1088,6 +1102,7 @@ app.get("/api/items/:id/movements", requireEstate("NILAM"), async (req, res) => 
       note: r.note,
       ref: r.ref === "-" ? "" : r.ref,
       refCode: r.refCode,
+      evidence_id: r.evidence_id,
     })),
     ...stockOut.map((r) => ({
       id: r.id,
@@ -1101,6 +1116,7 @@ app.get("/api/items/:id/movements", requireEstate("NILAM"), async (req, res) => 
       note: r.note,
       ref: r.ref,
       refCode: r.refCode,
+      evidence_id: r.evidence_id,
     })),
     ...manual.map((r) => ({
       id: r.id,
@@ -1114,6 +1130,7 @@ app.get("/api/items/:id/movements", requireEstate("NILAM"), async (req, res) => 
       note: r.note,
       ref: r.penerima && r.penerima.trim() ? r.penerima : "Input Manual",
       refCode: null,
+      evidence_id: null,
     })),
   ];
 
@@ -1165,7 +1182,8 @@ async function addTransfer(
   tujuan: string | undefined,
   qty: number,
   penerima: string | undefined,
-  note: string | null | undefined
+  note: string | null | undefined,
+  evidenceId?: string | null
 ): Promise<TransferChange> {
   if (!tujuan || !GUDANG_STOCK_OPTIONS.includes(tujuan)) return null;
   await applyMovement(client, req, GUDANG_LEDGER, {
@@ -1178,6 +1196,7 @@ async function addTransfer(
     note: `Transfer dari Gudang NILAM${note ? `: ${note}` : ""}`,
     is_correction: 0,
     transferFromId: nilamTxId,
+    evidenceId,
   });
   return { estate: tujuan, qty };
 }
@@ -1214,16 +1233,20 @@ app.post("/api/transactions", requireEstate("NILAM"), async (req, res) => {
 
   const item = await queryOne<any>("SELECT * FROM items WHERE id = @id", { id: item_id });
   if (!item) return res.status(404).json({ error: "Not found" });
+  const evidenceId = await claimEvidence(req, res);
+  if (evidenceId === undefined) return;
 
   let transfer: TransferChange = null;
   await withTransaction(async (client) => {
     const result = await queryOne<{ id: number }>(
-      `INSERT INTO transactions (item_id, tujuan, type, qty, note, penerima) VALUES (@item_id, @tujuan, @type, @qty, @note, @penerima) RETURNING id`,
-      { item_id, tujuan: tujuan || "", type, qty, note: note || null, penerima: penerima || "" },
+      `INSERT INTO transactions (item_id, tujuan, type, qty, note, penerima, evidence_id)
+       VALUES (@item_id, @tujuan, @type, @qty, @note, @penerima, @evidenceId::uuid) RETURNING id`,
+      { item_id, tujuan: tujuan || "", type, qty, note: note || null, penerima: penerima || "", evidenceId },
       client
     );
 
     const mirror = await mirrorTransaction(client, item, type, tujuan || "", qty, note, penerima || "");
+    await execute(`UPDATE ${mirror.source} SET evidence_id = @evidenceId::uuid WHERE id = @id`, { evidenceId, id: mirror.id }, client);
     await execute(
       `UPDATE transactions SET mirror_source = @source, mirror_id = @mirror_id WHERE id = @id`,
       { source: mirror.source, mirror_id: mirror.id, id: result!.id },
@@ -1231,7 +1254,7 @@ app.post("/api/transactions", requireEstate("NILAM"), async (req, res) => {
     );
 
     await applyStockEffect(client, item_id, type, qty, 1);
-    if (type === "OUT") transfer = await addTransfer(client, req, result!.id, item.kode, tujuan, qty, penerima, note);
+    if (type === "OUT") transfer = await addTransfer(client, req, result!.id, item.kode, tujuan, qty, penerima, note, evidenceId);
   });
 
   await logActivity(req, {
@@ -2109,6 +2132,8 @@ app.post("/api/bbm", async (req, res) => {
   if (!jumlah || jumlah <= 0) return res.status(400).json({ error: "Jumlah harus lebih dari 0" });
   if (!tanggal_iso || !/^\d{4}-\d{2}-\d{2}$/.test(tanggal_iso)) return res.status(400).json({ error: "Tanggal tidak valid" });
   if (!estate || !String(estate).trim()) return res.status(400).json({ error: "Estate/sub-lokasi wajib dipilih" });
+  const evidenceId = await claimEvidence(req, res);
+  if (evidenceId === undefined) return;
 
   const last = await queryOne<{ saldo_stock: number }>(
     `SELECT saldo_stock FROM bbm_log WHERE jenis_bbm = @jenis_bbm AND lokasi = @lokasi AND saldo_stock IS NOT NULL
@@ -2122,11 +2147,12 @@ app.post("/api/bbm", async (req, res) => {
 
   const result = await queryOne<{ id: number }>(
     `INSERT INTO bbm_log
-      (jenis_bbm, lokasi, estate, periode, tanggal, tanggal_iso, no_spb, stock_awal, diterima, pinjam, pemakaian, saldo_stock, keterangan, status_kepemilikan, kode_kendaraan, hm_terakhir)
+      (jenis_bbm, lokasi, estate, periode, tanggal, tanggal_iso, no_spb, stock_awal, diterima, pinjam, pemakaian, saldo_stock, keterangan, status_kepemilikan, kode_kendaraan, hm_terakhir, evidence_id)
      VALUES
-      (@jenis_bbm, @lokasi, @estate, @periode, @tanggal, @tanggal_iso, @no_spb, NULL, @diterima, NULL, @pemakaian, @saldo_stock, @keterangan, NULL, @kode_kendaraan, @hm_terakhir)
+      (@jenis_bbm, @lokasi, @estate, @periode, @tanggal, @tanggal_iso, @no_spb, NULL, @diterima, NULL, @pemakaian, @saldo_stock, @keterangan, NULL, @kode_kendaraan, @hm_terakhir, @evidenceId::uuid)
      RETURNING id`,
     {
+      evidenceId,
       jenis_bbm,
       lokasi,
       estate,
@@ -2345,6 +2371,8 @@ app.post("/api/pupuk", async (req, res) => {
   if (!["MASUK", "KELUAR"].includes(tipe)) return res.status(400).json({ error: "Tipe transaksi tidak valid" });
   if (!jumlah || Number(jumlah) <= 0) return res.status(400).json({ error: "Jumlah harus lebih dari 0" });
   if (!/^\d{4}-\d{2}-\d{2}$/.test(tanggal_iso || "")) return res.status(400).json({ error: "Tanggal tidak valid" });
+  const evidenceId = await claimEvidence(req, res);
+  if (evidenceId === undefined) return;
 
   const jenis = String(jenis_pupuk).trim().toUpperCase();
   const last = await queryOne<{ saldo_stock: number }>(
@@ -2360,10 +2388,11 @@ app.post("/api/pupuk", async (req, res) => {
   const periode = `${INDO_MONTHS[Number(m) - 1]} ${y}`;
 
   const row = await queryOne<{ id: number }>(
-    `INSERT INTO pupuk_log (estate, jenis_pupuk, periode, tanggal, tanggal_iso, divisi, no_embrace, kode_barang, keluar, diterima, saldo_stock, keterangan, blok, ha, pokok)
-     VALUES (@estate, @jenis, @periode, @tanggal, @tanggal_iso, @divisi, @no_embrace, @kode_barang, @keluar, @diterima, @saldo, @keterangan, @blok, @ha, @pokok)
+    `INSERT INTO pupuk_log (estate, jenis_pupuk, periode, tanggal, tanggal_iso, divisi, no_embrace, kode_barang, keluar, diterima, saldo_stock, keterangan, blok, ha, pokok, evidence_id)
+     VALUES (@estate, @jenis, @periode, @tanggal, @tanggal_iso, @divisi, @no_embrace, @kode_barang, @keluar, @diterima, @saldo, @keterangan, @blok, @ha, @pokok, @evidenceId::uuid)
      RETURNING id`,
     {
+      evidenceId,
       estate,
       jenis,
       periode,
@@ -2679,7 +2708,18 @@ async function klinikReverse(client: PoolClient, tx: any) {
 // One Klinik Stock In / Out: batches, history row (with its alloc) and totals in one transaction.
 async function recordKlinikMove(
   req: express.Request,
-  m: { klinik: string; obat: string; type: "IN" | "OUT"; qty: number; exp?: string; tujuan: string; penerima: string; note: string | null; is_correction: number }
+  m: {
+    klinik: string;
+    obat: string;
+    type: "IN" | "OUT";
+    qty: number;
+    exp?: string;
+    tujuan: string;
+    penerima: string;
+    note: string | null;
+    is_correction: number;
+    evidenceId?: string | null;
+  }
 ): Promise<string | null> {
   try {
     await withTransaction((client) => klinikMoveTx(client, req, m));
@@ -2694,9 +2734,9 @@ type KlinikMove = Parameters<typeof recordKlinikMove>[1];
 async function klinikMoveTx(client: PoolClient, req: express.Request, m: KlinikMove) {
   const alloc = await klinikApply(client, m.klinik, m.obat, m.type, m.qty, m.exp);
   await execute(
-    `INSERT INTO klinik_stock_tx (klinik, obat_kode, type, qty, tujuan, penerima, note, is_correction, user_id, alloc)
-     VALUES (@klinik, @obat, @type, @qty, @tujuan, @penerima, @note, @is_correction, @user_id, @alloc::jsonb)`,
-    { ...m, user_id: req.user!.id, alloc: JSON.stringify(alloc) },
+    `INSERT INTO klinik_stock_tx (klinik, obat_kode, type, qty, tujuan, penerima, note, is_correction, user_id, alloc, evidence_id)
+     VALUES (@klinik, @obat, @type, @qty, @tujuan, @penerima, @note, @is_correction, @user_id, @alloc::jsonb, @evidenceId::uuid)`,
+    { ...m, evidenceId: m.evidenceId ?? null, user_id: req.user!.id, alloc: JSON.stringify(alloc) },
     client
   );
   await syncKlinikStock(client, m.klinik, m.obat);
@@ -2796,6 +2836,8 @@ app.post("/api/klinik-stock/transactions", async (req, res) => {
   if (!obat) return res.status(404).json({ error: "Obat tidak ditemukan di master data" });
 
   const exp = type === "IN" ? expired_date || "" : typeof expired_date === "string" ? expired_date : undefined;
+  const evidenceId = await claimEvidence(req, res);
+  if (evidenceId === undefined) return;
   const err = await recordKlinikMove(req, {
     klinik,
     obat: obat_kode,
@@ -2806,8 +2848,12 @@ app.post("/api/klinik-stock/transactions", async (req, res) => {
     penerima: penerima || "",
     note: note || null,
     is_correction: 0,
+    evidenceId,
   });
-  if (err) return res.status(400).json({ error: err });
+  if (err) {
+    await releaseEvidence(evidenceId);
+    return res.status(400).json({ error: err });
+  }
 
   await logActivity(req, {
     module: "KLINIK",
@@ -3058,7 +3104,7 @@ for (const lr of LEDGER_ROUTES) {
     const limit = Math.min(parseInt(pageSize) || 50, 500);
     const offset = (Math.max(parseInt(page) || 1, 1) - 1) * limit;
     const data = await queryMany(
-      `SELECT t.id, t.created_at, t.type, t.qty, t.tujuan, t.penerima, t.note, t.is_correction,
+      `SELECT t.id, t.created_at, t.type, t.qty, t.tujuan, t.penerima, t.note, t.is_correction, t.evidence_id,
               ${l === GUDANG_LEDGER ? "t.transfer_from_id IS NOT NULL" : "false"} AS is_transfer,
               ${l === KLINIK_LEDGER ? "t.alloc" : "NULL"} AS alloc,
               m.kode, m.nama, m.satuan, COALESCE(u.nama, u.username, '') AS input_oleh
@@ -4113,14 +4159,17 @@ app.post("/api/oli", async (req, res) => {
   if (!(await queryOne("SELECT 1 FROM master_oli WHERE nama = @jenis", { jenis }))) {
     return res.status(400).json({ error: `Jenis oli ${jenis} belum ada di Master Data Oli` });
   }
+  const evidenceId = await claimEvidence(req, res);
+  if (evidenceId === undefined) return;
   const lastSaldo = (await latestSaldoRow("OLI", estate, jenis))?.saldo_stock ?? 0;
   const saldoBaru = round3(tipe === "MASUK" ? lastSaldo + qty : lastSaldo - qty);
   const { tanggal, periode } = oliDate(tanggal_iso);
   const row = await queryOne<{ id: number }>(
-    `INSERT INTO oli_log (estate, jenis_oli, periode, tanggal, tanggal_iso, no_embrace, diterima, pemakaian, saldo_stock, keterangan)
-     VALUES (@estate, @jenis, @periode, @tanggal, @tanggal_iso, @no_embrace, @diterima, @pemakaian, @saldo, @keterangan)
+    `INSERT INTO oli_log (estate, jenis_oli, periode, tanggal, tanggal_iso, no_embrace, diterima, pemakaian, saldo_stock, keterangan, evidence_id)
+     VALUES (@estate, @jenis, @periode, @tanggal, @tanggal_iso, @no_embrace, @diterima, @pemakaian, @saldo, @keterangan, @evidenceId::uuid)
      RETURNING id`,
     {
+      evidenceId,
       estate,
       jenis,
       periode,
@@ -4339,7 +4388,17 @@ async function loanItem(module: LoanModule, estate: string, kode: string, client
 async function loanMove(
   client: PoolClient,
   req: express.Request,
-  l: { module: LoanModule; estate: string; kode: string; type: "IN" | "OUT"; qty: number; note: string; pinjamanId: number; alloc?: Alloc[] }
+  l: {
+    module: LoanModule;
+    estate: string;
+    kode: string;
+    type: "IN" | "OUT";
+    qty: number;
+    note: string;
+    pinjamanId: number;
+    evidenceId: string | null;
+    alloc?: Alloc[];
+  }
 ): Promise<Alloc[] | undefined> {
   const short = (have: number) => new StockError(`Stok ${l.kode} di ${l.estate} hanya ${round3(have)}`);
   if (l.module === "GUDANG" && l.estate === "NILAM") {
@@ -4347,13 +4406,13 @@ async function loanMove(
     if (!item) throw new StockError(`Barang ${l.kode} tidak ada di master data`);
     if (l.type === "OUT" && item.stock_tersedia < l.qty) throw short(item.stock_tersedia);
     const tx = await queryOne<{ id: number }>(
-      `INSERT INTO transactions (item_id, tujuan, type, qty, note, penerima, pinjaman_id)
-       VALUES (@item_id, 'PINJAMAN', @type, @qty, @note, '', @pid) RETURNING id`,
-      { item_id: item.id, type: l.type, qty: l.qty, note: l.note, pid: l.pinjamanId },
+      `INSERT INTO transactions (item_id, tujuan, type, qty, note, penerima, pinjaman_id, evidence_id)
+       VALUES (@item_id, 'PINJAMAN', @type, @qty, @note, '', @pid, @ev::uuid) RETURNING id`,
+      { item_id: item.id, type: l.type, qty: l.qty, note: l.note, pid: l.pinjamanId, ev: l.evidenceId },
       client
     );
     const mirror = await mirrorTransaction(client, item, l.type, "PINJAMAN", l.qty, l.note, "");
-    await execute(`UPDATE ${mirror.source} SET pinjaman_id = @pid WHERE id = @id`, { pid: l.pinjamanId, id: mirror.id }, client);
+    await execute(`UPDATE ${mirror.source} SET pinjaman_id = @pid, evidence_id = @ev::uuid WHERE id = @id`, { pid: l.pinjamanId, ev: l.evidenceId, id: mirror.id }, client);
     await execute("UPDATE transactions SET mirror_source = @s, mirror_id = @m WHERE id = @id", { s: mirror.source, m: mirror.id, id: tx!.id }, client);
     await applyStockEffect(client, item.id, l.type, l.qty, 1);
     return undefined;
@@ -4369,6 +4428,7 @@ async function loanMove(
       note: l.note,
       is_correction: 0,
       pinjamanId: l.pinjamanId,
+      evidenceId: l.evidenceId,
     });
     if (l.type === "OUT" && before < l.qty) throw short(before);
     return undefined;
@@ -4381,9 +4441,19 @@ async function loanMove(
       for (const a of alloc) await addToBatch(client, l.estate, l.kode, a.exp, a.qty);
     }
     await execute(
-      `INSERT INTO klinik_stock_tx (klinik, obat_kode, type, qty, tujuan, penerima, note, is_correction, user_id, alloc, pinjaman_id)
-       VALUES (@klinik, @obat, @type, @qty, 'PINJAMAN', '', @note, 0, @uid, @alloc::jsonb, @pid)`,
-      { klinik: l.estate, obat: l.kode, type: l.type, qty: l.qty, note: l.note, uid: req.user!.id, alloc: JSON.stringify(alloc), pid: l.pinjamanId },
+      `INSERT INTO klinik_stock_tx (klinik, obat_kode, type, qty, tujuan, penerima, note, is_correction, user_id, alloc, pinjaman_id, evidence_id)
+       VALUES (@klinik, @obat, @type, @qty, 'PINJAMAN', '', @note, 0, @uid, @alloc::jsonb, @pid, @ev::uuid)`,
+      {
+        klinik: l.estate,
+        obat: l.kode,
+        type: l.type,
+        qty: l.qty,
+        note: l.note,
+        uid: req.user!.id,
+        alloc: JSON.stringify(alloc),
+        pid: l.pinjamanId,
+        ev: l.evidenceId,
+      },
       client
     );
     await syncKlinikStock(client, l.estate, l.kode);
@@ -4407,12 +4477,12 @@ async function loanMove(
     )?.d ?? "";
   const today = jakartaToday();
   const iso = lastIso > today ? lastIso : today;
-  const p = { estate: l.estate, jenis: l.kode, iso, saldo: round3(before + signed), pinjam: signed, note: l.note, pid: l.pinjamanId };
+  const p = { estate: l.estate, jenis: l.kode, iso, saldo: round3(before + signed), pinjam: signed, note: l.note, pid: l.pinjamanId, ev: l.evidenceId };
   if (module === "BBM") {
     const { tanggal, periode } = isoToIndoDate(iso);
     await execute(
-      `INSERT INTO bbm_log (jenis_bbm, lokasi, estate, periode, tanggal, tanggal_iso, no_spb, pinjam, saldo_stock, keterangan, kode_kendaraan, hm_terakhir, pinjaman_id)
-       VALUES (@jenis, @estate, @estate, @periode, @tanggal, @iso, '', @pinjam, @saldo, @note, '', '', @pid)`,
+      `INSERT INTO bbm_log (jenis_bbm, lokasi, estate, periode, tanggal, tanggal_iso, no_spb, pinjam, saldo_stock, keterangan, kode_kendaraan, hm_terakhir, pinjaman_id, evidence_id)
+       VALUES (@jenis, @estate, @estate, @periode, @tanggal, @iso, '', @pinjam, @saldo, @note, '', '', @pid, @ev::uuid)`,
       { ...p, tanggal, periode },
       client
     );
@@ -4422,15 +4492,15 @@ async function loanMove(
   const date = { periode: `${INDO_MONTHS[Number(m) - 1]} ${y}`, tanggal: `${d}/${m}/${y}` };
   if (module === "OLI") {
     await execute(
-      `INSERT INTO oli_log (estate, jenis_oli, periode, tanggal, tanggal_iso, no_embrace, pinjam, saldo_stock, keterangan, pinjaman_id)
-       VALUES (@estate, @jenis, @periode, @tanggal, @iso, '', @pinjam, @saldo, @note, @pid)`,
+      `INSERT INTO oli_log (estate, jenis_oli, periode, tanggal, tanggal_iso, no_embrace, pinjam, saldo_stock, keterangan, pinjaman_id, evidence_id)
+       VALUES (@estate, @jenis, @periode, @tanggal, @iso, '', @pinjam, @saldo, @note, @pid, @ev::uuid)`,
       { ...p, ...date },
       client
     );
   } else {
     await execute(
-      `INSERT INTO pupuk_log (estate, jenis_pupuk, periode, tanggal, tanggal_iso, divisi, no_embrace, kode_barang, pinjam, saldo_stock, keterangan, blok, pinjaman_id)
-       VALUES (@estate, @jenis, @periode, @tanggal, @iso, '', '', '', @pinjam, @saldo, @note, '', @pid)`,
+      `INSERT INTO pupuk_log (estate, jenis_pupuk, periode, tanggal, tanggal_iso, divisi, no_embrace, kode_barang, pinjam, saldo_stock, keterangan, blok, pinjaman_id, evidence_id)
+       VALUES (@estate, @jenis, @periode, @tanggal, @iso, '', '', '', @pinjam, @saldo, @note, '', @pid, @ev::uuid)`,
       { ...p, ...date },
       client
     );
@@ -4442,9 +4512,20 @@ const loanObjek = (l: Pick<LoanRow, "id" | "kode" | "nama">) => `Pinjaman #${l.i
 const fmtLoanQty = (n: number, satuan: string) => `${round3(n).toLocaleString("id-ID")} ${satuan}`;
 
 // Moves `qty` of loan `l`'s item from `from` to `to` (the loan itself, or a return the other way).
-async function loanTransfer(client: PoolClient, req: express.Request, l: LoanRow, from: string, to: string, qty: number, outNote: string, inNote: string) {
-  const alloc = await loanMove(client, req, { module: l.module, estate: from, kode: l.kode, type: "OUT", qty, note: outNote, pinjamanId: l.id });
-  await loanMove(client, req, { module: l.module, estate: to, kode: l.kode, type: "IN", qty, note: inNote, pinjamanId: l.id, alloc });
+async function loanTransfer(
+  client: PoolClient,
+  req: express.Request,
+  l: LoanRow,
+  from: string,
+  to: string,
+  qty: number,
+  outNote: string,
+  inNote: string,
+  evidenceId: string | null
+) {
+  const base = { module: l.module, kode: l.kode, qty, pinjamanId: l.id, evidenceId };
+  const alloc = await loanMove(client, req, { ...base, estate: from, type: "OUT", note: outNote });
+  await loanMove(client, req, { ...base, estate: to, type: "IN", note: inNote, alloc });
 }
 
 // Logged in both estates' activity log.
@@ -4474,7 +4555,7 @@ app.get("/api/pinjaman", async (req, res) => {
   const data = await queryMany(
     `SELECT p.*, COALESCE(u.nama, u.username, '') AS dibuat_oleh,
        COALESCE((SELECT json_agg(json_build_object('qty', k.qty, 'tanggal_iso', k.tanggal_iso, 'note', k.note, 'batal', k.batal,
-                   'oleh', COALESCE(ku.nama, ku.username, '')) ORDER BY k.id)
+                   'oleh', COALESCE(ku.nama, ku.username, ''), 'evidence_id', k.evidence_id) ORDER BY k.id)
                  FROM pinjaman_kembali k LEFT JOIN users ku ON ku.id = k.user_id WHERE k.pinjaman_id = p.id), '[]') AS kembali
      FROM pinjaman p LEFT JOIN users u ON u.id = p.user_id ${where}
      ORDER BY (p.status = 'DIPINJAM') DESC, p.id DESC LIMIT @limit OFFSET @offset`,
@@ -4545,20 +4626,33 @@ app.post("/api/pinjaman", async (req, res) => {
   if (!alasan) return res.status(400).json({ error: "Alasan wajib diisi" });
   const item = await loanItem(m, dari, String(kode ?? ""));
   if (!item) return res.status(404).json({ error: "Barang tidak ditemukan di master data" });
+  const evidenceId = await claimEvidence(req, res);
+  if (evidenceId === undefined) return;
 
   let loan: LoanRow;
   try {
     loan = await withTransaction(async (client) => {
       const l = (await queryOne<LoanRow>(
-        `INSERT INTO pinjaman (module, kode, nama, satuan, dari_estate, ke_estate, qty, alasan, tanggal_iso, user_id)
-         VALUES (@module, @kode, @nama, @satuan, @dari, @ke, @qty, @alasan, @today, @uid) RETURNING *`,
-        { module: m, kode: item.kode, nama: item.nama, satuan: item.satuan, dari, ke, qty: round3(qty), alasan, today: jakartaToday(), uid: u.id },
+        `INSERT INTO pinjaman (module, kode, nama, satuan, dari_estate, ke_estate, qty, alasan, tanggal_iso, user_id, evidence_id)
+         VALUES (@module, @kode, @nama, @satuan, @dari, @ke, @qty, @alasan, @today, @uid, @ev::uuid) RETURNING *`,
+        { module: m, kode: item.kode, nama: item.nama, satuan: item.satuan, dari, ke, qty: round3(qty), alasan, today: jakartaToday(), uid: u.id, ev: evidenceId },
         client
       ))!;
-      await loanTransfer(client, req, l, dari, ke, l.qty, `Dipinjamkan ke ${ke} (Pinjaman #${l.id}): ${alasan}`, `Pinjam dari ${dari} (Pinjaman #${l.id}): ${alasan}`);
+      await loanTransfer(
+        client,
+        req,
+        l,
+        dari,
+        ke,
+        l.qty,
+        `Dipinjamkan ke ${ke} (Pinjaman #${l.id}): ${alasan}`,
+        `Pinjam dari ${dari} (Pinjaman #${l.id}): ${alasan}`,
+        evidenceId
+      );
       return l;
     });
   } catch (e) {
+    await releaseEvidence(evidenceId);
     if (e instanceof StockError) return res.status(400).json({ error: e.message });
     throw e;
   }
@@ -4585,6 +4679,9 @@ async function loanBack(req: express.Request, res: express.Response, batal: bool
 
   const lunas = round3(l.qty_kembali + qty) >= l.qty;
   const tag = `Pinjaman #${l.id}${note ? `: ${note}` : ""}`;
+  // A return needs its foto bukti; a cancel (wrong input) doesn't.
+  const evidenceId = batal ? null : await claimEvidence(req, res);
+  if (evidenceId === undefined) return;
   try {
     await withTransaction(async (client) => {
       const cur = await queryOne<{ status: string; qty_kembali: number }>("SELECT status, qty_kembali FROM pinjaman WHERE id = @id FOR UPDATE", { id: l.id }, client);
@@ -4597,11 +4694,13 @@ async function loanBack(req: express.Request, res: express.Response, batal: bool
         l.dari_estate,
         qty,
         batal ? `Batal pinjam dari ${l.dari_estate} (${tag})` : `Kembalikan pinjaman ke ${l.dari_estate} (${tag})`,
-        batal ? `Batal dipinjamkan ke ${l.ke_estate} (${tag})` : `Pengembalian pinjaman dari ${l.ke_estate} (${tag})`
+        batal ? `Batal dipinjamkan ke ${l.ke_estate} (${tag})` : `Pengembalian pinjaman dari ${l.ke_estate} (${tag})`,
+        evidenceId
       );
       await execute(
-        "INSERT INTO pinjaman_kembali (pinjaman_id, qty, tanggal_iso, note, batal, user_id) VALUES (@id, @qty, @today, @note, @batal, @uid)",
-        { id: l.id, qty, today: jakartaToday(), note, batal, uid: u.id },
+        `INSERT INTO pinjaman_kembali (pinjaman_id, qty, tanggal_iso, note, batal, user_id, evidence_id)
+         VALUES (@id, @qty, @today, @note, @batal, @uid, @ev::uuid)`,
+        { id: l.id, qty, today: jakartaToday(), note, batal, uid: u.id, ev: evidenceId },
         client
       );
       await execute(
@@ -4611,6 +4710,7 @@ async function loanBack(req: express.Request, res: express.Response, batal: bool
       );
     });
   } catch (e) {
+    await releaseEvidence(evidenceId);
     if (e instanceof StockError) return res.status(400).json({ error: e.message });
     throw e;
   }
@@ -4734,3 +4834,108 @@ app.get("/api/perbandingan/barang", async (req, res) => {
       : await queryMany<{ v: string }>("SELECT DISTINCT jenis_pupuk v FROM pupuk_log WHERE jenis_pupuk <> '' ORDER BY 1");
   res.json(list.map((r) => ({ kode: r.v, nama: r.v, satuan: m === "PUPUK" ? "KG" : "LTR" })));
 });
+
+// ---- Foto bukti transaksi (see schema.sql evidence) ----
+// Every Stok Masuk / Keluar (Gudang, Klinik, BBM, Pupuk, Oli) and every Pinjaman / pengembalian needs
+// a photo. The form uploads it first (POST /api/evidence, already shrunk in the browser); the photo
+// lives in the private Supabase Storage bucket `evidence` and the transaction keeps its id. It is
+// shown through GET /api/evidence/:id, which redirects to a short-lived signed URL.
+const STORAGE_URL = (process.env.SUPABASE_URL ?? "").replace(/\/$/, "");
+const STORAGE_KEY = process.env.SUPABASE_SERVICE_KEY ?? "";
+const EVIDENCE_BUCKET = "evidence";
+const EVIDENCE_MAX_BYTES = 3 * 1024 * 1024;
+const EVIDENCE_MIME: Record<string, string> = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" };
+function evidenceEnabled() {
+  return !!(STORAGE_URL && STORAGE_KEY);
+}
+const storageHeaders = () => ({ Authorization: `Bearer ${STORAGE_KEY}`, apikey: STORAGE_KEY });
+
+async function storageUpload(path: string, body: Buffer, mime: string) {
+  const put = () =>
+    fetch(`${STORAGE_URL}/storage/v1/object/${EVIDENCE_BUCKET}/${path}`, {
+      method: "POST",
+      headers: { ...storageHeaders(), "Content-Type": mime, "x-upsert": "false" },
+      body: new Uint8Array(body),
+    });
+  let r = await put();
+  // First upload ever: the bucket doesn't exist yet, create it (private) and try again.
+  if (r.status === 400 || r.status === 404) {
+    const text = await r.text();
+    if (!/bucket not found/i.test(text)) throw new Error(`Upload gagal: ${text}`);
+    await fetch(`${STORAGE_URL}/storage/v1/bucket`, {
+      method: "POST",
+      headers: { ...storageHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify({ id: EVIDENCE_BUCKET, name: EVIDENCE_BUCKET, public: false }),
+    });
+    r = await put();
+  }
+  if (!r.ok) throw new Error(`Upload gagal: ${r.status} ${await r.text()}`);
+}
+
+app.post("/api/evidence", async (req, res) => {
+  if (!STORAGE_URL || !STORAGE_KEY) return res.status(503).json({ error: "Penyimpanan foto belum disiapkan" });
+  const m = String(req.body?.data ?? "").match(/^data:(image\/[a-z]+);base64,(.+)$/);
+  const ext = m && EVIDENCE_MIME[m[1]];
+  if (!m || !ext) return res.status(400).json({ error: "File harus berupa gambar (JPG / PNG / WEBP)" });
+  const body = Buffer.from(m[2], "base64");
+  if (!body.length || body.length > EVIDENCE_MAX_BYTES) return res.status(400).json({ error: "Ukuran foto maksimal 3 MB" });
+  const row = (await queryOne<{ id: string }>("SELECT gen_random_uuid()::text id"))!;
+  const path = `${jakartaToday().slice(0, 7)}/${row.id}.${ext}`;
+  try {
+    await storageUpload(path, body, m[1]);
+  } catch (e) {
+    console.error(e);
+    return res.status(502).json({ error: "Foto gagal diupload, coba lagi" });
+  }
+  await execute("INSERT INTO evidence (id, path, mime, size, user_id) VALUES (@id::uuid, @path, @mime, @size, @uid)", {
+    id: row.id,
+    path,
+    mime: m[1],
+    size: body.length,
+    uid: req.user!.id,
+  });
+  res.json({ id: row.id });
+});
+
+// Opens the photo (any logged-in account; the id is a random uuid only shown next to the transaction).
+app.get("/api/evidence/:id", async (req, res) => {
+  if (!/^[0-9a-f-]{36}$/.test(req.params.id)) return res.status(404).send("Foto tidak ditemukan");
+  const ev = await queryOne<{ path: string }>("SELECT path FROM evidence WHERE id = @id::uuid", { id: req.params.id });
+  if (!ev || !STORAGE_URL) return res.status(404).send("Foto tidak ditemukan");
+  const r = await fetch(`${STORAGE_URL}/storage/v1/object/sign/${EVIDENCE_BUCKET}/${ev.path}`, {
+    method: "POST",
+    headers: { ...storageHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ expiresIn: 600 }),
+  });
+  const j: any = await r.json().catch(() => ({}));
+  if (!r.ok || !j.signedURL) return res.status(502).send("Foto tidak bisa dibuka");
+  res.redirect(`${STORAGE_URL}/storage/v1${j.signedURL}`);
+});
+
+// Takes the uploaded photo of a new transaction: it must exist, be uploaded by this account and not
+// belong to another transaction yet. Returns its id; undefined = refused (the error is sent); null =
+// photo storage isn't set up on this server (SUPABASE_URL / SUPABASE_SERVICE_KEY), so no photo is
+// asked and transactions keep working until it is.
+async function claimEvidence(req: express.Request, res: express.Response): Promise<string | null | undefined> {
+  if (!evidenceEnabled()) return null;
+  const id = String(req.body?.evidence_id ?? "");
+  if (!/^[0-9a-f-]{36}$/.test(id)) {
+    res.status(400).json({ error: "Foto bukti wajib diupload" });
+    return undefined;
+  }
+  const ok = await queryOne(
+    "UPDATE evidence SET used = true WHERE id = @id::uuid AND used = false AND (user_id = @uid OR @su) RETURNING id",
+    { id, uid: req.user!.id, su: req.user!.role === "superuser" }
+  );
+  if (!ok) {
+    res.status(400).json({ error: "Foto bukti tidak valid, upload ulang fotonya" });
+    return undefined;
+  }
+  return id;
+}
+
+// Gives a claimed photo back when the transaction it was for is refused (e.g. not enough stock), so
+// the same upload can be used when the form is sent again.
+async function releaseEvidence(id: string | null | undefined) {
+  if (id) await execute("UPDATE evidence SET used = false WHERE id = @id::uuid", { id });
+}

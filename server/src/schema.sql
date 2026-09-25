@@ -438,3 +438,25 @@ ALTER TABLE pupuk_log ADD COLUMN IF NOT EXISTS pinjaman_id INTEGER;
 ALTER TABLE oli_log ADD COLUMN IF NOT EXISTS pinjaman_id INTEGER;
 ALTER TABLE pupuk_log ADD COLUMN IF NOT EXISTS pinjam DOUBLE PRECISION;
 ALTER TABLE oli_log ADD COLUMN IF NOT EXISTS pinjam DOUBLE PRECISION;
+
+-- Foto bukti transaksi: the image sits in the private Supabase Storage bucket `evidence` at `path`;
+-- every Stok Masuk / Keluar and Pinjaman row keeps its evidence_id (used = linked to a transaction).
+CREATE TABLE IF NOT EXISTS evidence (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  path TEXT NOT NULL,
+  mime TEXT NOT NULL DEFAULT 'image/jpeg',
+  size INTEGER NOT NULL DEFAULT 0,
+  user_id INTEGER,
+  used BOOLEAN NOT NULL DEFAULT false,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+ALTER TABLE transactions ADD COLUMN IF NOT EXISTS evidence_id UUID;
+ALTER TABLE stock_in_log ADD COLUMN IF NOT EXISTS evidence_id UUID;
+ALTER TABLE stock_out_log ADD COLUMN IF NOT EXISTS evidence_id UUID;
+ALTER TABLE gudang_stock_tx ADD COLUMN IF NOT EXISTS evidence_id UUID;
+ALTER TABLE klinik_stock_tx ADD COLUMN IF NOT EXISTS evidence_id UUID;
+ALTER TABLE bbm_log ADD COLUMN IF NOT EXISTS evidence_id UUID;
+ALTER TABLE pupuk_log ADD COLUMN IF NOT EXISTS evidence_id UUID;
+ALTER TABLE oli_log ADD COLUMN IF NOT EXISTS evidence_id UUID;
+ALTER TABLE pinjaman ADD COLUMN IF NOT EXISTS evidence_id UUID;
+ALTER TABLE pinjaman_kembali ADD COLUMN IF NOT EXISTS evidence_id UUID;

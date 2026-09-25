@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { ArrowLeftRight, ArrowRight, Plus, X } from "lucide-react";
 import { api, errorText, type OpnameModule, type Pinjaman, type PinjamanBarang, type PinjamanStatus } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
+import { EvidenceInput, EvidenceLink, useEvidenceEnabled } from "../components/EvidenceInput";
 import { can, canModule, userEstates } from "../lib/access";
 import { LOAN_LATE_DAYS, loanDays, useOpenPinjaman } from "../hooks/useOpenPinjaman";
 import { OPNAME_MODULES, OPNAME_MODULE_LABEL, fmtQty, isoDisplay, opnameModule, round3 } from "../lib/opname";
@@ -157,12 +158,14 @@ export function PinjamanPage() {
                       <span className={`text-xs px-2 py-0.5 rounded-full border whitespace-nowrap ${STATUS[l.status].cls}`}>{STATUS[l.status].label}</span>
                     </td>
                     <td className="px-4 py-2.5 text-xs text-[var(--text-secondary)] min-w-[200px]">
-                      <div>{l.alasan}</div>
+                      <div>
+                        {l.alasan} <EvidenceLink id={l.evidence_id} label="foto" />
+                      </div>
                       <div className="text-[var(--text-muted)]">oleh {l.dibuat_oleh || "-"}</div>
                       {l.kembali.map((k, i) => (
                         <div key={i} className="mt-1 text-[var(--text-muted)]">
                           {isoDisplay(k.tanggal_iso)} · {k.batal ? "Dibatalkan" : `Kembali ${fmtQty(k.qty)} ${l.satuan}`}
-                          {k.note && `: ${k.note}`} ({k.oleh || "-"})
+                          {k.note && `: ${k.note}`} ({k.oleh || "-"}) <EvidenceLink id={k.evidence_id} label="foto" />
                         </div>
                       ))}
                     </td>
@@ -238,6 +241,8 @@ function CreatePinjamanModal({
   const [barang, setBarang] = useState<PinjamanBarang | null>(null);
   const [qty, setQty] = useState("");
   const [alasan, setAlasan] = useState("");
+  const [evidenceId, setEvidenceId] = useState<string | null>(null);
+  const evidenceOn = useEvidenceEnabled();
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
@@ -272,9 +277,10 @@ function CreatePinjamanModal({
     if (isWhole && !Number.isInteger(n)) return setError("Jumlah harus bilangan bulat");
     if (!saldoModule && n > barang.stok) return setError(`Stok ${dari} hanya ${fmtQty(barang.stok)} ${barang.satuan}`);
     if (!alasan.trim()) return setError("Alasan wajib diisi");
+    if (evidenceOn && !evidenceId) return setError("Foto bukti wajib diupload");
     setSubmitting(true);
     try {
-      await api.createPinjaman({ module, dari, ke, kode: barang.kode, qty: n, alasan: alasan.trim() });
+      await api.createPinjaman({ evidence_id: evidenceId ?? "", module, dari, ke, kode: barang.kode, qty: n, alasan: alasan.trim() });
       onSuccess();
     } catch (e) {
       setError(errorText(e, "Gagal menyimpan pinjaman"));
@@ -378,6 +384,8 @@ function CreatePinjamanModal({
         </p>
       )}
 
+      <EvidenceInput value={evidenceId} onChange={setEvidenceId} />
+
       {error && <p className="text-xs text-[var(--accent-red)]">{error}</p>}
 
       <button
@@ -395,6 +403,9 @@ function KembaliModal({ loan, batal, onClose, onSuccess }: { loan: Pinjaman; bat
   const sisa = round3(loan.qty - loan.qty_kembali);
   const [qty, setQty] = useState(String(sisa).replace(".", ","));
   const [note, setNote] = useState("");
+  // A return needs its foto bukti; a cancel doesn't.
+  const [evidenceId, setEvidenceId] = useState<string | null>(null);
+  const evidenceOn = useEvidenceEnabled();
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const n = Number(qty.replace(",", "."));
@@ -406,11 +417,12 @@ function KembaliModal({ loan, batal, onClose, onSuccess }: { loan: Pinjaman; bat
       if (!(n > 0)) return setError("Jumlah harus lebih dari 0");
       if (n > sisa) return setError(`Sisa pinjaman hanya ${fmtQty(sisa)} ${loan.satuan}`);
       if (whole(loan.module, loan.dari_estate, loan.ke_estate) && !Number.isInteger(n)) return setError("Jumlah harus bilangan bulat");
+      if (evidenceOn && !evidenceId) return setError("Foto bukti wajib diupload");
     }
     setSubmitting(true);
     try {
       if (batal) await api.batalPinjaman(loan.id, note.trim());
-      else await api.kembalikanPinjaman(loan.id, n, note.trim());
+      else await api.kembalikanPinjaman(loan.id, n, note.trim(), evidenceId ?? "");
       onSuccess();
     } catch (e) {
       setError(errorText(e, "Gagal menyimpan"));
@@ -450,6 +462,8 @@ function KembaliModal({ loan, batal, onClose, onSuccess }: { loan: Pinjaman; bat
         <label className={labelCls}>{batal ? "Alasan pembatalan" : "Catatan"}</label>
         <input value={note} onChange={(e) => setNote(e.target.value)} className={inputCls} />
       </div>
+
+      {!batal && <EvidenceInput value={evidenceId} onChange={setEvidenceId} />}
 
       {error && <p className="text-xs text-[var(--accent-red)]">{error}</p>}
 

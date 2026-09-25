@@ -11,6 +11,7 @@ import { fetchAllRows, type TableReport } from "../lib/printTable";
 import { useDragScroll } from "../hooks/useDragScroll";
 import { useAuth } from "../context/AuthContext";
 import { can } from "../lib/access";
+import { EvidenceLink } from "../components/EvidenceInput";
 
 const localIso = (d: Date) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -286,7 +287,7 @@ export function InventoryOliPage({ estate }: { estate: string }) {
                       {r.saldo_stock !== null ? fmt(r.saldo_stock) : "-"}
                     </td>
                     <td className="px-4 py-2.5 text-[var(--text-secondary)] text-xs max-w-[320px] truncate" title={r.keterangan}>
-                      {r.keterangan || "-"}
+                      <EvidenceLink id={r.evidence_id} /> {r.keterangan || "-"}
                     </td>
                     {showActions && (
                       <td className="px-4 py-2.5 text-right">

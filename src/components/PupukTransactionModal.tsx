@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { X } from "lucide-react";
 import { api, errorText, type PupukSummary } from "../lib/api";
+import { EvidenceInput, useEvidenceEnabled } from "./EvidenceInput";
 
 const todayIso = () => {
   const d = new Date();
@@ -37,6 +38,8 @@ export function PupukTransactionModal({
   const [ha, setHa] = useState("");
   const [pokok, setPokok] = useState("");
   const [keterangan, setKeterangan] = useState("");
+  const [evidenceId, setEvidenceId] = useState<string | null>(null);
+  const evidenceOn = useEvidenceEnabled();
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
@@ -55,11 +58,13 @@ export function PupukTransactionModal({
       keluar && ha === "" && "HA",
       keluar && pokok === "" && "Pokok",
       !keterangan.trim() && "Keterangan",
+      evidenceOn && !evidenceId && "Foto Bukti",
     ].filter(Boolean);
     if (missing.length) return setError(`Wajib diisi: ${missing.join(", ")}`);
     setSubmitting(true);
     try {
       await api.createPupuk({
+        evidence_id: evidenceId ?? "",
         estate,
         jenis_pupuk: jenis,
         tanggal_iso: tanggal,
@@ -204,6 +209,8 @@ export function PupukTransactionModal({
               className={inputCls}
             />
           </div>
+
+          <EvidenceInput value={evidenceId} onChange={setEvidenceId} />
 
           {error && <p className="text-xs text-[var(--accent-red)]">{error}</p>}
 

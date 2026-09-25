@@ -8,6 +8,7 @@ import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useAuth } from "../context/AuthContext";
 import { can } from "../lib/access";
 import { useDragScroll } from "../hooks/useDragScroll";
+import { EvidenceLink } from "../components/EvidenceInput";
 
 const TUJUAN_OPTIONS = ["NILAM", "KNS", "WJA", "ZAMRUD", "FIRUS"];
 
@@ -231,7 +232,7 @@ export function ItemDetailPage() {
                       </td>
                       <td className="px-4 py-2.5 text-xs text-[var(--text-secondary)]">{m.ref || "-"}</td>
                       <td className="px-4 py-2.5 text-xs text-[var(--text-secondary)] max-w-[220px] truncate" title={m.note || ""}>
-                        {m.note || "-"}
+                        <EvidenceLink id={m.evidence_id} /> {m.note || "-"}
                       </td>
                       {showActions && (
                         <td className="px-4 py-2.5 text-right">

@@ -11,6 +11,7 @@ import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useAuth } from "../context/AuthContext";
 import { can } from "../lib/access";
 import { useDragScroll } from "../hooks/useDragScroll";
+import { EvidenceLink } from "../components/EvidenceInput";
 
 const JENIS_OPTIONS = ["SOLAR", "BENSIN"];
 
@@ -381,7 +382,7 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
                       {r.saldo_stock !== null ? r.saldo_stock.toLocaleString("id-ID") : "-"}
                     </td>
                     <td className="px-4 py-2.5 text-[var(--text-secondary)] text-xs max-w-[260px] truncate" title={r.keterangan}>
-                      {r.keterangan || "-"}
+                      <EvidenceLink id={r.evidence_id} /> {r.keterangan || "-"}
                     </td>
                     <td className="px-4 py-2.5 text-xs text-[var(--text-secondary)]">{r.status_kepemilikan || "-"}</td>
                     <td className="px-4 py-2.5 text-xs whitespace-nowrap">{r.kode_kendaraan || "-"}</td>

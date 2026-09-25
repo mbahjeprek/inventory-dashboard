@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { X } from "lucide-react";
 import { api, errorText, type OliSummary } from "../lib/api";
+import { EvidenceInput, useEvidenceEnabled } from "./EvidenceInput";
 
 const todayIso = () => {
   const d = new Date();
@@ -32,6 +33,8 @@ export function OliTransactionModal({
   const [jumlah, setJumlah] = useState(0);
   const [noEmbrace, setNoEmbrace] = useState("");
   const [keterangan, setKeterangan] = useState("");
+  const [evidenceId, setEvidenceId] = useState<string | null>(null);
+  const evidenceOn = useEvidenceEnabled();
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
@@ -41,11 +44,15 @@ export function OliTransactionModal({
   const submit = async () => {
     setError("");
     if (jumlah <= 0) return setError("Jumlah harus lebih dari 0");
-    const missing = [!noEmbrace.trim() && "No. BPB", !keterangan.trim() && (tipe === "PEMAKAIAN" ? "Unit / Keterangan" : "Keterangan")].filter(Boolean);
+    const missing = [
+      !noEmbrace.trim() && "No. BPB",
+      !keterangan.trim() && (tipe === "PEMAKAIAN" ? "Unit / Keterangan" : "Keterangan"),
+      evidenceOn && !evidenceId && "Foto Bukti",
+    ].filter(Boolean);
     if (missing.length) return setError(`Wajib diisi: ${missing.join(", ")}`);
     setSubmitting(true);
     try {
-      await api.createOli({ estate, jenis_oli: jenis, tanggal_iso: tanggal, tipe, jumlah, no_embrace: noEmbrace, keterangan });
+      await api.createOli({ evidence_id: evidenceId ?? "", estate, jenis_oli: jenis, tanggal_iso: tanggal, tipe, jumlah, no_embrace: noEmbrace, keterangan });
       onSuccess();
     } catch (e) {
       setError(errorText(e, "Gagal menyimpan transaksi"));
@@ -137,6 +144,8 @@ export function OliTransactionModal({
               />
             </div>
           </div>
+
+          <EvidenceInput value={evidenceId} onChange={setEvidenceId} />
 
           {error && <p className="text-xs text-[var(--accent-red)]">{error}</p>}
 

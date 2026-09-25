@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { X, ClipboardCheck } from "lucide-react";
 import { api, errorText, GUDANG_TUJUAN, type KlinikBatch, type PickerItem, type StockScope } from "../lib/api";
 import { KaryawanAutocomplete } from "./KaryawanAutocomplete";
+import { EvidenceInput, useEvidenceEnabled } from "./EvidenceInput";
 import { useAuth } from "../context/AuthContext";
 import { can } from "../lib/access";
 
@@ -43,6 +44,9 @@ export function TransactionModal({
   const [qty, setQty] = useState(1);
   const [actualQty, setActualQty] = useState(0);
   const [note, setNote] = useState("");
+  // Foto bukti, required for Stock In / Out (not for Koreksi).
+  const [evidenceId, setEvidenceId] = useState<string | null>(null);
+  const evidenceOn = useEvidenceEnabled();
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   // Klinik only: stock is kept per expiry-date batch.
@@ -98,6 +102,7 @@ export function TransactionModal({
     mode === "OUT" && !isKlinik && !tujuan && "Tujuan / Konsumen",
     mode !== "KOREKSI" && !(mode === "OUT" && buang) && !receiver.trim() && (mode === "OUT" ? (isKlinik ? "Pasien / Penerima" : "Penerima / Pengambil") : "Diterima Oleh"),
     !note.trim() && "Catatan",
+    mode !== "KOREKSI" && evidenceOn && !evidenceId && "Foto Bukti",
   ].filter(Boolean);
 
   const submit = async () => {
@@ -139,6 +144,7 @@ export function TransactionModal({
     try {
       if (scope?.kind === "klinik")
         await api.createKlinikTransaction({
+          evidence_id: evidenceId ?? "",
           klinik: scope.name,
           obat_kode: item.kode,
           type: mode,
@@ -149,8 +155,8 @@ export function TransactionModal({
           expired_date: mode === "IN" ? expIn || undefined : batchOut === FEFO ? undefined : batchOut,
         });
       else if (scope?.kind === "gudang")
-        await api.createGudangTransaction({ gudang: scope.name, item_kode: item.kode, tujuan, type: mode, qty, note, penerima });
-      else await api.createTransaction({ item_id: item.id, tujuan, type: mode, qty, note, penerima });
+        await api.createGudangTransaction({ evidence_id: evidenceId ?? "", gudang: scope.name, item_kode: item.kode, tujuan, type: mode, qty, note, penerima });
+      else await api.createTransaction({ evidence_id: evidenceId ?? "", item_id: item.id, tujuan, type: mode, qty, note, penerima });
       onSuccess();
     } catch (e) {
       setError(errorText(e, "Gagal menyimpan transaksi"));
@@ -161,7 +167,7 @@ export function TransactionModal({
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg w-full max-w-md shadow-xl">
+      <div className="bg-white rounded-lg w-full max-w-md shadow-xl max-h-[calc(100vh-2rem)] overflow-y-auto">
         <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--border)]">
           <div>
             <h3 className="font-semibold text-sm text-[var(--text-primary)]">{isKlinik ? `Input Transaksi Obat - Klinik ${scope.name}` : `Input Transaksi Stock${scope ? ` - ${scope.name}` : ""}`}</h3>
@@ -374,6 +380,8 @@ export function TransactionModal({
               className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-2"
             />
           </div>
+
+          {mode !== "KOREKSI" && <EvidenceInput value={evidenceId} onChange={setEvidenceId} />}
 
           {error && <p className="text-xs text-[var(--accent-red)]">{error}</p>}
 

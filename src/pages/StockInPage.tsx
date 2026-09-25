@@ -8,6 +8,7 @@ import { can } from "../lib/access";
 import { ExportButtons } from "../components/ExportButtons";
 import { fetchAllRows, type TableReport } from "../lib/printTable";
 import { useDragScroll } from "../hooks/useDragScroll";
+import { EvidenceLink } from "../components/EvidenceInput";
 
 const TUJUAN_OPTIONS = ["NILAM", "KNS", "WJA", "ZAMRUD", "FIRUS"];
 
@@ -219,7 +220,7 @@ export function StockInPage({ embedded = false }: { embedded?: boolean }) {
                     <td className="px-4 py-2.5 text-right font-medium text-[var(--accent-green)]">+{r.qty} {r.satuan}</td>
                     <td className="px-4 py-2.5">{r.tujuan || <span className="text-[var(--text-muted)]">-</span>}</td>
                     <td className="px-4 py-2.5 text-[var(--text-secondary)] text-xs max-w-[220px] truncate" title={r.keterangan}>
-                      {r.keterangan || "-"}
+                      <EvidenceLink id={r.evidence_id} /> {r.keterangan || "-"}
                     </td>
                     {showActions && (
                       <td className="px-4 py-2.5 text-right">

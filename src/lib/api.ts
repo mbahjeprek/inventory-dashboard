@@ -91,6 +91,7 @@ export type LedgerTx = {
   alloc?: { exp: string; qty: number }[] | null;
   // Stok Masuk booked automatically by a Stok Keluar from another gudang; changed only from there.
   is_transfer: boolean;
+  evidence_id?: string | null;
   kode: string;
   nama: string;
   satuan: string;
@@ -178,6 +179,7 @@ export type Transaction = {
 
 export type StockInRecord = {
   id: number;
+  evidence_id?: string | null;
   item_id: number | null;
   kode: string;
   nama: string;
@@ -197,6 +199,7 @@ export type StockInRecord = {
 
 export type StockOutRecord = {
   id: number;
+  evidence_id?: string | null;
   item_id: number | null;
   kode: string;
   nama: string;
@@ -247,6 +250,7 @@ export type BbmRecord = {
   diterima: number | null;
   pinjam: number | null;
   pemakaian: number | null;
+  evidence_id?: string | null;
   saldo_stock: number | null;
   keterangan: string;
   status_kepemilikan: string | null;
@@ -270,6 +274,7 @@ export type PupukRecord = {
   // Pinjaman antar estate: + borrowed in / return received, - lent out / returned.
   pinjam: number | null;
   pinjaman_id: number | null;
+  evidence_id: string | null;
   saldo_stock: number | null;
   keterangan: string;
   blok: string;
@@ -289,6 +294,7 @@ export type OliRecord = {
   pemakaian: number | null;
   pinjam: number | null;
   pinjaman_id: number | null;
+  evidence_id: string | null;
   saldo_stock: number | null;
   keterangan: string;
 };
@@ -337,6 +343,7 @@ export type Movement = {
   note: string | null;
   ref: string | null;
   refCode: string | null;
+  evidence_id?: string | null;
 };
 
 export type TopKeluarRow = { kode: string; id: number | null; nama: string; satuan: string | null; qty: number; trx: number };
@@ -371,7 +378,8 @@ export type Pinjaman = {
   tanggal_iso: string;
   created_at: string;
   dibuat_oleh: string;
-  kembali: { qty: number; tanggal_iso: string; note: string; batal: boolean; oleh: string }[];
+  evidence_id: string | null;
+  kembali: { qty: number; tanggal_iso: string; note: string; batal: boolean; oleh: string; evidence_id: string | null }[];
 };
 export type PinjamanBarang = { kode: string; nama: string; satuan: string; stok: number };
 export type OpnameStatus = "DRAFT" | "SUBMITTED" | "APPROVED" | "BATAL";
@@ -481,6 +489,8 @@ export const api = {
   itemMovements: (id: number) => req<{ data: Movement[] }>(`/api/items/${id}/movements`),
 
   createTransaction: (payload: {
+    // Foto bukti (uploadEvidence) - required by the server.
+    evidence_id: string;
     item_id: number;
     tujuan?: string;
     type: "IN" | "OUT";
@@ -505,6 +515,8 @@ export const api = {
   },
 
   createGudangTransaction: (payload: {
+    // Foto bukti (uploadEvidence) - required by the server.
+    evidence_id: string;
     gudang: string;
     item_kode: string;
     type: "IN" | "OUT";
@@ -547,6 +559,8 @@ export const api = {
   },
 
   createKlinikTransaction: (payload: {
+    // Foto bukti (uploadEvidence) - required by the server.
+    evidence_id: string;
     klinik: string;
     obat_kode: string;
     type: "IN" | "OUT";
@@ -654,6 +668,8 @@ export const api = {
   pupukOptions: (estate: string) => req<{ jenis: string[]; divisi: string[] }>(`/api/pupuk/options?estate=${estate}`),
 
   createPupuk: (payload: {
+    // Foto bukti (uploadEvidence) - required by the server.
+    evidence_id: string;
     estate: string;
     jenis_pupuk: string;
     tanggal_iso: string;
@@ -680,7 +696,7 @@ export const api = {
   oliSummary: (estate: string, range: { dateFrom?: string; dateTo?: string; asOf?: string } = {}) =>
     req<OliSummary>(`/api/oli/summary?${new URLSearchParams({ estate, ...range } as any)}`),
   oliOptions: (estate: string) => req<{ jenis: string[] }>(`/api/oli/options?estate=${estate}`),
-  createOli: (payload: { estate: string; jenis_oli: string; tanggal_iso: string; tipe: "MASUK" | "PEMAKAIAN"; jumlah: number; no_embrace?: string; keterangan?: string }) =>
+  createOli: (payload: { evidence_id: string; estate: string; jenis_oli: string; tanggal_iso: string; tipe: "MASUK" | "PEMAKAIAN"; jumlah: number; no_embrace?: string; keterangan?: string }) =>
     req<{ success: boolean; id: number; saldo_stock: number }>("/api/oli", { method: "POST", body: JSON.stringify(payload) }),
   updateOli: (id: number, payload: Record<string, unknown>) => req<{ success: boolean }>(`/api/oli/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
   deleteOli: (id: number) => req<{ success: boolean }>(`/api/oli/${id}`, { method: "DELETE" }),
@@ -789,6 +805,8 @@ export const api = {
   },
 
   createBbmTransaction: (payload: {
+    // Foto bukti (uploadEvidence) - required by the server.
+    evidence_id: string;
     jenis_bbm: "SOLAR" | "BENSIN";
     lokasi: string;
     tanggal_iso: string;
@@ -847,10 +865,13 @@ export const api = {
     req<{ data: Pinjaman[]; total: number }>(`/api/pinjaman?${new URLSearchParams(params as any)}`),
   pinjamanBarang: (module: OpnameModule, estate: string, search: string) =>
     req<PinjamanBarang[]>(`/api/pinjaman/barang?${new URLSearchParams({ module, estate, search })}`),
-  createPinjaman: (payload: { module: OpnameModule; dari: string; ke: string; kode: string; qty: number; alasan: string }) =>
+  createPinjaman: (payload: { evidence_id: string; module: OpnameModule; dari: string; ke: string; kode: string; qty: number; alasan: string }) =>
     req<{ success: boolean; id: number }>("/api/pinjaman", { method: "POST", body: JSON.stringify(payload) }),
-  kembalikanPinjaman: (id: number, qty: number, note: string) =>
-    req<{ success: boolean }>(`/api/pinjaman/${id}/kembali`, { method: "POST", body: JSON.stringify({ qty, note }) }),
+  kembalikanPinjaman: (id: number, qty: number, note: string, evidence_id: string) =>
+    req<{ success: boolean }>(`/api/pinjaman/${id}/kembali`, { method: "POST", body: JSON.stringify({ qty, note, evidence_id }) }),
+
+  // Foto bukti: a data URL (already shrunk, see lib/evidence.ts) -> the id a transaction refers to.
+  uploadEvidence: (data: string) => req<{ id: string }>("/api/evidence", { method: "POST", body: JSON.stringify({ data }) }),
   batalPinjaman: (id: number, note: string) =>
     req<{ success: boolean }>(`/api/pinjaman/${id}/batal`, { method: "POST", body: JSON.stringify({ note }) }),
 

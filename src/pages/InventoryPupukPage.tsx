@@ -11,6 +11,7 @@ import { fetchAllRows, type TableReport } from "../lib/printTable";
 import { useDragScroll } from "../hooks/useDragScroll";
 import { useAuth } from "../context/AuthContext";
 import { can } from "../lib/access";
+import { EvidenceLink } from "../components/EvidenceInput";
 
 const localIso = (d: Date) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -333,7 +334,7 @@ export function InventoryPupukPage({ estate }: { estate: string }) {
                       {r.saldo_stock !== null ? r.saldo_stock.toLocaleString("id-ID", { maximumFractionDigits: 2 }) : "-"}
                     </td>
                     <td className="px-4 py-2.5 text-[var(--text-secondary)] text-xs max-w-[260px] truncate" title={r.keterangan}>
-                      {r.keterangan || "-"}
+                      <EvidenceLink id={r.evidence_id} /> {r.keterangan || "-"}
                     </td>
                     <td className="px-4 py-2.5 text-xs whitespace-nowrap">{r.blok || "-"}</td>
                     <td className="px-4 py-2.5 text-right text-xs">{r.ha != null ? r.ha.toLocaleString("id-ID", { maximumFractionDigits: 2 }) : "-"}</td>

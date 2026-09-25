@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { X } from "lucide-react";
 import { api, errorText, type BbmSummary } from "../lib/api";
 import { AlatAutocomplete, type AlatOption } from "./AlatAutocomplete";
+import { EvidenceInput, useEvidenceEnabled } from "./EvidenceInput";
 
 const JENIS_OPTIONS = ["SOLAR", "BENSIN"] as const;
 // BBM storage sites (see BBM_LOKASI_OPTIONS in server/src/app.ts). Sub-locations like AKSS/UKM are
@@ -37,6 +38,8 @@ export function BbmTransactionModal({
   const [estateOptions, setEstateOptions] = useState<string[]>([]);
   const [kodeKendaraan, setKodeKendaraan] = useState("");
   const [hmTerakhir, setHmTerakhir] = useState("");
+  const [evidenceId, setEvidenceId] = useState<string | null>(null);
+  const evidenceOn = useEvidenceEnabled();
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
@@ -63,6 +66,7 @@ export function BbmTransactionModal({
       keluar && !isGenset && !hmTerakhir.trim() && "HM/KM Terakhir",
       !noSpb.trim() && "No. SPB",
       !keterangan.trim() && "Keterangan",
+      evidenceOn && !evidenceId && "Foto Bukti",
     ].filter(Boolean);
     if (missing.length) {
       setError(`Wajib diisi: ${missing.join(", ")}`);
@@ -79,6 +83,7 @@ export function BbmTransactionModal({
     setSubmitting(true);
     try {
       await api.createBbmTransaction({
+        evidence_id: evidenceId ?? "",
         jenis_bbm: jenisBbm,
         lokasi,
         tanggal_iso: tanggal,
@@ -263,6 +268,8 @@ export function BbmTransactionModal({
               />
             </div>
           </div>
+
+          <EvidenceInput value={evidenceId} onChange={setEvidenceId} />
 
           {error && <p className="text-xs text-[var(--accent-red)]">{error}</p>}
 

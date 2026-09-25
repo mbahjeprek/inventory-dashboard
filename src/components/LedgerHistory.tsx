@@ -8,6 +8,7 @@ import { fetchAllRows, type TableReport } from "../lib/printTable";
 import { useDragScroll } from "../hooks/useDragScroll";
 import { useAuth } from "../context/AuthContext";
 import { can } from "../lib/access";
+import { EvidenceLink } from "./EvidenceInput";
 
 const formatWaktu = (iso: string) =>
   new Date(iso).toLocaleString("id-ID", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
@@ -218,7 +219,7 @@ export function LedgerHistory({ scope, type, refreshKey }: { scope: StockScope; 
                           Dibuang (expired)
                         </span>
                       )}
-                      {r.note || (r.is_correction || r.tujuan === "DIBUANG" ? "" : "-")}
+                      <EvidenceLink id={r.evidence_id} /> {r.note || (r.is_correction || r.tujuan === "DIBUANG" ? "" : "-")}
                       {isKlinik && r.alloc && r.alloc.length > 0 && (
                         <div className="text-[11px] text-[var(--text-muted)] mt-0.5">
                           Batch exp:{" "}
