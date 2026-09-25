@@ -56,6 +56,18 @@ export const PERM_TEMPLATES: { label: string; perms: string[] }[] = [
   { label: "Semua modul (penuh)", perms: MODULES.flatMap((m) => MODULE_ACTIONS[m].map((a) => modulePerm(m, a))) },
 ];
 
+// Add-on presets for Stok Opname: add the action (with Lihat) to every module the account already
+// has something ticked in, or to every module when nothing is ticked yet. Other boxes stay as they are.
+export const OPNAME_TEMPLATES: { label: string; action: "opname" | "approve" }[] = [
+  { label: "+ Hitung Opname", action: "opname" },
+  { label: "+ Approve Opname", action: "approve" },
+];
+export function addOpnamePerm(perms: string[], action: "opname" | "approve"): string[] {
+  const held = MODULES.filter((m) => perms.some((p) => p.startsWith(`${m.toLowerCase()}.`)));
+  const mods = held.length ? held : [...MODULES];
+  return [...new Set([...perms, ...mods.flatMap((m) => [modulePerm(m, "view"), modulePerm(m, action)])])];
+}
+
 export function can(user: AuthUser | null, perm: string): boolean {
   if (!user) return false;
   return user.role === "superuser" || (user.perms ?? []).includes(perm);

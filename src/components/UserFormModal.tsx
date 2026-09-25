@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { X } from "lucide-react";
 import { api, ESTATES, type UserAccount, type Role } from "../lib/api";
-import { ACTIONS, MODULES, MODULE_ACTIONS, MODULE_LABELS, OTHER_PERMS, PERM_TEMPLATES, modulePerm, type Action, type Module } from "../lib/access";
+import { ACTIONS, MODULES, MODULE_ACTIONS, MODULE_LABELS, OTHER_PERMS, PERM_TEMPLATES, OPNAME_TEMPLATES, addOpnamePerm, modulePerm, type Action, type Module } from "../lib/access";
 import { PasswordInput } from "./PasswordInput";
 import { useAuth } from "../context/AuthContext";
 
@@ -157,6 +157,17 @@ export function UserFormModal({
                         type="button"
                         onClick={() => setPerms((cur) => [...cur.filter((p) => !MODULES.some((m) => p.startsWith(`${m.toLowerCase()}.`))), ...t.perms])}
                         className="text-[11px] px-2 py-1 rounded border border-[var(--accent-blue-border)] text-[var(--accent-blue)] hover:bg-[var(--accent-blue-bg)]"
+                      >
+                        {t.label}
+                      </button>
+                    ))}
+                    {OPNAME_TEMPLATES.map((t) => (
+                      <button
+                        key={t.label}
+                        type="button"
+                        title="Tambahkan ke modul yang sudah dicentang (atau semua modul kalau belum ada)"
+                        onClick={() => setPerms((cur) => addOpnamePerm(cur, t.action))}
+                        className="text-[11px] px-2 py-1 rounded border border-[var(--accent-green-border)] text-[var(--accent-green)] hover:bg-[var(--accent-green-bg)]"
                       >
                         {t.label}
                       </button>
