@@ -141,6 +141,8 @@ function requiredPerms(req: express.Request): Need {
   if (is(/^\/auth\//) || is(/^\/karyawan\/pick$/) || is(/^\/alat-berat\/pick$/)) return null;
   // Stok Opname: each route checks the opname's own module (view / opname / approve) and estate.
   if (is(/^\/stock-opname(\/|$)/)) return null;
+  // Pinjaman antar estate: each route checks the loan's module (view / input) and estates itself.
+  if (is(/^\/pinjaman(\/|$)/)) return null;
   if (is(/^\/(stock-correction|gudang-stock\/correction)$/)) return ["gudang.koreksi"];
   if (is(/^\/klinik-stock\/correction$/)) return ["klinik.koreksi"];
   // items = the master barang list, which is also Nilam's gudang stock.
@@ -211,9 +213,44 @@ async function stockLocations(req: express.Request): Promise<StockLocation[]> {
   if (p === "/pupuk" && m === "POST") return P(b.estate);
   if (/^\/pupuk\/\d+$/.test(p)) return P(await col("pupuk_log", "estate"));
   if (p === "/oli" && m === "POST") return O(b.estate);
+  // Pinjaman: both the lending and the borrowing estate's stock move.
+  const loanAt = (module: unknown, ...estates: unknown[]) =>
+    OPNAME_MODULES_LIST.includes(module as OpnameModule) ? estates.flatMap(at(module as OpnameModule)) : [];
+  if (p === "/pinjaman" && m === "POST") return loanAt(b.module, b.dari, b.ke);
+  if (/^\/pinjaman\/\d+\/(kembali|batal)$/.test(p)) {
+    const l = await queryOne<any>("SELECT module, dari_estate, ke_estate FROM pinjaman WHERE id = @id", { id: p.split("/")[2] });
+    return l ? loanAt(l.module, l.dari_estate, l.ke_estate) : [];
+  }
   if (/^\/oli\/\d+$/.test(p)) return O(await col("oli_log", "estate"));
   return [];
 }
+
+const OPNAME_MODULES_LIST: OpnameModule[] = ["GUDANG", "KLINIK", "BBM", "PUPUK", "OLI"];
+
+// Movement rows booked by a Pinjaman (pinjaman_id set) only change through the Pinjaman page, so the
+// loan and both estates' stock stay in step.
+const PINJAMAN_ROWS: [RegExp, string][] = [
+  [/^\/transactions\/(\d+)$/, "transactions"],
+  [/^\/stock-in\/(\d+)$/, "stock_in_log"],
+  [/^\/stock-out\/(\d+)$/, "stock_out_log"],
+  [/^\/gudang-stock\/history\/(\d+)$/, "gudang_stock_tx"],
+  [/^\/klinik-stock\/history\/(\d+)$/, "klinik_stock_tx"],
+  [/^\/bbm\/(\d+)$/, "bbm_log"],
+  [/^\/pupuk\/(\d+)$/, "pupuk_log"],
+  [/^\/oli\/(\d+)$/, "oli_log"],
+];
+app.use("/api", async (req, res, next) => {
+  if (req.method !== "PUT" && req.method !== "DELETE") return next();
+  const p = (req.baseUrl + req.path).replace(/^\/api/, "");
+  for (const [re, table] of PINJAMAN_ROWS) {
+    const id = p.match(re)?.[1];
+    if (!id) continue;
+    const row = await queryOne<{ pinjaman_id: number | null }>(`SELECT pinjaman_id FROM ${table} WHERE id = @id`, { id });
+    if (row?.pinjaman_id)
+      return res.status(409).json({ error: `Transaksi ini bagian dari Pinjaman #${row.pinjaman_id}. Kelola lewat menu Pinjaman Antar Estate.` });
+  }
+  next();
+});
 
 const OPNAME_MODULE_LABEL: Record<OpnameModule, string> = { GUDANG: "Gudang", KLINIK: "Klinik", BBM: "BBM", PUPUK: "Pupuk", OLI: "Oli" };
 
@@ -439,19 +476,19 @@ app.get("/api/top-keluar", async (req, res) => {
     const parts: string[] = [];
     if (allowed.includes("NILAM")) {
       parts.push(`SELECT s.kode, s.qty FROM stock_out_log s
-        WHERE s.kode IS NOT NULL AND s.tanggal_keluar_iso BETWEEN @dateFrom AND @dateTo`);
+        WHERE s.kode IS NOT NULL AND s.pinjaman_id IS NULL AND s.tanggal_keluar_iso BETWEEN @dateFrom AND @dateTo`);
     }
     params.gudangs = allowed.filter((e) => GUDANG_STOCK_OPTIONS.includes(e));
     if (params.gudangs.length) {
       parts.push(`SELECT t.item_kode, t.qty FROM gudang_stock_tx t
-        WHERE t.type = 'OUT' AND t.is_correction = 0 AND t.gudang = ANY(@gudangs::text[]) AND ${txDate}`);
+        WHERE t.type = 'OUT' AND t.is_correction = 0 AND t.pinjaman_id IS NULL AND t.gudang = ANY(@gudangs::text[]) AND ${txDate}`);
     }
     srcSql = parts.join(" UNION ALL ");
     master = "items";
   } else {
     params.kliniks = allowed;
     srcSql = `SELECT t.obat_kode, t.qty FROM klinik_stock_tx t
-      WHERE t.type = 'OUT' AND t.is_correction = 0 AND COALESCE(t.tujuan, '') <> 'DIBUANG' AND t.klinik = ANY(@kliniks::text[]) AND ${txDate}`;
+      WHERE t.type = 'OUT' AND t.is_correction = 0 AND t.pinjaman_id IS NULL AND COALESCE(t.tujuan, '') <> 'DIBUANG' AND t.klinik = ANY(@kliniks::text[]) AND ${txDate}`;
     master = "obat";
   }
 
@@ -878,6 +915,8 @@ type Movement = {
   is_correction: number;
   // Only on gudang_stock_tx: the Nilam Stok Keluar (transactions.id) this Stok Masuk came from.
   transferFromId?: number;
+  // The Pinjaman antar estate this movement belongs to (see "Pinjaman" at the end).
+  pinjamanId?: number;
 };
 
 // Applies one movement to a location's stock, creating its stock row on first use.
@@ -895,9 +934,10 @@ async function applyMovement(client: PoolClient, req: express.Request, l: StockL
     client
   ))!;
   const link = m.transferFromId !== undefined;
+  const loan = m.pinjamanId !== undefined;
   await execute(
-    `INSERT INTO ${l.tx} (${l.scope}, ${l.item}, type, qty, tujuan, penerima, note, is_correction, user_id${link ? ", transfer_from_id" : ""})
-     VALUES (@scope, @item, @type, @qty, @tujuan, @penerima, @note, @is_correction, @user_id${link ? ", @transferFromId" : ""})`,
+    `INSERT INTO ${l.tx} (${l.scope}, ${l.item}, type, qty, tujuan, penerima, note, is_correction, user_id${link ? ", transfer_from_id" : ""}${loan ? ", pinjaman_id" : ""})
+     VALUES (@scope, @item, @type, @qty, @tujuan, @penerima, @note, @is_correction, @user_id${link ? ", @transferFromId" : ""}${loan ? ", @pinjamanId" : ""})`,
     { ...m, user_id: req.user!.id },
     client
   );
@@ -4237,3 +4277,349 @@ app.delete("/api/master-oli/:id", async (req, res) => {
   await logActivity(req, { module: "OLI", estate: null, aksi: "Hapus Jenis Oli", objek: `${existing.kode} - ${existing.nama}` });
   res.json({ success: true });
 });
+
+// ---- Pinjaman antar estate (see schema.sql pinjaman) ----
+// Estate A lends estate B stock of one item: A gets a Stok Keluar and B a Stok Masuk at once (no
+// confirmation step). B returns the same item, all at once or in parts, which books the reverse
+// until the loan is LUNAS; a loan nothing came back on yet can be cancelled (Batal = full return).
+// Anyone with the module's Input permission in one of the two estates may record either step.
+type LoanModule = OpnameModule;
+type LoanRow = {
+  id: number;
+  module: LoanModule;
+  kode: string;
+  nama: string;
+  satuan: string;
+  dari_estate: string;
+  ke_estate: string;
+  qty: number;
+  qty_kembali: number;
+  status: "DIPINJAM" | "LUNAS" | "BATAL";
+  alasan: string;
+  tanggal_iso: string;
+};
+const loanPerm = (m: LoanModule, a: "view" | "input") => `${m.toLowerCase()}.${a}`;
+const canLoan = (user: SessionUser, m: LoanModule, a: "view" | "input") => user.role === "superuser" || user.perms.includes(loanPerm(m, a));
+// Nilam's gudang (items), Klinik and BBM count whole units; the other gudang, pupuk and oli decimals.
+const loanWhole = (m: LoanModule, a: string, b: string) => m === "KLINIK" || m === "BBM" || (m === "GUDANG" && (a === "NILAM" || b === "NILAM"));
+const jakartaToday = () => new Date(Date.now() + 7 * 3600_000).toISOString().slice(0, 10);
+
+type LoanItem = { kode: string; nama: string; satuan: string; stok: number };
+
+// What the lender has of `kode` now (and its name / satuan); null = not in the master data.
+async function loanItem(module: LoanModule, estate: string, kode: string, client?: PoolClient): Promise<LoanItem | null | undefined> {
+  if (module === "GUDANG") {
+    return queryOne<LoanItem>(
+      `SELECT i.kode, i.nama, COALESCE(i.satuan, '') satuan,
+         ${estate === "NILAM" ? "COALESCE(i.stock_tersedia, 0)" : "COALESCE(gs.stock_tersedia, 0)"}::float8 stok
+       FROM items i LEFT JOIN gudang_stock gs ON gs.item_kode = i.kode AND gs.gudang = @estate WHERE i.kode = @kode`,
+      { estate, kode },
+      client
+    );
+  }
+  if (module === "KLINIK") {
+    return queryOne<LoanItem>(
+      `SELECT o.kode, o.nama, COALESCE(o.satuan, '') satuan, COALESCE(ks.stock_tersedia, 0)::float8 stok
+       FROM obat o LEFT JOIN klinik_stock ks ON ks.obat_kode = o.kode AND ks.klinik = @estate WHERE o.kode = @kode`,
+      { estate, kode },
+      client
+    );
+  }
+  if (module === "BBM" && !BBM_JENIS.includes(kode)) return null;
+  if (module === "OLI" && !(await queryOne("SELECT 1 FROM master_oli WHERE nama = @kode", { kode }, client))) return null;
+  const stok = (await latestSaldoRow(module as SaldoModule, estate, kode, client))?.saldo_stock ?? 0;
+  return { kode, nama: kode, satuan: module === "PUPUK" ? "KG" : "LTR", stok };
+}
+
+// One side of a loan movement: `type` OUT at the estate giving, IN at the estate receiving. Klinik
+// OUT takes the batches expiring first and returns them, so the IN side can add the same batches.
+async function loanMove(
+  client: PoolClient,
+  req: express.Request,
+  l: { module: LoanModule; estate: string; kode: string; type: "IN" | "OUT"; qty: number; note: string; pinjamanId: number; alloc?: Alloc[] }
+): Promise<Alloc[] | undefined> {
+  const short = (have: number) => new StockError(`Stok ${l.kode} di ${l.estate} hanya ${round3(have)}`);
+  if (l.module === "GUDANG" && l.estate === "NILAM") {
+    const item = await queryOne<any>("SELECT * FROM items WHERE kode = @kode FOR UPDATE", { kode: l.kode }, client);
+    if (!item) throw new StockError(`Barang ${l.kode} tidak ada di master data`);
+    if (l.type === "OUT" && item.stock_tersedia < l.qty) throw short(item.stock_tersedia);
+    const tx = await queryOne<{ id: number }>(
+      `INSERT INTO transactions (item_id, tujuan, type, qty, note, penerima, pinjaman_id)
+       VALUES (@item_id, 'PINJAMAN', @type, @qty, @note, '', @pid) RETURNING id`,
+      { item_id: item.id, type: l.type, qty: l.qty, note: l.note, pid: l.pinjamanId },
+      client
+    );
+    const mirror = await mirrorTransaction(client, item, l.type, "PINJAMAN", l.qty, l.note, "");
+    await execute(`UPDATE ${mirror.source} SET pinjaman_id = @pid WHERE id = @id`, { pid: l.pinjamanId, id: mirror.id }, client);
+    await execute("UPDATE transactions SET mirror_source = @s, mirror_id = @m WHERE id = @id", { s: mirror.source, m: mirror.id, id: tx!.id }, client);
+    await applyStockEffect(client, item.id, l.type, l.qty, 1);
+    return undefined;
+  }
+  if (l.module === "GUDANG") {
+    const before = await applyMovement(client, req, GUDANG_LEDGER, {
+      scope: l.estate,
+      item: l.kode,
+      type: l.type,
+      qty: l.qty,
+      tujuan: "PINJAMAN",
+      penerima: "",
+      note: l.note,
+      is_correction: 0,
+      pinjamanId: l.pinjamanId,
+    });
+    if (l.type === "OUT" && before < l.qty) throw short(before);
+    return undefined;
+  }
+  if (l.module === "KLINIK") {
+    let alloc: Alloc[];
+    if (l.type === "OUT") alloc = await takeFromBatches(client, l.estate, l.kode, l.qty);
+    else {
+      alloc = l.alloc ?? [{ exp: "", qty: l.qty }];
+      for (const a of alloc) await addToBatch(client, l.estate, l.kode, a.exp, a.qty);
+    }
+    await execute(
+      `INSERT INTO klinik_stock_tx (klinik, obat_kode, type, qty, tujuan, penerima, note, is_correction, user_id, alloc, pinjaman_id)
+       VALUES (@klinik, @obat, @type, @qty, 'PINJAMAN', '', @note, 0, @uid, @alloc::jsonb, @pid)`,
+      { klinik: l.estate, obat: l.kode, type: l.type, qty: l.qty, note: l.note, uid: req.user!.id, alloc: JSON.stringify(alloc), pid: l.pinjamanId },
+      client
+    );
+    await syncKlinikStock(client, l.estate, l.kode);
+    return alloc;
+  }
+
+  // BBM / pupuk / oli: a saldo row with the qty in `pinjam`, dated today (or after the latest row so
+  // it becomes the saldo). A BBM Stok Keluar can't exceed the saldo, like on the BBM page.
+  const module = l.module as SaldoModule;
+  const t = SALDO_LEDGER[module];
+  const before = (await latestSaldoRow(module, l.estate, l.kode, client))?.saldo_stock ?? 0;
+  if (module === "BBM" && l.type === "OUT" && before < l.qty) throw short(before);
+  const signed = l.type === "IN" ? l.qty : -l.qty;
+  const lastIso =
+    (
+      await queryOne<{ d: string | null }>(
+        `SELECT MAX(tanggal_iso) d FROM ${t.table} WHERE ${t.jenis} = @jenis AND ${t.estate} = @estate`,
+        { jenis: l.kode, estate: l.estate },
+        client
+      )
+    )?.d ?? "";
+  const today = jakartaToday();
+  const iso = lastIso > today ? lastIso : today;
+  const p = { estate: l.estate, jenis: l.kode, iso, saldo: round3(before + signed), pinjam: signed, note: l.note, pid: l.pinjamanId };
+  if (module === "BBM") {
+    const { tanggal, periode } = isoToIndoDate(iso);
+    await execute(
+      `INSERT INTO bbm_log (jenis_bbm, lokasi, estate, periode, tanggal, tanggal_iso, no_spb, pinjam, saldo_stock, keterangan, kode_kendaraan, hm_terakhir, pinjaman_id)
+       VALUES (@jenis, @estate, @estate, @periode, @tanggal, @iso, '', @pinjam, @saldo, @note, '', '', @pid)`,
+      { ...p, tanggal, periode },
+      client
+    );
+    return undefined;
+  }
+  const [y, m, d] = iso.split("-");
+  const date = { periode: `${INDO_MONTHS[Number(m) - 1]} ${y}`, tanggal: `${d}/${m}/${y}` };
+  if (module === "OLI") {
+    await execute(
+      `INSERT INTO oli_log (estate, jenis_oli, periode, tanggal, tanggal_iso, no_embrace, pinjam, saldo_stock, keterangan, pinjaman_id)
+       VALUES (@estate, @jenis, @periode, @tanggal, @iso, '', @pinjam, @saldo, @note, @pid)`,
+      { ...p, ...date },
+      client
+    );
+  } else {
+    await execute(
+      `INSERT INTO pupuk_log (estate, jenis_pupuk, periode, tanggal, tanggal_iso, divisi, no_embrace, kode_barang, pinjam, saldo_stock, keterangan, blok, pinjaman_id)
+       VALUES (@estate, @jenis, @periode, @tanggal, @iso, '', '', '', @pinjam, @saldo, @note, '', @pid)`,
+      { ...p, ...date },
+      client
+    );
+  }
+  return undefined;
+}
+
+const loanObjek = (l: Pick<LoanRow, "id" | "kode" | "nama">) => `Pinjaman #${l.id} - ${l.kode === l.nama ? l.nama : `${l.kode} - ${l.nama}`}`;
+const fmtLoanQty = (n: number, satuan: string) => `${round3(n).toLocaleString("id-ID")} ${satuan}`;
+
+// Moves `qty` of loan `l`'s item from `from` to `to` (the loan itself, or a return the other way).
+async function loanTransfer(client: PoolClient, req: express.Request, l: LoanRow, from: string, to: string, qty: number, outNote: string, inNote: string) {
+  const alloc = await loanMove(client, req, { module: l.module, estate: from, kode: l.kode, type: "OUT", qty, note: outNote, pinjamanId: l.id });
+  await loanMove(client, req, { module: l.module, estate: to, kode: l.kode, type: "IN", qty, note: inNote, pinjamanId: l.id, alloc });
+}
+
+// Logged in both estates' activity log.
+async function logLoan(req: express.Request, l: LoanRow, aksi: string, detail: string) {
+  const objek = loanObjek(l);
+  const module = OPNAME_LOG_MODULE[l.module];
+  await logActivities(req, [
+    { module, estate: l.dari_estate, aksi, objek, detail },
+    { module, estate: l.ke_estate, aksi, objek, detail },
+  ]);
+}
+
+app.get("/api/pinjaman", async (req, res) => {
+  const { module = "", estate = "", status = "", page = "1", pageSize = "50" } = req.query as Record<string, string>;
+  const u = req.user!;
+  const modules = OPNAME_MODULES_LIST.filter((m) => canLoan(u, m, "view") && (!module || m === module));
+  const estates = u.estates.filter((e) => !estate || e === estate);
+  if (!modules.length || !estates.length) return res.json({ data: [], total: 0 });
+  const conditions = ["p.module = ANY(@modules::text[])", "(p.dari_estate = ANY(@estates::text[]) OR p.ke_estate = ANY(@estates::text[]))"];
+  if (status === "OPEN") conditions.push("p.status = 'DIPINJAM'");
+  else if (["LUNAS", "BATAL"].includes(status)) conditions.push("p.status = @status");
+  const where = `WHERE ${conditions.join(" AND ")}`;
+  const params = { modules, estates, status };
+  const total = (await queryOne<{ c: number }>(`SELECT COUNT(*)::int c FROM pinjaman p ${where}`, params))!.c;
+  const limit = Math.min(parseInt(pageSize) || 50, 200);
+  const offset = (Math.max(parseInt(page) || 1, 1) - 1) * limit;
+  const data = await queryMany(
+    `SELECT p.*, COALESCE(u.nama, u.username, '') AS dibuat_oleh,
+       COALESCE((SELECT json_agg(json_build_object('qty', k.qty, 'tanggal_iso', k.tanggal_iso, 'note', k.note, 'batal', k.batal,
+                   'oleh', COALESCE(ku.nama, ku.username, '')) ORDER BY k.id)
+                 FROM pinjaman_kembali k LEFT JOIN users ku ON ku.id = k.user_id WHERE k.pinjaman_id = p.id), '[]') AS kembali
+     FROM pinjaman p LEFT JOIN users u ON u.id = p.user_id ${where}
+     ORDER BY (p.status = 'DIPINJAM') DESC, p.id DESC LIMIT @limit OFFSET @offset`,
+    { ...params, limit, offset }
+  );
+  res.json({ data, total });
+});
+
+// The items the lender can lend: its stock of that module (only stock > 0 for gudang / klinik).
+app.get("/api/pinjaman/barang", async (req, res) => {
+  const { module = "", estate = "", search = "" } = req.query as Record<string, string>;
+  const m = module as LoanModule;
+  if (!OPNAME_MODULES_LIST.includes(m)) return res.status(400).json({ error: "Modul tidak valid" });
+  if (!(ESTATES as readonly string[]).includes(estate)) return res.status(400).json({ error: "Estate tidak valid" });
+  if (!canLoan(req.user!, m, "input")) return res.status(403).json({ error: "Akses ditolak" });
+  const like = `%${search}%`;
+  if (m === "GUDANG") {
+    const data =
+      estate === "NILAM"
+        ? await queryMany(
+            `SELECT kode, nama, COALESCE(satuan, '') satuan, stock_tersedia::float8 stok FROM items
+             WHERE stock_tersedia > 0 AND (@search = '' OR kode ILIKE @like OR nama ILIKE @like) ORDER BY nama LIMIT 30`,
+            { search, like }
+          )
+        : await queryMany(
+            `SELECT i.kode, i.nama, COALESCE(i.satuan, '') satuan, gs.stock_tersedia::float8 stok FROM gudang_stock gs JOIN items i ON i.kode = gs.item_kode
+             WHERE gs.gudang = @estate AND gs.stock_tersedia > 0 AND (@search = '' OR i.kode ILIKE @like OR i.nama ILIKE @like) ORDER BY i.nama LIMIT 30`,
+            { estate, search, like }
+          );
+    return res.json(data);
+  }
+  if (m === "KLINIK") {
+    return res.json(
+      await queryMany(
+        `SELECT o.kode, o.nama, COALESCE(o.satuan, '') satuan, ks.stock_tersedia::float8 stok FROM klinik_stock ks JOIN obat o ON o.kode = ks.obat_kode
+         WHERE ks.klinik = @estate AND ks.stock_tersedia > 0 AND (@search = '' OR o.kode ILIKE @like OR o.nama ILIKE @like) ORDER BY o.nama LIMIT 30`,
+        { estate, search, like }
+      )
+    );
+  }
+  const jenis =
+    m === "BBM"
+      ? BBM_JENIS
+      : m === "OLI"
+        ? (await queryMany<{ v: string }>("SELECT nama v FROM master_oli ORDER BY nama")).map((r) => r.v)
+        : (await queryMany<{ v: string }>("SELECT DISTINCT jenis_pupuk v FROM pupuk_log WHERE estate = @estate ORDER BY 1", { estate })).map((r) => r.v);
+  const data: LoanItem[] = [];
+  for (const j of jenis) {
+    const it = await loanItem(m, estate, j);
+    if (it && (!search || it.nama.toLowerCase().includes(search.toLowerCase()))) data.push(it);
+  }
+  res.json(data);
+});
+
+app.post("/api/pinjaman", async (req, res) => {
+  const { module, dari, ke, kode } = req.body;
+  const alasan = String(req.body.alasan ?? "").trim();
+  const qty = Number(req.body.qty);
+  const u = req.user!;
+  const m = module as LoanModule;
+  if (!OPNAME_MODULES_LIST.includes(m)) return res.status(400).json({ error: "Modul tidak valid" });
+  if (!(ESTATES as readonly string[]).includes(dari) || !(ESTATES as readonly string[]).includes(ke)) return res.status(400).json({ error: "Estate tidak valid" });
+  if (dari === ke) return res.status(400).json({ error: "Estate peminjam harus beda dengan estate yang meminjamkan" });
+  if (!canLoan(u, m, "input") || !(estateAllowed(u, dari) || estateAllowed(u, ke))) return res.status(403).json({ error: "Akses ditolak" });
+  if (!Number.isFinite(qty) || qty <= 0) return res.status(400).json({ error: "Jumlah harus lebih dari 0" });
+  if (loanWhole(m, dari, ke) && !Number.isInteger(qty)) return res.status(400).json({ error: "Jumlah harus bilangan bulat" });
+  if (!alasan) return res.status(400).json({ error: "Alasan wajib diisi" });
+  const item = await loanItem(m, dari, String(kode ?? ""));
+  if (!item) return res.status(404).json({ error: "Barang tidak ditemukan di master data" });
+
+  let loan: LoanRow;
+  try {
+    loan = await withTransaction(async (client) => {
+      const l = (await queryOne<LoanRow>(
+        `INSERT INTO pinjaman (module, kode, nama, satuan, dari_estate, ke_estate, qty, alasan, tanggal_iso, user_id)
+         VALUES (@module, @kode, @nama, @satuan, @dari, @ke, @qty, @alasan, @today, @uid) RETURNING *`,
+        { module: m, kode: item.kode, nama: item.nama, satuan: item.satuan, dari, ke, qty: round3(qty), alasan, today: jakartaToday(), uid: u.id },
+        client
+      ))!;
+      await loanTransfer(client, req, l, dari, ke, l.qty, `Dipinjamkan ke ${ke} (Pinjaman #${l.id}): ${alasan}`, `Pinjam dari ${dari} (Pinjaman #${l.id}): ${alasan}`);
+      return l;
+    });
+  } catch (e) {
+    if (e instanceof StockError) return res.status(400).json({ error: e.message });
+    throw e;
+  }
+  await logLoan(req, loan, "Pinjaman Baru", `${dari} meminjamkan ${fmtLoanQty(loan.qty, loan.satuan)} ke ${ke}; Alasan: ${alasan}`);
+  res.json({ success: true, id: loan.id });
+});
+
+// A return (may be partial) or a cancel: the borrower gives the qty back to the lender.
+async function loanBack(req: express.Request, res: express.Response, batal: boolean) {
+  const u = req.user!;
+  const note = String(req.body.note ?? "").trim();
+  const l = await queryOne<LoanRow>("SELECT * FROM pinjaman WHERE id = @id", { id: req.params.id });
+  if (!l) return res.status(404).json({ error: "Pinjaman tidak ditemukan" });
+  if (!canLoan(u, l.module, "input") || !(estateAllowed(u, l.dari_estate) || estateAllowed(u, l.ke_estate)))
+    return res.status(403).json({ error: "Akses ditolak" });
+  if (l.status !== "DIPINJAM") return res.status(400).json({ error: `Pinjaman ini sudah ${l.status === "LUNAS" ? "lunas" : "dibatalkan"}` });
+  const sisa = round3(l.qty - l.qty_kembali);
+  if (batal && l.qty_kembali > 0) return res.status(400).json({ error: "Sudah ada pengembalian, pinjaman tidak bisa dibatalkan. Kembalikan sisanya." });
+  if (batal && !note) return res.status(400).json({ error: "Alasan pembatalan wajib diisi" });
+  const qty = batal ? sisa : Number(req.body.qty);
+  if (!Number.isFinite(qty) || qty <= 0) return res.status(400).json({ error: "Jumlah harus lebih dari 0" });
+  if (qty > sisa) return res.status(400).json({ error: `Sisa pinjaman hanya ${fmtLoanQty(sisa, l.satuan)}` });
+  if (loanWhole(l.module, l.dari_estate, l.ke_estate) && !Number.isInteger(qty)) return res.status(400).json({ error: "Jumlah harus bilangan bulat" });
+
+  const lunas = round3(l.qty_kembali + qty) >= l.qty;
+  const tag = `Pinjaman #${l.id}${note ? `: ${note}` : ""}`;
+  try {
+    await withTransaction(async (client) => {
+      const cur = await queryOne<{ status: string; qty_kembali: number }>("SELECT status, qty_kembali FROM pinjaman WHERE id = @id FOR UPDATE", { id: l.id }, client);
+      if (cur!.status !== "DIPINJAM" || cur!.qty_kembali !== l.qty_kembali) throw new StockError("Pinjaman ini baru saja berubah, muat ulang halaman");
+      await loanTransfer(
+        client,
+        req,
+        l,
+        l.ke_estate,
+        l.dari_estate,
+        qty,
+        batal ? `Batal pinjam dari ${l.dari_estate} (${tag})` : `Kembalikan pinjaman ke ${l.dari_estate} (${tag})`,
+        batal ? `Batal dipinjamkan ke ${l.ke_estate} (${tag})` : `Pengembalian pinjaman dari ${l.ke_estate} (${tag})`
+      );
+      await execute(
+        "INSERT INTO pinjaman_kembali (pinjaman_id, qty, tanggal_iso, note, batal, user_id) VALUES (@id, @qty, @today, @note, @batal, @uid)",
+        { id: l.id, qty, today: jakartaToday(), note, batal, uid: u.id },
+        client
+      );
+      await execute(
+        "UPDATE pinjaman SET qty_kembali = @k, status = @s WHERE id = @id",
+        { id: l.id, k: batal ? 0 : round3(l.qty_kembali + qty), s: batal ? "BATAL" : lunas ? "LUNAS" : "DIPINJAM" },
+        client
+      );
+    });
+  } catch (e) {
+    if (e instanceof StockError) return res.status(400).json({ error: e.message });
+    throw e;
+  }
+  await logLoan(
+    req,
+    l,
+    batal ? "Batal Pinjaman" : "Pengembalian Pinjaman",
+    batal
+      ? `${fmtLoanQty(qty, l.satuan)} kembali ke ${l.dari_estate}; Alasan: ${note}`
+      : `${l.ke_estate} mengembalikan ${fmtLoanQty(qty, l.satuan)} ke ${l.dari_estate}; ${lunas ? "Lunas" : `sisa ${fmtLoanQty(sisa - qty, l.satuan)}`}${note ? `; Catatan: ${note}` : ""}`
+  );
+  res.json({ success: true });
+}
+
+app.post("/api/pinjaman/:id/kembali", (req, res) => loanBack(req, res, false));
+app.post("/api/pinjaman/:id/batal", (req, res) => loanBack(req, res, true));

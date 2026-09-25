@@ -20,6 +20,7 @@ import { MasterObatPage } from "./pages/MasterObatPage";
 import { MasterOliPage } from "./pages/MasterOliPage";
 import { UserActivityPage } from "./pages/UserActivityPage";
 import { StokOpnamePage } from "./pages/StokOpnamePage";
+import { PinjamanPage } from "./pages/PinjamanPage";
 import { StokOpnameDetailPage } from "./pages/StokOpnameDetailPage";
 
 function App() {
@@ -222,6 +223,14 @@ function App() {
                 element={
                   <RequirePageAccess>
                     <UsersPage />
+                  </RequirePageAccess>
+                }
+              />
+              <Route
+                path="/pinjaman"
+                element={
+                  <RequirePageAccess>
+                    <PinjamanPage />
                   </RequirePageAccess>
                 }
               />

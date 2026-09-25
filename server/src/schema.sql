@@ -394,3 +394,47 @@ INSERT INTO master_oli (kode, nama, satuan, keterangan) VALUES
   ('OL-003', 'SAE 10', 'LTR', '')
 ON CONFLICT DO NOTHING;
 ALTER TABLE pupuk_log ADD COLUMN IF NOT EXISTS koreksi DOUBLE PRECISION;
+
+-- Pinjaman antar estate: stock one estate lends another (dari_estate -> ke_estate), in any module.
+-- Lending books a Stok Keluar at the lender and a Stok Masuk at the borrower right away; each
+-- return (pinjaman_kembali, may be partial) books the reverse until qty_kembali = qty (LUNAS).
+-- Batal = the whole loan returned at once while nothing had come back yet. The movement rows carry
+-- pinjaman_id and can only change through the Pinjaman page; BBM / pupuk / oli keep the qty in
+-- `pinjam` (+ in, - out) so stok masuk / pemakaian totals don't count it.
+CREATE TABLE IF NOT EXISTS pinjaman (
+  id SERIAL PRIMARY KEY,
+  module TEXT NOT NULL,
+  kode TEXT NOT NULL,
+  nama TEXT NOT NULL DEFAULT '',
+  satuan TEXT NOT NULL DEFAULT '',
+  dari_estate TEXT NOT NULL,
+  ke_estate TEXT NOT NULL,
+  qty DOUBLE PRECISION NOT NULL,
+  qty_kembali DOUBLE PRECISION NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'DIPINJAM',
+  alasan TEXT NOT NULL DEFAULT '',
+  tanggal_iso TEXT NOT NULL,
+  user_id INTEGER,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_pinjaman_estates ON pinjaman(dari_estate, ke_estate, status);
+CREATE TABLE IF NOT EXISTS pinjaman_kembali (
+  id SERIAL PRIMARY KEY,
+  pinjaman_id INTEGER NOT NULL REFERENCES pinjaman(id),
+  qty DOUBLE PRECISION NOT NULL,
+  tanggal_iso TEXT NOT NULL,
+  note TEXT NOT NULL DEFAULT '',
+  batal BOOLEAN NOT NULL DEFAULT false,
+  user_id INTEGER,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+ALTER TABLE transactions ADD COLUMN IF NOT EXISTS pinjaman_id INTEGER;
+ALTER TABLE stock_in_log ADD COLUMN IF NOT EXISTS pinjaman_id INTEGER;
+ALTER TABLE stock_out_log ADD COLUMN IF NOT EXISTS pinjaman_id INTEGER;
+ALTER TABLE gudang_stock_tx ADD COLUMN IF NOT EXISTS pinjaman_id INTEGER;
+ALTER TABLE klinik_stock_tx ADD COLUMN IF NOT EXISTS pinjaman_id INTEGER;
+ALTER TABLE bbm_log ADD COLUMN IF NOT EXISTS pinjaman_id INTEGER;
+ALTER TABLE pupuk_log ADD COLUMN IF NOT EXISTS pinjaman_id INTEGER;
+ALTER TABLE oli_log ADD COLUMN IF NOT EXISTS pinjaman_id INTEGER;
+ALTER TABLE pupuk_log ADD COLUMN IF NOT EXISTS pinjam DOUBLE PRECISION;
+ALTER TABLE oli_log ADD COLUMN IF NOT EXISTS pinjam DOUBLE PRECISION;

@@ -18,13 +18,14 @@ import {
   Activity,
   ClipboardCheck,
   Droplet,
+  ArrowLeftRight,
   MapPin,
   Check,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { useEstateFilter } from "../hooks/useEstateFilter";
 import { ChangePasswordModal } from "./ChangePasswordModal";
-import { canModule, pageAllowed, userEstates, OPNAME_PATH, type Module } from "../lib/access";
+import { canModule, pageAllowed, userEstates, OPNAME_PATH, PINJAMAN_PATH, type Module } from "../lib/access";
 
 type NavItem = { to: string; label: string; icon: typeof Package };
 type NavSection = { title?: string; collapsible?: boolean; items: NavItem[] };
@@ -65,7 +66,10 @@ const navSections: NavSection[] = [
   {
     title: "Inventory",
     collapsible: true,
-    items: [{ to: OPNAME_PATH, label: "Stok Opname", icon: ClipboardCheck }],
+    items: [
+      { to: OPNAME_PATH, label: "Stok Opname", icon: ClipboardCheck },
+      { to: PINJAMAN_PATH, label: "Pinjaman Estate", icon: ArrowLeftRight },
+    ],
   },
   {
     title: "Master Data",

@@ -262,14 +262,25 @@ function AttentionPanel({ e, d }: { e: EstateInfo; d: EstateData }) {
       !canModule(user, "KLINIK")
         ? none
         : api.klinikStock({ klinik: e.estate, stock, sortBy: stock === "expired" ? "expired_date" : "nama", page: 1, pageSize: 4 });
-    Promise.all([gudang("habis"), gudang("menipis"), klinik("expired"), klinik("habis")])
-      .then(([gh, gm, ke, kh]) => {
+    // Loans of this estate (lent out or borrowed) that haven't fully come back yet.
+    const pinjaman = api
+      .pinjamanList({ estate: e.estate, status: "OPEN", pageSize: 4 })
+      .then((res) => ({
+        total: res.total,
+        data: res.data.map((l) => ({
+          nama: `${l.nama} ${(l.qty - l.qty_kembali).toLocaleString("id-ID", { maximumFractionDigits: 3 })} ${l.satuan} (${l.dari_estate} → ${l.ke_estate})`,
+        })),
+      }))
+      .catch(() => ({ data: [] as { nama: string }[], total: 0 }));
+    Promise.all([gudang("habis"), gudang("menipis"), klinik("expired"), klinik("habis"), pinjaman])
+      .then(([gh, gm, ke, kh, pj]) => {
         if (stale) return;
         const list: AttentionGroup[] = [
           { key: "gh", title: "Gudang · stok habis", tone: "red", to: e.gudang, ...pick(gh) },
           { key: "gm", title: "Gudang · stok menipis", tone: "amber", to: e.gudang, ...pick(gm) },
           { key: "ke", title: "Klinik · expired / ≤ 30 hari", tone: "red", to: e.klinik, ...pick(ke) },
           { key: "kh", title: "Klinik · stok habis", tone: "amber", to: e.klinik, ...pick(kh) },
+          { key: "pj", title: "Pinjaman belum kembali", tone: "amber", to: "/pinjaman", ...pick(pj) },
         ];
         setGroups(list.filter((g) => g.total > 0));
       })

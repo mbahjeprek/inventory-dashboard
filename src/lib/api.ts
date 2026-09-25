@@ -267,6 +267,9 @@ export type PupukRecord = {
   kode_barang: string;
   keluar: number | null;
   diterima: number | null;
+  // Pinjaman antar estate: + borrowed in / return received, - lent out / returned.
+  pinjam: number | null;
+  pinjaman_id: number | null;
   saldo_stock: number | null;
   keterangan: string;
   blok: string;
@@ -284,6 +287,8 @@ export type OliRecord = {
   no_embrace: string;
   diterima: number | null;
   pemakaian: number | null;
+  pinjam: number | null;
+  pinjaman_id: number | null;
   saldo_stock: number | null;
   keterangan: string;
 };
@@ -337,6 +342,26 @@ export type Movement = {
 export type TopKeluarRow = { kode: string; id: number | null; nama: string; satuan: string | null; qty: number; trx: number };
 // ---- Stok Opname (server/src/app.ts "Stok Opname") ----
 export type OpnameModule = "GUDANG" | "KLINIK" | "BBM" | "PUPUK" | "OLI";
+
+export type PinjamanStatus = "DIPINJAM" | "LUNAS" | "BATAL";
+export type Pinjaman = {
+  id: number;
+  module: OpnameModule;
+  kode: string;
+  nama: string;
+  satuan: string;
+  dari_estate: string;
+  ke_estate: string;
+  qty: number;
+  qty_kembali: number;
+  status: PinjamanStatus;
+  alasan: string;
+  tanggal_iso: string;
+  created_at: string;
+  dibuat_oleh: string;
+  kembali: { qty: number; tanggal_iso: string; note: string; batal: boolean; oleh: string }[];
+};
+export type PinjamanBarang = { kode: string; nama: string; satuan: string; stok: number };
 export type OpnameStatus = "DRAFT" | "SUBMITTED" | "APPROVED" | "BATAL";
 export type Opname = {
   id: number;
@@ -800,6 +825,17 @@ export const api = {
   ) => req<{ success: boolean }>(`/api/users/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
 
   deleteUser: (id: number) => req<{ success: boolean }>(`/api/users/${id}`, { method: "DELETE" }),
+
+  pinjamanList: (params: Record<string, string | number>) =>
+    req<{ data: Pinjaman[]; total: number }>(`/api/pinjaman?${new URLSearchParams(params as any)}`),
+  pinjamanBarang: (module: OpnameModule, estate: string, search: string) =>
+    req<PinjamanBarang[]>(`/api/pinjaman/barang?${new URLSearchParams({ module, estate, search })}`),
+  createPinjaman: (payload: { module: OpnameModule; dari: string; ke: string; kode: string; qty: number; alasan: string }) =>
+    req<{ success: boolean; id: number }>("/api/pinjaman", { method: "POST", body: JSON.stringify(payload) }),
+  kembalikanPinjaman: (id: number, qty: number, note: string) =>
+    req<{ success: boolean }>(`/api/pinjaman/${id}/kembali`, { method: "POST", body: JSON.stringify({ qty, note }) }),
+  batalPinjaman: (id: number, note: string) =>
+    req<{ success: boolean }>(`/api/pinjaman/${id}/batal`, { method: "POST", body: JSON.stringify({ note }) }),
 
   opnameList: (params: Record<string, string | number>) =>
     req<{ data: OpnameListRow[]; total: number; page: number; pageSize: number }>(

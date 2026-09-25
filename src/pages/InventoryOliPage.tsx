@@ -129,7 +129,7 @@ export function InventoryOliPage({ estate }: { estate: string }) {
         { label: "Stock (LTR)", align: "right" },
         { label: "Keterangan" },
       ],
-      rows: all.map((r) => [r.periode, r.tanggal, r.jenis_oli, r.no_embrace, r.diterima || null, r.pemakaian || null, r.saldo_stock, r.keterangan]),
+      rows: all.map((r) => [r.periode, r.tanggal, r.jenis_oli, r.no_embrace, r.diterima || ((r.pinjam ?? 0) > 0 ? r.pinjam : null), r.pemakaian || ((r.pinjam ?? 0) < 0 ? -r.pinjam! : null), r.saldo_stock, r.keterangan]),
     };
   };
 
@@ -280,8 +280,8 @@ export function InventoryOliPage({ estate }: { estate: string }) {
                     <td className="px-4 py-2.5 whitespace-nowrap text-[var(--text-secondary)]">{r.tanggal || "-"}</td>
                     <td className="px-4 py-2.5 whitespace-nowrap text-xs">{r.jenis_oli}</td>
                     <td className="px-4 py-2.5 text-xs text-[var(--text-secondary)]">{r.no_embrace || "-"}</td>
-                    <td className="px-4 py-2.5 text-right font-medium text-[var(--accent-green)]">{ltr(r.diterima)}</td>
-                    <td className="px-4 py-2.5 text-right font-medium text-[var(--accent-red)]">{ltr(r.pemakaian)}</td>
+                    <td className="px-4 py-2.5 text-right font-medium text-[var(--accent-green)]">{r.diterima ? ltr(r.diterima) : (r.pinjam ?? 0) > 0 ? <>{ltr(r.pinjam)}<span className="ml-1 text-[10px] font-normal text-[var(--text-muted)]">pinjam</span></> : "-"}</td>
+                    <td className="px-4 py-2.5 text-right font-medium text-[var(--accent-red)]">{r.pemakaian ? ltr(r.pemakaian) : (r.pinjam ?? 0) < 0 ? <>{ltr(-r.pinjam!)}<span className="ml-1 text-[10px] font-normal text-[var(--text-muted)]">pinjam</span></> : "-"}</td>
                     <td className={`px-4 py-2.5 text-right ${(r.saldo_stock ?? 0) < 0 ? "text-[var(--accent-red)]" : "text-[var(--text-primary)]"}`}>
                       {r.saldo_stock !== null ? fmt(r.saldo_stock) : "-"}
                     </td>

@@ -115,11 +115,15 @@ export function canOpname(user: AuthUser | null, m: Module, a: "view" | "opname"
 export const OPNAME_PATH = "/stok-opname";
 const hasOpnameAccess = (user: AuthUser | null) => MODULES.some((m) => can(user, modulePerm(m, "opname")) || can(user, modulePerm(m, "approve")));
 
+// Pinjaman antar estate: seen with any module's Lihat, recorded with that module's Input.
+export const PINJAMAN_PATH = "/pinjaman";
+
 // Whether a non-inventory page (sidebar / router) may be opened.
 export function pageAllowed(user: AuthUser | null, path: string): boolean {
   if (!user) return false;
   if (user.role === "superuser") return true;
   if (path === OPNAME_PATH || path.startsWith(`${OPNAME_PATH}/`)) return hasOpnameAccess(user);
+  if (path === PINJAMAN_PATH) return MODULES.some((m) => canModule(user, m));
   return !!PAGE_PERMS[path] && can(user, PAGE_PERMS[path]);
 }
 
