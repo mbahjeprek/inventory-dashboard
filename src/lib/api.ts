@@ -531,6 +531,10 @@ export const api = {
   klinikStockCorrection: (payload: { klinik: string; obat_kode: string; actual_qty: number; note?: string; expired_date?: string }) =>
     req<{ success: boolean; delta: number }>("/api/klinik-stock/correction", { method: "POST", body: JSON.stringify(payload) }),
 
+  // The full expiry breakdown of a clinic stock row; a changed total is booked as Koreksi (needs note).
+  setKlinikBatches: (id: number, batches: { expired_date: string; qty: number }[], note: string) =>
+    req<{ success: boolean }>(`/api/klinik-stock/${id}/batches`, { method: "PUT", body: JSON.stringify({ batches, note }) }),
+
   updateKlinikStock: (id: number, payload: { buffer_stock: number; catatan: string }) =>
     req<{ success: boolean }>(`/api/klinik-stock/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
 

@@ -200,6 +200,8 @@ async function stockLocations(req: express.Request): Promise<StockLocation[]> {
   if (/^\/klinik-stock\/(transactions|correction)$/.test(p)) return K(b.klinik);
   if (/^\/klinik-stock\/batch\/\d+$/.test(p)) return K(await col("klinik_batch", "klinik"));
   if (/^\/klinik-stock\/\d+$/.test(p) && m === "DELETE") return K(await col("klinik_stock", "klinik"));
+  if (/^\/klinik-stock\/\d+\/batches$/.test(p))
+    return K((await queryOne<{ v: string }>("SELECT klinik v FROM klinik_stock WHERE id = @id", { id: p.split("/")[2] }))?.v);
   if (/^\/klinik-stock\/history\/\d+$/.test(p)) return K(await col("klinik_stock_tx", "klinik"));
   if (p === "/bbm" && m === "POST") return B(b.lokasi);
   if (/^\/bbm\/\d+$/.test(p)) return B(await col("bbm_log", "lokasi"));
@@ -2858,6 +2860,84 @@ app.put("/api/klinik-stock/:id", requireSuperuser, async (req, res) => {
     aksi: "Edit Stok",
     objek: `${existing.obat_kode} - ${obat?.nama ?? ""}`,
     detail: describeChanges(existing, next, { buffer_stock: "Buffer", catatan: "Catatan" }),
+  });
+  res.json({ success: true });
+});
+
+// The whole expiry breakdown of one clinic stock row at once (Edit Stok Klinik): `batches` is the
+// list the stock should be split into. The same total only rearranges the batches (a wrong or
+// several expiry dates) and books nothing; a different total is a Koreksi, booked per expiry date.
+app.put("/api/klinik-stock/:id/batches", requireSuperuser, async (req, res) => {
+  const row = await queryOne<any>("SELECT * FROM klinik_stock WHERE id = @id", { id: req.params.id });
+  if (!row) return res.status(404).json({ error: "Not found" });
+  if (!estateAllowed(req.user!, row.klinik)) return res.status(403).json({ error: "Akses ditolak" });
+  const list = Array.isArray(req.body.batches) ? req.body.batches : null;
+  const note = String(req.body.note ?? "").trim();
+  if (!list) return res.status(400).json({ error: "Invalid payload" });
+  const want = new Map<string, number>();
+  for (const b of list) {
+    const exp = String(b?.expired_date ?? "");
+    if (exp && !ISO_DATE.test(exp)) return res.status(400).json({ error: "Tanggal expired tidak valid" });
+    if (!Number.isInteger(b?.qty) || b.qty < 0) return res.status(400).json({ error: "Jumlah harus bilangan bulat positif" });
+    if (b.qty > 0) want.set(exp, (want.get(exp) ?? 0) + b.qty);
+  }
+  const have = new Map(
+    (await queryMany<{ expired_date: string; qty: number }>("SELECT expired_date, qty FROM klinik_batch WHERE klinik = @k AND obat_kode = @o AND qty > 0", {
+      k: row.klinik,
+      o: row.obat_kode,
+    })).map((b) => [b.expired_date, b.qty])
+  );
+  const sum = (m: Map<string, number>) => [...m.values()].reduce((a, b) => a + b, 0);
+  const text = (m: Map<string, number>) =>
+    [...m].sort(([a], [b]) => (a === "" ? 1 : b === "" ? -1 : a.localeCompare(b))).map(([e, q]) => `${expText(e)}: ${q}`).join(", ") || "kosong";
+  const before = sum(have);
+  const after = sum(want);
+  const obat = await queryOne<any>("SELECT nama FROM obat WHERE kode = @k", { k: row.obat_kode });
+  const objek = `${row.obat_kode} - ${obat?.nama ?? ""}`;
+
+  if (after === before) {
+    if (text(have) === text(want)) return res.json({ success: true });
+    await withTransaction(async (client) => {
+      await execute("DELETE FROM klinik_batch WHERE klinik = @k AND obat_kode = @o", { k: row.klinik, o: row.obat_kode }, client);
+      for (const [exp, qty] of want) await addToBatch(client, row.klinik, row.obat_kode, exp, qty);
+      await syncKlinikStock(client, row.klinik, row.obat_kode);
+    });
+    await logActivity(req, { module: "KLINIK", estate: row.klinik, aksi: "Atur Batch", objek, detail: `${text(have)} → ${text(want)}` });
+    return res.json({ success: true });
+  }
+
+  if (req.user!.role !== "superuser" && !req.user!.perms.includes("klinik.koreksi"))
+    return res.status(403).json({ error: `Total berubah (${before} → ${after}) dan itu Koreksi Stok, yang tidak diizinkan untuk akun ini` });
+  if (!note) return res.status(400).json({ error: "Isi alasan koreksi" });
+  const exps = [...new Set([...have.keys(), ...want.keys()])];
+  try {
+    await withTransaction(async (client) => {
+      for (const exp of exps) {
+        const delta = (want.get(exp) ?? 0) - (have.get(exp) ?? 0);
+        if (!delta) continue;
+        await klinikMoveTx(client, req, {
+          klinik: row.klinik,
+          obat: row.obat_kode,
+          type: delta > 0 ? "IN" : "OUT",
+          qty: Math.abs(delta),
+          exp,
+          tujuan: "",
+          penerima: "",
+          note: `Koreksi Stok (Opname) batch ${expText(exp)}: ${note}`,
+          is_correction: 1,
+        });
+      }
+    });
+  } catch (e) {
+    if (e instanceof StockError) return res.status(400).json({ error: e.message });
+    throw e;
+  }
+  await logActivity(req, {
+    module: "KLINIK",
+    estate: row.klinik,
+    aksi: "Koreksi Stok",
+    objek,
+    detail: `${text(have)} → ${text(want)} (total ${before} → ${after}); Catatan: ${note}`,
   });
   res.json({ success: true });
 });
