@@ -35,12 +35,15 @@ type Filter = "" | "belum" | "selisih" | "sesuai";
 // What the counter typed, kept as text until saved (so "1," or "" can be typed freely).
 type Edit = { fisik: string; ket: string };
 
+// Indonesian number format, as shown everywhere else: "." groups thousands, "," is the decimal
+// separator ("47.600" = 47600, "2,5" = 2.5).
 const parseQty = (s: string): number | null | undefined => {
-  const t = s.trim().replace(",", ".");
+  const t = s.trim().replace(/\./g, "").replace(",", ".");
   if (t === "") return null;
   const n = Number(t);
   return Number.isFinite(n) && n >= 0 ? n : undefined; // undefined = invalid
 };
+const toInput = (n: number | null) => (n === null ? "" : String(n).replace(".", ","));
 
 // One Stok Opname: count (DRAFT), then submit, then approve / send back.
 export function StokOpnameDetailPage() {
@@ -166,7 +169,7 @@ export function StokOpnameDetailPage() {
     setTouched((t) => ({ key: viewKey, ids: new Set([...(t.key === viewKey ? t.ids : []), l.id]) }));
     setEdits((cur) => ({
       ...cur,
-      [l.id]: { fisik: cur[l.id]?.fisik ?? (l.stok_fisik === null ? "" : String(l.stok_fisik)), ket: cur[l.id]?.ket ?? l.keterangan, ...patch },
+      [l.id]: { fisik: cur[l.id]?.fisik ?? toInput(l.stok_fisik), ket: cur[l.id]?.ket ?? l.keterangan, ...patch },
     }));
   };
 
@@ -546,7 +549,7 @@ export function StokOpnameDetailPage() {
                             <input
                               data-fisik={l.id}
                               inputMode="decimal"
-                              value={e ? e.fisik : l.stok_fisik === null ? "" : String(l.stok_fisik)}
+                              value={e ? e.fisik : toInput(l.stok_fisik)}
                               onChange={(ev) => setEdit(l, { fisik: ev.target.value })}
                               onKeyDown={nextOnEnter(l, "fisik")}
                               placeholder="-"
@@ -556,7 +559,7 @@ export function StokOpnameDetailPage() {
                               }`}
                             />
                             <button
-                              onClick={() => setEdit(l, { fisik: String(l.stok_sistem) })}
+                              onClick={() => setEdit(l, { fisik: toInput(l.stok_sistem) })}
                               title="Sesuai sistem"
                               className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--accent-green)] hover:bg-[var(--accent-green-bg)]"
                             >
