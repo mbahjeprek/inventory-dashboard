@@ -21,12 +21,14 @@ export const MODULE_ACTIONS: Record<string, string[]> = {
   bbm: ["view", "input", "edit", "delete", "opname", "approve"],
   pupuk: ["view", "input", "edit", "delete", "opname", "approve"],
   klinik: ["view", "input", "edit", "delete", "koreksi", "opname", "approve"],
+  oli: ["view", "input", "edit", "delete", "opname", "approve"],
 };
 export const MODULE_PERMS: string[] = Object.entries(MODULE_ACTIONS).flatMap(([m, acts]) => acts.map((a) => `${m}.${a}`));
 export const ALL_PERMS: string[] = [
   ...MODULE_PERMS,
   "master.barang",
   "master.obat",
+  "master.oli",
   "master.karyawan",
   "master.alat",
   "master.users",

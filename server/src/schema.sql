@@ -358,4 +358,39 @@ CREATE TABLE IF NOT EXISTS opname_line (
 -- saldo_stock is the counted amount and `koreksi` the difference, with diterima/pemakaian/keluar left
 -- empty so stok masuk/keluar totals don't count it.
 ALTER TABLE bbm_log ADD COLUMN IF NOT EXISTS koreksi DOUBLE PRECISION;
+
+-- Oli (lubricant) ledger, one running balance per estate + jenis oli (SAE 15W 40, SAE 90, SAE 10...),
+-- laid out like the "STOK OLI" Google Sheet: diterima / pemakaian in liters, saldo_stock after the row.
+-- Same shape as pupuk_log; `koreksi` = the difference booked by an approved Stok Opname.
+CREATE TABLE IF NOT EXISTS oli_log (
+  id SERIAL PRIMARY KEY,
+  estate TEXT NOT NULL,
+  jenis_oli TEXT NOT NULL,
+  periode TEXT,
+  tanggal TEXT,
+  tanggal_iso TEXT,
+  no_embrace TEXT DEFAULT '',
+  diterima DOUBLE PRECISION,
+  pemakaian DOUBLE PRECISION,
+  saldo_stock DOUBLE PRECISION,
+  keterangan TEXT DEFAULT '',
+  koreksi DOUBLE PRECISION,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_oli_estate_date ON oli_log(estate, tanggal_iso);
+
+-- Master data oli: the jenis oli that transactions and opname may use. oli_log.jenis_oli holds the
+-- `nama`; renaming a jenis here renames it in oli_log too (see PUT /api/master-oli/:id).
+CREATE TABLE IF NOT EXISTS master_oli (
+  id SERIAL PRIMARY KEY,
+  kode TEXT UNIQUE NOT NULL,
+  nama TEXT UNIQUE NOT NULL,
+  satuan TEXT NOT NULL DEFAULT 'LTR',
+  keterangan TEXT NOT NULL DEFAULT ''
+);
+INSERT INTO master_oli (kode, nama, satuan, keterangan) VALUES
+  ('OL-001', 'SAE 15W 40', 'LTR', ''),
+  ('OL-002', 'SAE 90', 'LTR', ''),
+  ('OL-003', 'SAE 10', 'LTR', '')
+ON CONFLICT DO NOTHING;
 ALTER TABLE pupuk_log ADD COLUMN IF NOT EXISTS koreksi DOUBLE PRECISION;

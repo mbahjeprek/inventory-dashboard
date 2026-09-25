@@ -50,6 +50,7 @@ export type UserActivity = {
     m_bbm: number;
     m_pupuk: number;
     m_klinik: number;
+    m_oli?: number;
   }[];
   logins: { user_id: number; login: number }[];
   daily: { user_id: number; tanggal: string; aksi: number }[];
@@ -273,6 +274,27 @@ export type PupukRecord = {
   pokok: number | null;
 };
 
+export type OliRecord = {
+  id: number;
+  estate: string;
+  jenis_oli: string;
+  periode: string;
+  tanggal: string;
+  tanggal_iso: string | null;
+  no_embrace: string;
+  diterima: number | null;
+  pemakaian: number | null;
+  saldo_stock: number | null;
+  keterangan: string;
+};
+export type MasterOli = { id: number; kode: string; nama: string; satuan: string; keterangan: string; transaksi: number };
+export type OliSaldo = { jenis_oli: string; saldo_stock: number; tanggal: string };
+export type OliSummary = {
+  perJenis: { jenis_oli: string; diterima: number; pemakaian: number }[];
+  saldoTerakhir: OliSaldo[];
+  saldoPerTanggal: OliSaldo[];
+};
+
 export type PupukSaldo = { jenis_pupuk: string; saldo_stock: number; tanggal: string };
 export type PupukSummary = {
   perJenis: { jenis_pupuk: string; diterima: number; keluar: number }[];
@@ -283,7 +305,7 @@ export type PupukSummary = {
 export type ActivityLog = {
   id: number;
   created_at: string;
-  module: "BARANG" | "BBM" | "PUPUK" | "KLINIK";
+  module: "BARANG" | "BBM" | "PUPUK" | "KLINIK" | "OLI";
   estate: string | null;
   aksi: string;
   objek: string | null;
@@ -314,7 +336,7 @@ export type Movement = {
 
 export type TopKeluarRow = { kode: string; id: number | null; nama: string; satuan: string | null; qty: number; trx: number };
 // ---- Stok Opname (server/src/app.ts "Stok Opname") ----
-export type OpnameModule = "GUDANG" | "KLINIK" | "BBM" | "PUPUK";
+export type OpnameModule = "GUDANG" | "KLINIK" | "BBM" | "PUPUK" | "OLI";
 export type OpnameStatus = "DRAFT" | "SUBMITTED" | "APPROVED" | "BATAL";
 export type Opname = {
   id: number;
@@ -608,6 +630,25 @@ export const api = {
     req<{ success: boolean }>(`/api/pupuk/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
 
   deletePupuk: (id: number) => req<{ success: boolean }>(`/api/pupuk/${id}`, { method: "DELETE" }),
+
+  oli: (params: Record<string, string | number>) =>
+    req<{ data: OliRecord[]; total: number; pemakaianSum: number; diterimaSum: number; page: number; pageSize: number }>(
+      `/api/oli?${new URLSearchParams(params as any)}`
+    ),
+  oliSummary: (estate: string, range: { dateFrom?: string; dateTo?: string; asOf?: string } = {}) =>
+    req<OliSummary>(`/api/oli/summary?${new URLSearchParams({ estate, ...range } as any)}`),
+  oliOptions: (estate: string) => req<{ jenis: string[] }>(`/api/oli/options?estate=${estate}`),
+  createOli: (payload: { estate: string; jenis_oli: string; tanggal_iso: string; tipe: "MASUK" | "PEMAKAIAN"; jumlah: number; no_embrace?: string; keterangan?: string }) =>
+    req<{ success: boolean; id: number; saldo_stock: number }>("/api/oli", { method: "POST", body: JSON.stringify(payload) }),
+  updateOli: (id: number, payload: Record<string, unknown>) => req<{ success: boolean }>(`/api/oli/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
+  deleteOli: (id: number) => req<{ success: boolean }>(`/api/oli/${id}`, { method: "DELETE" }),
+
+  masterOli: (search = "") => req<{ data: MasterOli[]; total: number }>(`/api/master-oli?${new URLSearchParams({ search })}`),
+  createMasterOli: (payload: { kode: string; nama: string; satuan: string; keterangan: string }) =>
+    req<{ success: boolean; id: number }>("/api/master-oli", { method: "POST", body: JSON.stringify(payload) }),
+  updateMasterOli: (id: number, payload: { kode: string; nama: string; satuan: string; keterangan: string }) =>
+    req<{ success: boolean }>(`/api/master-oli/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
+  deleteMasterOli: (id: number) => req<{ success: boolean }>(`/api/master-oli/${id}`, { method: "DELETE" }),
 
   gudangStockSummary: (gudang: string) => req<GudangStockSummary>(`/api/gudang-stock/summary?gudang=${gudang}`),
 

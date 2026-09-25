@@ -13,6 +13,7 @@ const ESTATES_BY_MODULE = {
   BBM: ["NILAM", "WJA", "KNS", "ZAMRUD", "FIRUS"],
   PUPUK: ["NILAM", "KNS", "WJA", "ZAMRUD", "FIRUS"],
   KLINIK: ["NILAM", "KNS", "WJA", "ZAMRUD", "FIRUS"],
+  OLI: ["NILAM", "KNS", "WJA", "ZAMRUD", "FIRUS"],
 };
 
 const formatWaktu = (iso: string) =>
@@ -33,7 +34,7 @@ export function ActivityLogPage({
   estateLock,
   onClose,
 }: {
-  module: "BARANG" | "BBM" | "PUPUK" | "KLINIK";
+  module: "BARANG" | "BBM" | "PUPUK" | "KLINIK" | "OLI";
   estateLock?: string;
   onClose?: () => void;
 }) {
@@ -41,8 +42,8 @@ export function ActivityLogPage({
   // Editing / deleting log entries stays superuser-only; the estate filter lists the account's estates.
   const isSuperuser = user?.role === "superuser";
   const ownEstates = userEstates(user);
-  const estateLabel = module === "BBM" ? "Lokasi" : module === "PUPUK" ? "Estate" : module === "KLINIK" ? "Klinik" : "Gudang";
-  const title = `${module === "BBM" ? "Log Activity BBM" : module === "PUPUK" ? "Log Activity Pupuk NPK" : module === "KLINIK" ? "Log Activity Klinik" : "Log Activity Barang"}${estateLock ? ` - ${estateLock}` : ""}`;
+  const estateLabel = module === "BBM" ? "Lokasi" : module === "PUPUK" || module === "OLI" ? "Estate" : module === "KLINIK" ? "Klinik" : "Gudang";
+  const title = `${module === "BBM" ? "Log Activity BBM" : module === "PUPUK" ? "Log Activity Pupuk NPK" : module === "KLINIK" ? "Log Activity Klinik" : module === "OLI" ? "Log Activity Oli" : "Log Activity Barang"}${estateLock ? ` - ${estateLock}` : ""}`;
 
   const [rows, setRows] = useState<ActivityLog[]>([]);
   const [total, setTotal] = useState(0);
@@ -128,7 +129,7 @@ export function ActivityLogPage({
         <div>
           <h1 className="text-xl font-semibold text-[var(--text-primary)]">{title}</h1>
           <p className="text-sm text-[var(--text-secondary)]">
-            Riwayat perubahan data Inventory {module === "BBM" ? "BBM" : module === "PUPUK" ? "Pupuk NPK" : module === "KLINIK" ? "Klinik" : "Gudang"} (tambah, edit, hapus, transaksi) beserta
+            Riwayat perubahan data Inventory {module === "BBM" ? "BBM" : module === "PUPUK" ? "Pupuk NPK" : module === "KLINIK" ? "Klinik" : module === "OLI" ? "Oli" : "Gudang"} (tambah, edit, hapus, transaksi) beserta
             siapa yang melakukannya
           </p>
         </div>

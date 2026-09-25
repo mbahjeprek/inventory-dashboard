@@ -17,6 +17,7 @@ import {
   Stethoscope,
   Activity,
   ClipboardCheck,
+  Droplet,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { useEstateFilter } from "../hooks/useEstateFilter";
@@ -81,7 +82,20 @@ const KLINIK_GROUP: DropdownGroup = {
   ],
 };
 
-const DROPDOWN_GROUPS: DropdownGroup[] = [GUDANG_GROUP, BBM_GROUP, PUPUK_GROUP, KLINIK_GROUP];
+const OLI_GROUP: DropdownGroup = {
+  key: "oli",
+  icon: Droplet,
+  title: "Oli",
+  options: [
+    { to: "/inventory-oli", label: "Nilam" },
+    { to: "/inventory-oli-kns", label: "KNS" },
+    { to: "/inventory-oli-wja", label: "WJA" },
+    { to: "/inventory-oli-zamrud", label: "Zamrud" },
+    { to: "/inventory-oli-firus", label: "Firus" },
+  ],
+};
+
+const DROPDOWN_GROUPS: DropdownGroup[] = [GUDANG_GROUP, BBM_GROUP, PUPUK_GROUP, OLI_GROUP, KLINIK_GROUP];
 
 const navSections: NavSection[] = [
   { items: [{ to: "/", label: "Dashboard", icon: LayoutDashboard }] },
@@ -96,6 +110,7 @@ const navSections: NavSection[] = [
     items: [
       { to: "/master-barang", label: "Barang", icon: Package },
       { to: "/master-obat", label: "Obat", icon: Pill },
+      { to: "/master-oli", label: "Oli", icon: Droplet },
       { to: "/karyawan", label: "Karyawan", icon: Users },
       { to: "/alat-berat", label: "Alat Berat", icon: Truck },
       { to: "/users", label: "Pengguna", icon: KeyRound },

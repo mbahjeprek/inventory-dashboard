@@ -15,7 +15,9 @@ import { UsersPage } from "./pages/UsersPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { InventoryPupukPage } from "./pages/InventoryPupukPage";
 import { InventoryKlinikPage } from "./pages/InventoryKlinikPage";
+import { InventoryOliPage } from "./pages/InventoryOliPage";
 import { MasterObatPage } from "./pages/MasterObatPage";
+import { MasterOliPage } from "./pages/MasterOliPage";
 import { UserActivityPage } from "./pages/UserActivityPage";
 import { StokOpnamePage } from "./pages/StokOpnamePage";
 import { StokOpnameDetailPage } from "./pages/StokOpnameDetailPage";
@@ -58,6 +60,23 @@ function App() {
                   element={
                     <RequireEstate estate={estate}>
                       <InventoryKlinikPage key={estate} klinik={estate} />
+                    </RequireEstate>
+                  }
+                />
+              ))}
+              {[
+                { path: "/inventory-oli", estate: "NILAM" },
+                { path: "/inventory-oli-kns", estate: "KNS" },
+                { path: "/inventory-oli-wja", estate: "WJA" },
+                { path: "/inventory-oli-zamrud", estate: "ZAMRUD" },
+                { path: "/inventory-oli-firus", estate: "FIRUS" },
+              ].map(({ path, estate }) => (
+                <Route
+                  key={path}
+                  path={path}
+                  element={
+                    <RequireEstate estate={estate}>
+                      <InventoryOliPage key={estate} estate={estate} />
                     </RequireEstate>
                   }
                 />
@@ -171,6 +190,14 @@ function App() {
                 element={
                   <RequirePageAccess>
                     <MasterObatPage />
+                  </RequirePageAccess>
+                }
+              />
+              <Route
+                path="/master-oli"
+                element={
+                  <RequirePageAccess>
+                    <MasterOliPage />
                   </RequirePageAccess>
                 }
               />

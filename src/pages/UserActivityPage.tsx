@@ -125,6 +125,7 @@ export function UserActivityPage() {
               ["BBM", p.m_bbm],
               ["Pupuk NPK", p.m_pupuk],
               ["Klinik", p.m_klinik],
+              ["Oli", p.m_oli ?? 0],
             ] as [string, number][])
               .filter(([, n]) => n > 0)
               .map(([m, n]) => `${m} ${fmt(n)}`)

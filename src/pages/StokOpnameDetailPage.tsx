@@ -60,7 +60,7 @@ export function StokOpnameDetailPage() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [dialog, setDialog] = useState<DialogSpec | null>(null);
-  const [adding, setAdding] = useState<"" | "picker" | "pupuk">("");
+  const [adding, setAdding] = useState<"" | "picker" | "jenis">("");
   const [pickedObat, setPickedObat] = useState<PickerItem | null>(null);
   // Rows typed into stay in the current filter (e.g. "Belum dihitung") until the filter or search
   // changes, so the reason for a difference can be filled in right away instead of the row vanishing.
@@ -494,11 +494,11 @@ export function StokOpnameDetailPage() {
         </div>
         {canCount && opname.module !== "BBM" && (
           <button
-            onClick={() => setAdding(opname.module === "PUPUK" ? "pupuk" : "picker")}
+            onClick={() => setAdding(opname.module === "PUPUK" || opname.module === "OLI" ? "jenis" : "picker")}
             className={`${btn} border border-[var(--border)] text-[var(--text-primary)] hover:bg-[#f1f5f9]`}
             title="Barang yang ditemukan saat hitung tapi tidak ada di daftar"
           >
-            <Plus size={16} /> Tambah {isKlinik ? "Obat/Batch" : opname.module === "PUPUK" ? "Jenis Pupuk" : "Barang"}
+            <Plus size={16} /> Tambah {isKlinik ? "Obat/Batch" : opname.module === "PUPUK" ? "Jenis Pupuk" : opname.module === "OLI" ? "Jenis Oli" : "Barang"}
           </button>
         )}
       </div>
@@ -651,7 +651,9 @@ export function StokOpnameDetailPage() {
           onConfirm={(exp) => addLine(pickedObat.kode, exp)}
         />
       )}
-      {adding === "pupuk" && <AddPupukModal estate={opname.estate} onClose={() => setAdding("")} onConfirm={(jenis) => addLine(jenis)} />}
+      {adding === "jenis" && (
+        <AddJenisModal oli={opname.module === "OLI"} estate={opname.estate} onClose={() => setAdding("")} onConfirm={(jenis) => addLine(jenis)} />
+      )}
     </div>
   );
 }
@@ -801,10 +803,12 @@ function SmallFormModal({
   );
 }
 
-function AddPupukModal({ estate, onClose, onConfirm }: { estate: string; onClose: () => void; onConfirm: (jenis: string) => Promise<void> }) {
+// A jenis pupuk / jenis oli line, picked from the known ones or typed.
+function AddJenisModal({ oli, estate, onClose, onConfirm }: { oli: boolean; estate: string; onClose: () => void; onConfirm: (jenis: string) => Promise<void> }) {
   const [jenis, setJenis] = useState<string[]>([]);
   useEffect(() => {
-    api.pupukOptions(estate).then((r) => setJenis(r.jenis)).catch(() => setJenis([]));
-  }, [estate]);
-  return <SmallFormModal title="Tambah Jenis Pupuk" label="Jenis pupuk" options={jenis} confirmLabel="Tambah" onClose={onClose} onConfirm={onConfirm} />;
+    (oli ? api.oliOptions(estate) : api.pupukOptions(estate)).then((r) => setJenis(r.jenis)).catch(() => setJenis([]));
+  }, [estate, oli]);
+  const noun = oli ? "Oli" : "Pupuk";
+  return <SmallFormModal title={`Tambah Jenis ${noun}`} label={`Jenis ${noun.toLowerCase()}`} options={jenis} confirmLabel="Tambah" onClose={onClose} onConfirm={onConfirm} />;
 }

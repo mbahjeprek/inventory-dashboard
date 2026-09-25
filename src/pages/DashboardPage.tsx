@@ -26,7 +26,7 @@ const ESTATES = [
 ];
 type EstateInfo = (typeof ESTATES)[number];
 
-const MODULE_LABEL: Record<ActivityLog["module"], string> = { BARANG: "Gudang", BBM: "BBM", PUPUK: "Pupuk NPK", KLINIK: "Klinik" };
+const MODULE_LABEL: Record<ActivityLog["module"], string> = { BARANG: "Gudang", BBM: "BBM", PUPUK: "Pupuk NPK", KLINIK: "Klinik", OLI: "Oli" };
 
 // Postgres COUNT/SUM can arrive as strings, so coerce before formatting or comparing.
 const fmt = (n: number | string | undefined) => Number(n ?? 0).toLocaleString("id-ID");

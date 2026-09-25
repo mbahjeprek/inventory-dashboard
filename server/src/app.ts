@@ -118,7 +118,7 @@ app.use("/api", async (req, res, next) => {
 // path (without the /api prefix), the action from the method. "super" = superusers
 // only; null = any logged-in account (the route still checks the estate itself).
 type Need = string[] | "super" | null;
-const ACTIVITY_PERM: Record<string, string> = { BARANG: "gudang", BBM: "bbm", PUPUK: "pupuk", KLINIK: "klinik" };
+const ACTIVITY_PERM: Record<string, string> = { BARANG: "gudang", BBM: "bbm", PUPUK: "pupuk", KLINIK: "klinik", OLI: "oli" };
 function requiredPerms(req: express.Request): Need {
   // Inside app.use("/api") req.path is relative to the mount, inside a route it is the full path.
   const p = (req.baseUrl + req.path).replace(/^\/api/, "");
@@ -139,10 +139,12 @@ function requiredPerms(req: express.Request): Need {
   if (is(/^\/(summary|items|transactions|stock-in|stock-out|gudang-stock)(\/|$)/)) return [`gudang.${act}`];
   if (is(/^\/bbm(\/|$)/)) return [`bbm.${act}`];
   if (is(/^\/pupuk(\/|$)/)) return [`pupuk.${act}`];
+  if (is(/^\/oli(\/|$)/)) return [`oli.${act}`];
   if (is(/^\/klinik-stock(\/|$)/)) return [`klinik.${act}`];
   if (is(/^\/top-keluar$/)) return [q.source === "klinik" ? "klinik.view" : "gudang.view"];
   if (is(/^\/activity-log$/)) return ACTIVITY_PERM[q.module] ? [`${ACTIVITY_PERM[q.module]}.view`] : "super";
   if (is(/^\/obat(\/|$)/)) return ["master.obat"];
+  if (is(/^\/master-oli(\/|$)/)) return ["master.oli"];
   if (is(/^\/karyawan(\/|$)/)) return ["master.karyawan"];
   if (is(/^\/alat-berat(\/|$)/)) return ["master.alat"];
   if (is(/^\/users(\/|$)/)) return ["master.users"];
@@ -160,7 +162,7 @@ app.use("/api", (req, res, next) => {
 });
 
 // ---- Stok Opname lock: while a location has an open opname (DRAFT / SUBMITTED) its stock can't move ----
-type OpnameModule = "GUDANG" | "KLINIK" | "BBM" | "PUPUK";
+type OpnameModule = "GUDANG" | "KLINIK" | "BBM" | "PUPUK" | "OLI";
 type StockLocation = { module: OpnameModule; estate: string };
 
 // The locations whose stock a request would change. Only stock-moving routes are listed: master
@@ -174,7 +176,7 @@ async function stockLocations(req: express.Request): Promise<StockLocation[]> {
   const col = async (table: string, column: string) =>
     id ? (await queryOne<{ v: string }>(`SELECT ${column} v FROM ${table} WHERE id = @id`, { id }))?.v : undefined;
   const at = (module: OpnameModule) => (estate: unknown) => (typeof estate === "string" && estate ? [{ module, estate }] : []);
-  const [G, K, B, P] = (["GUDANG", "KLINIK", "BBM", "PUPUK"] as const).map(at);
+  const [G, K, B, P, O] = (["GUDANG", "KLINIK", "BBM", "PUPUK", "OLI"] as const).map(at);
   // A Nilam Stok Keluar to another estate's gudang also books a Stok Masuk there (see addTransfer).
   const transferTo = (tujuan: unknown, type: unknown) => (type === "OUT" && GUDANG_STOCK_OPTIONS.includes(String(tujuan)) ? G(tujuan) : []);
 
@@ -195,10 +197,12 @@ async function stockLocations(req: express.Request): Promise<StockLocation[]> {
   if (/^\/bbm\/\d+$/.test(p)) return B(await col("bbm_log", "lokasi"));
   if (p === "/pupuk" && m === "POST") return P(b.estate);
   if (/^\/pupuk\/\d+$/.test(p)) return P(await col("pupuk_log", "estate"));
+  if (p === "/oli" && m === "POST") return O(b.estate);
+  if (/^\/oli\/\d+$/.test(p)) return O(await col("oli_log", "estate"));
   return [];
 }
 
-const OPNAME_MODULE_LABEL: Record<OpnameModule, string> = { GUDANG: "Gudang", KLINIK: "Klinik", BBM: "BBM", PUPUK: "Pupuk" };
+const OPNAME_MODULE_LABEL: Record<OpnameModule, string> = { GUDANG: "Gudang", KLINIK: "Klinik", BBM: "BBM", PUPUK: "Pupuk", OLI: "Oli" };
 
 app.use("/api", async (req, res, next) => {
   const locs = await stockLocations(req);
@@ -236,7 +240,7 @@ function requireEstate(estate: string) {
 }
 
 // ---- Activity log (audit trail), see schema.sql's activity_log ----
-type LogModule = "BARANG" | "BBM" | "PUPUK" | "KLINIK";
+type LogModule = "BARANG" | "BBM" | "PUPUK" | "KLINIK" | "OLI";
 
 // Records who changed what. Called after the change succeeded; a logging failure is reported but
 // never fails the user's action itself.
@@ -3032,7 +3036,8 @@ app.get("/api/user-activity", requireSuperuser, async (req, res) => {
             COUNT(*) FILTER (WHERE module = 'BARANG')::int m_gudang,
             COUNT(*) FILTER (WHERE module = 'BBM')::int m_bbm,
             COUNT(*) FILTER (WHERE module = 'PUPUK')::int m_pupuk,
-            COUNT(*) FILTER (WHERE module = 'KLINIK')::int m_klinik
+            COUNT(*) FILTER (WHERE module = 'KLINIK')::int m_klinik,
+            COUNT(*) FILTER (WHERE module = 'OLI')::int m_oli
      FROM activity_log WHERE user_id IS NOT NULL AND ${inRange("created_at")} GROUP BY user_id`,
     params
   );
@@ -3052,7 +3057,7 @@ app.get("/api/user-activity", requireSuperuser, async (req, res) => {
 app.get("/api/activity-log", async (req, res) => {
   const { module = "", estate = "", aksi = "", search = "", dateFrom = "", dateTo = "", tz = "", page = "1", pageSize = "50" } =
     req.query as Record<string, string>;
-  if (!["BARANG", "BBM", "PUPUK", "KLINIK"].includes(module)) return res.status(400).json({ error: "Modul tidak valid" });
+  if (!["BARANG", "BBM", "PUPUK", "KLINIK", "OLI"].includes(module)) return res.status(400).json({ error: "Modul tidak valid" });
 
   const conditions = ["module = @module"];
   const params: any = { module };
@@ -3214,8 +3219,8 @@ app.get("/api/bbm", async (req, res) => {
 // Flow: create (snapshot of the system stock) -> count (stok_fisik per line, DRAFT) -> submit ->
 // approve (one Koreksi per line whose count differs) or send back to DRAFT; DRAFT/SUBMITTED can be
 // cancelled. Every module uses the same five estates.
-const OPNAME_MODULES: OpnameModule[] = ["GUDANG", "KLINIK", "BBM", "PUPUK"];
-const OPNAME_LOG_MODULE: Record<OpnameModule, LogModule> = { GUDANG: "BARANG", KLINIK: "KLINIK", BBM: "BBM", PUPUK: "PUPUK" };
+const OPNAME_MODULES: OpnameModule[] = ["GUDANG", "KLINIK", "BBM", "PUPUK", "OLI"];
+const OPNAME_LOG_MODULE: Record<OpnameModule, LogModule> = { GUDANG: "BARANG", KLINIK: "KLINIK", BBM: "BBM", PUPUK: "PUPUK", OLI: "OLI" };
 const BBM_JENIS = ["SOLAR", "BENSIN"];
 // Nilam items, klinik batches and BBM saldo (INTEGER) are whole numbers; other gudang and pupuk take decimals.
 const opnameWhole = (o: { module: string; estate: string }) => o.module === "KLINIK" || o.module === "BBM" || (o.module === "GUDANG" && o.estate === "NILAM");
@@ -3296,6 +3301,17 @@ async function opnameSnapshot(module: OpnameModule, estate: string, client?: Poo
       client
     );
   }
+  if (module === "OLI") {
+    // Every jenis in master oli (plus any this estate still has history of), this estate's saldo or 0.
+    return queryMany(
+      `SELECT j kode, j nama, 'LTR' satuan, '' exp,
+         COALESCE((SELECT saldo_stock FROM oli_log WHERE jenis_oli = j AND estate = @estate AND saldo_stock IS NOT NULL
+                   ORDER BY tanggal_iso DESC, id DESC LIMIT 1), 0)::float8 stok_sistem
+       FROM (SELECT nama j FROM master_oli UNION SELECT DISTINCT jenis_oli FROM oli_log WHERE estate = @estate) x ORDER BY j`,
+      { estate },
+      client
+    );
+  }
   // Every jenis pupuk known in any estate (at least PUPUK NPK), with this estate's saldo or 0, so an
   // estate without pupuk history yet (KNS/WJA) still gets its lines to count.
   return queryMany(
@@ -3308,15 +3324,24 @@ async function opnameSnapshot(module: OpnameModule, estate: string, client?: Poo
   );
 }
 
-// Latest BBM / pupuk saldo row of one jenis (the running balance new entries continue from).
-const latestSaldoRow = (module: "BBM" | "PUPUK", estate: string, jenis: string, client?: PoolClient) =>
-  queryOne<{ saldo_stock: number }>(
-    module === "BBM"
-      ? `SELECT saldo_stock FROM bbm_log WHERE jenis_bbm = @jenis AND lokasi = @estate AND saldo_stock IS NOT NULL ORDER BY tanggal_iso DESC, id DESC LIMIT 1`
-      : `SELECT saldo_stock FROM pupuk_log WHERE jenis_pupuk = @jenis AND estate = @estate AND saldo_stock IS NOT NULL ORDER BY tanggal_iso DESC, id DESC LIMIT 1`,
+// The running-balance ledgers (no movement table, a saldo per row): table, jenis and estate column.
+const SALDO_LEDGER = {
+  BBM: { table: "bbm_log", jenis: "jenis_bbm", estate: "lokasi" },
+  PUPUK: { table: "pupuk_log", jenis: "jenis_pupuk", estate: "estate" },
+  OLI: { table: "oli_log", jenis: "jenis_oli", estate: "estate" },
+} as const;
+type SaldoModule = keyof typeof SALDO_LEDGER;
+const isSaldoModule = (m: OpnameModule): m is SaldoModule => m in SALDO_LEDGER;
+
+// Latest BBM / pupuk / oli saldo row of one jenis (the running balance new entries continue from).
+const latestSaldoRow = (module: SaldoModule, estate: string, jenis: string, client?: PoolClient) => {
+  const t = SALDO_LEDGER[module];
+  return queryOne<{ saldo_stock: number }>(
+    `SELECT saldo_stock FROM ${t.table} WHERE ${t.jenis} = @jenis AND ${t.estate} = @estate AND saldo_stock IS NOT NULL ORDER BY tanggal_iso DESC, id DESC LIMIT 1`,
     { estate, jenis },
     client
   );
+};
 
 // One line as it stands now (for a line added during the count); null = not in the master data.
 async function opnameCurrent(module: OpnameModule, estate: string, kode: string, exp: string): Promise<OpnameLine | null> {
@@ -3339,8 +3364,10 @@ async function opnameCurrent(module: OpnameModule, estate: string, kode: string,
     return r ? { ...r, exp } : null;
   }
   if (module === "BBM" && !BBM_JENIS.includes(kode)) return null;
+  if (!isSaldoModule(module)) return null;
+  if (module === "OLI" && !(await queryOne("SELECT 1 FROM master_oli WHERE nama = @kode", { kode }))) return null;
   const last = await latestSaldoRow(module, estate, kode);
-  return { kode, nama: kode, satuan: module === "BBM" ? "LTR" : "KG", exp: "", stok_sistem: last?.saldo_stock ?? 0 };
+  return { kode, nama: kode, satuan: module === "PUPUK" ? "KG" : "LTR", exp: "", stok_sistem: last?.saldo_stock ?? 0 };
 }
 
 // Books the count of one line as a Koreksi. Returns the stock before (the count is the stock after).
@@ -3377,15 +3404,15 @@ async function applyOpnameLine(client: PoolClient, req: express.Request, o: Opna
     return before;
   }
 
-  // BBM / pupuk: a saldo row dated the opname day, or after the latest row so it becomes the saldo.
+  // BBM / pupuk / oli: a saldo row dated the opname day, or after the latest row so it becomes the saldo.
+  if (!isSaldoModule(o.module)) throw new Error(`Modul ${o.module} tidak punya saldo berjalan`);
+  const t = SALDO_LEDGER[o.module];
   const before = (await latestSaldoRow(o.module, o.estate, line.kode, client))?.saldo_stock ?? 0;
   const delta = round3(actual - before);
   if (delta === 0) return before;
   const lastIso =
     (await queryOne<{ d: string | null }>(
-      o.module === "BBM"
-        ? "SELECT MAX(tanggal_iso) d FROM bbm_log WHERE jenis_bbm = @jenis AND lokasi = @estate"
-        : "SELECT MAX(tanggal_iso) d FROM pupuk_log WHERE jenis_pupuk = @jenis AND estate = @estate",
+      `SELECT MAX(tanggal_iso) d FROM ${t.table} WHERE ${t.jenis} = @jenis AND ${t.estate} = @estate`,
       { jenis: line.kode, estate: o.estate },
       client
     ))?.d ?? "";
@@ -3396,6 +3423,14 @@ async function applyOpnameLine(client: PoolClient, req: express.Request, o: Opna
       `INSERT INTO bbm_log (jenis_bbm, lokasi, estate, periode, tanggal, tanggal_iso, no_spb, saldo_stock, keterangan, kode_kendaraan, hm_terakhir, koreksi)
        VALUES (@jenis, @estate, @estate, @periode, @tanggal, @iso, '', @saldo, @note, '', '', @delta)`,
       { jenis: line.kode, estate: o.estate, periode, tanggal, iso, saldo: actual, note, delta },
+      client
+    );
+  } else if (o.module === "OLI") {
+    const [y, m, d] = iso.split("-");
+    await execute(
+      `INSERT INTO oli_log (estate, jenis_oli, periode, tanggal, tanggal_iso, no_embrace, saldo_stock, keterangan, koreksi)
+       VALUES (@estate, @jenis, @periode, @tanggal, @iso, '', @saldo, @note, @delta)`,
+      { estate: o.estate, jenis: line.kode, periode: `${INDO_MONTHS[Number(m) - 1]} ${y}`, tanggal: `${d}/${m}/${y}`, iso, saldo: actual, note, delta },
       client
     );
   } else {
@@ -3417,7 +3452,7 @@ type CountedLine = OpnameLine & { id: number; stok_fisik: number };
 // line). Returns each line's stock before, in the order of `lines`. BBM / pupuk have at most a few
 // lines and keep the per-line path.
 async function applyOpnameLines(client: PoolClient, req: express.Request, o: OpnameRow, lines: CountedLine[]): Promise<number[]> {
-  if (o.module === "BBM" || o.module === "PUPUK") {
+  if (isSaldoModule(o.module)) {
     const befores: number[] = [];
     for (const line of lines) befores.push(round3(await applyOpnameLine(client, req, o, line)));
     return befores;
@@ -3667,7 +3702,7 @@ app.post("/api/stock-opname/:id/lines", async (req, res) => {
   if (o.status !== "DRAFT") return res.status(400).json({ error: "Opname ini sudah diajukan, tidak bisa diubah" });
   if (o.module === "BBM") return res.status(400).json({ error: "BBM selalu berisi Solar dan Bensin" });
   let kode = String(req.body?.kode ?? "").trim();
-  if (o.module === "PUPUK") kode = kode.toUpperCase();
+  if (o.module === "PUPUK" || o.module === "OLI") kode = kode.toUpperCase();
   const exp = o.module === "KLINIK" ? String(req.body?.exp ?? "") : "";
   if (!kode) return res.status(400).json({ error: "Barang wajib dipilih" });
   if (exp && !ISO_DATE.test(exp)) return res.status(400).json({ error: "Tanggal expired tidak valid" });
@@ -3783,7 +3818,7 @@ app.post("/api/stock-opname/:id/approve", async (req, res) => {
       module: OPNAME_LOG_MODULE[o.module],
       estate: o.estate,
       aksi: "Koreksi Stok",
-      objek: o.module === "BBM" || o.module === "PUPUK" ? line.kode : `${line.kode} - ${line.nama}`,
+      objek: isSaldoModule(o.module) ? line.kode : `${line.kode} - ${line.nama}`,
       detail: `Stok Opname #${o.id}${o.module === "KLINIK" ? `; Batch ${expText(line.exp)}` : ""}: ${before} → ${after} (selisih ${signed(round3(after - before))})${
         line.keterangan ? `; Catatan: ${line.keterangan}` : ""
       }`,
@@ -3808,5 +3843,279 @@ app.post("/api/stock-opname/:id/cancel", async (req, res) => {
   });
   if (!o) return;
   await logOpname(req, o, "Batalkan Stok Opname", `${catatan ? `Alasan: ${catatan}; ` : ""}transaksi stok dibuka`);
+  res.json({ success: true });
+});
+
+// ---- Inventory Oli (lubricant), see schema.sql's oli_log ----
+// Same shape as Inventory Pupuk: a running saldo per estate + jenis oli. Nilam was imported from its
+// "STOK OLI" sheet; the other estates start empty.
+const OLI_ESTATES = ["NILAM", "KNS", "WJA", "ZAMRUD", "FIRUS"];
+
+function checkOliEstate(req: express.Request, res: express.Response, estate: string) {
+  if (!OLI_ESTATES.includes(estate)) {
+    res.status(400).json({ error: "Estate tidak valid" });
+    return false;
+  }
+  if (!estateAllowed(req.user!, estate)) {
+    res.status(403).json({ error: "Akses ditolak" });
+    return false;
+  }
+  return true;
+}
+
+function oliFilters(q: Record<string, string>) {
+  const conditions = ["estate = @estate"];
+  const params: any = { estate: q.estate };
+  if (q.jenis_oli) {
+    conditions.push("jenis_oli = @jenis_oli");
+    params.jenis_oli = q.jenis_oli;
+  }
+  wordSearch(q.search || "", ["jenis_oli", "no_embrace", "keterangan"], conditions, params);
+  if (ISO_DATE.test(q.dateFrom || "")) {
+    conditions.push("tanggal_iso >= @dateFrom");
+    params.dateFrom = q.dateFrom;
+  }
+  if (ISO_DATE.test(q.dateTo || "")) {
+    conditions.push("tanggal_iso <= @dateTo");
+    params.dateTo = q.dateTo;
+  }
+  return { where: "WHERE " + conditions.join(" AND "), params };
+}
+
+const latestOliSaldo = (estate: string, asOf?: string) =>
+  queryMany<{ jenis_oli: string; saldo_stock: number; tanggal: string }>(
+    `SELECT jenis_oli, saldo_stock, tanggal FROM (
+       SELECT jenis_oli, saldo_stock, tanggal,
+              ROW_NUMBER() OVER (PARTITION BY jenis_oli ORDER BY tanggal_iso DESC, id DESC) AS rn
+       FROM oli_log WHERE estate = @estate AND saldo_stock IS NOT NULL ${asOf ? "AND tanggal_iso <= @asOf" : ""}
+     ) sub WHERE rn = 1 ORDER BY jenis_oli`,
+    { estate, ...(asOf ? { asOf } : {}) }
+  );
+
+app.get("/api/oli/summary", async (req, res) => {
+  const q = req.query as Record<string, string>;
+  if (!checkOliEstate(req, res, q.estate)) return;
+  const flow = oliFilters({ estate: q.estate, dateFrom: q.dateFrom, dateTo: q.dateTo });
+  const perJenis = await queryMany(
+    `SELECT jenis_oli, COALESCE(SUM(diterima), 0)::float8 diterima, COALESCE(SUM(pemakaian), 0)::float8 pemakaian
+     FROM oli_log ${flow.where} GROUP BY jenis_oli ORDER BY jenis_oli`,
+    flow.params
+  );
+  // Same split as pupuk: saldoTerakhir is today's balance, saldoPerTanggal the balance at the filter's end.
+  const saldoTerakhir = await latestOliSaldo(q.estate);
+  const saldoPerTanggal = ISO_DATE.test(q.asOf || "") ? await latestOliSaldo(q.estate, q.asOf) : saldoTerakhir;
+  res.json({ perJenis, saldoTerakhir, saldoPerTanggal });
+});
+
+app.get("/api/oli/options", async (req, res) => {
+  const { estate = "" } = req.query as Record<string, string>;
+  if (!checkOliEstate(req, res, estate)) return;
+  // The jenis in master oli; transactions may only use these.
+  const rows = await queryMany<{ v: string }>("SELECT nama v FROM master_oli ORDER BY nama");
+  res.json({ jenis: rows.map((r) => r.v) });
+});
+
+app.get("/api/oli", async (req, res) => {
+  const q = req.query as Record<string, string>;
+  if (!checkOliEstate(req, res, q.estate)) return;
+  const { where, params } = oliFilters(q);
+  const totals = (await queryOne<any>(
+    `SELECT COUNT(*)::int c, COALESCE(SUM(pemakaian), 0)::float8 pemakaian, COALESCE(SUM(diterima), 0)::float8 diterima FROM oli_log ${where}`,
+    params
+  ))!;
+  const limit = Math.min(parseInt(q.pageSize) || 50, 500);
+  const offset = (Math.max(parseInt(q.page) || 1, 1) - 1) * limit;
+  const data = await queryMany(`SELECT * FROM oli_log ${where} ORDER BY tanggal_iso DESC, id DESC LIMIT @limit OFFSET @offset`, {
+    ...params,
+    limit,
+    offset,
+  });
+  res.json({ data, total: totals.c, pemakaianSum: totals.pemakaian, diterimaSum: totals.diterima, page: parseInt(q.page) || 1, pageSize: limit });
+});
+
+const oliObjek = (r: { jenis_oli: string; tanggal: string }) => `${r.jenis_oli} · ${r.tanggal}`;
+const oliDate = (iso: string) => {
+  const [y, m, d] = iso.split("-");
+  return { tanggal: `${d}/${m}/${y}`, periode: `${INDO_MONTHS[Number(m) - 1]} ${y}` };
+};
+
+// Oli masuk or pemakaian; like pupuk, pemakaian may exceed the saldo (the form warns instead).
+app.post("/api/oli", async (req, res) => {
+  const { estate, jenis_oli, tanggal_iso, tipe, jumlah, no_embrace, keterangan } = req.body;
+  if (!checkOliEstate(req, res, estate)) return;
+  if (!jenis_oli || !String(jenis_oli).trim()) return res.status(400).json({ error: "Jenis oli wajib diisi" });
+  if (!["MASUK", "PEMAKAIAN"].includes(tipe)) return res.status(400).json({ error: "Tipe transaksi tidak valid" });
+  const qty = Number(jumlah);
+  if (!Number.isFinite(qty) || qty <= 0) return res.status(400).json({ error: "Jumlah harus lebih dari 0" });
+  if (!ISO_DATE.test(tanggal_iso || "")) return res.status(400).json({ error: "Tanggal tidak valid" });
+
+  const jenis = String(jenis_oli).trim().toUpperCase();
+  if (!(await queryOne("SELECT 1 FROM master_oli WHERE nama = @jenis", { jenis }))) {
+    return res.status(400).json({ error: `Jenis oli ${jenis} belum ada di Master Data Oli` });
+  }
+  const lastSaldo = (await latestSaldoRow("OLI", estate, jenis))?.saldo_stock ?? 0;
+  const saldoBaru = round3(tipe === "MASUK" ? lastSaldo + qty : lastSaldo - qty);
+  const { tanggal, periode } = oliDate(tanggal_iso);
+  const row = await queryOne<{ id: number }>(
+    `INSERT INTO oli_log (estate, jenis_oli, periode, tanggal, tanggal_iso, no_embrace, diterima, pemakaian, saldo_stock, keterangan)
+     VALUES (@estate, @jenis, @periode, @tanggal, @tanggal_iso, @no_embrace, @diterima, @pemakaian, @saldo, @keterangan)
+     RETURNING id`,
+    {
+      estate,
+      jenis,
+      periode,
+      tanggal,
+      tanggal_iso,
+      no_embrace: no_embrace || "",
+      diterima: tipe === "MASUK" ? qty : null,
+      pemakaian: tipe === "PEMAKAIAN" ? qty : null,
+      saldo: saldoBaru,
+      keterangan: keterangan || (tipe === "MASUK" ? "OLI MASUK" : ""),
+    }
+  );
+  await logActivity(req, {
+    module: "OLI",
+    estate,
+    aksi: tipe === "MASUK" ? "Stok Masuk" : "Stok Keluar",
+    objek: oliObjek({ jenis_oli: jenis, tanggal }),
+    detail: [`Jumlah: ${qty} LTR`, `Saldo: ${lastSaldo} → ${saldoBaru}`, no_embrace && `No. Embrace: ${no_embrace}`, keterangan && `Keterangan: ${keterangan}`]
+      .filter(Boolean)
+      .join("; "),
+  });
+  res.json({ success: true, id: row!.id, saldo_stock: saldoBaru });
+});
+
+app.put("/api/oli/:id", requireSuperuser, async (req, res) => {
+  const existing = await queryOne<any>("SELECT * FROM oli_log WHERE id = @id", { id: req.params.id });
+  if (!existing) return res.status(404).json({ error: "Not found" });
+  if (!estateAllowed(req.user!, existing.estate)) return res.status(403).json({ error: "Akses ditolak" });
+  const b = req.body;
+  if (b.tanggal_iso && !ISO_DATE.test(b.tanggal_iso)) return res.status(400).json({ error: "Tanggal tidak valid" });
+  const iso = b.tanggal_iso || existing.tanggal_iso;
+  const updated = {
+    tanggal_iso: iso,
+    ...(iso ? oliDate(iso) : { tanggal: existing.tanggal, periode: existing.periode }),
+    no_embrace: b.no_embrace ?? existing.no_embrace ?? "",
+    diterima: b.diterima === undefined ? existing.diterima : optNum(b.diterima),
+    pemakaian: b.pemakaian === undefined ? existing.pemakaian : optNum(b.pemakaian),
+    saldo_stock: b.saldo_stock === undefined ? existing.saldo_stock : optNum(b.saldo_stock),
+    keterangan: b.keterangan ?? existing.keterangan ?? "",
+  };
+  await execute(
+    `UPDATE oli_log SET tanggal_iso = @tanggal_iso, tanggal = @tanggal, periode = @periode, no_embrace = @no_embrace,
+       diterima = @diterima, pemakaian = @pemakaian, saldo_stock = @saldo_stock, keterangan = @keterangan
+     WHERE id = @id`,
+    { ...updated, id: req.params.id }
+  );
+  await logActivity(req, {
+    module: "OLI",
+    estate: existing.estate,
+    aksi: "Edit Transaksi",
+    objek: oliObjek(existing),
+    detail: describeChanges(existing, updated, {
+      tanggal: "Tanggal",
+      no_embrace: "No. Embrace",
+      diterima: "Stok Masuk",
+      pemakaian: "Pemakaian",
+      saldo_stock: "Saldo Stok",
+      keterangan: "Keterangan",
+    }),
+  });
+  res.json({ success: true });
+});
+
+app.delete("/api/oli/:id", requireSuperuser, async (req, res) => {
+  const existing = await queryOne<any>("SELECT * FROM oli_log WHERE id = @id", { id: req.params.id });
+  if (!existing) return res.status(404).json({ error: "Not found" });
+  if (!estateAllowed(req.user!, existing.estate)) return res.status(403).json({ error: "Akses ditolak" });
+  await execute("DELETE FROM oli_log WHERE id = @id", { id: req.params.id });
+  await logActivity(req, {
+    module: "OLI",
+    estate: existing.estate,
+    aksi: "Hapus Transaksi",
+    objek: oliObjek(existing),
+    detail: [
+      existing.diterima && `Stok Masuk: ${existing.diterima}`,
+      existing.pemakaian && `Pemakaian: ${existing.pemakaian}`,
+      existing.saldo_stock !== null && `Saldo Stok: ${existing.saldo_stock}`,
+      existing.keterangan && `Keterangan: ${existing.keterangan}`,
+    ]
+      .filter(Boolean)
+      .join("; "),
+  });
+  res.json({ success: true });
+});
+
+// ---- Master data oli (see schema.sql master_oli) ----
+const masterOliPayload = (b: any) => ({
+  kode: String(b?.kode ?? "").trim().toUpperCase(),
+  nama: String(b?.nama ?? "").trim().toUpperCase(),
+  satuan: String(b?.satuan ?? "").trim().toUpperCase() || "LTR",
+  keterangan: String(b?.keterangan ?? "").trim(),
+});
+
+app.get("/api/master-oli", async (req, res) => {
+  const { search = "" } = req.query as Record<string, string>;
+  const conditions: string[] = [];
+  const params: any = {};
+  wordSearch(search, ["kode", "nama", "keterangan"], conditions, params);
+  const data = await queryMany(
+    `SELECT m.*, (SELECT COUNT(*)::int FROM oli_log l WHERE l.jenis_oli = m.nama) transaksi
+     FROM master_oli m ${conditions.length ? "WHERE " + conditions.join(" AND ") : ""} ORDER BY m.kode`,
+    params
+  );
+  res.json({ data, total: data.length });
+});
+
+app.post("/api/master-oli", async (req, res) => {
+  const o = masterOliPayload(req.body);
+  if (!o.kode || !o.nama) return res.status(400).json({ error: "Kode dan nama jenis oli wajib diisi" });
+  try {
+    const row = await queryOne<{ id: number }>(
+      "INSERT INTO master_oli (kode, nama, satuan, keterangan) VALUES (@kode, @nama, @satuan, @keterangan) RETURNING id",
+      o
+    );
+    await logActivity(req, { module: "OLI", estate: null, aksi: "Tambah Jenis Oli", objek: `${o.kode} - ${o.nama}`, detail: `Satuan: ${o.satuan}` });
+    res.json({ success: true, id: row!.id });
+  } catch (e: any) {
+    if (e.code === "23505") return res.status(409).json({ error: "Kode atau nama jenis oli sudah dipakai" });
+    throw e;
+  }
+});
+
+// A renamed jenis is renamed in the oli ledger too, so its saldo and history stay with it.
+app.put("/api/master-oli/:id", async (req, res) => {
+  const existing = await queryOne<any>("SELECT * FROM master_oli WHERE id = @id", { id: req.params.id });
+  if (!existing) return res.status(404).json({ error: "Not found" });
+  const o = masterOliPayload(req.body);
+  if (!o.kode || !o.nama) return res.status(400).json({ error: "Kode dan nama jenis oli wajib diisi" });
+  try {
+    await withTransaction(async (c) => {
+      await execute("UPDATE master_oli SET kode = @kode, nama = @nama, satuan = @satuan, keterangan = @keterangan WHERE id = @id", { ...o, id: existing.id }, c);
+      if (o.nama !== existing.nama) {
+        await execute("UPDATE oli_log SET jenis_oli = @nama WHERE jenis_oli = @old", { nama: o.nama, old: existing.nama }, c);
+      }
+    });
+  } catch (e: any) {
+    if (e.code === "23505") return res.status(409).json({ error: "Kode atau nama jenis oli sudah dipakai" });
+    throw e;
+  }
+  await logActivity(req, {
+    module: "OLI",
+    estate: null,
+    aksi: "Edit Jenis Oli",
+    objek: `${o.kode} - ${o.nama}`,
+    detail: describeChanges(existing, o, { kode: "Kode", nama: "Nama", satuan: "Satuan", keterangan: "Keterangan" }),
+  });
+  res.json({ success: true });
+});
+
+app.delete("/api/master-oli/:id", async (req, res) => {
+  const existing = await queryOne<any>("SELECT * FROM master_oli WHERE id = @id", { id: req.params.id });
+  if (!existing) return res.status(404).json({ error: "Not found" });
+  const used = await queryOne("SELECT 1 FROM oli_log WHERE jenis_oli = @n LIMIT 1", { n: existing.nama });
+  if (used) return res.status(409).json({ error: "Jenis oli ini sudah punya transaksi, tidak bisa dihapus" });
+  await execute("DELETE FROM master_oli WHERE id = @id", { id: existing.id });
+  await logActivity(req, { module: "OLI", estate: null, aksi: "Hapus Jenis Oli", objek: `${existing.kode} - ${existing.nama}` });
   res.json({ success: true });
 });

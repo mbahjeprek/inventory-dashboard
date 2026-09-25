@@ -3,9 +3,9 @@ import type { AuthUser } from "./api";
 // Checkbox access of an account. A superuser has every estate and permission; an estate account
 // only what is ticked for it in Pengguna. Mirrors ALL_PERMS / requiredPerms() in server/src/app.ts,
 // which is the actual security boundary - this only decides what to show.
-export const MODULES = ["GUDANG", "BBM", "PUPUK", "KLINIK"] as const;
+export const MODULES = ["GUDANG", "BBM", "PUPUK", "KLINIK", "OLI"] as const;
 export type Module = (typeof MODULES)[number];
-export const MODULE_LABELS: Record<Module, string> = { GUDANG: "Gudang", BBM: "BBM", PUPUK: "Pupuk NPK", KLINIK: "Klinik" };
+export const MODULE_LABELS: Record<Module, string> = { GUDANG: "Gudang", BBM: "BBM", PUPUK: "Pupuk NPK", KLINIK: "Klinik", OLI: "Oli" };
 
 export const ACTIONS = [
   { key: "view", label: "Lihat" },
@@ -25,6 +25,7 @@ export const MODULE_ACTIONS: Record<Module, Action[]> = {
   BBM: ["view", "input", "edit", "delete", "opname", "approve"],
   PUPUK: ["view", "input", "edit", "delete", "opname", "approve"],
   KLINIK: ["view", "input", "edit", "delete", "koreksi", "opname", "approve"],
+  OLI: ["view", "input", "edit", "delete", "opname", "approve"],
 };
 export const modulePerm = (m: Module, a: Action) => `${m.toLowerCase()}.${a}`;
 
@@ -34,6 +35,7 @@ export const OTHER_PERMS: { group: string; items: { key: string; label: string }
     items: [
       { key: "master.barang", label: "Barang" },
       { key: "master.obat", label: "Obat" },
+      { key: "master.oli", label: "Oli" },
       { key: "master.karyawan", label: "Karyawan" },
       { key: "master.alat", label: "Alat Berat" },
       { key: "master.users", label: "Pengguna" },
@@ -50,7 +52,7 @@ export const ALL_PERMS: string[] = [
 // Quick presets for the Pengguna form; the boxes stay editable afterwards.
 const viewInput = (mods: Module[]) => mods.flatMap((m) => [modulePerm(m, "view"), modulePerm(m, "input")]);
 export const PERM_TEMPLATES: { label: string; perms: string[] }[] = [
-  { label: "Admin Gudang/BBM/Pupuk", perms: viewInput(["GUDANG", "BBM", "PUPUK"]) },
+  { label: "Admin Gudang/BBM/Pupuk/Oli", perms: viewInput(["GUDANG", "BBM", "PUPUK", "OLI"]) },
   { label: "Admin Klinik", perms: viewInput(["KLINIK"]) },
   { label: "Hanya Lihat", perms: MODULES.map((m) => modulePerm(m, "view")) },
   { label: "Semua modul (penuh)", perms: MODULES.flatMap((m) => MODULE_ACTIONS[m].map((a) => modulePerm(m, a))) },
@@ -88,6 +90,7 @@ export function moduleOfPath(path: string): Module | null {
   if (path.startsWith("/inventory-bbm")) return "BBM";
   if (path.startsWith("/inventory-pupuk")) return "PUPUK";
   if (path.startsWith("/inventory-klinik")) return "KLINIK";
+  if (path.startsWith("/inventory-oli")) return "OLI";
   if (path.startsWith("/inventory")) return "GUDANG";
   return null;
 }
@@ -96,6 +99,7 @@ export function moduleOfPath(path: string): Module | null {
 export const PAGE_PERMS: Record<string, string> = {
   "/master-barang": "master.barang",
   "/master-obat": "master.obat",
+  "/master-oli": "master.oli",
   "/karyawan": "master.karyawan",
   "/alat-berat": "master.alat",
   "/users": "master.users",
