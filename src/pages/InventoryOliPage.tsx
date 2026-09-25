@@ -45,7 +45,7 @@ export function InventoryOliPage({ estate }: { estate: string }) {
   const [editing, setEditing] = useState<OliRecord | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<OliRecord | null>(null);
   const pageSize = 25;
-  const colCount = showActions ? 9 : 8;
+  const colCount = showActions ? 10 : 9;
 
   const filters = () => ({ estate, search, jenis_oli: jenis, dateFrom, dateTo });
 
@@ -258,6 +258,7 @@ export function InventoryOliPage({ estate }: { estate: string }) {
                 <th className="px-4 py-2.5 text-right whitespace-nowrap">Pemakaian (LTR)</th>
                 <th className="px-4 py-2.5 text-right whitespace-nowrap">Stock (LTR)</th>
                 <th className="px-4 py-2.5">Keterangan</th>
+                <th className="px-4 py-2.5 text-center">Bukti</th>
                 {showActions && <th className="px-4 py-2.5 text-right">Aksi</th>}
               </tr>
             </thead>
@@ -287,7 +288,10 @@ export function InventoryOliPage({ estate }: { estate: string }) {
                       {r.saldo_stock !== null ? fmt(r.saldo_stock) : "-"}
                     </td>
                     <td className="px-4 py-2.5 text-[var(--text-secondary)] text-xs max-w-[320px] truncate" title={r.keterangan}>
-                      <EvidenceLink id={r.evidence_id} /> {r.keterangan || "-"}
+                      {r.keterangan || "-"}
+                    </td>
+                    <td className="px-4 py-2.5 text-center whitespace-nowrap">
+                      {r.evidence_id ? <EvidenceLink id={r.evidence_id} label="Lihat" /> : <span className="text-[var(--text-muted)]">-</span>}
                     </td>
                     {showActions && (
                       <td className="px-4 py-2.5 text-right">

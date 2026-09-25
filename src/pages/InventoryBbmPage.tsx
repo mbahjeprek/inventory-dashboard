@@ -346,6 +346,7 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
                 <th className="px-4 py-2.5 text-right whitespace-nowrap">Stok Keluar</th>
                 <th className="px-4 py-2.5 text-right whitespace-nowrap">Saldo Stock</th>
                 <th className="px-4 py-2.5">Keterangan</th>
+                <th className="px-4 py-2.5 text-center">Bukti</th>
                 <th className="px-4 py-2.5">Status Kepemilikan</th>
                 <th className="px-4 py-2.5">Kode Kendaraan</th>
                 <th className="px-4 py-2.5 min-w-[150px]">HM Terakhir Sebelum Permintaan Solar</th>
@@ -356,13 +357,13 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={showActions ? 12 : 11} className="px-4 py-8 text-center text-[var(--text-muted)]">
+                  <td colSpan={showActions ? 13 : 12} className="px-4 py-8 text-center text-[var(--text-muted)]">
                     Memuat...
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={showActions ? 12 : 11} className="px-4 py-8 text-center text-[var(--text-muted)]">
+                  <td colSpan={showActions ? 13 : 12} className="px-4 py-8 text-center text-[var(--text-muted)]">
                     Tidak ada data
                   </td>
                 </tr>
@@ -382,7 +383,10 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
                       {r.saldo_stock !== null ? r.saldo_stock.toLocaleString("id-ID") : "-"}
                     </td>
                     <td className="px-4 py-2.5 text-[var(--text-secondary)] text-xs max-w-[260px] truncate" title={r.keterangan}>
-                      <EvidenceLink id={r.evidence_id} /> {r.keterangan || "-"}
+                      {r.keterangan || "-"}
+                    </td>
+                    <td className="px-4 py-2.5 text-center whitespace-nowrap">
+                      {r.evidence_id ? <EvidenceLink id={r.evidence_id} label="Lihat" /> : <span className="text-[var(--text-muted)]">-</span>}
                     </td>
                     <td className="px-4 py-2.5 text-xs text-[var(--text-secondary)]">{r.status_kepemilikan || "-"}</td>
                     <td className="px-4 py-2.5 text-xs whitespace-nowrap">{r.kode_kendaraan || "-"}</td>

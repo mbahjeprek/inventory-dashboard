@@ -39,7 +39,7 @@ export function LedgerHistory({ scope, type, refreshKey }: { scope: StockScope; 
   const [confirmDelete, setConfirmDelete] = useState<LedgerTx | null>(null);
   const tableScrollRef = useDragScroll<HTMLDivElement>();
   const pageSize = 25;
-  const colCount = 7 + (showTujuan ? 1 : 0) + (showActions ? 1 : 0);
+  const colCount = 8 + (showTujuan ? 1 : 0) + (showActions ? 1 : 0);
 
   const query = () => ({ type, search, dateFrom, dateTo });
 
@@ -177,6 +177,7 @@ export function LedgerHistory({ scope, type, refreshKey }: { scope: StockScope; 
                 {showTujuan && <th className="px-4 py-2.5">Tujuan</th>}
                 <th className="px-4 py-2.5">{personLabel}</th>
                 <th className="px-4 py-2.5">Catatan</th>
+                <th className="px-4 py-2.5 text-center">Bukti</th>
                 <th className="px-4 py-2.5 whitespace-nowrap">Diinput Oleh</th>
                 {showActions && <th className="px-4 py-2.5 text-right">Aksi</th>}
               </tr>
@@ -219,13 +220,16 @@ export function LedgerHistory({ scope, type, refreshKey }: { scope: StockScope; 
                           Dibuang (expired)
                         </span>
                       )}
-                      <EvidenceLink id={r.evidence_id} /> {r.note || (r.is_correction || r.tujuan === "DIBUANG" ? "" : "-")}
+                      {r.note || (r.is_correction || r.tujuan === "DIBUANG" ? "" : "-")}
                       {isKlinik && r.alloc && r.alloc.length > 0 && (
                         <div className="text-[11px] text-[var(--text-muted)] mt-0.5">
                           Batch exp:{" "}
                           {r.alloc.map((a) => `${a.exp ? a.exp.split("-").reverse().join("/") : "tanpa tanggal"} (${a.qty.toLocaleString("id-ID")})`).join(", ")}
                         </div>
                       )}
+                    </td>
+                    <td className="px-4 py-2.5 text-center whitespace-nowrap">
+                      {r.evidence_id ? <EvidenceLink id={r.evidence_id} label="Lihat" /> : <span className="text-[var(--text-muted)]">-</span>}
                     </td>
                     <td className="px-4 py-2.5 whitespace-nowrap text-[var(--text-secondary)]">{r.input_oleh || "-"}</td>
                     {showActions && (

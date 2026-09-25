@@ -193,19 +193,20 @@ export function StockInPage({ embedded = false }: { embedded?: boolean }) {
                 <th className="px-4 py-2.5 text-right">Qty</th>
                 <th className="px-4 py-2.5">Tujuan</th>
                 <th className="px-4 py-2.5">Keterangan</th>
+                <th className="px-4 py-2.5 text-center">Bukti</th>
                 {showActions && <th className="px-4 py-2.5 text-right">Aksi</th>}
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={showActions ? 9 : 8} className="px-4 py-8 text-center text-[var(--text-muted)]">
+                  <td colSpan={showActions ? 10 : 9} className="px-4 py-8 text-center text-[var(--text-muted)]">
                     Memuat...
                   </td>
                 </tr>
               ) : items.length === 0 ? (
                 <tr>
-                  <td colSpan={showActions ? 9 : 8} className="px-4 py-8 text-center text-[var(--text-muted)]">
+                  <td colSpan={showActions ? 10 : 9} className="px-4 py-8 text-center text-[var(--text-muted)]">
                     Tidak ada data
                   </td>
                 </tr>
@@ -220,7 +221,10 @@ export function StockInPage({ embedded = false }: { embedded?: boolean }) {
                     <td className="px-4 py-2.5 text-right font-medium text-[var(--accent-green)]">+{r.qty} {r.satuan}</td>
                     <td className="px-4 py-2.5">{r.tujuan || <span className="text-[var(--text-muted)]">-</span>}</td>
                     <td className="px-4 py-2.5 text-[var(--text-secondary)] text-xs max-w-[220px] truncate" title={r.keterangan}>
-                      <EvidenceLink id={r.evidence_id} /> {r.keterangan || "-"}
+                      {r.keterangan || "-"}
+                    </td>
+                    <td className="px-4 py-2.5 text-center whitespace-nowrap">
+                      {r.evidence_id ? <EvidenceLink id={r.evidence_id} label="Lihat" /> : <span className="text-[var(--text-muted)]">-</span>}
                     </td>
                     {showActions && (
                       <td className="px-4 py-2.5 text-right">

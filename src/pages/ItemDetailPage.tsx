@@ -195,13 +195,14 @@ export function ItemDetailPage() {
                   <th className="px-4 py-2.5 text-right">Qty</th>
                   <th className="px-4 py-2.5">Referensi</th>
                   <th className="px-4 py-2.5">Keterangan</th>
+                  <th className="px-4 py-2.5 text-center">Bukti</th>
                   {showActions && <th className="px-4 py-2.5 text-right">Aksi</th>}
                 </tr>
               </thead>
               <tbody>
                 {filtered.length === 0 ? (
                   <tr>
-                    <td colSpan={showActions ? 8 : 7} className="px-4 py-8 text-center text-[var(--text-muted)]">
+                    <td colSpan={showActions ? 9 : 8} className="px-4 py-8 text-center text-[var(--text-muted)]">
                       Belum ada riwayat pergerakan
                     </td>
                   </tr>
@@ -232,7 +233,10 @@ export function ItemDetailPage() {
                       </td>
                       <td className="px-4 py-2.5 text-xs text-[var(--text-secondary)]">{m.ref || "-"}</td>
                       <td className="px-4 py-2.5 text-xs text-[var(--text-secondary)] max-w-[220px] truncate" title={m.note || ""}>
-                        <EvidenceLink id={m.evidence_id} /> {m.note || "-"}
+                        {m.note || "-"}
+                      </td>
+                      <td className="px-4 py-2.5 text-center whitespace-nowrap">
+                        {m.evidence_id ? <EvidenceLink id={m.evidence_id} label="Lihat" /> : <span className="text-[var(--text-muted)]">-</span>}
                       </td>
                       {showActions && (
                         <td className="px-4 py-2.5 text-right">

@@ -300,6 +300,7 @@ export function InventoryPupukPage({ estate }: { estate: string }) {
                 <th className="px-4 py-2.5 text-right whitespace-nowrap">Stok Keluar (KG)</th>
                 <th className="px-4 py-2.5 text-right whitespace-nowrap">Saldo Stok (KG)</th>
                 <th className="px-4 py-2.5">Keterangan</th>
+                <th className="px-4 py-2.5 text-center">Bukti</th>
                 <th className="px-4 py-2.5">Blok</th>
                 <th className="px-4 py-2.5 text-right">HA</th>
                 <th className="px-4 py-2.5 text-right">Pokok</th>
@@ -309,13 +310,13 @@ export function InventoryPupukPage({ estate }: { estate: string }) {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={showActions ? 14 : 13} className="px-4 py-8 text-center text-[var(--text-muted)]">
+                  <td colSpan={showActions ? 15 : 14} className="px-4 py-8 text-center text-[var(--text-muted)]">
                     Memuat...
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={showActions ? 14 : 13} className="px-4 py-8 text-center text-[var(--text-muted)]">
+                  <td colSpan={showActions ? 15 : 14} className="px-4 py-8 text-center text-[var(--text-muted)]">
                     Tidak ada data
                   </td>
                 </tr>
@@ -334,7 +335,10 @@ export function InventoryPupukPage({ estate }: { estate: string }) {
                       {r.saldo_stock !== null ? r.saldo_stock.toLocaleString("id-ID", { maximumFractionDigits: 2 }) : "-"}
                     </td>
                     <td className="px-4 py-2.5 text-[var(--text-secondary)] text-xs max-w-[260px] truncate" title={r.keterangan}>
-                      <EvidenceLink id={r.evidence_id} /> {r.keterangan || "-"}
+                      {r.keterangan || "-"}
+                    </td>
+                    <td className="px-4 py-2.5 text-center whitespace-nowrap">
+                      {r.evidence_id ? <EvidenceLink id={r.evidence_id} label="Lihat" /> : <span className="text-[var(--text-muted)]">-</span>}
                     </td>
                     <td className="px-4 py-2.5 text-xs whitespace-nowrap">{r.blok || "-"}</td>
                     <td className="px-4 py-2.5 text-right text-xs">{r.ha != null ? r.ha.toLocaleString("id-ID", { maximumFractionDigits: 2 }) : "-"}</td>
