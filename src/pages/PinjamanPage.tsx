@@ -3,6 +3,7 @@ import { ArrowLeftRight, ArrowRight, Plus, X } from "lucide-react";
 import { api, errorText, type OpnameModule, type Pinjaman, type PinjamanBarang, type PinjamanStatus } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { can, canModule, userEstates } from "../lib/access";
+import { LOAN_LATE_DAYS, loanDays, useOpenPinjaman } from "../hooks/useOpenPinjaman";
 import { OPNAME_MODULES, OPNAME_MODULE_LABEL, fmtQty, isoDisplay, opnameModule, round3 } from "../lib/opname";
 
 const ESTATES = ["NILAM", "KNS", "WJA", "ZAMRUD", "FIRUS"];
@@ -36,6 +37,7 @@ export function PinjamanPage() {
   const [reload, setReload] = useState(0);
   const [creating, setCreating] = useState(false);
   const [returning, setReturning] = useState<{ loan: Pinjaman; batal: boolean } | null>(null);
+  const refreshOpen = useOpenPinjaman((s) => s.refresh);
 
   useEffect(() => {
     setLoading(true);
@@ -53,6 +55,7 @@ export function PinjamanPage() {
     setCreating(false);
     setReturning(null);
     setReload((n) => n + 1);
+    refreshOpen();
   };
 
   return (
@@ -126,6 +129,13 @@ export function PinjamanPage() {
                     <td className="px-4 py-2.5 whitespace-nowrap">
                       <div>{isoDisplay(l.tanggal_iso)}</div>
                       <div className="text-[11px] text-[var(--text-muted)]">#{l.id}</div>
+                      {l.status === "DIPINJAM" && (
+                        <div
+                          className={`text-[11px] font-medium ${loanDays(l.tanggal_iso) >= LOAN_LATE_DAYS ? "text-[var(--accent-red)]" : "text-[var(--accent-amber)]"}`}
+                        >
+                          sudah {loanDays(l.tanggal_iso)} hari
+                        </div>
+                      )}
                     </td>
                     <td className="px-4 py-2.5">
                       <div className="font-medium text-[var(--text-primary)]">{l.nama}</div>

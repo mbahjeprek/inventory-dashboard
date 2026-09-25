@@ -95,6 +95,13 @@ export function moduleOfPath(path: string): Module | null {
   return null;
 }
 
+// Which estate an inventory page path belongs to ("/inventory-bbm-kns" -> KNS, "/inventory" -> NILAM).
+export function estateOfPath(path: string): string | null {
+  if (!moduleOfPath(path)) return null;
+  const m = path.match(/-(kns|wja|zamrud|firus)$/);
+  return m ? m[1].toUpperCase() : "NILAM";
+}
+
 // Permission needed for the non-inventory pages in the sidebar / router.
 export const PAGE_PERMS: Record<string, string> = {
   "/master-barang": "master.barang",

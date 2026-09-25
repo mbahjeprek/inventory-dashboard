@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { useEstateFilter } from "../hooks/useEstateFilter";
+import { useOpenPinjaman } from "../hooks/useOpenPinjaman";
 import { ChangePasswordModal } from "./ChangePasswordModal";
 import { canModule, pageAllowed, userEstates, OPNAME_PATH, PINJAMAN_PATH, type Module } from "../lib/access";
 
@@ -132,6 +133,7 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: { mobileOpen?: bo
   const minimized = minimizedPref && isDesktop;
 
   const pickedEstates = useEstateFilter((s) => s.picked);
+  const openLoans = useOpenPinjaman((s) => s.loans.length);
 
   // Inventory menus list the estates the account may open (narrowed to the ones picked on the
   // dashboard, if any) and only the modules it may view. Master data / monitoring pages follow their
@@ -346,8 +348,23 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: { mobileOpen?: bo
                       }`
                     }
                   >
-                    <Icon size={17} className="shrink-0 text-[#b9f0c9]" />
-                    {!minimized && label}
+                    <span className="relative shrink-0">
+                      <Icon size={17} className="text-[#b9f0c9]" />
+                      {minimized && to === PINJAMAN_PATH && openLoans > 0 && (
+                        <span className="absolute -top-1.5 -right-2 min-w-4 h-4 px-1 rounded-full bg-[#f59e0b] text-[10px] leading-4 text-center text-white">
+                          {openLoans}
+                        </span>
+                      )}
+                    </span>
+                    {!minimized && <span className="flex-1">{label}</span>}
+                    {!minimized && to === PINJAMAN_PATH && openLoans > 0 && (
+                      <span
+                        title={`${openLoans} pinjaman belum kembali`}
+                        className="min-w-5 h-5 px-1.5 rounded-full bg-[#f59e0b] text-[11px] leading-5 text-center text-white"
+                      >
+                        {openLoans}
+                      </span>
+                    )}
                   </NavLink>
                 ))}
             </div>
