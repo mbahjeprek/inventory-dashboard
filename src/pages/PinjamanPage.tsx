@@ -231,9 +231,9 @@ function CreatePinjamanModal({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
-  // Either side may record the loan, so one of the two estates must be the account's own.
-  const dariOptions = ESTATES;
-  const keOptions = ESTATES.filter((e) => e !== dari && (myEstates.includes(dari) || myEstates.includes(e)));
+  // Only the lending estate records a loan: "dari" is one of the account's own estates.
+  const dariOptions = ESTATES.filter((e) => myEstates.includes(e));
+  const keOptions = ESTATES.filter((e) => e !== dari);
   useEffect(() => {
     if (!keOptions.includes(ke)) setKe(keOptions[0] ?? "");
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -274,7 +274,7 @@ function CreatePinjamanModal({
   };
 
   return (
-    <Modal title="Catat Pinjaman" subtitle="Stok langsung pindah dari estate yang meminjamkan ke peminjam" onClose={onClose}>
+    <Modal title="Catat Pinjaman" subtitle="Dicatat oleh estate yang meminjamkan; stok kedua estate langsung berubah" onClose={onClose}>
       <div>
         <label className={labelCls}>Modul</label>
         <select value={module} onChange={(e) => setModule(e.target.value as OpnameModule)} className={inputCls}>

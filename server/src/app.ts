@@ -4282,7 +4282,8 @@ app.delete("/api/master-oli/:id", async (req, res) => {
 // Estate A lends estate B stock of one item: A gets a Stok Keluar and B a Stok Masuk at once (no
 // confirmation step). B returns the same item, all at once or in parts, which books the reverse
 // until the loan is LUNAS; a loan nothing came back on yet can be cancelled (Batal = full return).
-// Anyone with the module's Input permission in one of the two estates may record either step.
+// Only the lending estate (module Input permission there) records a loan; a return or cancel may be
+// recorded by either of the two estates.
 type LoanModule = OpnameModule;
 type LoanRow = {
   id: number;
@@ -4486,7 +4487,7 @@ app.get("/api/pinjaman/barang", async (req, res) => {
   const m = module as LoanModule;
   if (!OPNAME_MODULES_LIST.includes(m)) return res.status(400).json({ error: "Modul tidak valid" });
   if (!(ESTATES as readonly string[]).includes(estate)) return res.status(400).json({ error: "Estate tidak valid" });
-  if (!canLoan(req.user!, m, "input")) return res.status(403).json({ error: "Akses ditolak" });
+  if (!canLoan(req.user!, m, "input") || !estateAllowed(req.user!, estate)) return res.status(403).json({ error: "Akses ditolak" });
   const like = `%${search}%`;
   if (m === "GUDANG") {
     const data =
@@ -4535,7 +4536,8 @@ app.post("/api/pinjaman", async (req, res) => {
   if (!OPNAME_MODULES_LIST.includes(m)) return res.status(400).json({ error: "Modul tidak valid" });
   if (!(ESTATES as readonly string[]).includes(dari) || !(ESTATES as readonly string[]).includes(ke)) return res.status(400).json({ error: "Estate tidak valid" });
   if (dari === ke) return res.status(400).json({ error: "Estate peminjam harus beda dengan estate yang meminjamkan" });
-  if (!canLoan(u, m, "input") || !(estateAllowed(u, dari) || estateAllowed(u, ke))) return res.status(403).json({ error: "Akses ditolak" });
+  if (!canLoan(u, m, "input") || !estateAllowed(u, dari))
+    return res.status(403).json({ error: "Pinjaman hanya bisa dicatat oleh estate yang meminjamkan barang" });
   if (!Number.isFinite(qty) || qty <= 0) return res.status(400).json({ error: "Jumlah harus lebih dari 0" });
   if (loanWhole(m, dari, ke) && !Number.isInteger(qty)) return res.status(400).json({ error: "Jumlah harus bilangan bulat" });
   if (!alasan) return res.status(400).json({ error: "Alasan wajib diisi" });
