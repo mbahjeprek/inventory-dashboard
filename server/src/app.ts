@@ -143,6 +143,8 @@ function requiredPerms(req: express.Request): Need {
   if (is(/^\/stock-opname(\/|$)/)) return null;
   // Pinjaman antar estate: each route checks the loan's module (view / input) and estates itself.
   if (is(/^\/pinjaman(\/|$)/)) return null;
+  // Perbandingan antar estate: the route checks the module's Lihat and the estates itself.
+  if (is(/^\/perbandingan(\/|$)/)) return null;
   if (is(/^\/(stock-correction|gudang-stock\/correction)$/)) return ["gudang.koreksi"];
   if (is(/^\/klinik-stock\/correction$/)) return ["klinik.koreksi"];
   // items = the master barang list, which is also Nilam's gudang stock.
@@ -4625,3 +4627,110 @@ async function loanBack(req: express.Request, res: express.Response, batal: bool
 
 app.post("/api/pinjaman/:id/kembali", (req, res) => loanBack(req, res, false));
 app.post("/api/pinjaman/:id/batal", (req, res) => loanBack(req, res, true));
+
+// ---- Perbandingan pemakaian antar estate (Dashboard tab "Perbandingan") ----
+// What left each estate's stock per period: Gudang / Klinik Stok Keluar, BBM pemakaian, pupuk
+// keluar, oli pemakaian. Koreksi, pinjaman, obat dibuang and a Nilam Stok Keluar that was a transfer
+// into another estate's gudang (counted there when it goes out) are left out. Gudang / Klinik items
+// have mixed satuan, so without one barang chosen they compare the number of Stok Keluar.
+const CMP_MODULES = ["GUDANG", "KLINIK", "BBM", "PUPUK", "OLI"] as const;
+type CmpModule = (typeof CMP_MODULES)[number];
+const ISO_TEXT = (col: string) => `CASE WHEN ${col} LIKE '____-__-__' THEN ${col}::date END`;
+
+function cmpSource(module: CmpModule, kode: string): string {
+  const jak = "(t.created_at AT TIME ZONE 'Asia/Jakarta')::date";
+  const item = kode ? "AND t.kode_ = @kode" : "";
+  if (module === "GUDANG") {
+    return `
+      SELECT 'NILAM' estate, ${ISO_TEXT("s.tanggal_keluar_iso")} d, s.qty::float8 qty FROM stock_out_log s
+      WHERE s.pinjaman_id IS NULL ${kode ? "AND s.kode = @kode" : ""}
+        AND NOT EXISTS (SELECT 1 FROM transactions x JOIN gudang_stock_tx g ON g.transfer_from_id = x.id
+                        WHERE x.mirror_source = 'stock_out_log' AND x.mirror_id = s.id)
+      UNION ALL
+      SELECT t.gudang, ${jak}, t.qty::float8 FROM (SELECT *, item_kode kode_ FROM gudang_stock_tx) t
+      WHERE t.type = 'OUT' AND t.is_correction = 0 AND t.pinjaman_id IS NULL ${item}`;
+  }
+  if (module === "KLINIK") {
+    return `
+      SELECT t.klinik, ${jak}, t.qty::float8 FROM (SELECT *, obat_kode kode_ FROM klinik_stock_tx) t
+      WHERE t.type = 'OUT' AND t.is_correction = 0 AND t.pinjaman_id IS NULL AND COALESCE(t.tujuan, '') <> 'DIBUANG' ${item}`;
+  }
+  if (module === "BBM") {
+    return `SELECT lokasi, ${ISO_TEXT("tanggal_iso")}, pemakaian::float8 FROM bbm_log WHERE pemakaian > 0 AND jenis_bbm = @kode`;
+  }
+  if (module === "PUPUK") {
+    return `SELECT estate, ${ISO_TEXT("tanggal_iso")}, keluar::float8 FROM pupuk_log WHERE keluar > 0 ${kode ? "AND jenis_pupuk = @kode" : ""}`;
+  }
+  return `SELECT estate, ${ISO_TEXT("tanggal_iso")}, pemakaian::float8 FROM oli_log WHERE pemakaian > 0 ${kode ? "AND jenis_oli = @kode" : ""}`;
+}
+
+const addDays = (iso: string, n: number) => {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+};
+
+app.get("/api/perbandingan", async (req, res) => {
+  const { module = "", estates = "", dateFrom = "", dateTo = "", kode = "" } = req.query as Record<string, string>;
+  const m = module as CmpModule;
+  if (!CMP_MODULES.includes(m)) return res.status(400).json({ error: "Modul tidak valid" });
+  if (!canLoan(req.user!, m, "view")) return res.status(403).json({ error: "Akses ditolak" });
+  if (!ISO_DATE.test(dateFrom) || !ISO_DATE.test(dateTo) || dateFrom > dateTo) return res.status(400).json({ error: "Periode tidak valid" });
+  if (m === "BBM" && !BBM_JENIS.includes(kode)) return res.status(400).json({ error: "Pilih Solar atau Bensin" });
+  const wanted = (estates ? estates.split(",") : [...ESTATES]).filter((e) => (ESTATES as readonly string[]).includes(e) && estateAllowed(req.user!, e));
+  if (!wanted.length) return res.json({ unit: "", metric: "qty", bucket: "month", perEstate: [], prev: [], series: [] });
+
+  // The period before, of the same length, for the change column.
+  const days = Math.round((Date.parse(dateTo) - Date.parse(dateFrom)) / 86400000) + 1;
+  const prevFrom = addDays(dateFrom, -days);
+  const prevTo = addDays(dateFrom, -1);
+  // Up to ~2 months the trend is per week, longer per month.
+  const bucket = days <= 62 ? "week" : "month";
+  const metric = (m === "GUDANG" || m === "KLINIK") && !kode ? "trx" : "qty";
+
+  const rows = await queryMany<{ estate: string; b: string | null; cur: boolean; qty: number; n: number }>(
+    `WITH src(estate, d, qty) AS (${cmpSource(m, kode)})
+     SELECT estate, CASE WHEN d >= @from::date THEN to_char(date_trunc('${bucket}', d), 'YYYY-MM-DD') END b,
+            d >= @from::date cur, SUM(qty)::float8 qty, COUNT(*)::int n
+     FROM src WHERE estate = ANY(@estates::text[]) AND d BETWEEN @prevFrom::date AND @to::date
+     GROUP BY 1, 2, 3`,
+    { estates: wanted, from: dateFrom, to: dateTo, prevFrom, kode }
+  );
+  const val = (r: { qty: number; n: number }) => (metric === "trx" ? r.n : round3(r.qty));
+  const total = (cur: boolean) =>
+    wanted.map((estate) => ({ estate, value: round3(rows.filter((r) => r.estate === estate && r.cur === cur).reduce((s, r) => s + val(r), 0)) }));
+  const series = rows
+    .filter((r) => r.cur && r.b)
+    .map((r) => ({ bucket: r.b!, estate: r.estate, value: val(r) }))
+    .sort((a, b) => a.bucket.localeCompare(b.bucket));
+
+  let unit = metric === "trx" ? "transaksi" : m === "PUPUK" ? "KG" : m === "BBM" || m === "OLI" ? "LTR" : "";
+  if (metric === "qty" && (m === "GUDANG" || m === "KLINIK"))
+    unit = (await queryOne<{ s: string }>(`SELECT COALESCE(satuan, '') s FROM ${m === "GUDANG" ? "items" : "obat"} WHERE kode = @kode`, { kode }))?.s ?? "";
+  res.json({ unit, metric, bucket, prevFrom, prevTo, perEstate: total(true), prev: total(false), series });
+});
+
+// Barang to compare: Gudang / Klinik search the master data; pupuk / oli list their jenis.
+app.get("/api/perbandingan/barang", async (req, res) => {
+  const { module = "", search = "" } = req.query as Record<string, string>;
+  const m = module as CmpModule;
+  if (!CMP_MODULES.includes(m)) return res.status(400).json({ error: "Modul tidak valid" });
+  if (!canLoan(req.user!, m, "view")) return res.status(403).json({ error: "Akses ditolak" });
+  const like = `%${search}%`;
+  if (m === "GUDANG" || m === "KLINIK") {
+    const table = m === "GUDANG" ? "items" : "obat";
+    return res.json(
+      await queryMany(
+        `SELECT kode, nama, COALESCE(satuan, '') satuan FROM ${table}
+         WHERE @search = '' OR kode ILIKE @like OR nama ILIKE @like ORDER BY nama LIMIT 20`,
+        { search, like }
+      )
+    );
+  }
+  if (m === "BBM") return res.json(BBM_JENIS.map((j) => ({ kode: j, nama: j, satuan: "LTR" })));
+  const list =
+    m === "OLI"
+      ? await queryMany<{ v: string }>("SELECT nama v FROM master_oli ORDER BY nama")
+      : await queryMany<{ v: string }>("SELECT DISTINCT jenis_pupuk v FROM pupuk_log WHERE jenis_pupuk <> '' ORDER BY 1");
+  res.json(list.map((r) => ({ kode: r.v, nama: r.v, satuan: m === "PUPUK" ? "KG" : "LTR" })));
+});

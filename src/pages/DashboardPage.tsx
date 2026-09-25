@@ -6,6 +6,7 @@ import { useAuth } from "../context/AuthContext";
 import { useEstateFilter } from "../hooks/useEstateFilter";
 import { canModule, MODULES, userEstates, type Module } from "../lib/access";
 import { TopKeluarPanel } from "../components/TopKeluarPanel";
+import { PerbandinganPanel } from "../components/PerbandinganPanel";
 
 type GudangStat = { totalItems: number; totalStock: number; lowStock: number; outOfStock: number };
 
@@ -421,6 +422,24 @@ export function DashboardPage() {
   const shownKey = shown.map((e) => e.estate).join(",");
 
   const [data, setData] = useState<Record<string, EstateData>>({});
+  // Ringkasan (cards per estate) or Perbandingan (estates side by side); remembered per browser.
+  // Only an account with several estates has something to compare.
+  const [tabPref, setTabPref] = useState<"ringkasan" | "perbandingan">(() => {
+    try {
+      return localStorage.getItem("dashboard.tab") === "perbandingan" ? "perbandingan" : "ringkasan";
+    } catch {
+      return "ringkasan";
+    }
+  });
+  const tab = multiEstate && anyModule ? tabPref : "ringkasan";
+  const pickTab = (t: "ringkasan" | "perbandingan") => {
+    setTabPref(t);
+    try {
+      localStorage.setItem("dashboard.tab", t);
+    } catch {
+      // ignore
+    }
+  };
 
   const now = new Date();
   const monthRange = { dateFrom: localIso(new Date(now.getFullYear(), now.getMonth(), 1)), dateTo: localIso(now) };
@@ -481,22 +500,47 @@ export function DashboardPage() {
         )}
       </div>
 
+      {multiEstate && anyModule && (
+        <div className="flex gap-1 border-b border-[var(--border)] -mt-2">
+          {(
+            [
+              ["ringkasan", "Ringkasan"],
+              ["perbandingan", "Perbandingan"],
+            ] as const
+          ).map(([key, label]) => (
+            <button
+              key={key}
+              onClick={() => pickTab(key)}
+              className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px ${
+                tab === key
+                  ? "border-[var(--accent-blue)] text-[var(--accent-blue)]"
+                  : "border-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {tab === "perbandingan" && <PerbandinganPanel estates={shown} />}
+
       {!anyModule && (
         <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg p-4 text-sm text-[var(--text-secondary)]">
           Akun ini tidak punya akses inventory. Buka menu di samping untuk halaman yang bisa diakses.
         </div>
       )}
 
-      {anyModule && shown.map((e) => (
+      {tab === "ringkasan" && anyModule && shown.map((e) => (
         <section key={e.estate} className="space-y-3">
           {multiEstate && <h2 className="text-sm font-semibold uppercase tracking-wide text-[var(--text-secondary)]">Estate {e.label}</h2>}
           <EstateRow e={e} d={data[e.estate] ?? {}} monthLabel={monthLabel} />
         </section>
       ))}
 
-      {anyModule && <TopKeluarPanel estates={shown} />}
+      {tab === "ringkasan" && anyModule && <TopKeluarPanel estates={shown} />}
 
-      {anyModule && single && (
+      {tab === "ringkasan" && anyModule && single && (
         <div className="grid gap-3 lg:grid-cols-2 items-start">
           <AttentionPanel e={single} d={data[single.estate] ?? {}} />
           <RecentActivity estate={single.estate} />

@@ -343,6 +343,18 @@ export type TopKeluarRow = { kode: string; id: number | null; nama: string; satu
 // ---- Stok Opname (server/src/app.ts "Stok Opname") ----
 export type OpnameModule = "GUDANG" | "KLINIK" | "BBM" | "PUPUK" | "OLI";
 
+// Usage per estate for the Dashboard "Perbandingan" tab (metric trx = number of Stok Keluar).
+export type Perbandingan = {
+  unit: string;
+  metric: "qty" | "trx";
+  bucket: "week" | "month";
+  prevFrom: string;
+  prevTo: string;
+  perEstate: { estate: string; value: number }[];
+  prev: { estate: string; value: number }[];
+  series: { bucket: string; estate: string; value: number }[];
+};
+
 export type PinjamanStatus = "DIPINJAM" | "LUNAS" | "BATAL";
 export type Pinjaman = {
   id: number;
@@ -825,6 +837,11 @@ export const api = {
   ) => req<{ success: boolean }>(`/api/users/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
 
   deleteUser: (id: number) => req<{ success: boolean }>(`/api/users/${id}`, { method: "DELETE" }),
+
+  perbandingan: (params: { module: OpnameModule; estates: string[]; dateFrom: string; dateTo: string; kode: string }) =>
+    req<Perbandingan>(`/api/perbandingan?${new URLSearchParams({ ...params, estates: params.estates.join(",") })}`),
+  perbandinganBarang: (module: OpnameModule, search: string) =>
+    req<{ kode: string; nama: string; satuan: string }[]>(`/api/perbandingan/barang?${new URLSearchParams({ module, search })}`),
 
   pinjamanList: (params: Record<string, string | number>) =>
     req<{ data: Pinjaman[]; total: number }>(`/api/pinjaman?${new URLSearchParams(params as any)}`),
