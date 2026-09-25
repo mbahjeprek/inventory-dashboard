@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   ArrowLeft,
   Search,
@@ -19,6 +19,7 @@ import {
   AlertTriangle,
   CircleDashed,
   X,
+  Pencil,
 } from "lucide-react";
 import { api, errorText, type Opname, type OpnameLine, type PickerItem, type StockScope } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
@@ -60,6 +61,7 @@ export function StokOpnameDetailPage() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [dialog, setDialog] = useState<DialogSpec | null>(null);
+  const navigate = useNavigate();
   const [adding, setAdding] = useState<"" | "picker" | "jenis">("");
   const [pickedObat, setPickedObat] = useState<PickerItem | null>(null);
   // Rows typed into stay in the current filter (e.g. "Belum dihitung") until the filter or search
@@ -157,6 +159,11 @@ export function StokOpnameDetailPage() {
   const whole = opnameWhole(opname.module, opname.estate);
   const locName = `${OPNAME_MODULE_LABEL[opname.module]} ${opname.estate}`;
   const locked = opname.status === "DRAFT" || opname.status === "SUBMITTED";
+  // A superuser may still correct the counts of a submitted or approved opname; on an approved one the
+  // stock moves by the difference (only lines counted at approval, see PUT /api/stock-opname/:id).
+  const superEdit = isSuper && (opname.status === "SUBMITTED" || opname.status === "APPROVED");
+  const canEdit = canCount || superEdit;
+  const editableLine = (l: OpnameLine) => canCount || (superEdit && (opname.status !== "APPROVED" || l.stok_fisik !== null));
 
   const totalPages = Math.max(Math.ceil(filtered.length / PAGE_SIZE), 1);
   const pageRows = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
@@ -182,15 +189,16 @@ export function StokOpnameDetailPage() {
     setSaving(true);
     setError("");
     try {
-      await api.saveOpname(opname.id, {
+      const res = await api.saveOpname(opname.id, {
         lines: dirtyIds.map((lid) => ({ id: lid, stok_fisik: parseQty(edits[lid].fisik) ?? null, keterangan: edits[lid].ket })),
       });
       await load();
-      setNotice("Hitungan tersimpan");
+      setNotice(opname.status === "APPROVED" ? `Perubahan tersimpan: ${res.adjusted ?? 0} item stoknya disesuaikan` : "Hitungan tersimpan");
       setTimeout(() => setNotice(""), 2500);
       return true;
     } catch (e) {
       setError(errorText(e, "Gagal menyimpan hitungan", true));
+      if (opname.status === "APPROVED") throw e;
       return false;
     } finally {
       setSaving(false);
@@ -330,6 +338,71 @@ export function StokOpnameDetailPage() {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <ExportButtons total={filtered.length} buildReport={buildReport} fileName={`stok-opname-${opname.id}`} />
+          {superEdit && (
+            <button
+              onClick={() =>
+                opname.status === "APPROVED"
+                  ? setDialog({
+                      title: "Simpan perubahan opname yang sudah disetujui?",
+                      message: `${dirtyIds.length} baris diubah. Stok ${locName} sekarang disesuaikan sebesar selisih perubahannya (dicatat sebagai Koreksi Stok).`,
+                      confirmLabel: "Simpan & Sesuaikan Stok",
+                      tone: "amber",
+                      onConfirm: async () => {
+                        await save();
+                        setDialog(null);
+                      },
+                    })
+                  : save()
+              }
+              disabled={!dirty || saving}
+              className={`${btn} border border-[var(--accent-amber-border)] text-[var(--accent-amber)] hover:bg-[var(--accent-amber-bg)]`}
+            >
+              <Pencil size={16} /> {saving ? "Menyimpan..." : dirty ? `Simpan Perubahan (${dirtyIds.length})` : "Edit: ubah Stok Fisik di tabel"}
+            </button>
+          )}
+          {isSuper && (
+            <button
+              onClick={() =>
+                setDialog({
+                  title: `Hapus Stok Opname #${opname.id}?`,
+                  message:
+                    opname.status === "APPROVED"
+                      ? `Opname ini sudah disetujui. Semua koreksi stoknya dibalik (stok ${locName} dikembalikan sebesar selisih yang dulu dikoreksi), lalu opname dihapus permanen.`
+                      : "Opname dihapus permanen beserta hitungannya. Stok tidak berubah.",
+                  confirmLabel: "Ya, Hapus Opname",
+                  cancelLabel: "Tidak",
+                  tone: "red",
+                  note: { label: "Alasan penghapusan", required: true },
+                  onConfirm: async (catatan) => {
+                    try {
+                      await api.deleteOpname(opname.id, catatan);
+                    } catch (e) {
+                      // Undoing would take stock that has been used since: offer to drop only the record.
+                      if (opname.status !== "APPROVED") throw e;
+                      setDialog({
+                        title: "Koreksi tidak bisa dibalik",
+                        message: `${errorText(e, "Stok tidak cukup")}. Stok sudah terpakai sejak opname disetujui. Hapus catatan opname saja tanpa mengubah stok?`,
+                        confirmLabel: "Hapus tanpa ubah stok",
+                        cancelLabel: "Batal",
+                        tone: "red",
+                        onConfirm: async () => {
+                          await api.deleteOpname(opname.id, catatan, true);
+                          setDialog(null);
+                          navigate("/stok-opname", { replace: true });
+                        },
+                      });
+                      return;
+                    }
+                    setDialog(null);
+                    navigate("/stok-opname", { replace: true });
+                  },
+                })
+              }
+              className={`${btn} border border-[var(--accent-red-border)] text-[var(--accent-red)] hover:bg-[var(--accent-red-bg)]`}
+            >
+              <Trash2 size={16} /> Hapus
+            </button>
+          )}
           {canCount && (
             <>
               <button
@@ -544,7 +617,7 @@ export function StokOpnameDetailPage() {
                       <td className="px-4 py-2 text-[var(--text-secondary)] whitespace-nowrap">{l.satuan || "-"}</td>
                       <td className="px-4 py-2 text-right">{fmtQty(l.stok_sistem)}</td>
                       <td className="px-4 py-2 text-right">
-                        {canCount ? (
+                        {editableLine(l) ? (
                           <div className="inline-flex items-center gap-1">
                             <input
                               data-fisik={l.id}
@@ -580,7 +653,7 @@ export function StokOpnameDetailPage() {
                         {s === null ? "-" : s === 0 ? "0" : `${s > 0 ? "+" : "−"}${fmtQty(Math.abs(s))}`}
                       </td>
                       <td className="px-4 py-2 min-w-[180px]">
-                        {canCount ? (
+                        {editableLine(l) ? (
                           <input
                             data-ket={l.id}
                             onKeyDown={nextOnEnter(l, "ket")}
@@ -616,7 +689,7 @@ export function StokOpnameDetailPage() {
         <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-t border-[var(--border)] text-sm text-[var(--text-secondary)]">
           <span>
             {filtered.length.toLocaleString("id-ID")} item · Halaman {page} dari {totalPages}
-            {canCount && <span className="text-xs text-[var(--text-muted)]"> · Enter = lanjut (ke Keterangan kalau ada selisih)</span>}
+            {canEdit && <span className="text-xs text-[var(--text-muted)]"> · Enter = lanjut (ke Keterangan kalau ada selisih)</span>}
           </span>
           <div className="flex gap-2">
             <button disabled={page <= 1} onClick={() => setPage((p) => p - 1)} className="p-1.5 rounded-md border border-[var(--border)] disabled:opacity-40">
@@ -633,7 +706,7 @@ export function StokOpnameDetailPage() {
         </div>
       </div>
 
-      {dialog && <ActionDialog spec={dialog} onClose={() => setDialog(null)} />}
+      {dialog && <ActionDialog key={dialog.title} spec={dialog} onClose={() => setDialog(null)} />}
       {adding === "picker" && !pickedObat && (
         <ItemPickerModal
           scope={pickerScope}

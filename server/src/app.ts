@@ -3873,10 +3873,16 @@ app.get("/api/stock-opname/:id", async (req, res) => {
 app.put("/api/stock-opname/:id", async (req, res) => {
   const { lines = [], catatan } = req.body ?? {};
   if (!Array.isArray(lines)) return res.status(400).json({ error: "Data tidak valid" });
-  const ok = await withTransaction(async (client) => {
+  const isSuper = req.user!.role === "superuser";
+  let adjusted: { line: OpnameLine; before: number; after: number }[] = [];
+  let ok: OpnameRow | null;
+  try {
+  ok = await withTransaction(async (client) => {
     const o = await loadOpname(req, res, "opname", client);
     if (!o) return null;
-    if (o.status !== "DRAFT") return refuse(res, 400, "Opname ini sudah diajukan, tidak bisa diubah");
+    // The counter changes a DRAFT; a superuser may also correct a submitted or an approved opname.
+    if (o.status !== "DRAFT" && !(isSuper && (o.status === "SUBMITTED" || o.status === "APPROVED")))
+      return refuse(res, 400, "Opname ini sudah diajukan, tidak bisa diubah");
     const whole = opnameWhole(o);
     const rows: { id: number; stok_fisik: number | null; keterangan: string }[] = [];
     for (const l of lines) {
@@ -3885,6 +3891,26 @@ app.put("/api/stock-opname/:id", async (req, res) => {
         return refuse(res, 400, whole ? "Stok fisik harus bilangan bulat, minimal 0" : "Stok fisik harus angka, minimal 0");
       }
       rows.push({ id: Number(l.id), stok_fisik: v === null ? null : round3(v), keterangan: String(l.keterangan ?? "").trim() });
+    }
+    // Approved: the stock already carries the count, so a changed count moves it by the difference.
+    if (o.status === "APPROVED" && rows.length) {
+      await refuseIfLocationOpen(o, client);
+      const old = new Map(
+        (await queryMany<OpnameLine & { id: number }>("SELECT * FROM opname_line WHERE opname_id = @oid", { oid: o.id }, client)).map((l) => [l.id, l])
+      );
+      for (const row of rows) {
+        const line = old.get(row.id);
+        if (!line) continue;
+        if (line.stok_fisik === null || row.stok_fisik === null) {
+          if (line.stok_fisik === row.stok_fisik) continue;
+          // Thrown (not refuse) so corrections already booked in this loop roll back too.
+          throw new StockError(`${line.nama}: baris yang tidak dihitung saat disetujui tidak bisa diisi / dikosongkan lagi`);
+        }
+        const delta = round3(row.stok_fisik - line.stok_fisik!);
+        if (!delta) continue;
+        const r2 = await opnameAdjust(client, req, o, { ...line, keterangan: row.keterangan }, delta, `Edit Stok Opname #${o.id}`);
+        adjusted.push({ line, ...r2 });
+      }
     }
     if (rows.length) {
       await execute(
@@ -3898,7 +3924,96 @@ app.put("/api/stock-opname/:id", async (req, res) => {
     if (typeof catatan === "string") await execute("UPDATE opname SET catatan = @c WHERE id = @id", { c: catatan.trim(), id: o.id }, client);
     return o;
   });
-  if (ok) res.json({ success: true });
+  } catch (e) {
+    if (e instanceof StockError) return res.status(400).json({ error: e.message });
+    throw e;
+  }
+  if (!ok) return;
+  if (ok.status !== "DRAFT") await logOpnameAdjust(req, ok, adjusted, "Edit Stok Opname");
+  res.json({ success: true, adjusted: adjusted.length });
+});
+
+// An approved opname changing the stock again (edit / delete) must not collide with an open opname of
+// the same location (that one locks its stock).
+async function refuseIfLocationOpen(o: OpnameRow, client: PoolClient) {
+  const other = await queryOne<{ id: number }>(
+    "SELECT id FROM opname WHERE module = @m AND estate = @e AND status IN ('DRAFT', 'SUBMITTED') AND id <> @id LIMIT 1",
+    { m: o.module, e: o.estate, id: o.id },
+    client
+  );
+  if (other) throw new StockError(`${OPNAME_MODULE_LABEL[o.module]} ${o.estate} sedang Stok Opname #${other.id}; selesaikan itu dulu`);
+}
+
+// Moves the stock of one opname line by `delta` from where it is now (a superuser correcting or
+// deleting an approved opname), booked as a Koreksi. Returns the stock before and after.
+async function opnameAdjust(client: PoolClient, req: express.Request, o: OpnameRow, line: OpnameLine, delta: number, label: string) {
+  const now = await opnameCurrent(o.module, o.estate, line.kode, line.exp);
+  if (!now) throw new StockError(`${line.kode} sudah tidak ada di master data`);
+  const before = round3(now.stok_sistem);
+  const after = round3(before + delta);
+  if (after < 0 && !isSaldoModule(o.module)) throw new StockError(`${line.nama}: stok sekarang ${before}, tidak cukup untuk dikurangi ${-delta}`);
+  await applyOpnameLine(client, req, o, { ...line, stok_fisik: after, keterangan: `${label}${line.keterangan ? ` - ${line.keterangan}` : ""}` });
+  return { before, after };
+}
+
+async function logOpnameAdjust(req: express.Request, o: OpnameRow, changes: { line: OpnameLine; before: number; after: number }[], aksi: string) {
+  await logActivities(
+    req,
+    changes.map(({ line, before, after }) => ({
+      module: OPNAME_LOG_MODULE[o.module],
+      estate: o.estate,
+      aksi: "Koreksi Stok",
+      objek: isSaldoModule(o.module) ? line.kode : `${line.kode} - ${line.nama}`,
+      detail: `${aksi} #${o.id}${o.module === "KLINIK" ? `; Batch ${expText(line.exp)}` : ""}: ${before} → ${after} (selisih ${signed(round3(after - before))})`,
+    }))
+  );
+}
+
+// Superuser only: removes an opname. An approved one is undone first - every correction it booked
+// (stok fisik - stok sistem at approval) is booked back against the stock as it is now - unless
+// keep_stock is set (the stock was used since, so undoing would go below zero): then only the record goes.
+app.post("/api/stock-opname/:id/delete", async (req, res) => {
+  if (req.user!.role !== "superuser") return res.status(403).json({ error: "Hanya Super User yang bisa menghapus stok opname" });
+  const alasan = String(req.body?.catatan ?? "").trim();
+  if (!alasan) return res.status(400).json({ error: "Alasan penghapusan wajib diisi" });
+  const keepStock = req.body?.keep_stock === true;
+  let done: { o: OpnameRow; undone: { line: OpnameLine; before: number; after: number }[] } | null;
+  try {
+    done = await withTransaction(async (client) => {
+      const o = await loadOpname(req, res, "view", client);
+      if (!o) return null;
+      const undone: { line: OpnameLine; before: number; after: number }[] = [];
+      if (o.status === "APPROVED" && !keepStock) {
+        await refuseIfLocationOpen(o, client);
+        const lines = await queryMany<OpnameLine & { id: number; stok_fisik: number }>(
+          "SELECT * FROM opname_line WHERE opname_id = @id AND stok_fisik IS NOT NULL ORDER BY id",
+          { id: o.id },
+          client
+        );
+        for (const line of lines) {
+          const booked = round3(line.stok_fisik - line.stok_sistem);
+          if (!booked) continue;
+          undone.push({ line, ...(await opnameAdjust(client, req, o, { ...line, keterangan: alasan }, -booked, `Hapus Stok Opname #${o.id}`)) });
+        }
+      }
+      await execute("DELETE FROM opname WHERE id = @id", { id: o.id }, client);
+      return { o, undone };
+    });
+  } catch (e) {
+    if (e instanceof StockError) return res.status(400).json({ error: e.message, can_keep_stock: true });
+    throw e;
+  }
+  if (!done) return;
+  await logOpnameAdjust(req, done.o, done.undone, "Hapus Stok Opname");
+  await logOpname(
+    req,
+    done.o,
+    "Hapus Stok Opname",
+    `Status: ${done.o.status}; Alasan: ${alasan}${
+      done.o.status !== "APPROVED" ? "" : keepStock ? "; stok tidak diubah (koreksi tidak dibalik)" : `; ${done.undone.length} koreksi dibalik`
+    }`
+  );
+  res.json({ success: true, undone: done.undone.length });
 });
 
 // A barang / obat batch / jenis pupuk found during the count that isn't in the snapshot.

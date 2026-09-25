@@ -883,10 +883,13 @@ export const api = {
     req<{ success: boolean; id: number }>("/api/stock-opname", { method: "POST", body: JSON.stringify(payload) }),
   opname: (id: number) => req<{ opname: Opname; lines: OpnameLine[] }>(`/api/stock-opname/${id}`),
   saveOpname: (id: number, payload: { catatan?: string; lines: { id: number; stok_fisik: number | null; keterangan: string }[] }) =>
-    req<{ success: boolean }>(`/api/stock-opname/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
+    req<{ success: boolean; adjusted?: number }>(`/api/stock-opname/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
   addOpnameLine: (id: number, kode: string, exp = "") =>
     req<OpnameLine>(`/api/stock-opname/${id}/lines`, { method: "POST", body: JSON.stringify({ kode, exp }) }),
   deleteOpnameLine: (id: number, lineId: number) => req<{ success: boolean }>(`/api/stock-opname/${id}/lines/${lineId}`, { method: "DELETE" }),
+  // Superuser only; an approved opname's corrections are booked back first.
+  deleteOpname: (id: number, catatan: string, keep_stock = false) =>
+    req<{ success: boolean; undone: number }>(`/api/stock-opname/${id}/delete`, { method: "POST", body: JSON.stringify({ catatan, keep_stock }) }),
   opnameAction: (id: number, action: "submit" | "return" | "approve" | "cancel", catatan = "") =>
     req<{ success: boolean; corrected?: number }>(`/api/stock-opname/${id}/${action}`, { method: "POST", body: JSON.stringify({ catatan }) }),
 };
