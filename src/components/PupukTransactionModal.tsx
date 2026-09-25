@@ -36,7 +36,6 @@ export function PupukTransactionModal({
   const [blok, setBlok] = useState("");
   const [ha, setHa] = useState("");
   const [pokok, setPokok] = useState("");
-  const [noEmbrace, setNoEmbrace] = useState("");
   const [kodeBarang, setKodeBarang] = useState("");
   const [keterangan, setKeterangan] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -48,15 +47,15 @@ export function PupukTransactionModal({
   const submit = async () => {
     setError("");
     if (jumlah <= 0) return setError("Jumlah harus lebih dari 0");
-    // Every field shown is required (Blok/HA/Pokok only for pemakaian, No. Embrace only for masuk).
+    // Every field shown is required. Pupuk masuk only needs the keterangan; divisi, blok, HA, pokok
+    // and kode barang describe where it was applied.
     const keluar = tipe === "KELUAR";
     const missing = [
-      !divisi && "Divisi",
+      keluar && !divisi && "Divisi",
       keluar && !blok.trim() && "Blok",
-      !keluar && !noEmbrace.trim() && "No. Embrace",
       keluar && ha === "" && "HA",
       keluar && pokok === "" && "Pokok",
-      !kodeBarang.trim() && "Kode Barang",
+      keluar && !kodeBarang.trim() && "Kode Barang",
       !keterangan.trim() && "Keterangan",
     ].filter(Boolean);
     if (missing.length) return setError(`Wajib diisi: ${missing.join(", ")}`);
@@ -68,9 +67,9 @@ export function PupukTransactionModal({
         tanggal_iso: tanggal,
         tipe,
         jumlah,
-        divisi,
-        no_embrace: noEmbrace,
-        kode_barang: kodeBarang,
+        divisi: tipe === "KELUAR" ? divisi : "",
+        no_embrace: "",
+        kode_barang: tipe === "KELUAR" ? kodeBarang : "",
         keterangan,
         blok: tipe === "KELUAR" ? blok.trim().toUpperCase().replace(/\./g, "") : "",
         ha: tipe === "KELUAR" && ha !== "" ? Number(ha) : "",
@@ -165,49 +164,46 @@ export function PupukTransactionModal({
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className={labelCls}>Divisi</label>
-              <select value={divisi} onChange={(e) => setDivisi(e.target.value)} className={inputCls}>
-                <option value="">- Pilih -</option>
-                {divisiOptions.map((d) => (
-                  <option key={d} value={d}>
-                    {d}
-                  </option>
-                ))}
-              </select>
-            </div>
-            {tipe === "KELUAR" ? (
-              <div>
-                <label className={labelCls}>Blok</label>
-                <input value={blok} onChange={(e) => setBlok(e.target.value)} placeholder="cth. U23 (tanpa titik)" className={inputCls} />
-              </div>
-            ) : (
-              <div>
-                <label className={labelCls}>No. Embrace</label>
-                <input value={noEmbrace} onChange={(e) => setNoEmbrace(e.target.value)} className={inputCls} />
-              </div>
-            )}
-          </div>
-
           {tipe === "KELUAR" && (
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className={labelCls}>HA</label>
-                <input type="number" min={0} step="any" value={ha} onChange={(e) => setHa(e.target.value)} className={inputCls} />
+            <>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className={labelCls}>Divisi</label>
+                  <select value={divisi} onChange={(e) => setDivisi(e.target.value)} className={inputCls}>
+                    <option value="">- Pilih -</option>
+                    {divisiOptions.map((d) => (
+                      <option key={d} value={d}>
+                        {d}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className={labelCls}>Blok</label>
+                  <input value={blok} onChange={(e) => setBlok(e.target.value)} placeholder="cth. U23 (tanpa titik)" className={inputCls} />
+                </div>
               </div>
-              <div>
-                <label className={labelCls}>Pokok</label>
-                <input type="number" min={0} value={pokok} onChange={(e) => setPokok(e.target.value)} className={inputCls} />
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className={labelCls}>HA</label>
+                  <input type="number" min={0} step="any" value={ha} onChange={(e) => setHa(e.target.value)} className={inputCls} />
+                </div>
+                <div>
+                  <label className={labelCls}>Pokok</label>
+                  <input type="number" min={0} value={pokok} onChange={(e) => setPokok(e.target.value)} className={inputCls} />
+                </div>
               </div>
-            </div>
+            </>
           )}
 
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className={labelCls}>Kode Barang</label>
-              <input value={kodeBarang} onChange={(e) => setKodeBarang(e.target.value)} className={inputCls} />
-            </div>
+          <div className={tipe === "KELUAR" ? "grid grid-cols-2 gap-3" : ""}>
+            {tipe === "KELUAR" && (
+              <div>
+                <label className={labelCls}>Kode Barang</label>
+                <input value={kodeBarang} onChange={(e) => setKodeBarang(e.target.value)} className={inputCls} />
+              </div>
+            )}
             <div>
               <label className={labelCls}>Keterangan</label>
               <input
