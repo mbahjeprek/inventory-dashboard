@@ -135,6 +135,6 @@ export function accessSummary(u: { role: string; estates: string | null; perms: 
   }).filter(Boolean);
   for (const g of OTHER_PERMS) for (const i of g.items) if (perms.includes(i.key)) parts.push(`${g.group === "Master Data" ? "Master " : ""}${i.label}`);
   const estates = (u.estates ?? "").split(",").filter(Boolean).join(", ") || "tanpa estate";
-  const tempNote = temp ? ` · AKSES PENUH SEMENTARA s/d ${temp.toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" })}` : "";
+  const tempNote = temp ? ` · AKSES PENUH SEMENTARA (modul di atas) s/d ${temp.toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" })}` : "";
   return `${estates} · ${parts.join(" · ") || "tanpa hak akses"}${tempNote}`;
 }

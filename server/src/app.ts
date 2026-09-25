@@ -36,6 +36,15 @@ type UserRow = {
   temp_full_until: Date | null;
 };
 
+// Temporary full access (users.temp_full_until): until it expires, every action (edit, hapus,
+// koreksi, approve...) of the modules the account already has, in its own estates. It never opens a
+// module the account has nothing ticked in (a klinik account stays in Klinik).
+function withTempFull(perms: string[], until: Date | null): string[] {
+  if (!until || until <= new Date()) return perms;
+  const held = new Set(perms.filter((p) => MODULE_PERMS.includes(p)).map((p) => p.split(".")[0]));
+  return [...new Set([...perms, ...MODULE_PERMS.filter((p) => held.has(p.split(".")[0]))])];
+}
+
 function toSessionUser(row: UserRow): SessionUser {
   const superuser = row.role === "superuser";
   const estates = superuser ? [...ESTATES] : parseList(row.estates ?? row.estate, ESTATES);
@@ -48,8 +57,7 @@ function toSessionUser(row: UserRow): SessionUser {
     estates,
     perms: superuser
       ? [...ALL_PERMS]
-      : // Temporary full access (users.temp_full_until): every inventory permission in its own estates.
-        [...new Set([...parseList(row.perms, ALL_PERMS), ...(row.temp_full_until && row.temp_full_until > new Date() ? MODULE_PERMS : [])])],
+      : withTempFull(parseList(row.perms, ALL_PERMS), row.temp_full_until),
   };
 }
 
