@@ -44,6 +44,9 @@ export function BbmTransactionModal({
     api.bbmEstateOptions(jenisBbm, lokasi).then(setEstateOptions);
   }, [jenisBbm, lokasi]);
 
+  // A genset has no HM/KM reading, so the field is hidden once the kode kendaraan names one.
+  const isGenset = /genset/i.test(kodeKendaraan);
+
   const saldoSaatIni = summary?.saldoTerakhir.find((s) => s.jenis_bbm === jenisBbm && s.lokasi === lokasi)?.saldo_stock ?? 0;
   const saldoProyeksi = tipe === "DITERIMA" ? saldoSaatIni + jumlah : saldoSaatIni - jumlah;
 
@@ -54,7 +57,7 @@ export function BbmTransactionModal({
     const missing = [
       keluar && !estate && "Estate / Sub-lokasi",
       keluar && !kodeKendaraan.trim() && "Kode Kendaraan",
-      keluar && !hmTerakhir.trim() && "HM/KM Terakhir",
+      keluar && !isGenset && !hmTerakhir.trim() && "HM/KM Terakhir",
       !noSpb.trim() && "No. SPB",
       !keterangan.trim() && "Keterangan",
     ].filter(Boolean);
@@ -82,7 +85,7 @@ export function BbmTransactionModal({
         no_spb: noSpb,
         estate: tipe === "DITERIMA" ? lokasi : estate,
         kode_kendaraan: keluar ? kodeKendaraan : "",
-        hm_terakhir: keluar ? hmTerakhir : "",
+        hm_terakhir: keluar && !isGenset ? hmTerakhir : "",
       });
       onSuccess();
     } catch (e) {
@@ -220,7 +223,7 @@ export function BbmTransactionModal({
           )}
 
           {tipe === "PEMAKAIAN" && (
-          <div className="grid grid-cols-2 gap-3">
+          <div className={isGenset ? "" : "grid grid-cols-2 gap-3"}>
             <div>
               <label className="text-xs text-[var(--text-secondary)] mb-1 block">Kode Kendaraan</label>
               <input
@@ -229,6 +232,7 @@ export function BbmTransactionModal({
                 className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-1.5"
               />
             </div>
+            {!isGenset && (
             <div>
               <label className="text-xs text-[var(--text-secondary)] mb-1 block">HM/KM Terakhir</label>
               <input
@@ -238,6 +242,7 @@ export function BbmTransactionModal({
                 className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-1.5"
               />
             </div>
+            )}
           </div>
           )}
 
