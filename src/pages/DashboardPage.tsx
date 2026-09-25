@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { Package, Fuel, Sprout, Stethoscope, AlertTriangle, XCircle, CalendarClock, ChevronRight, History, CheckCircle2 } from "lucide-react";
-import { api, type ActivityLog, type BbmSummary, type KlinikSummary, type PupukSummary } from "../lib/api";
+import { Package, Fuel, Sprout, Stethoscope, Droplet, AlertTriangle, XCircle, CalendarClock, ChevronRight, History, CheckCircle2 } from "lucide-react";
+import { api, type ActivityLog, type BbmSummary, type KlinikSummary, type OliSummary, type PupukSummary } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { useEstateFilter } from "../hooks/useEstateFilter";
 import { canModule, MODULES, userEstates, type Module } from "../lib/access";
@@ -11,9 +11,9 @@ type GudangStat = { totalItems: number; totalStock: number; lowStock: number; ou
 
 // One entry per estate with the page of each inventory it has.
 const ESTATES = [
-  { estate: "NILAM", label: "Nilam", gudang: "/inventory", bbm: "/inventory-bbm", pupuk: "/inventory-pupuk", klinik: "/inventory-klinik" },
-  { estate: "KNS", label: "KNS", gudang: "/inventory-kns", bbm: "/inventory-bbm-kns", pupuk: "/inventory-pupuk-kns", klinik: "/inventory-klinik-kns" },
-  { estate: "WJA", label: "WJA", gudang: "/inventory-wja", bbm: "/inventory-bbm-wja", pupuk: "/inventory-pupuk-wja", klinik: "/inventory-klinik-wja" },
+  { estate: "NILAM", label: "Nilam", gudang: "/inventory", bbm: "/inventory-bbm", pupuk: "/inventory-pupuk", klinik: "/inventory-klinik", oli: "/inventory-oli" },
+  { estate: "KNS", label: "KNS", gudang: "/inventory-kns", bbm: "/inventory-bbm-kns", pupuk: "/inventory-pupuk-kns", klinik: "/inventory-klinik-kns", oli: "/inventory-oli-kns" },
+  { estate: "WJA", label: "WJA", gudang: "/inventory-wja", bbm: "/inventory-bbm-wja", pupuk: "/inventory-pupuk-wja", klinik: "/inventory-klinik-wja", oli: "/inventory-oli-wja" },
   {
     estate: "ZAMRUD",
     label: "Zamrud",
@@ -21,8 +21,9 @@ const ESTATES = [
     bbm: "/inventory-bbm-zamrud",
     pupuk: "/inventory-pupuk-zamrud",
     klinik: "/inventory-klinik-zamrud",
+    oli: "/inventory-oli-zamrud",
   },
-  { estate: "FIRUS", label: "Firus", gudang: "/inventory-firus", bbm: "/inventory-bbm-firus", pupuk: "/inventory-pupuk-firus", klinik: "/inventory-klinik-firus" },
+  { estate: "FIRUS", label: "Firus", gudang: "/inventory-firus", bbm: "/inventory-bbm-firus", pupuk: "/inventory-pupuk-firus", klinik: "/inventory-klinik-firus", oli: "/inventory-oli-firus" },
 ];
 type EstateInfo = (typeof ESTATES)[number];
 
@@ -95,9 +96,9 @@ function EmptyCard({ text }: { text: string }) {
   );
 }
 
-type EstateData = { gudang?: GudangStat | null; bbm?: BbmSummary | null; pupuk?: PupukSummary | null; klinik?: KlinikSummary | null };
+type EstateData = { gudang?: GudangStat | null; bbm?: BbmSummary | null; pupuk?: PupukSummary | null; klinik?: KlinikSummary | null; oli?: OliSummary | null };
 
-// The four inventory cards of one estate, side by side.
+// The inventory cards of one estate, side by side.
 // An admin limited to some modules only gets those cards.
 function EstateRow({ e, d, monthLabel }: { e: EstateInfo; d: EstateData; monthLabel: string }) {
   const { user } = useAuth();
@@ -108,9 +109,10 @@ function EstateRow({ e, d, monthLabel }: { e: EstateInfo; d: EstateData; monthLa
   const bbmFlow = (jenis: string) => d.bbm?.perLokasi.find((x) => x.jenis_bbm === jenis && x.lokasi === e.estate);
   const bbmEmpty = d.bbm && (["SOLAR", "BENSIN"] as const).every((j) => !Number(bbmSaldo(j)) && !bbmFlow(j));
   const pupukJenis = d.pupuk ? Array.from(new Set(d.pupuk.saldoTerakhir.map((x) => x.jenis_pupuk))) : [];
+  const oliJenis = d.oli ? Array.from(new Set([...d.oli.saldoTerakhir.map((x) => x.jenis_oli), ...d.oli.perJenis.map((x) => x.jenis_oli)])).sort() : [];
 
   return (
-    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5">
       {can("GUDANG") && (
       <Panel to={e.gudang} title="Gudang" icon={<Package size={16} className="text-[var(--accent-blue)]" />}>
         {loading(d.gudang) ? (
@@ -184,6 +186,33 @@ function EstateRow({ e, d, monthLabel }: { e: EstateInfo; d: EstateData; monthLa
       </Panel>
       )}
 
+      {can("OLI") && (
+      <Panel to={e.oli} title="Oli" icon={<Droplet size={16} className="text-[var(--accent-amber)]" />}>
+        {loading(d.oli) ? (
+          <Muted>Memuat...</Muted>
+        ) : failed(d.oli) ? (
+          <Muted>Gagal memuat data</Muted>
+        ) : oliJenis.length === 0 ? (
+          <EmptyCard text="Belum ada data oli" />
+        ) : (
+          <div className="space-y-3">
+            {oliJenis.map((j) => {
+              const saldo = Number(d.oli!.saldoTerakhir.find((x) => x.jenis_oli === j)?.saldo_stock ?? 0);
+              const flow = d.oli!.perJenis.find((x) => x.jenis_oli === j);
+              return (
+                <div key={j} className="grid grid-cols-3 gap-2">
+                  <Figure label={j} value={fmt(saldo)} suffix="LTR" tone={saldo < 0 ? "negative" : undefined} />
+                  <Figure label="Masuk" value={fmt(flow?.diterima)} tone="green" />
+                  <Figure label="Pakai" value={fmt(flow?.pemakaian)} tone="red" />
+                </div>
+              );
+            })}
+            <div className="text-[11px] text-[var(--text-muted)]">Masuk/pemakaian {monthLabel}</div>
+          </div>
+        )}
+      </Panel>
+      )}
+
       {can("KLINIK") && (
       <Panel to={e.klinik} title="Klinik" icon={<Stethoscope size={16} className="text-[var(--accent-blue)]" />}>
         {loading(d.klinik) ? (
@@ -252,6 +281,7 @@ function AttentionPanel({ e, d }: { e: EstateInfo; d: EstateData }) {
   }, [e.estate, e.gudang, e.klinik, user?.id]);
 
   const negativePupuk = canModule(user, "PUPUK") ? (d.pupuk?.saldoTerakhir ?? []).filter((x) => Number(x.saldo_stock) < 0) : [];
+  const negativeOli = canModule(user, "OLI") ? (d.oli?.saldoTerakhir ?? []).filter((x) => Number(x.saldo_stock) < 0) : [];
 
   return (
     <section className="min-w-0 bg-[var(--bg-card)] border border-[var(--border)] rounded-lg p-4">
@@ -260,7 +290,7 @@ function AttentionPanel({ e, d }: { e: EstateInfo; d: EstateData }) {
       </h3>
       {groups === null ? (
         <Muted>Memuat...</Muted>
-      ) : groups.length === 0 && negativePupuk.length === 0 ? (
+      ) : groups.length === 0 && negativePupuk.length === 0 && negativeOli.length === 0 ? (
         <div className="flex items-center gap-2 text-sm text-[var(--accent-green)]">
           <CheckCircle2 size={16} /> Semua aman, tidak ada stok habis, menipis, atau obat expired.
         </div>
@@ -291,20 +321,29 @@ function AttentionPanel({ e, d }: { e: EstateInfo; d: EstateData }) {
               </div>
             </Link>
           )}
+          {negativeOli.length > 0 && (
+            <Link to={e.oli} className="block py-2.5 group">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-sm font-medium text-[var(--accent-red)]">Oli · saldo minus</span>
+                <ChevronRight size={12} className="text-[var(--text-muted)] group-hover:text-[var(--text-primary)]" />
+              </div>
+              <div className="text-xs text-[var(--text-secondary)] mt-0.5">{negativeOli.map((x) => `${x.jenis_oli} ${fmt(x.saldo_stock)} LTR`).join(" · ")}</div>
+            </Link>
+          )}
         </div>
       )}
     </section>
   );
 }
 
-// Single-estate view: the latest changes across Gudang, BBM, Pupuk and Klinik.
+// Single-estate view: the latest changes across Gudang, BBM, Pupuk, Oli and Klinik.
 function RecentActivity({ estate }: { estate: string }) {
   const { user } = useAuth();
   const [rows, setRows] = useState<ActivityLog[] | null>(null);
 
   useEffect(() => {
     let stale = false;
-    const modules = (["BARANG", "BBM", "PUPUK", "KLINIK"] as ActivityLog["module"][]).filter((m) =>
+    const modules = (["BARANG", "BBM", "PUPUK", "KLINIK", "OLI"] as ActivityLog["module"][]).filter((m) =>
       canModule(user, m === "BARANG" ? "GUDANG" : m)
     );
     Promise.all(modules.map((module) => api.activityLog({ module, estate, page: 1, pageSize: 8 }).catch(() => ({ data: [] as ActivityLog[] }))))
@@ -354,7 +393,7 @@ function RecentActivity({ estate }: { estate: string }) {
   );
 }
 
-// Landing page after login, organised per estate: one row of Gudang/BBM/Pupuk/Klinik cards per estate.
+// Landing page after login, organised per estate: one row of Gudang/BBM/Pupuk/Oli/Klinik cards per estate.
 // An estate account (or a superuser who picks one estate) also gets "Perlu Perhatian" and
 // "Aktivitas Terbaru" for that estate. Each card links to its full inventory page.
 export function DashboardPage() {
@@ -391,6 +430,7 @@ export function DashboardPage() {
       if (canModule(user, "BBM")) api.bbmSummary(estate, monthRange).then((s) => put(estate, "bbm", s)).catch(() => put(estate, "bbm", null));
       if (canModule(user, "PUPUK")) api.pupukSummary(estate, monthRange).then((s) => put(estate, "pupuk", s)).catch(() => put(estate, "pupuk", null));
       if (canModule(user, "KLINIK")) api.klinikSummary(estate).then((s) => put(estate, "klinik", s)).catch(() => put(estate, "klinik", null));
+      if (canModule(user, "OLI")) api.oliSummary(estate, monthRange).then((s) => put(estate, "oli", s)).catch(() => put(estate, "oli", null));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id, shownKey]);
