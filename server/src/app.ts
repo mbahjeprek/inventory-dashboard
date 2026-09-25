@@ -2772,19 +2772,27 @@ app.put("/api/klinik-stock/batch/:id", requireSuperuser, async (req, res) => {
   if (!estateAllowed(req.user!, batch.klinik)) return res.status(403).json({ error: "Akses ditolak" });
   const exp = String(req.body.expired_date ?? "");
   if (exp && !ISO_DATE.test(exp)) return res.status(400).json({ error: "Tanggal expired tidak valid" });
+  // `qty` (optional) moves only part of the batch to the other date ("Pisah batch": stock that turned
+  // out to have several expiry dates); the total stays the same, so no stock transaction is booked.
+  const qty = req.body.qty === undefined ? batch.qty : req.body.qty;
+  if (!Number.isInteger(qty) || qty <= 0 || qty > batch.qty) return res.status(400).json({ error: `Jumlah dipisah harus 1 - ${batch.qty}` });
   if (exp === batch.expired_date) return res.json({ success: true });
+  const split = qty < batch.qty;
   await withTransaction(async (client) => {
-    await execute("DELETE FROM klinik_batch WHERE id = @id", { id: batch.id }, client);
-    await addToBatch(client, batch.klinik, batch.obat_kode, exp, batch.qty);
+    if (split) await execute("UPDATE klinik_batch SET qty = qty - @qty WHERE id = @id", { id: batch.id, qty }, client);
+    else await execute("DELETE FROM klinik_batch WHERE id = @id", { id: batch.id }, client);
+    await addToBatch(client, batch.klinik, batch.obat_kode, exp, qty);
     await syncKlinikStock(client, batch.klinik, batch.obat_kode);
   });
   const obat = await queryOne<any>("SELECT nama FROM obat WHERE kode = @k", { k: batch.obat_kode });
   await logActivity(req, {
     module: "KLINIK",
     estate: batch.klinik,
-    aksi: "Edit Batch",
+    aksi: split ? "Pisah Batch" : "Edit Batch",
     objek: `${batch.obat_kode} - ${obat?.nama ?? ""}`,
-    detail: `Expired: ${expText(batch.expired_date)} → ${expText(exp)}; Jumlah: ${batch.qty}`,
+    detail: split
+      ? `${qty} dari batch ${expText(batch.expired_date)} (${batch.qty}) dipindah ke ${expText(exp)}`
+      : `Expired: ${expText(batch.expired_date)} → ${expText(exp)}; Jumlah: ${batch.qty}`,
   });
   res.json({ success: true });
 });

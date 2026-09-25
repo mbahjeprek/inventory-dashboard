@@ -524,8 +524,9 @@ export const api = {
   klinikBatches: (klinik: string, obat_kode: string) =>
     req<KlinikBatch[]>(`/api/klinik-stock/batches?${new URLSearchParams({ klinik, obat_kode })}`),
 
-  updateKlinikBatch: (id: number, expired_date: string) =>
-    req<{ success: boolean }>(`/api/klinik-stock/batch/${id}`, { method: "PUT", body: JSON.stringify({ expired_date }) }),
+  // Without qty the whole batch moves to the date; with qty only that many (split off).
+  updateKlinikBatch: (id: number, expired_date: string, qty?: number) =>
+    req<{ success: boolean }>(`/api/klinik-stock/batch/${id}`, { method: "PUT", body: JSON.stringify({ expired_date, qty }) }),
 
   klinikStockCorrection: (payload: { klinik: string; obat_kode: string; actual_qty: number; note?: string; expired_date?: string }) =>
     req<{ success: boolean; delta: number }>("/api/klinik-stock/correction", { method: "POST", body: JSON.stringify(payload) }),
