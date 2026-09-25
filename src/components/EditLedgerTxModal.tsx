@@ -19,6 +19,9 @@ export function EditLedgerTxModal({
   const [tujuan, setTujuan] = useState(tx.tujuan ?? "");
   const [penerima, setPenerima] = useState(tx.penerima ?? "");
   const [note, setNote] = useState(tx.note ?? "");
+  // Klinik Stock In: the batch (expiry date) the stock went into.
+  const klinikIn = scope.kind === "klinik" && tx.type === "IN" && !tx.is_correction;
+  const [expired, setExpired] = useState(tx.alloc?.[0]?.exp ?? "");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const isOut = tx.type === "OUT";
@@ -31,10 +34,10 @@ export function EditLedgerTxModal({
     setSubmitting(true);
     setError("");
     try {
-      await api.updateLedgerTx(scope, tx.id, { qty, tujuan, penerima, note });
+      await api.updateLedgerTx(scope, tx.id, { qty, tujuan, penerima, note, ...(klinikIn ? { expired_date: expired } : {}) });
       onSuccess();
-    } catch {
-      setError("Gagal menyimpan perubahan");
+    } catch (e: any) {
+      setError(e?.message?.includes("400") ? "Tidak bisa disimpan: stok batch tidak mencukupi atau sudah terpakai" : "Gagal menyimpan perubahan");
     } finally {
       setSubmitting(false);
     }
@@ -77,6 +80,13 @@ export function EditLedgerTxModal({
               </p>
             )}
           </div>
+
+          {klinikIn && (
+            <div>
+              <label className="text-xs text-[var(--text-secondary)] mb-1 block">Tanggal Expired (batch)</label>
+              <input type="date" value={expired} onChange={(e) => setExpired(e.target.value)} className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-2" />
+            </div>
+          )}
 
           {isOut && scope.kind === "gudang" && (
             <div>

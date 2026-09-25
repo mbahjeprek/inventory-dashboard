@@ -96,7 +96,14 @@ export function LedgerHistory({ scope, type, refreshKey }: { scope: StockScope; 
         r.satuan,
         ...(showTujuan ? [r.tujuan] : []),
         r.penerima,
-        [r.is_correction ? "Koreksi" : "", r.note ?? ""].filter(Boolean).join(" · "),
+        [
+          r.is_correction ? "Koreksi" : "",
+          r.tujuan === "DIBUANG" ? "Dibuang (expired)" : "",
+          r.note ?? "",
+          isKlinik && r.alloc?.length ? `Batch exp: ${r.alloc.map((a) => `${a.exp || "tanpa tanggal"} (${a.qty})`).join(", ")}` : "",
+        ]
+          .filter(Boolean)
+          .join(" · "),
         r.input_oleh,
       ]),
     };
@@ -201,7 +208,18 @@ export function LedgerHistory({ scope, type, refreshKey }: { scope: StockScope; 
                           Koreksi
                         </span>
                       ) : null}
-                      {r.note || (r.is_correction ? "" : "-")}
+                      {r.tujuan === "DIBUANG" && (
+                        <span className="mr-1.5 text-[10px] px-1.5 py-0.5 rounded-full border bg-[var(--accent-red-bg)] text-[var(--accent-red)] border-[var(--accent-red-border)]">
+                          Dibuang (expired)
+                        </span>
+                      )}
+                      {r.note || (r.is_correction || r.tujuan === "DIBUANG" ? "" : "-")}
+                      {isKlinik && r.alloc && r.alloc.length > 0 && (
+                        <div className="text-[11px] text-[var(--text-muted)] mt-0.5">
+                          Batch exp:{" "}
+                          {r.alloc.map((a) => `${a.exp ? a.exp.split("-").reverse().join("/") : "tanpa tanggal"} (${a.qty.toLocaleString("id-ID")})`).join(", ")}
+                        </div>
+                      )}
                     </td>
                     <td className="px-4 py-2.5 whitespace-nowrap text-[var(--text-secondary)]">{r.input_oleh || "-"}</td>
                     {showActions && (

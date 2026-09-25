@@ -84,6 +84,8 @@ export type LedgerTx = {
   penerima: string;
   note: string | null;
   is_correction: number;
+  // Klinik: which batches the movement touched ([{exp, qty}], exp '' = no expiry).
+  alloc?: { exp: string; qty: number }[] | null;
   // Stok Masuk booked automatically by a Stok Keluar from another gudang; changed only from there.
   is_transfer: boolean;
   kode: string;
@@ -116,7 +118,11 @@ export type KlinikStockItem = {
   expired_date: string | null;
   catatan: string;
   keterangan: string;
+  // Batches still in stock, nearest expiry first ('' = no expiry date).
+  batches: KlinikBatch[];
 };
+
+export type KlinikBatch = { id: number; expired_date: string; qty: number };
 
 export type KlinikSummary = {
   totalItems: number;
@@ -426,12 +432,20 @@ export const api = {
     tujuan?: string;
     penerima?: string;
     note?: string;
+    // IN: the batch's expiry date; OUT: take from this batch (absent = expiring first).
+    expired_date?: string;
   }) => req<{ success: boolean }>("/api/klinik-stock/transactions", { method: "POST", body: JSON.stringify(payload) }),
 
-  klinikStockCorrection: (payload: { klinik: string; obat_kode: string; actual_qty: number; note?: string }) =>
+  klinikBatches: (klinik: string, obat_kode: string) =>
+    req<KlinikBatch[]>(`/api/klinik-stock/batches?${new URLSearchParams({ klinik, obat_kode })}`),
+
+  updateKlinikBatch: (id: number, expired_date: string) =>
+    req<{ success: boolean }>(`/api/klinik-stock/batch/${id}`, { method: "PUT", body: JSON.stringify({ expired_date }) }),
+
+  klinikStockCorrection: (payload: { klinik: string; obat_kode: string; actual_qty: number; note?: string; expired_date?: string }) =>
     req<{ success: boolean; delta: number }>("/api/klinik-stock/correction", { method: "POST", body: JSON.stringify(payload) }),
 
-  updateKlinikStock: (id: number, payload: { buffer_stock: number; expired_date: string; catatan: string }) =>
+  updateKlinikStock: (id: number, payload: { buffer_stock: number; catatan: string }) =>
     req<{ success: boolean }>(`/api/klinik-stock/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
 
   deleteKlinikStock: (id: number) => req<{ success: boolean }>(`/api/klinik-stock/${id}`, { method: "DELETE" }),
@@ -448,7 +462,7 @@ export const api = {
     );
   },
 
-  updateLedgerTx: (scope: StockScope, id: number, payload: { qty: number; tujuan: string; penerima: string; note: string }) =>
+  updateLedgerTx: (scope: StockScope, id: number, payload: { qty: number; tujuan: string; penerima: string; note: string; expired_date?: string }) =>
     req<{ success: boolean }>(`/api/${scope.kind === "klinik" ? "klinik-stock" : "gudang-stock"}/history/${id}`, {
       method: "PUT",
       body: JSON.stringify(payload),

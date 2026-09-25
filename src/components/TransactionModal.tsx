@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { X, ClipboardCheck } from "lucide-react";
-import { api, GUDANG_TUJUAN, type PickerItem, type StockScope } from "../lib/api";
+import { api, GUDANG_TUJUAN, type KlinikBatch, type PickerItem, type StockScope } from "../lib/api";
 import { KaryawanAutocomplete } from "./KaryawanAutocomplete";
 import { useAuth } from "../context/AuthContext";
 import { can } from "../lib/access";
@@ -10,6 +10,12 @@ import { can } from "../lib/access";
 const NILAM_TUJUAN = ["NILAM", "KNS", "WJA", "ZAMRUD", "FIRUS"];
 
 type Mode = "IN" | "OUT" | "KOREKSI";
+
+// Klinik batch pickers: FEFO = take the batch that expires first; NEW = count a batch not listed yet.
+const FEFO = "__fefo";
+const NEW_BATCH = "__new";
+const tgl = (iso: string) => (iso ? iso.split("-").reverse().join("/") : "tanpa tanggal expired");
+const isPast = (iso: string) => !!iso && iso < new Date().toISOString().slice(0, 10);
 
 // One Stock In / Stock Out / Koreksi form for every estate. Without `scope` it works on Nilam's
 // gudang stock (items); with a scope on that gudang's or klinik's own stock.
@@ -39,6 +45,29 @@ export function TransactionModal({
   const [note, setNote] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  // Klinik only: stock is kept per expiry-date batch.
+  const [batches, setBatches] = useState<KlinikBatch[]>([]);
+  const [expIn, setExpIn] = useState("");
+  const [batchOut, setBatchOut] = useState(FEFO);
+  const [buang, setBuang] = useState(false);
+  const [batchKor, setBatchKor] = useState(NEW_BATCH);
+  const [newExp, setNewExp] = useState("");
+
+  useEffect(() => {
+    if (!isKlinik) return;
+    api
+      .klinikBatches(scope!.name, initialItem.kode)
+      .then((b) => {
+        setBatches(b);
+        if (b.length) setBatchKor(b[0].expired_date);
+      })
+      .catch(() => setBatches([]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialItem.kode]);
+
+  const korExp = batchKor === NEW_BATCH ? newExp : batchKor;
+  const korBatchQty = batches.find((b) => b.expired_date === korExp)?.qty ?? 0;
+  const outAvailable = isKlinik && batchOut !== FEFO ? (batches.find((b) => b.expired_date === batchOut)?.qty ?? 0) : item.stock_tersedia;
 
   useEffect(() => {
     // The picker row already carries the scope's stock; Nilam refreshes it from the item.
@@ -46,15 +75,17 @@ export function TransactionModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialItem.id]);
 
+  // Koreksi starts from the current count: the whole stock, or for Klinik the chosen batch.
+  const korBase = isKlinik ? korBatchQty : item.stock_tersedia;
   useEffect(() => {
-    if (mode === "KOREKSI") setActualQty(item.stock_tersedia);
+    if (mode === "KOREKSI") setActualQty(korBase);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode]);
+  }, [mode, korBase]);
 
   // Gudang KNS/WJA/Zamrud/Firus take decimal qty (e.g. 2,5 KG); Nilam and Klinik whole numbers.
   const decimal = scope?.kind === "gudang";
   const parseQty = (v: string) => (decimal ? Math.round((parseFloat(v) || 0) * 1000) / 1000 : parseInt(v) || 0);
-  const selisih = Math.round((actualQty - item.stock_tersedia) * 1000) / 1000;
+  const selisih = Math.round((actualQty - korBase) * 1000) / 1000;
 
   const submit = async () => {
     setError("");
@@ -66,7 +97,8 @@ export function TransactionModal({
       }
       setSubmitting(true);
       try {
-        if (scope?.kind === "klinik") await api.klinikStockCorrection({ klinik: scope.name, obat_kode: item.kode, actual_qty: actualQty, note });
+        if (scope?.kind === "klinik")
+          await api.klinikStockCorrection({ klinik: scope.name, obat_kode: item.kode, actual_qty: actualQty, note, expired_date: korExp });
         else if (scope?.kind === "gudang") await api.gudangStockCorrection({ gudang: scope.name, item_kode: item.kode, actual_qty: actualQty, note });
         else await api.stockCorrection({ item_id: item.id, actual_qty: actualQty, note });
         onSuccess();
@@ -82,14 +114,23 @@ export function TransactionModal({
       setError("Jumlah harus lebih dari 0");
       return;
     }
-    if (mode === "OUT" && qty > item.stock_tersedia) {
-      setError(`Stock tersedia hanya ${item.stock_tersedia} ${item.satuan}`);
+    if (mode === "OUT" && qty > outAvailable) {
+      setError(`${isKlinik && batchOut !== FEFO ? "Stok batch ini" : "Stock tersedia"} hanya ${outAvailable} ${item.satuan}`);
       return;
     }
     setSubmitting(true);
     try {
       if (scope?.kind === "klinik")
-        await api.createKlinikTransaction({ klinik: scope.name, obat_kode: item.kode, type: mode, qty, note, penerima });
+        await api.createKlinikTransaction({
+          klinik: scope.name,
+          obat_kode: item.kode,
+          type: mode,
+          qty,
+          note,
+          penerima,
+          tujuan: mode === "OUT" && buang ? "DIBUANG" : undefined,
+          expired_date: mode === "IN" ? expIn || undefined : batchOut === FEFO ? undefined : batchOut,
+        });
       else if (scope?.kind === "gudang")
         await api.createGudangTransaction({ gudang: scope.name, item_kode: item.kode, tujuan, type: mode, qty, note, penerima });
       else await api.createTransaction({ item_id: item.id, tujuan, type: mode, qty, note, penerima });
@@ -197,6 +238,57 @@ export function TransactionModal({
                   Jumlah ini otomatis tercatat sebagai Stok Masuk di Gudang {tujuan}.
                 </p>
               )}
+            </div>
+          )}
+
+          {isKlinik && mode === "IN" && (
+            <div>
+              <label className="text-xs text-[var(--text-secondary)] mb-1 block">Tanggal Expired</label>
+              <input type="date" value={expIn} onChange={(e) => setExpIn(e.target.value)} className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-2" />
+              <p className="text-[11px] text-[var(--text-muted)] mt-1">
+                Obat dengan tanggal expired berbeda disimpan sebagai batch terpisah. Kosongkan untuk alat/BHP tanpa expired.
+              </p>
+            </div>
+          )}
+
+          {isKlinik && mode === "OUT" && (
+            <div className="space-y-2">
+              <div>
+                <label className="text-xs text-[var(--text-secondary)] mb-1 block">Ambil dari batch</label>
+                <select value={batchOut} onChange={(e) => setBatchOut(e.target.value)} className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-2">
+                  <option value={FEFO}>Otomatis: yang expired paling dekat dulu</option>
+                  {batches.map((b) => (
+                    <option key={b.id} value={b.expired_date}>
+                      Exp {tgl(b.expired_date)}
+                      {isPast(b.expired_date) ? " (sudah expired)" : ""} · sisa {b.qty.toLocaleString("id-ID")}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <label className="flex items-center gap-2 text-xs text-[var(--text-secondary)] cursor-pointer">
+                <input type="checkbox" checked={buang} onChange={(e) => setBuang(e.target.checked)} />
+                Buang obat expired (tidak dihitung sebagai pemakaian)
+              </label>
+            </div>
+          )}
+
+          {isKlinik && mode === "KOREKSI" && (
+            <div className="space-y-2">
+              <div>
+                <label className="text-xs text-[var(--text-secondary)] mb-1 block">Batch yang dihitung</label>
+                <select value={batchKor} onChange={(e) => setBatchKor(e.target.value)} className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-2">
+                  {batches.map((b) => (
+                    <option key={b.id} value={b.expired_date}>
+                      Exp {tgl(b.expired_date)} · tercatat {b.qty.toLocaleString("id-ID")}
+                    </option>
+                  ))}
+                  <option value={NEW_BATCH}>Batch lain (isi tanggal expired)</option>
+                </select>
+              </div>
+              {batchKor === NEW_BATCH && (
+                <input type="date" value={newExp} onChange={(e) => setNewExp(e.target.value)} className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-2" />
+              )}
+              <p className="text-[11px] text-[var(--text-muted)]">Tercatat di batch ini: {korBatchQty.toLocaleString("id-ID")} {item.satuan}</p>
             </div>
           )}
 

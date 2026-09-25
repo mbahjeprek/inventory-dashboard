@@ -173,6 +173,29 @@ CREATE TABLE IF NOT EXISTS klinik_stock_tx (
 );
 CREATE INDEX IF NOT EXISTS idx_klinik_tx_item ON klinik_stock_tx(klinik, obat_kode);
 
+-- One obat in one clinic can sit in several batches with their own expiry date. Stock In adds to
+-- the batch of its expiry date ('' = no expiry, e.g. kasa/plester), Stock Out takes the batch that
+-- expires first (FEFO) unless a batch is picked, Koreksi counts one batch. klinik_stock keeps the
+-- totals: stock_tersedia = sum of the batches, expired_date = the nearest expiry still in stock.
+-- klinik_stock_tx.alloc records which batches a movement touched ([{exp, qty}]) so an edit or
+-- delete can put the stock back where it came from.
+CREATE TABLE IF NOT EXISTS klinik_batch (
+  id SERIAL PRIMARY KEY,
+  klinik TEXT NOT NULL,
+  obat_kode TEXT NOT NULL REFERENCES obat(kode) ON UPDATE CASCADE,
+  expired_date TEXT NOT NULL DEFAULT '',
+  qty INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE(klinik, obat_kode, expired_date)
+);
+ALTER TABLE klinik_stock_tx ADD COLUMN IF NOT EXISTS alloc JSONB;
+-- Stock from before batches existed becomes one batch per obat with the expiry it had.
+INSERT INTO klinik_batch (klinik, obat_kode, expired_date, qty)
+SELECT ks.klinik, ks.obat_kode, COALESCE(ks.expired_date, ''), ks.stock_tersedia
+FROM klinik_stock ks
+WHERE ks.stock_tersedia > 0
+  AND NOT EXISTS (SELECT 1 FROM klinik_batch b WHERE b.klinik = ks.klinik AND b.obat_kode = ks.obat_kode);
+
 CREATE TABLE IF NOT EXISTS bbm_log (
   id SERIAL PRIMARY KEY,
   jenis_bbm TEXT NOT NULL,

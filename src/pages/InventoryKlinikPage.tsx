@@ -116,8 +116,9 @@ function FilterHeader({
   );
 }
 
-// Obat stock of one estate clinic. Stock only changes through the shared Transaksi form
-// (Stock In / Stock Out / Koreksi); superusers can edit buffer, expired date and note.
+// Obat stock of one estate clinic, kept per expiry-date batch. Stock only changes through the
+// shared Transaksi form (Stock In / Stock Out / Koreksi); Edit changes buffer, note and a batch's
+// expiry date.
 export function InventoryKlinikPage({ klinik }: { klinik: string }) {
   const [items, setItems] = useState<KlinikStockItem[]>([]);
   const [summary, setSummary] = useState<KlinikSummary | null>(null);
@@ -234,7 +235,14 @@ export function InventoryKlinikPage({ klinik }: { klinik: string }) {
         i.deskripsi,
         i.satuan,
         i.stock_tersedia,
-        [formatTanggal(i.expired_date), i.catatan].filter(Boolean).join(" · "),
+        [
+          i.batches.length > 1
+            ? i.batches.map((b) => `${b.expired_date ? formatTanggal(b.expired_date) : "Tanpa expired"} (${b.qty})`).join(", ")
+            : formatTanggal(i.expired_date),
+          i.catatan,
+        ]
+          .filter(Boolean)
+          .join(" · "),
       ]),
     };
   };
@@ -369,7 +377,6 @@ export function InventoryKlinikPage({ klinik }: { klinik: string }) {
                     </tr>
                   ) : (
                     items.map((item, idx) => {
-                      const exp = expiryState(item.expired_date);
                       const habis = item.stock_tersedia <= 0;
                       const menipis = !habis && item.buffer_stock > 0 && item.stock_tersedia <= item.buffer_stock;
                       return (
@@ -390,21 +397,32 @@ export function InventoryKlinikPage({ klinik }: { klinik: string }) {
                             {item.stock_tersedia.toLocaleString("id-ID")}
                           </td>
                           <td className="px-4 py-2.5 whitespace-nowrap">
-                            {item.expired_date ? (
-                              <div
-                                className={
-                                  exp === "expired"
-                                    ? "text-[var(--accent-red)] font-medium"
-                                    : exp === "soon"
-                                      ? "text-[var(--accent-amber)] font-medium"
-                                      : "text-[var(--text-secondary)]"
-                                }
-                                title={exp === "expired" ? "Sudah expired" : exp === "soon" ? `Expired dalam ≤ ${EXPIRY_WARNING_DAYS} hari` : ""}
-                              >
-                                {formatTanggal(item.expired_date)}
-                              </div>
-                            ) : (
+                            {/* One line per batch (nearest expiry first) with its quantity; a single
+                                batch shows just its date. */}
+                            {item.batches.filter((b) => b.expired_date).length === 0 ? (
                               !item.catatan && <span className="text-[var(--text-muted)]">-</span>
+                            ) : (
+                              item.batches.map((b) => {
+                                const st = expiryState(b.expired_date || null);
+                                return (
+                                  <div
+                                    key={b.id}
+                                    className={
+                                      st === "expired"
+                                        ? "text-[var(--accent-red)] font-medium"
+                                        : st === "soon"
+                                          ? "text-[var(--accent-amber)] font-medium"
+                                          : "text-[var(--text-secondary)]"
+                                    }
+                                    title={st === "expired" ? "Sudah expired" : st === "soon" ? `Expired dalam ≤ ${EXPIRY_WARNING_DAYS} hari` : ""}
+                                  >
+                                    {b.expired_date ? formatTanggal(b.expired_date) : "Tanpa expired"}
+                                    {item.batches.length > 1 && (
+                                      <span className="text-xs font-normal text-[var(--text-muted)]"> · {b.qty.toLocaleString("id-ID")}</span>
+                                    )}
+                                  </div>
+                                );
+                              })
                             )}
                             {item.catatan && <div className="text-xs text-[var(--accent-amber)] whitespace-normal">{item.catatan}</div>}
                           </td>
@@ -413,7 +431,7 @@ export function InventoryKlinikPage({ klinik }: { klinik: string }) {
                               <div className="inline-flex gap-1.5">
                                 {canEdit && (<button
                                   onClick={() => setEditingItem(item)}
-                                  title="Edit buffer, expired & catatan"
+                                  title="Edit buffer, catatan & tanggal expired batch"
                                   className="p-1.5 rounded-md border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[#f1f5f9]"
                                 >
                                   <Pencil size={14} />

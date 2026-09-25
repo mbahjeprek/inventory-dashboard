@@ -343,7 +343,7 @@ app.get("/api/top-keluar", async (req, res) => {
   } else {
     params.kliniks = allowed;
     srcSql = `SELECT t.obat_kode, t.qty FROM klinik_stock_tx t
-      WHERE t.type = 'OUT' AND t.is_correction = 0 AND t.klinik = ANY(@kliniks::text[]) AND ${txDate}`;
+      WHERE t.type = 'OUT' AND t.is_correction = 0 AND COALESCE(t.tujuan, '') <> 'DIBUANG' AND t.klinik = ANY(@kliniks::text[]) AND ${txDate}`;
     master = "obat";
   }
 
@@ -2403,6 +2403,127 @@ function checkKlinik(req: express.Request, res: express.Response, klinik: string
 // expired_date is stored as YYYY-MM-DD text, so it compares with CURRENT_DATE via ::date.
 const EXPIRING_SQL = `(ks.expired_date IS NOT NULL AND ks.expired_date <> '' AND ks.expired_date::date <= CURRENT_DATE + ${EXPIRY_WARNING_DAYS})`;
 
+// ---- Klinik batches (see schema.sql klinik_batch) ----
+type Alloc = { exp: string; qty: number }; // exp '' = batch without expiry date
+class StockError extends Error {}
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+const expText = (exp: string) => (exp ? exp.split("-").reverse().join("/") : "tanpa tanggal");
+// Tujuan of a Stock Out that throws expired obat away; it is left out of Top Barang Keluar.
+const TUJUAN_DIBUANG = "DIBUANG";
+
+async function addToBatch(client: PoolClient, klinik: string, obat: string, exp: string, qty: number) {
+  await execute(
+    `INSERT INTO klinik_batch (klinik, obat_kode, expired_date, qty) VALUES (@klinik, @obat, @exp, @qty)
+     ON CONFLICT (klinik, obat_kode, expired_date) DO UPDATE SET qty = klinik_batch.qty + EXCLUDED.qty`,
+    { klinik, obat, exp, qty },
+    client
+  );
+}
+
+// Takes qty from one batch (exp given) or from the batches that expire first (FEFO, undated last).
+async function takeFromBatches(client: PoolClient, klinik: string, obat: string, qty: number, exp?: string): Promise<Alloc[]> {
+  const rows = await queryMany<{ id: number; expired_date: string; qty: number }>(
+    `SELECT id, expired_date, qty FROM klinik_batch
+     WHERE klinik = @klinik AND obat_kode = @obat AND qty > 0 ${exp !== undefined ? "AND expired_date = @exp" : ""}
+     ORDER BY expired_date = '', expired_date, id FOR UPDATE`,
+    { klinik, obat, exp: exp ?? "" },
+    client
+  );
+  const available = rows.reduce((s, r) => s + r.qty, 0);
+  if (available < qty) {
+    throw new StockError(exp !== undefined ? `Stok batch expired ${expText(exp)} hanya ${available}` : `Stock tersedia hanya ${available}`);
+  }
+  const alloc: Alloc[] = [];
+  let left = qty;
+  for (const r of rows) {
+    if (left <= 0) break;
+    const take = Math.min(r.qty, left);
+    left -= take;
+    alloc.push({ exp: r.expired_date, qty: take });
+    await execute("UPDATE klinik_batch SET qty = qty - @take WHERE id = @id", { take, id: r.id }, client);
+  }
+  await execute("DELETE FROM klinik_batch WHERE klinik = @klinik AND obat_kode = @obat AND qty <= 0", { klinik, obat }, client);
+  return alloc;
+}
+
+// klinik_stock totals follow the batches.
+async function syncKlinikStock(client: PoolClient, klinik: string, obat: string) {
+  await execute(
+    `INSERT INTO klinik_stock (klinik, obat_kode, buffer_stock, stock_tersedia) VALUES (@klinik, @obat, 0, 0)
+     ON CONFLICT (klinik, obat_kode) DO NOTHING`,
+    { klinik, obat },
+    client
+  );
+  await execute(
+    `UPDATE klinik_stock SET
+       stock_tersedia = COALESCE((SELECT SUM(qty) FROM klinik_batch b WHERE b.klinik = @klinik AND b.obat_kode = @obat), 0),
+       expired_date = (SELECT MIN(NULLIF(expired_date, '')) FROM klinik_batch b WHERE b.klinik = @klinik AND b.obat_kode = @obat AND b.qty > 0)
+     WHERE klinik = @klinik AND obat_kode = @obat`,
+    { klinik, obat },
+    client
+  );
+}
+
+// Applies one movement to the batches: IN adds to the batch of `exp`, OUT takes from `exp` or FEFO.
+async function klinikApply(client: PoolClient, klinik: string, obat: string, type: "IN" | "OUT", qty: number, exp?: string): Promise<Alloc[]> {
+  if (type === "IN") {
+    await addToBatch(client, klinik, obat, exp ?? "", qty);
+    return [{ exp: exp ?? "", qty }];
+  }
+  return takeFromBatches(client, klinik, obat, qty, exp);
+}
+
+// Undoes a stored movement on the batches it touched. A Stock In can only be undone while its batch
+// still holds that stock - once part of it went out, the Stock Out has to be changed first (or a
+// Koreksi used), otherwise the batches would no longer match what really happened. Rows from before
+// batches (no alloc) use the nearest batch.
+async function klinikReverse(client: PoolClient, tx: any) {
+  const alloc: Alloc[] | null = tx.alloc;
+  if (tx.type === "OUT") {
+    const fallback = alloc
+      ? ""
+      : ((await queryOne<{ e: string }>(
+          "SELECT expired_date e FROM klinik_batch WHERE klinik = @k AND obat_kode = @o ORDER BY expired_date = '', expired_date LIMIT 1",
+          { k: tx.klinik, o: tx.obat_kode },
+          client
+        ))?.e ?? "");
+    for (const a of alloc ?? [{ exp: fallback, qty: tx.qty }]) await addToBatch(client, tx.klinik, tx.obat_kode, a.exp, a.qty);
+    return;
+  }
+  try {
+    if (alloc) for (const a of alloc) await takeFromBatches(client, tx.klinik, tx.obat_kode, a.qty, a.exp);
+    else await takeFromBatches(client, tx.klinik, tx.obat_kode, tx.qty);
+  } catch (e) {
+    if (e instanceof StockError) {
+      throw new StockError("Stok dari transaksi ini sudah terpakai. Ubah/hapus dulu stok keluarnya, atau pakai Koreksi Stok per batch.");
+    }
+    throw e;
+  }
+}
+
+// One Klinik Stock In / Out: batches, history row (with its alloc) and totals in one transaction.
+async function recordKlinikMove(
+  req: express.Request,
+  m: { klinik: string; obat: string; type: "IN" | "OUT"; qty: number; exp?: string; tujuan: string; penerima: string; note: string | null; is_correction: number }
+): Promise<string | null> {
+  try {
+    await withTransaction(async (client) => {
+      const alloc = await klinikApply(client, m.klinik, m.obat, m.type, m.qty, m.exp);
+      await execute(
+        `INSERT INTO klinik_stock_tx (klinik, obat_kode, type, qty, tujuan, penerima, note, is_correction, user_id, alloc)
+         VALUES (@klinik, @obat, @type, @qty, @tujuan, @penerima, @note, @is_correction, @user_id, @alloc::jsonb)`,
+        { ...m, user_id: req.user!.id, alloc: JSON.stringify(alloc) },
+        client
+      );
+      await syncKlinikStock(client, m.klinik, m.obat);
+    });
+    return null;
+  } catch (e) {
+    if (e instanceof StockError) return e.message;
+    throw e;
+  }
+}
+
 app.get("/api/klinik-stock/summary", async (req, res) => {
   const { klinik = "" } = req.query as Record<string, string>;
   if (!checkKlinik(req, res, klinik)) return;
@@ -2454,7 +2575,10 @@ app.get("/api/klinik-stock", async (req, res) => {
   const data = await queryMany(
     `SELECT ks.id, o.id obat_id, o.kode, o.nama, o.kategori, o.jenis, o.deskripsi, o.satuan, ks.buffer_stock, ks.stock_tersedia,
             ks.expired_date, ks.catatan,
-            CASE WHEN ks.stock_tersedia > 0 THEN 'AMAN' ELSE 'BUFFER STOCK' END AS keterangan
+            CASE WHEN ks.stock_tersedia > 0 THEN 'AMAN' ELSE 'BUFFER STOCK' END AS keterangan,
+            COALESCE((SELECT json_agg(json_build_object('id', b.id, 'expired_date', b.expired_date, 'qty', b.qty)
+                                      ORDER BY b.expired_date = '', b.expired_date)
+                      FROM klinik_batch b WHERE b.klinik = ks.klinik AND b.obat_kode = ks.obat_kode AND b.qty > 0), '[]') AS batches
      ${joinSql} ORDER BY ${sortCol} ${dir} NULLS LAST, o.kode LIMIT @limit OFFSET @offset`,
     { ...params, limit, offset }
   );
@@ -2483,19 +2607,24 @@ app.get("/api/klinik-stock/pick", async (req, res) => {
   res.json({ data, total: Number(total), page: parseInt(page), pageSize: limit });
 });
 
+// Stock In: `expired_date` = the batch ('' / absent = no expiry). Stock Out: `expired_date` picks a
+// batch, absent = FEFO; tujuan "DIBUANG" = expired obat thrown away.
 app.post("/api/klinik-stock/transactions", async (req, res) => {
-  const { klinik, obat_kode, type, qty, tujuan, penerima, note } = req.body;
+  const { klinik, obat_kode, type, qty, tujuan, penerima, note, expired_date } = req.body;
   if (!checkKlinik(req, res, klinik)) return;
   if (!["IN", "OUT"].includes(type) || !Number.isInteger(qty) || qty <= 0) return res.status(400).json({ error: "Invalid payload" });
+  if (expired_date && !ISO_DATE.test(expired_date)) return res.status(400).json({ error: "Tanggal expired tidak valid" });
   const obat = await queryOne<any>("SELECT kode, nama FROM obat WHERE kode = @obat_kode", { obat_kode });
   if (!obat) return res.status(404).json({ error: "Obat tidak ditemukan di master data" });
 
-  const err = await recordMovement(req, KLINIK_LEDGER, {
-    scope: klinik,
-    item: obat_kode,
+  const exp = type === "IN" ? expired_date || "" : typeof expired_date === "string" ? expired_date : undefined;
+  const err = await recordKlinikMove(req, {
+    klinik,
+    obat: obat_kode,
     type,
     qty,
-    tujuan: tujuan || "",
+    exp,
+    tujuan: type === "OUT" && tujuan === TUJUAN_DIBUANG ? TUJUAN_DIBUANG : "",
     penerima: penerima || "",
     note: note || null,
     is_correction: 0,
@@ -2505,41 +2634,100 @@ app.post("/api/klinik-stock/transactions", async (req, res) => {
   await logActivity(req, {
     module: "KLINIK",
     estate: klinik,
-    aksi: type === "IN" ? "Stok Masuk" : "Stok Keluar",
+    aksi: type === "IN" ? "Stok Masuk" : tujuan === TUJUAN_DIBUANG ? "Buang Obat Expired" : "Stok Keluar",
     objek: `${obat.kode} - ${obat.nama}`,
-    detail: movementDetail(qty, tujuan, penerima, note),
+    detail: [movementDetail(qty, undefined, penerima, note), exp !== undefined && `Batch expired: ${expText(exp)}`].filter(Boolean).join("; "),
   });
   res.json({ success: true });
 });
 
+// Batches of one obat in one clinic (for the transaction form).
+app.get("/api/klinik-stock/batches", async (req, res) => {
+  const { klinik = "", obat_kode = "" } = req.query as Record<string, string>;
+  if (!checkKlinik(req, res, klinik)) return;
+  const rows = await queryMany(
+    `SELECT id, expired_date, qty FROM klinik_batch WHERE klinik = @klinik AND obat_kode = @obat_kode AND qty > 0
+     ORDER BY expired_date = '', expired_date`,
+    { klinik, obat_kode }
+  );
+  res.json(rows);
+});
+
+// Fix a batch's expiry date (typo); a batch that ends up on an existing date is merged into it.
+app.put("/api/klinik-stock/batch/:id", requireSuperuser, async (req, res) => {
+  const batch = await queryOne<any>("SELECT * FROM klinik_batch WHERE id = @id", { id: req.params.id });
+  if (!batch) return res.status(404).json({ error: "Not found" });
+  if (!estateAllowed(req.user!, batch.klinik)) return res.status(403).json({ error: "Akses ditolak" });
+  const exp = String(req.body.expired_date ?? "");
+  if (exp && !ISO_DATE.test(exp)) return res.status(400).json({ error: "Tanggal expired tidak valid" });
+  if (exp === batch.expired_date) return res.json({ success: true });
+  await withTransaction(async (client) => {
+    await execute("DELETE FROM klinik_batch WHERE id = @id", { id: batch.id }, client);
+    await addToBatch(client, batch.klinik, batch.obat_kode, exp, batch.qty);
+    await syncKlinikStock(client, batch.klinik, batch.obat_kode);
+  });
+  const obat = await queryOne<any>("SELECT nama FROM obat WHERE kode = @k", { k: batch.obat_kode });
+  await logActivity(req, {
+    module: "KLINIK",
+    estate: batch.klinik,
+    aksi: "Edit Batch",
+    objek: `${batch.obat_kode} - ${obat?.nama ?? ""}`,
+    detail: `Expired: ${expText(batch.expired_date)} → ${expText(exp)}; Jumlah: ${batch.qty}`,
+  });
+  res.json({ success: true });
+});
+
+// Koreksi (stock opname) counts one batch: `expired_date` names it ('' = no expiry; a date that has
+// no batch yet adds one).
 app.post("/api/klinik-stock/correction", requireSuperuser, async (req, res) => {
   const { klinik, obat_kode, actual_qty, note } = req.body;
+  const exp = String(req.body.expired_date ?? "");
   if (!checkKlinik(req, res, klinik)) return;
   if (!Number.isInteger(actual_qty) || actual_qty < 0) return res.status(400).json({ error: "Invalid payload" });
+  if (exp && !ISO_DATE.test(exp)) return res.status(400).json({ error: "Tanggal expired tidak valid" });
   const obat = await queryOne<any>("SELECT kode, nama FROM obat WHERE kode = @obat_kode", { obat_kode });
   if (!obat) return res.status(404).json({ error: "Obat tidak ditemukan di master data" });
 
-  const before = await recordCorrection(req, KLINIK_LEDGER, klinik, obat_kode, actual_qty, note);
+  const before =
+    (await queryOne<{ q: number }>("SELECT qty q FROM klinik_batch WHERE klinik = @klinik AND obat_kode = @obat_kode AND expired_date = @exp", {
+      klinik,
+      obat_kode,
+      exp,
+    }))?.q ?? 0;
   const delta = actual_qty - before;
+  if (delta !== 0) {
+    const err = await recordKlinikMove(req, {
+      klinik,
+      obat: obat_kode,
+      type: delta > 0 ? "IN" : "OUT",
+      qty: Math.abs(delta),
+      exp,
+      tujuan: "",
+      penerima: "",
+      note: `Koreksi Stok (Opname) batch ${expText(exp)}${note ? `: ${note}` : ""}`,
+      is_correction: 1,
+    });
+    if (err) return res.status(400).json({ error: err });
+  }
   await logActivity(req, {
     module: "KLINIK",
     estate: klinik,
     aksi: "Koreksi Stok",
     objek: `${obat.kode} - ${obat.nama}`,
-    detail: `Stock: ${before} → ${actual_qty} (selisih ${delta > 0 ? "+" : ""}${delta})${note ? `; Catatan: ${note}` : ""}`,
+    detail: `Batch ${expText(exp)}: ${before} → ${actual_qty} (selisih ${delta > 0 ? "+" : ""}${delta})${note ? `; Catatan: ${note}` : ""}`,
   });
   res.json({ success: true, delta });
 });
 
-// Buffer, expiry date and note of one clinic stock row. The quantity itself only changes through
-// Stock In/Out/Koreksi so every change has a history row.
+// Buffer and note of one clinic stock row. The quantity only changes through Stock In/Out/Koreksi
+// (so every change has a history row) and expiry dates live on the batches (PUT batch/:id).
 app.put("/api/klinik-stock/:id", requireSuperuser, async (req, res) => {
   const existing = await queryOne<any>("SELECT * FROM klinik_stock WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Not found" });
-  const { buffer_stock, expired_date, catatan } = req.body;
-  if (expired_date && !/^\d{4}-\d{2}-\d{2}$/.test(expired_date)) return res.status(400).json({ error: "Tanggal expired tidak valid" });
-  const next = { buffer_stock: Number(buffer_stock) || 0, expired_date: expired_date || null, catatan: String(catatan ?? "").trim() };
-  await execute("UPDATE klinik_stock SET buffer_stock = @buffer_stock, expired_date = @expired_date, catatan = @catatan WHERE id = @id", {
+  if (!estateAllowed(req.user!, existing.klinik)) return res.status(403).json({ error: "Akses ditolak" });
+  const { buffer_stock, catatan } = req.body;
+  const next = { buffer_stock: Number(buffer_stock) || 0, catatan: String(catatan ?? "").trim() };
+  await execute("UPDATE klinik_stock SET buffer_stock = @buffer_stock, catatan = @catatan WHERE id = @id", {
     ...next,
     id: req.params.id,
   });
@@ -2549,7 +2737,7 @@ app.put("/api/klinik-stock/:id", requireSuperuser, async (req, res) => {
     estate: existing.klinik,
     aksi: "Edit Stok",
     objek: `${existing.obat_kode} - ${obat?.nama ?? ""}`,
-    detail: describeChanges(existing, next, { buffer_stock: "Buffer", expired_date: "Expired", catatan: "Catatan" }),
+    detail: describeChanges(existing, next, { buffer_stock: "Buffer", catatan: "Catatan" }),
   });
   res.json({ success: true });
 });
@@ -2557,7 +2745,11 @@ app.put("/api/klinik-stock/:id", requireSuperuser, async (req, res) => {
 app.delete("/api/klinik-stock/:id", requireSuperuser, async (req, res) => {
   const existing = await queryOne<any>("SELECT * FROM klinik_stock WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Not found" });
-  await execute("DELETE FROM klinik_stock WHERE id = @id", { id: req.params.id });
+  if (!estateAllowed(req.user!, existing.klinik)) return res.status(403).json({ error: "Akses ditolak" });
+  await withTransaction(async (client) => {
+    await execute("DELETE FROM klinik_batch WHERE klinik = @k AND obat_kode = @o", { k: existing.klinik, o: existing.obat_kode }, client);
+    await execute("DELETE FROM klinik_stock WHERE id = @id", { id: req.params.id }, client);
+  });
   const obat = await queryOne<any>("SELECT nama FROM obat WHERE kode = @k", { k: existing.obat_kode });
   await logActivity(req, {
     module: "KLINIK",
@@ -2604,6 +2796,7 @@ for (const lr of LEDGER_ROUTES) {
     const data = await queryMany(
       `SELECT t.id, t.created_at, t.type, t.qty, t.tujuan, t.penerima, t.note, t.is_correction,
               ${l === GUDANG_LEDGER ? "t.transfer_from_id IS NOT NULL" : "false"} AS is_transfer,
+              ${l === KLINIK_LEDGER ? "t.alloc" : "NULL"} AS alloc,
               m.kode, m.nama, m.satuan, COALESCE(u.nama, u.username, '') AS input_oleh
        ${fromSql} ORDER BY t.created_at DESC, t.id DESC LIMIT @limit OFFSET @offset`,
       { ...params, limit, offset }
@@ -2623,6 +2816,32 @@ for (const lr of LEDGER_ROUTES) {
       return res.status(400).json({ error: `Gudang ${existing.gudang} hanya bisa menyuplai ${GUDANG_TUJUAN[existing.gudang].join(", ")}` });
     }
 
+    if (l === KLINIK_LEDGER) {
+      // Klinik: undo the old movement on its batches and apply the new qty (IN: its batch, or a new
+      // expiry date; OUT: FEFO again; Koreksi: the same batch).
+      const exp: string | undefined =
+        existing.type === "IN" || existing.is_correction
+          ? typeof req.body.expired_date === "string" && existing.type === "IN"
+            ? req.body.expired_date
+            : existing.alloc?.[0]?.exp ?? ""
+          : undefined;
+      if (exp && !ISO_DATE.test(exp)) return res.status(400).json({ error: "Tanggal expired tidak valid" });
+      try {
+        await withTransaction(async (client) => {
+          await klinikReverse(client, existing);
+          const alloc = await klinikApply(client, existing.klinik, existing.obat_kode, existing.type, qty, exp);
+          await execute(
+            `UPDATE klinik_stock_tx SET qty = @qty, penerima = @penerima, note = @note, alloc = @alloc::jsonb WHERE id = @id`,
+            { qty, penerima: penerima ?? "", note: note || null, alloc: JSON.stringify(alloc), id: existing.id },
+            client
+          );
+          await syncKlinikStock(client, existing.klinik, existing.obat_kode);
+        });
+      } catch (e) {
+        if (e instanceof StockError) return res.status(400).json({ error: e.message });
+        throw e;
+      }
+    } else {
     const sign = existing.type === "IN" ? 1 : -1;
     const delta = round3(sign * (qty - existing.qty));
     await withTransaction(async (client) => {
@@ -2639,6 +2858,7 @@ for (const lr of LEDGER_ROUTES) {
         client
       );
     });
+    }
     const m = await queryOne<any>(`SELECT nama FROM ${master} WHERE kode = @k`, { k: existing[l.item] });
     await logActivity(req, {
       module: lr.module,
@@ -2659,14 +2879,22 @@ for (const lr of LEDGER_ROUTES) {
     const existing = await queryOne<any>(`SELECT * FROM ${l.tx} WHERE id = @id`, { id: req.params.id });
     if (!existing) return res.status(404).json({ error: "Not found" });
     if (existing.transfer_from_id) return res.status(400).json({ error: TRANSFER_LOCKED });
-    await withTransaction(async (client) => {
-      await execute(`DELETE FROM ${l.tx} WHERE id = @id`, { id: existing.id }, client);
-      await execute(
-        `UPDATE ${l.stock} SET stock_tersedia = ROUND((stock_tersedia - @delta)::numeric, 3) WHERE ${l.scope} = @scope AND ${l.item} = @item`,
-        { delta: existing.type === "IN" ? existing.qty : -existing.qty, scope: existing[l.scope], item: existing[l.item] },
-        client
-      );
-    });
+    try {
+      await withTransaction(async (client) => {
+        if (l === KLINIK_LEDGER) await klinikReverse(client, existing);
+        await execute(`DELETE FROM ${l.tx} WHERE id = @id`, { id: existing.id }, client);
+        if (l === KLINIK_LEDGER) await syncKlinikStock(client, existing.klinik, existing.obat_kode);
+        else
+          await execute(
+            `UPDATE ${l.stock} SET stock_tersedia = ROUND((stock_tersedia - @delta)::numeric, 3) WHERE ${l.scope} = @scope AND ${l.item} = @item`,
+            { delta: existing.type === "IN" ? existing.qty : -existing.qty, scope: existing[l.scope], item: existing[l.item] },
+            client
+          );
+      });
+    } catch (e) {
+      if (e instanceof StockError) return res.status(400).json({ error: e.message });
+      throw e;
+    }
     const m = await queryOne<any>(`SELECT nama FROM ${master} WHERE kode = @k`, { k: existing[l.item] });
     await logActivity(req, {
       module: lr.module,
