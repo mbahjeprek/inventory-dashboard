@@ -20,7 +20,7 @@ import {
 import { useAuth } from "../context/AuthContext";
 import { useEstateFilter } from "../hooks/useEstateFilter";
 import { ChangePasswordModal } from "./ChangePasswordModal";
-import { canModule, type Module } from "../lib/access";
+import { can, canModule, PAGE_PERMS, userEstates, type Module } from "../lib/access";
 
 type NavItem = { to: string; label: string; icon: typeof Package };
 type NavSection = { title?: string; collapsible?: boolean; items: NavItem[] };
@@ -150,27 +150,23 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: { mobileOpen?: bo
   // The phone drawer always shows full labels; the icon-only mode is a desktop preference.
   const minimized = minimizedPref && isDesktop;
 
-  const isSuperuser = user?.role === "superuser";
   const pickedEstates = useEstateFilter((s) => s.picked);
 
-  // An estate account only ever sees its own estate's options and not Master Data, which is
-  // superuser-only - see requireEstate / requireSuperuser in app.ts for the matching enforcement.
-  // A superuser who picked estates on the dashboard only sees those. Stock In / Stock Out live as
-  // tabs inside each Gudang/Klinik page.
-  const shownEstates: (string | null | undefined)[] | null = isSuperuser ? (pickedEstates.length ? pickedEstates : null) : [user?.estate];
-  // An admin limited to some modules (users.modules) only gets those groups.
-  const dropdownGroups: DropdownGroup[] = (
-    shownEstates
-      ? DROPDOWN_GROUPS.map((g) => ({ ...g, options: g.options.filter((o) => shownEstates.includes(o.label.toUpperCase())) })).filter(
-          (g) => g.options.length > 0
-        )
-      : DROPDOWN_GROUPS
-  ).filter((g) => canModule(user, g.key.toUpperCase() as Module));
+  // Inventory menus list the estates the account may open (narrowed to the ones picked on the
+  // dashboard, if any) and only the modules it may view. Master data / monitoring pages follow their
+  // own permission. Stock In / Stock Out live as tabs inside each Gudang/Klinik page. The server
+  // enforces the same rules (app.ts requiredPerms / estateAllowed).
+  const ownEstates = userEstates(user);
+  const picked = pickedEstates.filter((e) => ownEstates.includes(e));
+  const shownEstates = picked.length ? picked : ownEstates;
+  const dropdownGroups: DropdownGroup[] = DROPDOWN_GROUPS.map((g) => ({
+    ...g,
+    options: g.options.filter((o) => shownEstates.includes(o.label.toUpperCase())),
+  })).filter((g) => g.options.length > 0 && canModule(user, g.key.toUpperCase() as Module));
 
-  const visibleSections = navSections.filter((s) => {
-    if (s.title === "Master Data" || s.title === "Monitoring") return isSuperuser;
-    return true;
-  });
+  const visibleSections = navSections
+    .map((s) => ({ ...s, items: s.items.filter((it) => !PAGE_PERMS[it.to] || can(user, PAGE_PERMS[it.to])) }))
+    .filter((s) => !s.title || s.title === "Inventory" || s.items.length > 0);
 
   const normalizedPathname = location.pathname;
   const activeByGroup: Record<string, string | undefined> = {};

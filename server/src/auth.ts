@@ -12,16 +12,32 @@ export type Role = "superuser" | "estate";
 export const ESTATES = ["NILAM", "KNS", "WJA", "ZAMRUD", "FIRUS"] as const;
 export type Estate = (typeof ESTATES)[number];
 
-export const MODULES = ["GUDANG", "BBM", "PUPUK", "KLINIK"] as const;
-export type Module = (typeof MODULES)[number];
+// Checkable permissions of an estate account (a superuser has all of them). Each inventory module
+// has view / input / edit / delete, Gudang and Klinik also koreksi (stock opname); then the master
+// data pages and monitoring. Keep in sync with PERM_GROUPS in src/lib/access.ts.
+export const MODULE_ACTIONS: Record<string, string[]> = {
+  gudang: ["view", "input", "edit", "delete", "koreksi"],
+  bbm: ["view", "input", "edit", "delete"],
+  pupuk: ["view", "input", "edit", "delete"],
+  klinik: ["view", "input", "edit", "delete", "koreksi"],
+};
+export const ALL_PERMS: string[] = [
+  ...Object.entries(MODULE_ACTIONS).flatMap(([m, acts]) => acts.map((a) => `${m}.${a}`)),
+  "master.barang",
+  "master.obat",
+  "master.karyawan",
+  "master.alat",
+  "master.users",
+  "monitor.log_user",
+];
 
-// `modules`: the inventory modules an estate account may open; null = all of them.
-export type SessionUser = { id: number; username: string; nama: string; role: Role; estate: Estate | null; modules?: Module[] | null };
+// Session: the token only identifies the account; estates and perms are re-read from the users
+// table on every request (see loadSessionUser in app.ts) so a change applies without re-login.
+export type SessionUser = { id: number; username: string; nama: string; role: Role; estate: Estate | null; estates: string[]; perms: string[] };
 
-// users.modules text -> list (null when unrestricted).
-export function parseModules(v: string | null | undefined): Module[] | null {
-  const list = (v ?? "").split(",").map((s) => s.trim()).filter((s): s is Module => (MODULES as readonly string[]).includes(s));
-  return list.length ? list : null;
+// Comma separated users.estates / users.perms -> list of known values.
+export function parseList(v: string | null | undefined, known: readonly string[]): string[] {
+  return (v ?? "").split(",").map((s) => s.trim()).filter((s) => known.includes(s));
 }
 
 export function hashPassword(password: string): string {
@@ -38,11 +54,11 @@ export function verifyPassword(password: string, stored: string): boolean {
   return candidate.length === hashBuffer.length && timingSafeEqual(candidate, hashBuffer);
 }
 
-export function signSession(user: SessionUser): string {
-  return jwt.sign(user, JWT_SECRET!, { expiresIn: "7d" });
+export function signSession(user: Pick<SessionUser, "id" | "username" | "nama" | "role" | "estate">): string {
+  return jwt.sign({ id: user.id, username: user.username, nama: user.nama, role: user.role, estate: user.estate }, JWT_SECRET!, { expiresIn: "7d" });
 }
 
-export function verifySession(token: string): SessionUser | null {
+export function verifySession(token: string): Pick<SessionUser, "id" | "username" | "nama" | "role" | "estate"> | null {
   try {
     const user = jwt.verify(token, JWT_SECRET!) as SessionUser;
     // Tokens issued before roles existed carry no role/estate; treat them as logged out so the

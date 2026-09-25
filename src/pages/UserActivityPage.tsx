@@ -3,7 +3,7 @@ import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, X
 import { Activity, ChevronLeft, ChevronRight, LogIn, UserCheck, UserX, ArrowLeftRight } from "lucide-react";
 import { api, type UserActivity } from "../lib/api";
 import { ExportButtons } from "../components/ExportButtons";
-import { MODULE_LABELS, type Module } from "../lib/access";
+import { accessSummary } from "../lib/access";
 import type { TableReport } from "../lib/printTable";
 
 // Categorical slots in fixed order (dataviz reference palette, light mode); "Lainnya" is neutral.
@@ -57,12 +57,7 @@ type UserRow = UserActivity["users"][number] & {
   akses: string;
 };
 
-// "Super User", or "FIRUS · Gudang, BBM, Pupuk NPK" for an estate account.
-function aksesLabel(u: UserActivity["users"][number]) {
-  if (u.role === "superuser") return "Super User";
-  const mods = u.modules ? u.modules.split(",").map((m) => MODULE_LABELS[m as Module] ?? m).join(", ") : "Semua modul";
-  return `${u.estate} · ${mods}`;
-}
+const aksesLabel = (u: UserActivity["users"][number]) => accessSummary(u);
 
 function Tile({ icon, label, value, note, onClick }: { icon: ReactNode; label: string; value: string; note: string; onClick?: () => void }) {
   return (

@@ -4,6 +4,7 @@ import { api, type StockOutRecord } from "../lib/api";
 import { EditStockOutModal } from "../components/EditStockOutModal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useAuth } from "../context/AuthContext";
+import { can } from "../lib/access";
 import { ExportButtons } from "../components/ExportButtons";
 import { fetchAllRows, type TableReport } from "../lib/printTable";
 import { useDragScroll } from "../hooks/useDragScroll";
@@ -23,7 +24,11 @@ export function StockOutPage({ embedded = false }: { embedded?: boolean }) {
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const { user } = useAuth();
-  const isSuperuser = user?.role === "superuser";
+  // Edit / delete buttons follow the account's ticked permissions (Pengguna); the Aksi column shows
+  // when it may do either.
+  const canEdit = can(user, "gudang.edit");
+  const canDelete = can(user, "gudang.delete");
+  const showActions = canEdit || canDelete;
   const [editing, setEditing] = useState<StockOutRecord | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<StockOutRecord | null>(null);
   const tableScrollRef = useDragScroll<HTMLDivElement>();
@@ -162,19 +167,19 @@ export function StockOutPage({ embedded = false }: { embedded?: boolean }) {
                 <th className="px-4 py-2.5 text-right">Qty</th>
                 <th className="px-4 py-2.5">Tujuan</th>
                 <th className="px-4 py-2.5">Keterangan</th>
-                {isSuperuser && <th className="px-4 py-2.5 text-right">Aksi</th>}
+                {showActions && <th className="px-4 py-2.5 text-right">Aksi</th>}
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={isSuperuser ? 8 : 7} className="px-4 py-8 text-center text-[var(--text-muted)]">
+                  <td colSpan={showActions ? 8 : 7} className="px-4 py-8 text-center text-[var(--text-muted)]">
                     Memuat...
                   </td>
                 </tr>
               ) : items.length === 0 ? (
                 <tr>
-                  <td colSpan={isSuperuser ? 8 : 7} className="px-4 py-8 text-center text-[var(--text-muted)]">
+                  <td colSpan={showActions ? 8 : 7} className="px-4 py-8 text-center text-[var(--text-muted)]">
                     Tidak ada data
                   </td>
                 </tr>
@@ -190,23 +195,23 @@ export function StockOutPage({ embedded = false }: { embedded?: boolean }) {
                     <td className="px-4 py-2.5 text-[var(--text-secondary)] text-xs max-w-[220px] truncate" title={r.keterangan}>
                       {r.keterangan || "-"}
                     </td>
-                    {isSuperuser && (
+                    {showActions && (
                       <td className="px-4 py-2.5 text-right">
                         <div className="inline-flex gap-1.5">
-                          <button
+                          {canEdit && (<button
                             onClick={() => setEditing(r)}
                             title="Edit"
                             className="p-1.5 rounded-md border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[#f1f5f9]"
                           >
                             <Pencil size={14} />
-                          </button>
-                          <button
+                          </button>)}
+                          {canDelete && (<button
                             onClick={() => setConfirmDelete(r)}
                             title="Hapus"
                             className="p-1.5 rounded-md border border-[var(--accent-red-border)] text-[var(--accent-red)] hover:bg-[var(--accent-red-bg)]"
                           >
                             <Trash2 size={14} />
-                          </button>
+                          </button>)}
                         </div>
                       </td>
                     )}

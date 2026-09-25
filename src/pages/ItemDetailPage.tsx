@@ -6,6 +6,7 @@ import { TransactionModal } from "../components/TransactionModal";
 import { EditItemModal } from "../components/EditItemModal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useAuth } from "../context/AuthContext";
+import { can } from "../lib/access";
 import { useDragScroll } from "../hooks/useDragScroll";
 
 const TUJUAN_OPTIONS = ["NILAM", "KNS", "WJA", "ZAMRUD", "FIRUS"];
@@ -33,7 +34,14 @@ export function ItemDetailPage() {
   const [showModal, setShowModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const { user } = useAuth();
-  const isSuperuser = user?.role === "superuser";
+  // Edit / delete buttons follow the account's ticked permissions (Pengguna); the Aksi column shows
+  // when it may do either.
+  const canEdit = can(user, "gudang.edit") || can(user, "master.barang");
+  const canDelete = can(user, "gudang.delete");
+  const showActions = canEdit || canDelete;
+  // "Transaksi" opens the Stok Masuk / Keluar / Koreksi form: shown when any of those is allowed.
+  const canInput = can(user, "gudang.input");
+  const canTx = canInput || can(user, "gudang.koreksi");
   const tableScrollRef = useDragScroll<HTMLDivElement>();
   const [confirmDeleteMovement, setConfirmDeleteMovement] = useState<Movement | null>(null);
 
@@ -87,20 +95,20 @@ export function ItemDetailPage() {
           <p className="text-sm text-[var(--text-secondary)] font-mono">{item.kode}</p>
         </div>
         <div className="flex gap-2">
-          {isSuperuser && (
-            <button
+          {showActions && (
+            canEdit && (<button
               onClick={() => setShowEditModal(true)}
               className="inline-flex items-center gap-2 text-sm px-4 py-2 rounded-md border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[#f8fafc]"
             >
               <Pencil size={16} /> Edit Barang
-            </button>
+            </button>)
           )}
-          <button
+          {canTx && (<button
             onClick={() => setShowModal(true)}
             className="inline-flex items-center gap-2 text-sm px-4 py-2 rounded-md bg-[var(--accent-blue)] text-white hover:opacity-90"
           >
             <PackagePlus size={16} /> Input Transaksi
-          </button>
+          </button>)}
         </div>
       </div>
 
@@ -181,13 +189,13 @@ export function ItemDetailPage() {
                   <th className="px-4 py-2.5 text-right">Qty</th>
                   <th className="px-4 py-2.5">Referensi</th>
                   <th className="px-4 py-2.5">Keterangan</th>
-                  {isSuperuser && <th className="px-4 py-2.5 text-right">Aksi</th>}
+                  {showActions && <th className="px-4 py-2.5 text-right">Aksi</th>}
                 </tr>
               </thead>
               <tbody>
                 {filtered.length === 0 ? (
                   <tr>
-                    <td colSpan={isSuperuser ? 8 : 7} className="px-4 py-8 text-center text-[var(--text-muted)]">
+                    <td colSpan={showActions ? 8 : 7} className="px-4 py-8 text-center text-[var(--text-muted)]">
                       Belum ada riwayat pergerakan
                     </td>
                   </tr>
@@ -220,15 +228,15 @@ export function ItemDetailPage() {
                       <td className="px-4 py-2.5 text-xs text-[var(--text-secondary)] max-w-[220px] truncate" title={m.note || ""}>
                         {m.note || "-"}
                       </td>
-                      {isSuperuser && (
+                      {showActions && (
                         <td className="px-4 py-2.5 text-right">
-                          <button
+                          {canDelete && (<button
                             onClick={() => setConfirmDeleteMovement(m)}
                             title="Hapus riwayat"
                             className="p-1.5 rounded-md border border-[var(--accent-red-border)] text-[var(--accent-red)] hover:bg-[var(--accent-red-bg)]"
                           >
                             <Trash2 size={14} />
-                          </button>
+                          </button>)}
                         </td>
                       )}
                     </tr>

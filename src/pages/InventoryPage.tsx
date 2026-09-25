@@ -25,6 +25,7 @@ import { ExportButtons } from "../components/ExportButtons";
 import { ActivityLogButton } from "../components/ActivityLogButton";
 import { fetchAllRows, type TableReport } from "../lib/printTable";
 import { useAuth } from "../context/AuthContext";
+import { can } from "../lib/access";
 import { useDragScroll } from "../hooks/useDragScroll";
 import { InventoryTabs, useInventoryTab } from "../components/InventoryTabs";
 import { StockInPage } from "./StockInPage";
@@ -123,7 +124,14 @@ export function InventoryPage() {
   // Bumped after a new transaction so an open Stock In/Out tab reloads.
   const [historyKey, setHistoryKey] = useState(0);
   const { user } = useAuth();
-  const isSuperuser = user?.role === "superuser";
+  // Edit / delete buttons follow the account's ticked permissions (Pengguna); the Aksi column shows
+  // when it may do either.
+  const canEdit = can(user, "gudang.edit") || can(user, "master.barang");
+  const canDelete = can(user, "gudang.delete");
+  const showActions = canEdit || canDelete;
+  // "Transaksi" opens the Stok Masuk / Keluar / Koreksi form: shown when any of those is allowed.
+  const canInput = can(user, "gudang.input");
+  const canTx = canInput || can(user, "gudang.koreksi");
   const [editingItem, setEditingItem] = useState<Item | null>(null);
   const [showPicker, setShowPicker] = useState(false);
   const tableScrollRef = useDragScroll<HTMLDivElement>();
@@ -212,12 +220,12 @@ export function InventoryPage() {
         <div className="flex flex-wrap items-center gap-2">
           <ActivityLogButton module="BARANG" estate="NILAM" />
           {tab === "stok" && <ExportButtons total={total} buildReport={buildReport} fileName="inventory-gudang-nilam" />}
-          <button
+          {canTx && (<button
             onClick={() => setShowPicker(true)}
             className="inline-flex items-center gap-1.5 text-sm px-3.5 py-2 rounded-md border border-[var(--accent-blue-border)] text-[var(--accent-blue)] hover:bg-[var(--accent-blue-bg)]"
           >
             <PackagePlus size={16} /> Transaksi
-          </button>
+          </button>)}
         </div>
       </div>
 
@@ -341,14 +349,14 @@ export function InventoryPage() {
                             >
                               <History size={14} />
                             </Link>
-                            {isSuperuser && (
-                              <button
+                            {showActions && (
+                              canEdit && (<button
                                 onClick={() => setEditingItem(item)}
                                 title="Edit data barang"
                                 className="p-1.5 rounded-md border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[#f1f5f9]"
                               >
                                 <Pencil size={14} />
-                              </button>
+                              </button>)
                             )}
                           </div>
                         </td>

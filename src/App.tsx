@@ -1,7 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider } from "./context/AuthContext";
 import { ProtectedRoute } from "./components/ProtectedRoute";
-import { RequireEstate, RequireSuperuser } from "./components/AccessGate";
+import { RequireEstate, RequirePageAccess } from "./components/AccessGate";
 import { LoginPage } from "./pages/LoginPage";
 import { MainLayout } from "./layouts/MainLayout";
 import { InventoryPage } from "./pages/InventoryPage";
@@ -159,49 +159,49 @@ function App() {
               <Route
                 path="/master-barang"
                 element={
-                  <RequireSuperuser>
+                  <RequirePageAccess>
                     <MasterBarangPage />
-                  </RequireSuperuser>
+                  </RequirePageAccess>
                 }
               />
               <Route
                 path="/master-obat"
                 element={
-                  <RequireSuperuser>
+                  <RequirePageAccess>
                     <MasterObatPage />
-                  </RequireSuperuser>
+                  </RequirePageAccess>
                 }
               />
               <Route
                 path="/karyawan"
                 element={
-                  <RequireSuperuser>
+                  <RequirePageAccess>
                     <KaryawanPage />
-                  </RequireSuperuser>
+                  </RequirePageAccess>
                 }
               />
               <Route
                 path="/alat-berat"
                 element={
-                  <RequireSuperuser>
+                  <RequirePageAccess>
                     <AlatBeratPage />
-                  </RequireSuperuser>
+                  </RequirePageAccess>
                 }
               />
               <Route
                 path="/users"
                 element={
-                  <RequireSuperuser>
+                  <RequirePageAccess>
                     <UsersPage />
-                  </RequireSuperuser>
+                  </RequirePageAccess>
                 }
               />
               <Route
                 path="/log-user"
                 element={
-                  <RequireSuperuser>
+                  <RequirePageAccess>
                     <UserActivityPage />
-                  </RequireSuperuser>
+                  </RequirePageAccess>
                 }
               />
 

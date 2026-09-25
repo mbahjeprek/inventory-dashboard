@@ -10,6 +10,7 @@ import { EditPupukModal } from "../components/EditPupukModal";
 import { fetchAllRows, type TableReport } from "../lib/printTable";
 import { useDragScroll } from "../hooks/useDragScroll";
 import { useAuth } from "../context/AuthContext";
+import { can } from "../lib/access";
 
 const localIso = (d: Date) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -36,7 +37,14 @@ export function InventoryPupukPage({ estate }: { estate: string }) {
   const [loading, setLoading] = useState(true);
   const [showTransaksi, setShowTransaksi] = useState(false);
   const { user } = useAuth();
-  const isSuperuser = user?.role === "superuser";
+  // Edit / delete buttons follow the account's ticked permissions (Pengguna); the Aksi column shows
+  // when it may do either.
+  const canEdit = can(user, "pupuk.edit");
+  const canDelete = can(user, "pupuk.delete");
+  const showActions = canEdit || canDelete;
+  // "Transaksi" opens the Stok Masuk / Keluar / Koreksi form: shown when any of those is allowed.
+  const canInput = can(user, "pupuk.input");
+  const canTx = canInput || can(user, "pupuk.koreksi");
   const [editing, setEditing] = useState<PupukRecord | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<PupukRecord | null>(null);
   const pageSize = 25;
@@ -163,12 +171,12 @@ export function InventoryPupukPage({ estate }: { estate: string }) {
         <div className="flex flex-wrap items-center gap-2">
           <ActivityLogButton module="PUPUK" estate={estate} />
           <ExportButtons total={total} buildReport={buildReport} fileName={`inventory-pupuk-${estate.toLowerCase()}`} />
-          <button
+          {canTx && (<button
             onClick={() => setShowTransaksi(true)}
             className="inline-flex items-center gap-1.5 text-sm px-3.5 py-2 rounded-md border border-[var(--accent-blue-border)] text-[var(--accent-blue)] hover:bg-[var(--accent-blue-bg)]"
           >
             <PackagePlus size={16} /> Transaksi
-          </button>
+          </button>)}
         </div>
       </div>
 
@@ -294,19 +302,19 @@ export function InventoryPupukPage({ estate }: { estate: string }) {
                 <th className="px-4 py-2.5">Blok</th>
                 <th className="px-4 py-2.5 text-right">HA</th>
                 <th className="px-4 py-2.5 text-right">Pokok</th>
-                {isSuperuser && <th className="px-4 py-2.5 text-right">Aksi</th>}
+                {showActions && <th className="px-4 py-2.5 text-right">Aksi</th>}
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={isSuperuser ? 14 : 13} className="px-4 py-8 text-center text-[var(--text-muted)]">
+                  <td colSpan={showActions ? 14 : 13} className="px-4 py-8 text-center text-[var(--text-muted)]">
                     Memuat...
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={isSuperuser ? 14 : 13} className="px-4 py-8 text-center text-[var(--text-muted)]">
+                  <td colSpan={showActions ? 14 : 13} className="px-4 py-8 text-center text-[var(--text-muted)]">
                     Tidak ada data
                   </td>
                 </tr>
@@ -330,23 +338,23 @@ export function InventoryPupukPage({ estate }: { estate: string }) {
                     <td className="px-4 py-2.5 text-xs whitespace-nowrap">{r.blok || "-"}</td>
                     <td className="px-4 py-2.5 text-right text-xs">{r.ha != null ? r.ha.toLocaleString("id-ID", { maximumFractionDigits: 2 }) : "-"}</td>
                     <td className="px-4 py-2.5 text-right text-xs">{r.pokok != null ? r.pokok.toLocaleString("id-ID", { maximumFractionDigits: 0 }) : "-"}</td>
-                    {isSuperuser && (
+                    {showActions && (
                       <td className="px-4 py-2.5 text-right">
                         <div className="inline-flex gap-1.5">
-                          <button
+                          {canEdit && (<button
                             onClick={() => setEditing(r)}
                             title="Edit"
                             className="p-1.5 rounded-md border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[#f1f5f9]"
                           >
                             <Pencil size={14} />
-                          </button>
-                          <button
+                          </button>)}
+                          {canDelete && (<button
                             onClick={() => setConfirmDelete(r)}
                             title="Hapus"
                             className="p-1.5 rounded-md border border-[var(--accent-red-border)] text-[var(--accent-red)] hover:bg-[var(--accent-red-bg)]"
                           >
                             <Trash2 size={14} />
-                          </button>
+                          </button>)}
                         </div>
                       </td>
                     )}

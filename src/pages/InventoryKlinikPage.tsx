@@ -27,6 +27,7 @@ import { ItemPickerModal } from "../components/ItemPickerModal";
 import { TransactionModal } from "../components/TransactionModal";
 import { useDragScroll } from "../hooks/useDragScroll";
 import { useAuth } from "../context/AuthContext";
+import { can } from "../lib/access";
 import { InventoryTabs, useInventoryTab } from "../components/InventoryTabs";
 import { LedgerHistory } from "../components/LedgerHistory";
 
@@ -135,13 +136,20 @@ export function InventoryKlinikPage({ klinik }: { klinik: string }) {
   // Bumped after a new transaction so an open Stock In/Out tab reloads.
   const [historyKey, setHistoryKey] = useState(0);
   const { user } = useAuth();
-  const isSuperuser = user?.role === "superuser";
+  // Edit / delete buttons follow the account's ticked permissions (Pengguna); the Aksi column shows
+  // when it may do either.
+  const canEdit = can(user, "klinik.edit");
+  const canDelete = can(user, "klinik.delete");
+  const showActions = canEdit || canDelete;
+  // "Transaksi" opens the Stok Masuk / Keluar / Koreksi form: shown when any of those is allowed.
+  const canInput = can(user, "klinik.input");
+  const canTx = canInput || can(user, "klinik.koreksi");
   const [editingItem, setEditingItem] = useState<KlinikStockItem | null>(null);
   const [deleteError, setDeleteError] = useState("");
   const [confirmDelete, setConfirmDelete] = useState<KlinikStockItem | null>(null);
   const tableScrollRef = useDragScroll<HTMLDivElement>();
   const pageSize = 25;
-  const colCount = isSuperuser ? 10 : 9;
+  const colCount = showActions ? 10 : 9;
 
   const query = () => ({ klinik, search, kategori, stock: stockFilter, sortBy, sortDir });
 
@@ -252,12 +260,12 @@ export function InventoryKlinikPage({ klinik }: { klinik: string }) {
         <div className="flex flex-wrap items-center gap-2">
           <ActivityLogButton module="KLINIK" estate={klinik} />
           {tab === "stok" && <ExportButtons total={total} buildReport={buildReport} fileName={`inventory-klinik-${klinik.toLowerCase()}`} />}
-          <button
+          {canTx && (<button
             onClick={() => setShowPicker(true)}
             className="inline-flex items-center gap-1.5 text-sm px-3.5 py-2 rounded-md border border-[var(--accent-blue-border)] text-[var(--accent-blue)] hover:bg-[var(--accent-blue-bg)]"
           >
             <PackagePlus size={16} /> Transaksi
-          </button>
+          </button>)}
         </div>
       </div>
 
@@ -341,7 +349,7 @@ export function InventoryKlinikPage({ klinik }: { klinik: string }) {
                       onSort={toggleSort}
                     />
                     <SortableHeader label="Expired Date" sortKey="expired_date" currentSort={sortBy} currentDir={sortDir} onSort={toggleSort} />
-                    {isSuperuser && <th className="px-4 py-2.5 text-right">Aksi</th>}
+                    {showActions && <th className="px-4 py-2.5 text-right">Aksi</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -400,23 +408,23 @@ export function InventoryKlinikPage({ klinik }: { klinik: string }) {
                             )}
                             {item.catatan && <div className="text-xs text-[var(--accent-amber)] whitespace-normal">{item.catatan}</div>}
                           </td>
-                          {isSuperuser && (
+                          {showActions && (
                             <td className="px-4 py-2.5 text-right">
                               <div className="inline-flex gap-1.5">
-                                <button
+                                {canEdit && (<button
                                   onClick={() => setEditingItem(item)}
                                   title="Edit buffer, expired & catatan"
                                   className="p-1.5 rounded-md border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[#f1f5f9]"
                                 >
                                   <Pencil size={14} />
-                                </button>
-                                <button
+                                </button>)}
+                                {canDelete && (<button
                                   onClick={() => setConfirmDelete(item)}
                                   title="Hapus dari klinik ini"
                                   className="p-1.5 rounded-md border border-[var(--accent-red-border)] text-[var(--accent-red)] hover:bg-[var(--accent-red-bg)]"
                                 >
                                   <Trash2 size={14} />
-                                </button>
+                                </button>)}
                               </div>
                             </td>
                           )}

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Search, ChevronLeft, ChevronRight, X, Pencil, Trash2 } from "lucide-react";
 import { api, type ActivityLog } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
+import { userEstates } from "../lib/access";
 import { ExportButtons } from "../components/ExportButtons";
 import { fetchAllRows, type TableReport } from "../lib/printTable";
 import { EditActivityLogModal } from "../components/EditActivityLogModal";
@@ -37,7 +38,9 @@ export function ActivityLogPage({
   onClose?: () => void;
 }) {
   const { user } = useAuth();
+  // Editing / deleting log entries stays superuser-only; the estate filter lists the account's estates.
   const isSuperuser = user?.role === "superuser";
+  const ownEstates = userEstates(user);
   const estateLabel = module === "BBM" ? "Lokasi" : module === "PUPUK" ? "Estate" : module === "KLINIK" ? "Klinik" : "Gudang";
   const title = `${module === "BBM" ? "Log Activity BBM" : module === "PUPUK" ? "Log Activity Pupuk NPK" : module === "KLINIK" ? "Log Activity Klinik" : "Log Activity Barang"}${estateLock ? ` - ${estateLock}` : ""}`;
 
@@ -97,7 +100,7 @@ export function ActivityLogPage({
     const tgl = (iso: string) => (iso ? iso.split("-").reverse().join("/") : "");
     const active = [
       search && `Cari: "${search}"`,
-      !estateLock && `${estateLabel}: ${(isSuperuser ? estate : user?.estate) || "Semua"}`,
+      !estateLock && `${estateLabel}: ${estate || (ownEstates.length === 1 ? ownEstates[0] : "Semua")}`,
       aksi && `Aksi: ${aksi}`,
       (dateFrom || dateTo) && `Tanggal: ${tgl(dateFrom) || "awal"} - ${tgl(dateTo) || "akhir"}`,
     ].filter(Boolean);
@@ -154,7 +157,7 @@ export function ActivityLogPage({
           />
         </div>
 
-        {estateLock ? null : isSuperuser ? (
+        {estateLock ? null : ESTATES_BY_MODULE[module].filter((e) => ownEstates.includes(e)).length > 1 ? (
           <select
             value={estate}
             onChange={(e) => {
@@ -164,7 +167,7 @@ export function ActivityLogPage({
             className={selectCls}
           >
             <option value="">Semua {estateLabel}</option>
-            {ESTATES_BY_MODULE[module].map((e) => (
+            {ESTATES_BY_MODULE[module].filter((e) => ownEstates.includes(e)).map((e) => (
               <option key={e} value={e}>
                 {e}
               </option>
@@ -172,7 +175,7 @@ export function ActivityLogPage({
           </select>
         ) : (
           <span className={`${selectCls} text-[var(--text-secondary)]`}>
-            {estateLabel}: {user?.estate}
+            {estateLabel}: {ownEstates.join(", ")}
           </span>
         )}
 

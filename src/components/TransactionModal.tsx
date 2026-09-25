@@ -3,6 +3,7 @@ import { X, ClipboardCheck } from "lucide-react";
 import { api, GUDANG_TUJUAN, type PickerItem, type StockScope } from "../lib/api";
 import { KaryawanAutocomplete } from "./KaryawanAutocomplete";
 import { useAuth } from "../context/AuthContext";
+import { can } from "../lib/access";
 
 // Gudang Nilam supplies every estate (a Stok Keluar to another estate becomes Stok Masuk in that
 // estate's gudang); the other gudang only supply their own estate and its sub-estates.
@@ -25,12 +26,14 @@ export function TransactionModal({
 }) {
   const isKlinik = scope?.kind === "klinik";
   const { user } = useAuth();
-  // Stock corrections are superuser-only (see requireSuperuser on /api/stock-correction).
-  const isSuperuser = user?.role === "superuser";
+  // Stock In/Out need the module's Input permission, Koreksi its Koreksi permission (Pengguna).
+  const mod = isKlinik ? "klinik" : "gudang";
+  const canInput = can(user, `${mod}.input`);
+  const canKoreksi = can(user, `${mod}.koreksi`);
   const [item, setItem] = useState(initialItem);
   const [tujuan, setTujuan] = useState("");
   const [penerima, setPenerima] = useState("");
-  const [mode, setMode] = useState<Mode>("IN");
+  const [mode, setMode] = useState<Mode>(canInput ? "IN" : "KOREKSI");
   const [qty, setQty] = useState(1);
   const [actualQty, setActualQty] = useState(0);
   const [note, setNote] = useState("");
@@ -135,7 +138,8 @@ export function TransactionModal({
         </div>
 
         <div className="p-5 space-y-4">
-          <div className={`grid ${isSuperuser ? "grid-cols-3" : "grid-cols-2"} gap-2`}>
+          <div className={`grid ${(canInput ? 2 : 0) + (canKoreksi ? 1 : 0) === 3 ? "grid-cols-3" : canInput ? "grid-cols-2" : "grid-cols-1"} gap-2`}>
+            {canInput && (
             <button
               onClick={() => setMode("IN")}
               className={`py-2 rounded-md text-xs font-medium border ${
@@ -146,6 +150,8 @@ export function TransactionModal({
             >
               Stock In
             </button>
+            )}
+            {canInput && (
             <button
               onClick={() => setMode("OUT")}
               className={`py-2 rounded-md text-xs font-medium border ${
@@ -156,7 +162,8 @@ export function TransactionModal({
             >
               Stock Out
             </button>
-            {isSuperuser && (
+            )}
+            {canKoreksi && (
               <button
                 onClick={() => setMode("KOREKSI")}
                 className={`py-2 rounded-md text-xs font-medium border flex items-center justify-center gap-1 ${

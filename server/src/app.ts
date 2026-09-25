@@ -2,7 +2,7 @@ import express from "express";
 import cookieParser from "cookie-parser";
 import type { PoolClient } from "pg";
 import { queryMany, queryOne, execute, withTransaction } from "./db.js";
-import { COOKIE_NAME, hashPassword, verifyPassword, signSession, verifySession, ESTATES, MODULES, parseModules, type Module, type SessionUser } from "./auth.js";
+import { COOKIE_NAME, hashPassword, verifyPassword, signSession, verifySession, ESTATES, ALL_PERMS, parseList, type SessionUser } from "./auth.js";
 
 export const app = express();
 // Frontend and API are always same-origin (one Vercel domain in production, Vite's dev proxy
@@ -24,26 +24,50 @@ function setSessionCookie(res: express.Response, token: string) {
 }
 
 // ---- Auth ----
-app.post("/api/auth/login", async (req, res) => {
-  const { username, password } = req.body;
-  if (!username || !password) return res.status(400).json({ error: "Username dan password wajib diisi" });
+// ---- Session user: the cookie names the account, access is read fresh from users ----
+type UserRow = { id: number; username: string; nama: string; role: "superuser" | "estate"; estate: string | null; estates: string | null; perms: string | null };
 
-  const row = await queryOne<{ id: number; username: string; nama: string; password_hash: string; role: "superuser" | "estate"; estate: string | null; modules: string | null }>(
-    "SELECT * FROM users WHERE username = @username",
-    { username }
-  );
-  if (!row || !verifyPassword(password, row.password_hash)) {
-    return res.status(401).json({ error: "Username atau password salah" });
-  }
-
-  const user: SessionUser = {
+function toSessionUser(row: UserRow): SessionUser {
+  const superuser = row.role === "superuser";
+  const estates = superuser ? [...ESTATES] : parseList(row.estates ?? row.estate, ESTATES);
+  return {
     id: row.id,
     username: row.username,
     nama: row.nama,
     role: row.role,
-    estate: row.estate as SessionUser["estate"],
-    modules: row.role === "estate" ? parseModules(row.modules) : null,
+    estate: (estates[0] ?? null) as SessionUser["estate"],
+    estates,
+    perms: superuser ? [...ALL_PERMS] : parseList(row.perms, ALL_PERMS),
   };
+}
+
+// Short per-instance cache so every API call doesn't hit the users table; cleared when an account
+// is changed here, so a new checkbox applies within seconds everywhere.
+const sessionCache = new Map<number, { user: SessionUser; at: number }>();
+const SESSION_TTL_MS = 15_000;
+async function sessionFromCookie(req: express.Request): Promise<SessionUser | null> {
+  const token = req.cookies?.[COOKIE_NAME];
+  const claims = token ? verifySession(token) : null;
+  if (!claims) return null;
+  const hit = sessionCache.get(claims.id);
+  if (hit && Date.now() - hit.at < SESSION_TTL_MS) return hit.user;
+  const row = await queryOne<UserRow>("SELECT id, username, nama, role, estate, estates, perms FROM users WHERE id = @id", { id: claims.id });
+  if (!row) return null;
+  const user = toSessionUser(row);
+  sessionCache.set(user.id, { user, at: Date.now() });
+  return user;
+}
+
+app.post("/api/auth/login", async (req, res) => {
+  const { username, password } = req.body;
+  if (!username || !password) return res.status(400).json({ error: "Username dan password wajib diisi" });
+
+  const row = await queryOne<UserRow & { password_hash: string }>("SELECT * FROM users WHERE username = @username", { username });
+  if (!row || !verifyPassword(password, row.password_hash)) {
+    return res.status(401).json({ error: "Username atau password salah" });
+  }
+
+  const user = toSessionUser(row);
   setSessionCookie(res, signSession(user));
   // Login history for the Log Aktivitas User page; a failure here never blocks the login.
   await execute("INSERT INTO login_log (user_id) VALUES (@id)", { id: user.id }).catch((e) => console.error("login log failed", e));
@@ -55,9 +79,8 @@ app.post("/api/auth/logout", (_req, res) => {
   res.json({ success: true });
 });
 
-app.get("/api/auth/me", (req, res) => {
-  const token = req.cookies?.[COOKIE_NAME];
-  const user = token ? verifySession(token) : null;
+app.get("/api/auth/me", async (req, res) => {
+  const user = await sessionFromCookie(req);
   if (!user) return res.status(401).json({ error: "Not authenticated" });
   res.json({ user });
 });
@@ -71,47 +94,66 @@ declare global {
 }
 
 // ---- Everything else under /api requires a valid session ----
-app.use("/api", (req, res, next) => {
-  const token = req.cookies?.[COOKIE_NAME];
-  const user = token ? verifySession(token) : null;
+app.use("/api", async (req, res, next) => {
+  const user = await sessionFromCookie(req);
   if (!user) return res.status(401).json({ error: "Not authenticated" });
   req.user = user;
   next();
 });
 
-// A 'superuser' sees/manages everything; an 'estate' user is locked to their own estate's
-// Gudang/BBM data and may only add to it - editing, deleting and stock corrections are
-// superuser-only. These two helpers gate routes accordingly - see schema.sql's comment on
-// users.role/estate for the reasoning.
-function requireSuperuser(req: express.Request, res: express.Response, next: express.NextFunction) {
-  if (req.user!.role !== "superuser") return res.status(403).json({ error: "Akses ditolak" });
-  next();
-}
-
-// Estate accounts limited to some modules (users.modules, e.g. an admin entry data Klinik) are
-// refused every API of the other modules. Paths are relative to the /api mount.
-const ACTIVITY_MODULE: Record<string, Module> = { BARANG: "GUDANG", BBM: "BBM", PUPUK: "PUPUK", KLINIK: "KLINIK" };
-function moduleOfRequest(req: express.Request): Module | null {
-  const p = req.path;
+// ---- Access: a superuser can do everything; an estate account only what is ticked for it ----
+// Each request maps to the permission(s) that allow it (any one is enough): the module from the
+// path (without the /api prefix), the action from the method. "super" = superusers
+// only; null = any logged-in account (the route still checks the estate itself).
+type Need = string[] | "super" | null;
+const ACTIVITY_PERM: Record<string, string> = { BARANG: "gudang", BBM: "bbm", PUPUK: "pupuk", KLINIK: "klinik" };
+function requiredPerms(req: express.Request): Need {
+  // Inside app.use("/api") req.path is relative to the mount, inside a route it is the full path.
+  const p = (req.baseUrl + req.path).replace(/^\/api/, "");
+  const m = req.method;
   const q = req.query as Record<string, string>;
-  if (p.startsWith("/bbm")) return "BBM";
-  if (p.startsWith("/pupuk")) return "PUPUK";
-  if (p.startsWith("/klinik-stock") || p.startsWith("/obat")) return "KLINIK";
-  if (/^\/(items|transactions|stock-in|stock-out|stock-correction|gudang-stock|summary|satuan-options)(\/|$)/.test(p)) return "GUDANG";
-  if (p.startsWith("/top-keluar")) return q.source === "klinik" ? "KLINIK" : "GUDANG";
-  if (p === "/activity-log") return ACTIVITY_MODULE[q.module] ?? null;
-  return null;
+  const act = m === "GET" ? "view" : m === "POST" ? "input" : m === "PUT" ? "edit" : m === "DELETE" ? "delete" : "";
+  const is = (re: RegExp) => re.test(p);
+
+  if (is(/^\/auth\//) || is(/^\/karyawan\/pick$/)) return null;
+  if (is(/^\/(stock-correction|gudang-stock\/correction)$/)) return ["gudang.koreksi"];
+  if (is(/^\/klinik-stock\/correction$/)) return ["klinik.koreksi"];
+  // items = the master barang list, which is also Nilam's gudang stock.
+  if (is(/^\/items$/) && m === "GET") return ["gudang.view", "master.barang"];
+  if (is(/^\/items(\/\d+)?$/) && m !== "GET") return ["master.barang", `gudang.${act}`];
+  if (is(/^\/satuan-options$/)) return ["gudang.view", "master.barang"];
+  if (is(/^\/(summary|items|transactions|stock-in|stock-out|gudang-stock)(\/|$)/)) return [`gudang.${act}`];
+  if (is(/^\/bbm(\/|$)/)) return [`bbm.${act}`];
+  if (is(/^\/pupuk(\/|$)/)) return [`pupuk.${act}`];
+  if (is(/^\/klinik-stock(\/|$)/)) return [`klinik.${act}`];
+  if (is(/^\/top-keluar$/)) return [q.source === "klinik" ? "klinik.view" : "gudang.view"];
+  if (is(/^\/activity-log$/)) return ACTIVITY_PERM[q.module] ? [`${ACTIVITY_PERM[q.module]}.view`] : "super";
+  if (is(/^\/obat(\/|$)/)) return ["master.obat"];
+  if (is(/^\/karyawan(\/|$)/)) return ["master.karyawan"];
+  if (is(/^\/alat-berat(\/|$)/)) return ["master.alat"];
+  if (is(/^\/users(\/|$)/)) return ["master.users"];
+  if (is(/^\/user-activity$/)) return ["monitor.log_user"];
+  return "super";
 }
 
 app.use("/api", (req, res, next) => {
-  const allowed = req.user!.role === "superuser" ? null : req.user!.modules;
-  const m = allowed ? moduleOfRequest(req) : null;
-  if (m && !allowed!.includes(m)) return res.status(403).json({ error: "Akses ditolak" });
+  if (req.user!.role === "superuser") return next();
+  const need = requiredPerms(req);
+  if (need === "super" || (need && !need.some((p) => req.user!.perms.includes(p)))) {
+    return res.status(403).json({ error: "Akses ditolak" });
+  }
   next();
 });
 
+// Routes that used to be superuser-only: the gate above has already checked the account's
+// permission for them, so this only still refuses routes with no permission mapped ("super").
+function requireSuperuser(req: express.Request, res: express.Response, next: express.NextFunction) {
+  if (req.user!.role === "superuser" || Array.isArray(requiredPerms(req))) return next();
+  return res.status(403).json({ error: "Akses ditolak" });
+}
+
 function estateAllowed(user: SessionUser, estate: string | null | undefined) {
-  return user.role === "superuser" || user.estate === estate;
+  return user.role === "superuser" || (!!estate && user.estates.includes(estate));
 }
 
 function requireEstate(estate: string) {
@@ -413,7 +455,8 @@ app.get("/api/items/:id", requireEstate("NILAM"), async (req, res) => {
   res.json({ ...item, transactions });
 });
 
-app.post("/api/items", requireEstate("NILAM"), async (req, res) => {
+// A new master barang: from Nilam's gudang page or by a Master Barang admin of any estate.
+app.post("/api/items", (req, res, next) => (req.user!.perms.includes("master.barang") ? next() : requireEstate("NILAM")(req, res, next)), async (req, res) => {
   const { kode, nama, satuan, buffer_stock } = req.body;
   if (!kode || !String(kode).trim() || !nama || !String(nama).trim()) {
     return res.status(400).json({ error: "Kode dan nama wajib diisi" });
@@ -1389,12 +1432,8 @@ app.post("/api/auth/change-password", async (req, res) => {
 });
 
 // ---- Users (login accounts) master data ----
-// users.modules from the form's list: only estate accounts are limited; empty = every module.
-function modulesValue(role: string, modules: unknown): string | null {
-  if (role !== "estate" || !Array.isArray(modules)) return null;
-  const list = MODULES.filter((m) => modules.includes(m));
-  return list.length && list.length < MODULES.length ? list.join(",") : null;
-}
+// users.estates / users.perms from the form's checkboxes (only kept for estate accounts).
+const listValue = (v: unknown, known: readonly string[]) => (Array.isArray(v) ? known.filter((k) => v.includes(k)).join(",") : "");
 
 app.get("/api/users", requireSuperuser, async (req, res) => {
   const { search = "", sortBy = "nama", sortDir = "asc", page = "1", pageSize = "50" } =
@@ -1419,33 +1458,43 @@ app.get("/api/users", requireSuperuser, async (req, res) => {
   const offset = (Math.max(parseInt(page) || 1, 1) - 1) * limit;
 
   const data = await queryMany(
-    `SELECT id, username, nama, role, estate, modules, created_at FROM users ${where} ORDER BY ${sortCol} ${dir} LIMIT @limit OFFSET @offset`,
+    `SELECT id, username, nama, role, estates, perms, created_at FROM users ${where} ORDER BY ${sortCol} ${dir} LIMIT @limit OFFSET @offset`,
     { ...params, limit, offset }
   );
 
   res.json({ data, total: Number(total), page: parseInt(page), pageSize: limit });
 });
 
+// A superuser has every estate and permission; an estate account needs at least one estate.
+function userAccess(body: any): { role: "superuser" | "estate"; estates: string; perms: string; error?: string } {
+  const role = body.role === "estate" ? "estate" : "superuser";
+  if (role === "superuser") return { role, estates: "", perms: "" };
+  const estates = listValue(body.estates, ESTATES);
+  if (!estates) return { role, estates, perms: "", error: "Pilih minimal satu estate untuk akun estate" };
+  return { role, estates, perms: listValue(body.perms, ALL_PERMS) };
+}
+
 app.post("/api/users", requireSuperuser, async (req, res) => {
-  const { username, password, nama, role, estate, modules } = req.body;
+  const { username, password, nama } = req.body;
   if (!username || !String(username).trim() || !password || !nama || !String(nama).trim()) {
     return res.status(400).json({ error: "Username, password, dan nama wajib diisi" });
   }
-  const finalRole = role === "estate" ? "estate" : "superuser";
-  if (finalRole === "estate" && !ESTATES.includes(estate)) {
-    return res.status(400).json({ error: "Estate wajib dipilih untuk akun estate" });
-  }
+  const access = userAccess(req.body);
+  if (access.error) return res.status(400).json({ error: access.error });
+  if (access.role === "superuser" && req.user!.role !== "superuser") return res.status(403).json({ error: "Hanya Super User yang bisa membuat Super User" });
 
   try {
     const row = await queryOne<{ id: number }>(
-      `INSERT INTO users (username, password_hash, nama, role, estate, modules) VALUES (@username, @password_hash, @nama, @role, @estate, @modules) RETURNING id`,
+      `INSERT INTO users (username, password_hash, nama, role, estate, estates, perms)
+       VALUES (@username, @password_hash, @nama, @role, @estate, @estates, @perms) RETURNING id`,
       {
         username: String(username).trim(),
         password_hash: hashPassword(password),
         nama: String(nama).trim(),
-        role: finalRole,
-        estate: finalRole === "estate" ? estate : null,
-        modules: modulesValue(finalRole, modules),
+        role: access.role,
+        estate: access.estates.split(",")[0] || null,
+        estates: access.estates || null,
+        perms: access.role === "estate" ? access.perms : null,
       }
     );
     res.json({ success: true, id: row!.id });
@@ -1461,25 +1510,29 @@ app.put("/api/users/:id", requireSuperuser, async (req, res) => {
   const existing = await queryOne<any>("SELECT * FROM users WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Not found" });
 
-  const { username, nama, password, role, estate, modules } = req.body;
+  const { username, nama, password } = req.body;
   if (!username || !String(username).trim() || !nama || !String(nama).trim()) {
     return res.status(400).json({ error: "Username dan nama wajib diisi" });
   }
-  const finalRole = role === "estate" ? "estate" : "superuser";
-  if (finalRole === "estate" && !ESTATES.includes(estate)) {
-    return res.status(400).json({ error: "Estate wajib dipilih untuk akun estate" });
+  const access = userAccess(req.body);
+  if (access.error) return res.status(400).json({ error: access.error });
+  // A Pengguna admin who isn't a superuser can't make or change Super User accounts.
+  if ((access.role === "superuser" || existing.role === "superuser") && req.user!.role !== "superuser") {
+    return res.status(403).json({ error: "Hanya Super User yang bisa mengubah akun Super User" });
   }
 
   try {
     await execute(
-      `UPDATE users SET username = @username, nama = @nama, password_hash = @password_hash, role = @role, estate = @estate, modules = @modules WHERE id = @id`,
+      `UPDATE users SET username = @username, nama = @nama, password_hash = @password_hash, role = @role,
+         estate = @estate, estates = @estates, perms = @perms, modules = NULL WHERE id = @id`,
       {
         username: String(username).trim(),
         nama: String(nama).trim(),
         password_hash: password ? hashPassword(password) : existing.password_hash,
-        role: finalRole,
-        estate: finalRole === "estate" ? estate : null,
-        modules: modulesValue(finalRole, modules),
+        role: access.role,
+        estate: access.estates.split(",")[0] || null,
+        estates: access.estates || null,
+        perms: access.role === "estate" ? access.perms : null,
         id: req.params.id,
       }
     );
@@ -1489,7 +1542,7 @@ app.put("/api/users/:id", requireSuperuser, async (req, res) => {
     }
     throw e;
   }
-
+  sessionCache.delete(Number(req.params.id));
   res.json({ success: true });
 });
 
@@ -1502,7 +1555,9 @@ app.delete("/api/users/:id", requireSuperuser, async (req, res) => {
     return res.status(400).json({ error: "Tidak bisa menghapus satu-satunya akun yang tersisa" });
   }
 
+  if (existing.role === "superuser" && req.user!.role !== "superuser") return res.status(403).json({ error: "Hanya Super User yang bisa menghapus Super User" });
   await execute("DELETE FROM users WHERE id = @id", { id: req.params.id });
+  sessionCache.delete(Number(req.params.id));
   res.json({ success: true });
 });
 
@@ -2636,7 +2691,7 @@ app.get("/api/user-activity", requireSuperuser, async (req, res) => {
   const inRange = (col: string) => `${day(col)} BETWEEN @dateFrom::date AND @dateTo::date`;
 
   const users = await queryMany(
-    `SELECT u.id, u.username, u.nama, u.role, u.estate, u.modules,
+    `SELECT u.id, u.username, u.nama, u.role, u.estates, u.perms,
             (SELECT MAX(created_at) FROM login_log l WHERE l.user_id = u.id) AS last_login,
             (SELECT MAX(created_at) FROM activity_log a WHERE a.user_id = u.id) AS last_action
      FROM users u ORDER BY u.nama`
@@ -2674,11 +2729,13 @@ app.get("/api/activity-log", async (req, res) => {
   const conditions = ["module = @module"];
   const params: any = { module };
 
-  // Estate users only ever see their own estate's log; a superuser may narrow to one estate.
-  const scope = req.user!.role === "superuser" ? estate : req.user!.estate;
-  if (scope) {
+  // Estate accounts only ever see their own estates' log; anyone may narrow to one estate.
+  if (estate && estateAllowed(req.user!, estate)) {
     conditions.push("estate = @estate");
-    params.estate = scope;
+    params.estate = estate;
+  } else if (req.user!.role !== "superuser") {
+    conditions.push("estate = ANY(@estates::text[])");
+    params.estates = req.user!.estates;
   }
   if (aksi) {
     conditions.push("aksi = @aksi");

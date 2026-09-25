@@ -14,6 +14,17 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS estate TEXT;
 -- Which inventory modules an estate account may open, comma separated from GUDANG, BBM, PUPUK,
 -- KLINIK (e.g. an admin entry data "GUDANG,BBM,PUPUK" or "KLINIK"). NULL = every module.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS modules TEXT;
+-- Checkbox access of an estate account (superusers have everything): `estates` = the estates it may
+-- open, `perms` = permission keys like "gudang.view,gudang.input,master.obat" (see ALL_PERMS in
+-- auth.ts). Accounts from before this carry over what they could do: their estate, and view +
+-- input on their modules (edit/delete/koreksi were superuser-only). `estate`/`modules` are legacy.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS estates TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS perms TEXT;
+UPDATE users SET estates = estate WHERE estates IS NULL AND estate IS NOT NULL;
+UPDATE users SET perms = (
+  SELECT string_agg(lower(trim(m)) || '.view,' || lower(trim(m)) || '.input', ',')
+  FROM unnest(string_to_array(COALESCE(NULLIF(modules, ''), 'GUDANG,BBM,PUPUK,KLINIK'), ',')) m
+) WHERE role = 'estate' AND perms IS NULL;
 
 CREATE TABLE IF NOT EXISTS items (
   id SERIAL PRIMARY KEY,

@@ -7,6 +7,7 @@ import { EditLedgerTxModal } from "./EditLedgerTxModal";
 import { fetchAllRows, type TableReport } from "../lib/printTable";
 import { useDragScroll } from "../hooks/useDragScroll";
 import { useAuth } from "../context/AuthContext";
+import { can } from "../lib/access";
 
 const formatWaktu = (iso: string) =>
   new Date(iso).toLocaleString("id-ID", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
@@ -15,7 +16,10 @@ const formatWaktu = (iso: string) =>
 // that location across all items. `refreshKey` changes after a new transaction so the list reloads.
 export function LedgerHistory({ scope, type, refreshKey }: { scope: StockScope; type: "IN" | "OUT"; refreshKey: number }) {
   const { user } = useAuth();
-  const isSuperuser = user?.role === "superuser";
+  // Edit / delete follow the account's permissions for this module (Pengguna).
+  const canEdit = can(user, `${scope.kind}.edit`);
+  const canDelete = can(user, `${scope.kind}.delete`);
+  const showActions = canEdit || canDelete;
   const isOut = type === "OUT";
   const isKlinik = scope.kind === "klinik";
   const noun = isKlinik ? "obat" : "barang";
@@ -34,7 +38,7 @@ export function LedgerHistory({ scope, type, refreshKey }: { scope: StockScope; 
   const [confirmDelete, setConfirmDelete] = useState<LedgerTx | null>(null);
   const tableScrollRef = useDragScroll<HTMLDivElement>();
   const pageSize = 25;
-  const colCount = 7 + (showTujuan ? 1 : 0) + (isSuperuser ? 1 : 0);
+  const colCount = 7 + (showTujuan ? 1 : 0) + (showActions ? 1 : 0);
 
   const query = () => ({ type, search, dateFrom, dateTo });
 
@@ -161,7 +165,7 @@ export function LedgerHistory({ scope, type, refreshKey }: { scope: StockScope; 
                 <th className="px-4 py-2.5">{personLabel}</th>
                 <th className="px-4 py-2.5">Catatan</th>
                 <th className="px-4 py-2.5 whitespace-nowrap">Diinput Oleh</th>
-                {isSuperuser && <th className="px-4 py-2.5 text-right">Aksi</th>}
+                {showActions && <th className="px-4 py-2.5 text-right">Aksi</th>}
               </tr>
             </thead>
             <tbody>
@@ -200,7 +204,7 @@ export function LedgerHistory({ scope, type, refreshKey }: { scope: StockScope; 
                       {r.note || (r.is_correction ? "" : "-")}
                     </td>
                     <td className="px-4 py-2.5 whitespace-nowrap text-[var(--text-secondary)]">{r.input_oleh || "-"}</td>
-                    {isSuperuser && (
+                    {showActions && (
                       <td className="px-4 py-2.5 text-right">
                         {r.is_transfer ? (
                           // Booked by a Stok Keluar from another gudang; it follows that one.
@@ -209,20 +213,20 @@ export function LedgerHistory({ scope, type, refreshKey }: { scope: StockScope; 
                           </span>
                         ) : (
                           <div className="inline-flex gap-1.5">
-                            <button
+                            {canEdit && (<button
                               onClick={() => setEditing(r)}
                               title="Edit transaksi"
                               className="p-1.5 rounded-md border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[#f1f5f9]"
                             >
                               <Pencil size={14} />
-                            </button>
-                            <button
+                            </button>)}
+                            {canDelete && (<button
                               onClick={() => setConfirmDelete(r)}
                               title="Hapus transaksi"
                               className="p-1.5 rounded-md border border-[var(--accent-red-border)] text-[var(--accent-red)] hover:bg-[var(--accent-red-bg)]"
                             >
                               <Trash2 size={14} />
-                            </button>
+                            </button>)}
                           </div>
                         )}
                       </td>

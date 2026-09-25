@@ -17,8 +17,10 @@ export type AuthUser = {
   nama: string;
   role: Role;
   estate: Estate | null;
-  // Inventory modules this estate account may open (see src/lib/access.ts); null/absent = all.
-  modules?: string[] | null;
+  // Estates it can open and the permissions ticked for it (see src/lib/access.ts); a superuser
+  // gets every estate and permission.
+  estates: string[];
+  perms: string[];
 };
 
 export type UserAccount = {
@@ -26,9 +28,9 @@ export type UserAccount = {
   username: string;
   nama: string;
   role: Role;
-  estate: Estate | null;
-  // Comma separated, e.g. "GUDANG,BBM,PUPUK"; null = every module.
-  modules: string | null;
+  // Comma separated, e.g. "ZAMRUD,FIRUS" and "gudang.view,gudang.input"; null for a superuser.
+  estates: string | null;
+  perms: string | null;
   created_at: string;
 };
 
@@ -664,12 +666,12 @@ export const api = {
     return req<{ data: UserAccount[]; total: number; page: number; pageSize: number }>(`/api/users?${qs}`);
   },
 
-  createUser: (payload: { username: string; password: string; nama: string; role: Role; estate?: Estate | null; modules?: string[] }) =>
+  createUser: (payload: { username: string; password: string; nama: string; role: Role; estates?: string[]; perms?: string[] }) =>
     req<{ success: boolean; id: number }>("/api/users", { method: "POST", body: JSON.stringify(payload) }),
 
   updateUser: (
     id: number,
-    payload: { username: string; nama: string; password?: string; role: Role; estate?: Estate | null; modules?: string[] }
+    payload: { username: string; nama: string; password?: string; role: Role; estates?: string[]; perms?: string[] }
   ) => req<{ success: boolean }>(`/api/users/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
 
   deleteUser: (id: number) => req<{ success: boolean }>(`/api/users/${id}`, { method: "DELETE" }),

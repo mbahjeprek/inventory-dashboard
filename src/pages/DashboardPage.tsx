@@ -4,7 +4,7 @@ import { Package, Fuel, Sprout, Stethoscope, AlertTriangle, XCircle, CalendarClo
 import { api, type ActivityLog, type BbmSummary, type KlinikSummary, type PupukSummary } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { useEstateFilter } from "../hooks/useEstateFilter";
-import { canModule, type Module } from "../lib/access";
+import { canModule, MODULES, userEstates, type Module } from "../lib/access";
 import { TopKeluarPanel } from "../components/TopKeluarPanel";
 
 type GudangStat = { totalItems: number; totalStock: number; lowStock: number; outOfStock: number };
@@ -359,12 +359,14 @@ function RecentActivity({ estate }: { estate: string }) {
 // "Aktivitas Terbaru" for that estate. Each card links to its full inventory page.
 export function DashboardPage() {
   const { user } = useAuth();
-  const isSuperuser = user?.role === "superuser";
   const { picked: pickedRaw, setPicked: storePicked } = useEstateFilter();
-  const allowedEstates = ESTATES.filter((e) => isSuperuser || user?.estate === e.estate);
-  // Superuser can pick any subset of estates; the sidebar follows the same choice (useEstateFilter).
+  const allowedEstates = ESTATES.filter((e) => userEstates(user).includes(e.estate));
+  // An account with several estates can pick any subset of them; the sidebar follows the same
+  // choice (useEstateFilter).
+  const multiEstate = allowedEstates.length > 1;
   const picked = pickedRaw.filter((code) => allowedEstates.some((e) => e.estate === code));
-  const shown = isSuperuser && picked.length ? allowedEstates.filter((e) => picked.includes(e.estate)) : allowedEstates;
+  const shown = picked.length ? allowedEstates.filter((e) => picked.includes(e.estate)) : allowedEstates;
+  const anyModule = MODULES.some((m) => canModule(user, m));
   const single = shown.length === 1 ? shown[0] : null;
   const shownKey = shown.map((e) => e.estate).join(",");
 
@@ -408,18 +410,18 @@ export function DashboardPage() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold text-[var(--text-primary)]">Dashboard{single && !isSuperuser ? ` - Estate ${single.label}` : ""}</h1>
+          <h1 className="text-xl font-semibold text-[var(--text-primary)]">Dashboard{single && !multiEstate ? ` - Estate ${single.label}` : ""}</h1>
           <p className="text-sm text-[var(--text-secondary)]">
             Selamat datang, {user?.nama || user?.username} ·{" "}
             {now.toLocaleDateString("id-ID", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
           </p>
         </div>
-        {isSuperuser && (
+        {multiEstate && anyModule && (
           <div className="flex flex-wrap gap-2">
             <button onClick={() => setPicked([])} className={chip(!picked.length)}>
               Semua Estate
             </button>
-            {ESTATES.map((e) => (
+            {allowedEstates.map((e) => (
               <button key={e.estate} onClick={() => toggleEstate(e.estate)} className={chip(picked.includes(e.estate))}>
                 {e.label}
               </button>
@@ -428,16 +430,22 @@ export function DashboardPage() {
         )}
       </div>
 
-      {shown.map((e) => (
+      {!anyModule && (
+        <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg p-4 text-sm text-[var(--text-secondary)]">
+          Akun ini tidak punya akses inventory. Buka menu di samping untuk halaman yang bisa diakses.
+        </div>
+      )}
+
+      {anyModule && shown.map((e) => (
         <section key={e.estate} className="space-y-3">
-          {isSuperuser && <h2 className="text-sm font-semibold uppercase tracking-wide text-[var(--text-secondary)]">Estate {e.label}</h2>}
+          {multiEstate && <h2 className="text-sm font-semibold uppercase tracking-wide text-[var(--text-secondary)]">Estate {e.label}</h2>}
           <EstateRow e={e} d={data[e.estate] ?? {}} monthLabel={monthLabel} />
         </section>
       ))}
 
-      <TopKeluarPanel estates={shown} />
+      {anyModule && <TopKeluarPanel estates={shown} />}
 
-      {single && (
+      {anyModule && single && (
         <div className="grid gap-3 lg:grid-cols-2 items-start">
           <AttentionPanel e={single} d={data[single.estate] ?? {}} />
           <RecentActivity estate={single.estate} />
