@@ -244,6 +244,25 @@ async function logActivity(
   }
 }
 
+// Many log entries in one statement (e.g. one Koreksi Stok per line of an approved opname).
+async function logActivities(
+  req: express.Request,
+  entries: { module: LogModule; estate: string | null; aksi: string; objek: string; detail?: string }[]
+) {
+  if (!entries.length) return;
+  const u = req.user!;
+  try {
+    await execute(
+      `INSERT INTO activity_log (module, estate, aksi, objek, detail, user_id, username, nama)
+       SELECT x.module, x.estate, x.aksi, x.objek, x.detail, @user_id, @username, @nama
+       FROM json_to_recordset(@rows::json) AS x(module text, estate text, aksi text, objek text, detail text)`,
+      { rows: JSON.stringify(entries.map((e) => ({ ...e, detail: e.detail ?? "" }))), user_id: u.id, username: u.username, nama: u.nama }
+    );
+  } catch (e) {
+    console.error("activity log failed", e);
+  }
+}
+
 // "Label: old → new" for each field that actually changed, e.g. "Stock Tersedia: 10 → 12".
 function describeChanges(before: Record<string, any>, after: Record<string, any>, labels: Record<string, string>) {
   const show = (v: any) => (v === null || v === undefined || v === "" ? "-" : String(v));
@@ -3379,6 +3398,148 @@ async function applyOpnameLine(client: PoolClient, req: express.Request, o: Opna
   return before;
 }
 
+type CountedLine = OpnameLine & { id: number; stok_fisik: number };
+
+// Books every count of an opname as Koreksi in a handful of set-based statements, so approving a few
+// hundred lines is as quick as approving one (a statement per line meant a database round trip per
+// line). Returns each line's stock before, in the order of `lines`. BBM / pupuk have at most a few
+// lines and keep the per-line path.
+async function applyOpnameLines(client: PoolClient, req: express.Request, o: OpnameRow, lines: CountedLine[]): Promise<number[]> {
+  if (o.module === "BBM" || o.module === "PUPUK") {
+    const befores: number[] = [];
+    for (const line of lines) befores.push(round3(await applyOpnameLine(client, req, o, line)));
+    return befores;
+  }
+  const kodes = [...new Set(lines.map((l) => l.kode))];
+  const note = (l: CountedLine) => `Koreksi Stok (Opname #${o.id})${l.keterangan ? `: ${l.keterangan}` : ""}`;
+  const base = { estate: o.estate, kodes, uid: req.user!.id };
+
+  if (o.module === "GUDANG" && o.estate === "NILAM") {
+    const cur = await queryMany<{ kode: string; id: number; stock: number }>(
+      "SELECT kode, id, COALESCE(stock_tersedia, 0)::float8 stock FROM items WHERE kode = ANY(@kodes::text[]) FOR UPDATE",
+      base,
+      client
+    );
+    const byKode = new Map(cur.map((r) => [r.kode, r]));
+    const missing = kodes.find((k) => !byKode.has(k));
+    if (missing) throw new StockError(`Barang ${missing} sudah tidak ada di master data`);
+    const rows = lines.map((l) => {
+      const it = byKode.get(l.kode)!;
+      const delta = l.stok_fisik - it.stock;
+      return { id: it.id, actual: l.stok_fisik, delta, qin: Math.max(delta, 0), qout: Math.max(-delta, 0), note: note(l) };
+    });
+    const moved = rows.filter((r) => r.delta !== 0);
+    if (moved.length) {
+      await execute(
+        `INSERT INTO transactions (item_id, tujuan, type, qty, note, is_correction)
+         SELECT x.id, '', CASE WHEN x.delta > 0 THEN 'IN' ELSE 'OUT' END, ABS(x.delta), x.note, 1
+         FROM json_to_recordset(@rows::json) AS x(id int, delta int, note text)`,
+        { rows: JSON.stringify(moved) },
+        client
+      );
+    }
+    await execute(
+      `UPDATE items it SET stock_tersedia = x.actual, stock_in = it.stock_in + x.qin, stock_out = it.stock_out + x.qout,
+         keterangan = CASE WHEN x.delta = 0 THEN it.keterangan WHEN x.actual > 0 THEN 'AMAN' ELSE 'BUFFER STOCK' END,
+         stock_fisik = x.actual, selisih_stock = x.delta
+       FROM json_to_recordset(@rows::json) AS x(id int, actual int, delta int, qin int, qout int)
+       WHERE it.id = x.id`,
+      { rows: JSON.stringify(rows) },
+      client
+    );
+    return lines.map((l) => byKode.get(l.kode)!.stock);
+  }
+
+  if (o.module === "GUDANG") {
+    const cur = await queryMany<{ kode: string; stock: number }>(
+      "SELECT item_kode kode, stock_tersedia::float8 stock FROM gudang_stock WHERE gudang = @estate AND item_kode = ANY(@kodes::text[]) FOR UPDATE",
+      base,
+      client
+    );
+    const stock = new Map(cur.map((r) => [r.kode, r.stock]));
+    const befores = lines.map((l) => stock.get(l.kode) ?? 0);
+    const moved = lines
+      .map((l, i) => ({ kode: l.kode, delta: round3(l.stok_fisik - befores[i]), note: note(l) }))
+      .filter((r) => r.delta !== 0);
+    if (moved.length) {
+      const p = { ...base, rows: JSON.stringify(moved) };
+      await execute(
+        `INSERT INTO gudang_stock (gudang, item_kode, buffer_stock, stock_tersedia)
+         SELECT @estate, x.kode, 0, 0 FROM json_to_recordset(@rows::json) AS x(kode text) ON CONFLICT (gudang, item_kode) DO NOTHING`,
+        p,
+        client
+      );
+      await execute(
+        `INSERT INTO gudang_stock_tx (gudang, item_kode, type, qty, tujuan, penerima, note, is_correction, user_id)
+         SELECT @estate, x.kode, CASE WHEN x.delta > 0 THEN 'IN' ELSE 'OUT' END, ABS(x.delta), '', '', x.note, 1, @uid
+         FROM json_to_recordset(@rows::json) AS x(kode text, delta float8, note text)`,
+        p,
+        client
+      );
+      await execute(
+        `UPDATE gudang_stock gs SET stock_tersedia = ROUND((gs.stock_tersedia + x.delta)::numeric, 3)
+         FROM json_to_recordset(@rows::json) AS x(kode text, delta float8)
+         WHERE gs.gudang = @estate AND gs.item_kode = x.kode`,
+        p,
+        client
+      );
+    }
+    return befores;
+  }
+
+  // Klinik: each line is one batch (obat + expiry); the batch is set to the count, klinik_stock follows.
+  const cur = await queryMany<{ kode: string; exp: string; qty: number }>(
+    "SELECT obat_kode kode, expired_date exp, qty FROM klinik_batch WHERE klinik = @estate AND obat_kode = ANY(@kodes::text[]) FOR UPDATE",
+    base,
+    client
+  );
+  const qty = new Map(cur.map((r) => [`${r.kode}|${r.exp}`, r.qty]));
+  const befores = lines.map((l) => qty.get(`${l.kode}|${l.exp}`) ?? 0);
+  const moved = lines
+    .map((l, i) => ({
+      kode: l.kode,
+      exp: l.exp,
+      actual: l.stok_fisik,
+      delta: l.stok_fisik - befores[i],
+      note: `Koreksi Stok (Opname #${o.id}) batch ${expText(l.exp)}${l.keterangan ? `: ${l.keterangan}` : ""}`,
+    }))
+    .filter((r) => r.delta !== 0);
+  if (moved.length) {
+    const p = { ...base, rows: JSON.stringify(moved), changed: [...new Set(moved.map((r) => r.kode))] };
+    await execute(
+      `INSERT INTO klinik_batch (klinik, obat_kode, expired_date, qty)
+       SELECT @estate, x.kode, x.exp, x.actual FROM json_to_recordset(@rows::json) AS x(kode text, exp text, actual int)
+       ON CONFLICT (klinik, obat_kode, expired_date) DO UPDATE SET qty = EXCLUDED.qty`,
+      p,
+      client
+    );
+    await execute("DELETE FROM klinik_batch WHERE klinik = @estate AND obat_kode = ANY(@changed::text[]) AND qty <= 0", p, client);
+    await execute(
+      `INSERT INTO klinik_stock_tx (klinik, obat_kode, type, qty, tujuan, penerima, note, is_correction, user_id, alloc)
+       SELECT @estate, x.kode, CASE WHEN x.delta > 0 THEN 'IN' ELSE 'OUT' END, ABS(x.delta), '', '', x.note, 1, @uid,
+              jsonb_build_array(jsonb_build_object('exp', x.exp, 'qty', ABS(x.delta)))
+       FROM json_to_recordset(@rows::json) AS x(kode text, exp text, delta int, note text)`,
+      p,
+      client
+    );
+    await execute(
+      `INSERT INTO klinik_stock (klinik, obat_kode, buffer_stock, stock_tersedia)
+       SELECT @estate, k, 0, 0 FROM unnest(@changed::text[]) k ON CONFLICT (klinik, obat_kode) DO NOTHING`,
+      p,
+      client
+    );
+    await execute(
+      `UPDATE klinik_stock ks SET
+         stock_tersedia = COALESCE((SELECT SUM(qty) FROM klinik_batch b WHERE b.klinik = ks.klinik AND b.obat_kode = ks.obat_kode), 0),
+         expired_date = (SELECT MIN(NULLIF(expired_date, '')) FROM klinik_batch b WHERE b.klinik = ks.klinik AND b.obat_kode = ks.obat_kode AND b.qty > 0)
+       WHERE ks.klinik = @estate AND ks.obat_kode = ANY(@changed::text[])`,
+      p,
+      client
+    );
+  }
+  return befores;
+}
+
 async function logOpname(req: express.Request, o: OpnameRow, aksi: string, detail = "") {
   await logActivity(req, { module: OPNAME_LOG_MODULE[o.module], estate: o.estate, aksi, objek: `Stok Opname #${o.id} - ${opnameName(o)}`, detail });
 }
@@ -3582,12 +3743,15 @@ app.post("/api/stock-opname/:id/approve", async (req, res) => {
         { id: o.id },
         client
       );
-      const changes: Change[] = [];
-      for (const line of lines) {
-        const before = round3(await applyOpnameLine(client, req, o, line));
-        await execute("UPDATE opname_line SET stok_sistem = @before WHERE id = @id", { before, id: line.id }, client);
-        if (before !== line.stok_fisik) changes.push({ line, before, after: line.stok_fisik });
-      }
+      const befores = await applyOpnameLines(client, req, o, lines);
+      await execute(
+        `UPDATE opname_line l SET stok_sistem = x.b FROM json_to_recordset(@rows::json) AS x(id int, b float8) WHERE l.id = x.id`,
+        { rows: JSON.stringify(lines.map((l, i) => ({ id: l.id, b: befores[i] }))) },
+        client
+      );
+      const changes: Change[] = lines
+        .map((line, i) => ({ line, before: befores[i], after: line.stok_fisik }))
+        .filter((c) => c.before !== c.after);
       await execute(
         `UPDATE opname SET status = 'APPROVED', approved_by = @uid, approved_by_nama = @unama, approved_at = now(), catatan_review = '' WHERE id = @id`,
         { uid: u.id, unama: u.nama, id: o.id },
@@ -3601,8 +3765,9 @@ app.post("/api/stock-opname/:id/approve", async (req, res) => {
   }
   if (!done) return;
   const { o, changes } = done;
-  for (const { line, before, after } of changes) {
-    await logActivity(req, {
+  await logActivities(
+    req,
+    changes.map(({ line, before, after }) => ({
       module: OPNAME_LOG_MODULE[o.module],
       estate: o.estate,
       aksi: "Koreksi Stok",
@@ -3610,8 +3775,8 @@ app.post("/api/stock-opname/:id/approve", async (req, res) => {
       detail: `Stok Opname #${o.id}${o.module === "KLINIK" ? `; Batch ${expText(line.exp)}` : ""}: ${before} → ${after} (selisih ${signed(round3(after - before))})${
         line.keterangan ? `; Catatan: ${line.keterangan}` : ""
       }`,
-    });
-  }
+    }))
+  );
   await logOpname(req, o, "Setujui Stok Opname", `${done.counted} item dihitung; ${changes.length} item dikoreksi; transaksi stok dibuka`);
   res.json({ success: true, corrected: changes.length });
 });
