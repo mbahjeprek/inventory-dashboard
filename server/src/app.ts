@@ -4848,7 +4848,10 @@ const EVIDENCE_MIME: Record<string, string> = { "image/jpeg": "jpg", "image/png"
 function evidenceEnabled() {
   return !!(STORAGE_URL && STORAGE_KEY);
 }
-const storageHeaders = () => ({ Authorization: `Bearer ${STORAGE_KEY}`, apikey: STORAGE_KEY });
+// A legacy service_role key (a JWT, "eyJ...") goes in both headers; a new secret key ("sb_secret_...")
+// only in apikey - Supabase turns it into the service role itself.
+const storageHeaders = (): Record<string, string> =>
+  STORAGE_KEY.startsWith("sb_") ? { apikey: STORAGE_KEY } : { Authorization: `Bearer ${STORAGE_KEY}`, apikey: STORAGE_KEY };
 
 async function storageUpload(path: string, body: Buffer, mime: string) {
   const put = () =>
