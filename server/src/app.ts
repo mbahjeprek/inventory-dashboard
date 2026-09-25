@@ -82,7 +82,10 @@ app.post("/api/auth/login", async (req, res) => {
   const { username, password } = req.body;
   if (!username || !password) return res.status(400).json({ error: "Username dan password wajib diisi" });
 
-  const row = await queryOne<UserRow & { password_hash: string }>("SELECT * FROM users WHERE username = @username", { username });
+  // The username is matched case-insensitively (Admin1 = admin1 = ADMIN1); only the password is exact.
+  const row = await queryOne<UserRow & { password_hash: string }>("SELECT * FROM users WHERE LOWER(username) = LOWER(@username) ORDER BY id LIMIT 1", {
+    username: String(username).trim(),
+  });
   if (!row || !verifyPassword(password, row.password_hash)) {
     return res.status(401).json({ error: "Username atau password salah" });
   }
@@ -1585,6 +1588,10 @@ function userAccess(body: any): { role: "superuser" | "estate"; estates: string;
   return { role, estates, perms: listValue(body.perms, ALL_PERMS) };
 }
 
+// Login ignores case, so two accounts may not differ only in case (admin / Admin).
+const usernameTaken = async (username: string, exceptId = 0) =>
+  !!(await queryOne("SELECT 1 FROM users WHERE LOWER(username) = LOWER(@username) AND id <> @exceptId", { username, exceptId }));
+
 app.post("/api/users", requireSuperuser, async (req, res) => {
   const { username, password, nama } = req.body;
   if (!username || !String(username).trim() || !password || !nama || !String(nama).trim()) {
@@ -1593,6 +1600,7 @@ app.post("/api/users", requireSuperuser, async (req, res) => {
   const access = userAccess(req.body);
   if (access.error) return res.status(400).json({ error: access.error });
   if (access.role === "superuser" && req.user!.role !== "superuser") return res.status(403).json({ error: "Hanya Super User yang bisa membuat Super User" });
+  if (await usernameTaken(String(username).trim())) return res.status(409).json({ error: "Username sudah digunakan" });
 
   try {
     const row = await queryOne<{ id: number }>(
@@ -1631,6 +1639,7 @@ app.put("/api/users/:id", requireSuperuser, async (req, res) => {
   if ((access.role === "superuser" || existing.role === "superuser") && req.user!.role !== "superuser") {
     return res.status(403).json({ error: "Hanya Super User yang bisa mengubah akun Super User" });
   }
+  if (await usernameTaken(String(username).trim(), existing.id)) return res.status(409).json({ error: "Username sudah digunakan" });
 
   try {
     await execute(

@@ -88,6 +88,9 @@ export function LoginPage() {
               <label className="text-sm font-medium text-[var(--text-secondary)] mb-1.5 block">Username</label>
               <input
                 autoFocus
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 className="w-full text-sm rounded-lg border border-[var(--border)] px-3.5 py-3"
