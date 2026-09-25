@@ -20,7 +20,6 @@ import { StatCard } from "../components/StatCard";
 import { ExportButtons } from "../components/ExportButtons";
 import { ActivityLogButton } from "../components/ActivityLogButton";
 import { fetchAllRows, type TableReport } from "../lib/printTable";
-import { AddGudangStockModal } from "../components/AddGudangStockModal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { EditGudangStockModal } from "../components/EditGudangStockModal";
 import { ItemPickerModal } from "../components/ItemPickerModal";
@@ -117,7 +116,6 @@ export function InventoryGudangStockPage({ gudang }: { gudang: string }) {
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
-  const [showAdd, setShowAdd] = useState(false);
   const [showPicker, setShowPicker] = useState(false);
   const [selectedItem, setSelectedItem] = useState<PickerItem | null>(null);
   const [tab, setTab] = useInventoryTab();
@@ -231,12 +229,6 @@ export function InventoryGudangStockPage({ gudang }: { gudang: string }) {
         <div className="flex flex-wrap items-center gap-2">
           <ActivityLogButton module="BARANG" estate={gudang} />
           {tab === "stok" && <ExportButtons total={total} buildReport={buildReport} fileName={`inventory-gudang-${gudang.toLowerCase()}`} />}
-          {canInput && (<button
-            onClick={() => setShowAdd(true)}
-            className="inline-flex items-center gap-1.5 text-sm px-3.5 py-2 rounded-md border border-[var(--accent-blue-border)] text-[var(--accent-blue)] hover:bg-[var(--accent-blue-bg)]"
-          >
-            <PackagePlus size={16} /> Tambah Item
-          </button>)}
           {canTx && (<button
             onClick={() => setShowPicker(true)}
             className="inline-flex items-center gap-1.5 text-sm px-3.5 py-2 rounded-md border border-[var(--accent-blue-border)] text-[var(--accent-blue)] hover:bg-[var(--accent-blue-bg)]"
@@ -426,17 +418,6 @@ export function InventoryGudangStockPage({ gudang }: { gudang: string }) {
         />
       )}
 
-      {showAdd && (
-        <AddGudangStockModal
-          gudang={gudang}
-          onClose={() => setShowAdd(false)}
-          onSuccess={() => {
-            setShowAdd(false);
-            load();
-            loadSummary();
-          }}
-        />
-      )}
 
       {editingItem && (
         <EditGudangStockModal
