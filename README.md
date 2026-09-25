@@ -10,25 +10,21 @@ label tujuan barang keluar untuk keperluan laporan, bukan stok terpisah.
 
 ## Menjalankan
 
-Backend (port 4000):
+Satu port saja: **http://localhost:5199** (frontend + API `/api/*` dalam satu dev server Vite).
+```
+npm install
+npm run dev
+```
+
+Import data (sekali saja, di folder `server`):
 ```
 cd server
-npm install
 npm run import        # import master barang dari data_raw.csv (sekali saja)
 npm run import:logs   # import histori stock in/out dari data_stock_in.csv & data_stock_out.csv
 npm run import:karyawan  # import master karyawan dari data_karyawan.csv
 npm run import:alat-berat # import master alat berat/kendaraan dari data_alat_berat.csv
 npm run import:bbm       # import histori Solar & Bensin dari data_bbm_*.csv
-npm run dev
 ```
-
-Frontend (port 5173/5174):
-```
-npm install
-npm run dev
-```
-
-Frontend akan proxy request `/api/*` ke backend di `http://localhost:4000`.
 
 ## Struktur data
 - `items` — master barang: kode, nama, satuan, buffer stock, keterangan (status AMAN/BUFFER STOCK),
