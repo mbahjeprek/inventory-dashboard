@@ -506,6 +506,7 @@ export function InventoryKlinikPage({ klinik }: { klinik: string }) {
 
       {editingItem && (
         <EditKlinikStockModal
+          klinik={klinik}
           item={editingItem}
           onClose={() => setEditingItem(null)}
           onSuccess={() => {

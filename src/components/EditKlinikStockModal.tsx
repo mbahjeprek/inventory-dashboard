@@ -1,17 +1,21 @@
 import { useState } from "react";
-import { X } from "lucide-react";
+import { Plus, Trash2, X } from "lucide-react";
 import { api, type KlinikStockItem } from "../lib/api";
+import { useAuth } from "../context/AuthContext";
+import { can } from "../lib/access";
 
 const tgl = (iso: string) => (iso ? iso.split("-").reverse().join("/") : "tanpa tanggal");
 
-// Buffer and note of one clinic stock row, plus fixing a batch's expiry date when it was entered
-// wrong. Quantities change through the Transaksi form (Stock In / Stock Out / Koreksi) so they
-// always leave a history row.
+// Buffer and note of one clinic stock row, fixing a batch's expiry date when it was entered wrong,
+// and adding batches by hand. A new batch adds stock, so it is booked as a Koreksi (found in a
+// physical count) or a Stok Masuk (just arrived) and always leaves a history row.
 export function EditKlinikStockModal({
+  klinik,
   item,
   onClose,
   onSuccess,
 }: {
+  klinik: string;
   item: KlinikStockItem;
   onClose: () => void;
   onSuccess: () => void;
@@ -21,10 +25,21 @@ export function EditKlinikStockModal({
   const [dates, setDates] = useState<Record<number, string>>(() => Object.fromEntries(item.batches.map((b) => [b.id, b.expired_date])));
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const { user } = useAuth();
+  const canKoreksi = can(user, "klinik.koreksi");
+  const canInput = can(user, "klinik.input");
+  const [newBatches, setNewBatches] = useState<{ exp: string; qty: number }[]>([]);
+  const [newAs, setNewAs] = useState<"KOREKSI" | "IN">(canKoreksi ? "KOREKSI" : "IN");
+  const qtyOf = (exp: string) => item.batches.find((b) => b.expired_date === exp)?.qty ?? 0;
 
   const submit = async () => {
     if (bufferStock < 0) {
       setError("Buffer tidak boleh negatif");
+      return;
+    }
+    const adds = newBatches.filter((b) => b.qty > 0);
+    if (newBatches.some((b) => b.qty < 0 || !Number.isInteger(b.qty))) {
+      setError("Jumlah batch baru harus bilangan bulat positif");
       return;
     }
     setSubmitting(true);
@@ -34,6 +49,16 @@ export function EditKlinikStockModal({
       // Changed expiry dates, one batch at a time (a batch moved onto an existing date merges).
       for (const b of item.batches) {
         if ((dates[b.id] ?? "") !== b.expired_date) await api.updateKlinikBatch(b.id, dates[b.id] ?? "");
+      }
+      // New batches (a date that already has a batch adds to it).
+      const note = "Tambah batch manual";
+      for (const b of adds) {
+        if (newAs === "KOREKSI") {
+          const current = (await api.klinikBatches(klinik, item.kode)).find((x) => x.expired_date === b.exp)?.qty ?? 0;
+          await api.klinikStockCorrection({ klinik, obat_kode: item.kode, actual_qty: current + b.qty, note, expired_date: b.exp });
+        } else {
+          await api.createKlinikTransaction({ klinik, obat_kode: item.kode, type: "IN", qty: b.qty, note, expired_date: b.exp || undefined });
+        }
       }
       onSuccess();
     } catch {
@@ -100,6 +125,67 @@ export function EditKlinikStockModal({
                 Kosongkan tanggal untuk barang tanpa expired. Batch yang dipindah ke tanggal yang sudah ada akan digabung
                 {item.batches.length > 1 ? ` (sekarang ${item.batches.map((b) => tgl(b.expired_date)).join(", ")})` : ""}.
               </p>
+            </div>
+          )}
+
+          {(canKoreksi || canInput) && (
+            <div>
+              {newBatches.length > 0 && (
+                <div className="space-y-2 mb-2">
+                  <div className="text-xs text-[var(--text-secondary)]">Batch baru</div>
+                  {newBatches.map((b, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <input
+                        type="date"
+                        value={b.exp}
+                        onChange={(e) => setNewBatches((cur) => cur.map((x, j) => (j === i ? { ...x, exp: e.target.value } : x)))}
+                        className="flex-1 text-sm rounded-md border border-[var(--border)] px-2 py-1.5"
+                      />
+                      <input
+                        type="number"
+                        min={1}
+                        value={b.qty || ""}
+                        placeholder="Jumlah"
+                        onChange={(e) => setNewBatches((cur) => cur.map((x, j) => (j === i ? { ...x, qty: parseInt(e.target.value) || 0 } : x)))}
+                        className="w-24 text-sm rounded-md border border-[var(--border)] px-2 py-1.5"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setNewBatches((cur) => cur.filter((_, j) => j !== i))}
+                        title="Batal tambah batch ini"
+                        className="p-1.5 rounded-md border border-[var(--accent-red-border)] text-[var(--accent-red)] hover:bg-[var(--accent-red-bg)]"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  ))}
+                  {newBatches.some((b) => b.qty > 0 && qtyOf(b.exp) > 0) && (
+                    <p className="text-[11px] text-[var(--accent-amber)]">Tanggal yang sudah punya batch akan ditambahkan ke batch tersebut.</p>
+                  )}
+                  <div className="flex flex-wrap items-center gap-3 text-xs text-[var(--text-secondary)]">
+                    <span>Dicatat sebagai:</span>
+                    {canKoreksi && (
+                      <label className="flex items-center gap-1.5 cursor-pointer">
+                        <input type="radio" name="newAs" checked={newAs === "KOREKSI"} onChange={() => setNewAs("KOREKSI")} />
+                        Koreksi (hasil hitung fisik)
+                      </label>
+                    )}
+                    {canInput && (
+                      <label className="flex items-center gap-1.5 cursor-pointer">
+                        <input type="radio" name="newAs" checked={newAs === "IN"} onChange={() => setNewAs("IN")} />
+                        Stok Masuk (barang datang)
+                      </label>
+                    )}
+                  </div>
+                </div>
+              )}
+              <button
+                type="button"
+                onClick={() => setNewBatches((cur) => [...cur, { exp: "", qty: 0 }])}
+                className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md border border-[var(--accent-blue-border)] text-[var(--accent-blue)] hover:bg-[var(--accent-blue-bg)]"
+              >
+                <Plus size={14} /> Tambah batch
+              </button>
             </div>
           )}
 
