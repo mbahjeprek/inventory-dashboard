@@ -87,11 +87,16 @@ export function TransactionModal({
   const parseQty = (v: string) => (decimal ? Math.round((parseFloat(v) || 0) * 1000) / 1000 : parseInt(v) || 0);
   const selisih = Math.round((actualQty - korBase) * 1000) / 1000;
 
+  // Klinik Stock In is always received by whoever is logged in; Stock Out goes to a patient (typed)
+  // or one of the estate's karyawan.
+  const selfReceives = isKlinik && mode === "IN";
+  const receiver = selfReceives ? (user?.nama ?? "") : penerima;
+
   // Every field on the form is required; only a Klinik batch's expiry date may stay empty (alat/BHP
   // without one), and nobody receives obat that is thrown away.
   const missing = [
     mode === "OUT" && !isKlinik && !tujuan && "Tujuan / Konsumen",
-    mode !== "KOREKSI" && !(mode === "OUT" && buang) && !penerima.trim() && (mode === "OUT" ? (isKlinik ? "Pasien / Penerima" : "Penerima / Pengambil") : "Diterima Oleh"),
+    mode !== "KOREKSI" && !(mode === "OUT" && buang) && !receiver.trim() && (mode === "OUT" ? (isKlinik ? "Pasien / Penerima" : "Penerima / Pengambil") : "Diterima Oleh"),
     !note.trim() && "Catatan",
   ].filter(Boolean);
 
@@ -139,7 +144,7 @@ export function TransactionModal({
           type: mode,
           qty,
           note,
-          penerima,
+          penerima: receiver,
           tujuan: mode === "OUT" && buang ? "DIBUANG" : undefined,
           expired_date: mode === "IN" ? expIn || undefined : batchOut === FEFO ? undefined : batchOut,
         });
@@ -309,7 +314,11 @@ export function TransactionModal({
               <label className="text-xs text-[var(--text-secondary)] mb-1 block">
                 {mode === "OUT" ? (isKlinik ? "Pasien / Penerima" : "Penerima / Pengambil") : "Diterima Oleh"}
               </label>
-              <KaryawanAutocomplete estate={scope?.name ?? "NILAM"} value={penerima} onChange={setPenerima} />
+              {selfReceives ? (
+                <div className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-2 text-[var(--text-secondary)] bg-[#f8fafc]">{receiver}</div>
+              ) : (
+                <KaryawanAutocomplete estate={scope?.name ?? "NILAM"} value={penerima} onChange={setPenerima} />
+              )}
             </div>
           )}
 
