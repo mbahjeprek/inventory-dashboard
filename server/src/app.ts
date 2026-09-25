@@ -3265,12 +3265,14 @@ async function opnameSnapshot(module: OpnameModule, estate: string, client?: Poo
       client
     );
   }
+  // Every jenis pupuk known in any estate (at least PUPUK NPK), with this estate's saldo or 0, so an
+  // estate without pupuk history yet (KNS/WJA) still gets its lines to count.
   return queryMany(
-    `SELECT jenis_pupuk kode, jenis_pupuk nama, 'KG' satuan, '' exp, saldo_stock::float8 stok_sistem FROM (
-       SELECT jenis_pupuk, saldo_stock, ROW_NUMBER() OVER (PARTITION BY jenis_pupuk ORDER BY tanggal_iso DESC, id DESC) rn
-       FROM pupuk_log WHERE estate = @estate AND saldo_stock IS NOT NULL
-     ) s WHERE rn = 1 ORDER BY jenis_pupuk`,
-    { estate },
+    `SELECT j kode, j nama, 'KG' satuan, '' exp,
+       COALESCE((SELECT saldo_stock FROM pupuk_log WHERE jenis_pupuk = j AND estate = @estate AND saldo_stock IS NOT NULL
+                 ORDER BY tanggal_iso DESC, id DESC LIMIT 1), 0)::float8 stok_sistem
+     FROM (SELECT DISTINCT jenis_pupuk j FROM pupuk_log UNION SELECT @npk) x ORDER BY j`,
+    { estate, npk: "PUPUK NPK" },
     client
   );
 }
