@@ -15,6 +15,7 @@ import {
   Sprout,
   Pill,
   Stethoscope,
+  Activity,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { useEstateFilter } from "../hooks/useEstateFilter";
@@ -100,6 +101,11 @@ const navSections: NavSection[] = [
       { to: "/users", label: "Pengguna", icon: KeyRound },
     ],
   },
+  {
+    title: "Monitoring",
+    collapsible: true,
+    items: [{ to: "/log-user", label: "Log Aktivitas User", icon: Activity }],
+  },
 ];
 
 const SIDEBAR_COLLAPSED_KEY = "sidebar-collapsed";
@@ -162,7 +168,7 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: { mobileOpen?: bo
   ).filter((g) => canModule(user, g.key.toUpperCase() as Module));
 
   const visibleSections = navSections.filter((s) => {
-    if (s.title === "Master Data") return isSuperuser;
+    if (s.title === "Master Data" || s.title === "Monitoring") return isSuperuser;
     return true;
   });
 

@@ -16,6 +16,7 @@ import { DashboardPage } from "./pages/DashboardPage";
 import { InventoryPupukPage } from "./pages/InventoryPupukPage";
 import { InventoryKlinikPage } from "./pages/InventoryKlinikPage";
 import { MasterObatPage } from "./pages/MasterObatPage";
+import { UserActivityPage } from "./pages/UserActivityPage";
 
 function App() {
   return (
@@ -192,6 +193,14 @@ function App() {
                 element={
                   <RequireSuperuser>
                     <UsersPage />
+                  </RequireSuperuser>
+                }
+              />
+              <Route
+                path="/log-user"
+                element={
+                  <RequireSuperuser>
+                    <UserActivityPage />
                   </RequireSuperuser>
                 }
               />

@@ -45,6 +45,8 @@ app.post("/api/auth/login", async (req, res) => {
     modules: row.role === "estate" ? parseModules(row.modules) : null,
   };
   setSessionCookie(res, signSession(user));
+  // Login history for the Log Aktivitas User page; a failure here never blocks the login.
+  await execute("INSERT INTO login_log (user_id) VALUES (@id)", { id: user.id }).catch((e) => console.error("login log failed", e));
   res.json({ user });
 });
 
@@ -2621,6 +2623,47 @@ for (const lr of LEDGER_ROUTES) {
     res.json({ success: true });
   });
 }
+
+// ---- Log Aktivitas User (superuser): who acted / logged in over a period ----
+// Built from activity_log (every add/edit/delete/transaction, all modules) and login_log. Every
+// account is listed, so the ones without a single action in the period stand out.
+app.get("/api/user-activity", requireSuperuser, async (req, res) => {
+  const { dateFrom = "", dateTo = "", tz = "" } = req.query as Record<string, string>;
+  const iso = /^\d{4}-\d{2}-\d{2}$/;
+  if (!iso.test(dateFrom) || !iso.test(dateTo)) return res.status(400).json({ error: "Periode tidak valid" });
+  const params = { dateFrom, dateTo, tz: /^[A-Za-z_]+(\/[A-Za-z0-9_+-]+)*$/.test(tz) ? tz : "Asia/Jakarta" };
+  const day = (col: string) => `(${col} AT TIME ZONE @tz)::date`;
+  const inRange = (col: string) => `${day(col)} BETWEEN @dateFrom::date AND @dateTo::date`;
+
+  const users = await queryMany(
+    `SELECT u.id, u.username, u.nama, u.role, u.estate, u.modules,
+            (SELECT MAX(created_at) FROM login_log l WHERE l.user_id = u.id) AS last_login,
+            (SELECT MAX(created_at) FROM activity_log a WHERE a.user_id = u.id) AS last_action
+     FROM users u ORDER BY u.nama`
+  );
+  const perUser = await queryMany(
+    `SELECT user_id, COUNT(*)::int aksi, COUNT(DISTINCT ${day("created_at")})::int hari_aktif,
+            COUNT(*) FILTER (WHERE aksi = 'Stok Masuk')::int stok_masuk,
+            COUNT(*) FILTER (WHERE aksi = 'Stok Keluar')::int stok_keluar,
+            COUNT(*) FILTER (WHERE aksi = 'Koreksi Stok')::int koreksi,
+            COUNT(*) FILTER (WHERE module = 'BARANG')::int m_gudang,
+            COUNT(*) FILTER (WHERE module = 'BBM')::int m_bbm,
+            COUNT(*) FILTER (WHERE module = 'PUPUK')::int m_pupuk,
+            COUNT(*) FILTER (WHERE module = 'KLINIK')::int m_klinik
+     FROM activity_log WHERE user_id IS NOT NULL AND ${inRange("created_at")} GROUP BY user_id`,
+    params
+  );
+  const logins = await queryMany(
+    `SELECT user_id, COUNT(*)::int login FROM login_log WHERE ${inRange("created_at")} GROUP BY user_id`,
+    params
+  );
+  const daily = await queryMany(
+    `SELECT user_id, to_char(${day("created_at")}, 'YYYY-MM-DD') tanggal, COUNT(*)::int aksi
+     FROM activity_log WHERE user_id IS NOT NULL AND ${inRange("created_at")} GROUP BY 1, 2 ORDER BY 2`,
+    params
+  );
+  res.json({ users, perUser, logins, daily });
+});
 
 // ---- Activity log listing: separate logs per module, scoped to the caller's estate ----
 app.get("/api/activity-log", async (req, res) => {

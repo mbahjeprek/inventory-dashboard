@@ -219,6 +219,14 @@ CREATE INDEX IF NOT EXISTS idx_bbm_estate ON bbm_log(estate);
 CREATE INDEX IF NOT EXISTS idx_bbm_jenis ON bbm_log(jenis_bbm);
 CREATE INDEX IF NOT EXISTS idx_bbm_date ON bbm_log(tanggal_iso);
 
+-- One row per successful login, for the Log Aktivitas User page (who logs in, who doesn't).
+CREATE TABLE IF NOT EXISTS login_log (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_login_log_user_date ON login_log(user_id, created_at);
+
 -- Audit trail of every change made through the dashboard, kept as two separate logs: module
 -- 'BARANG' (Inventory Gudang of every estate, incl. Nilam's items/transactions/stock in-out) and
 -- 'BBM'. `estate` is the gudang/lokasi the change belongs to, so estate users see only their own.

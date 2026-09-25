@@ -32,6 +32,25 @@ export type UserAccount = {
   created_at: string;
 };
 
+// Log Aktivitas User: every account plus its actions / logins in the period.
+export type UserActivity = {
+  users: (Omit<UserAccount, "created_at"> & { last_login: string | null; last_action: string | null })[];
+  perUser: {
+    user_id: number;
+    aksi: number;
+    hari_aktif: number;
+    stok_masuk: number;
+    stok_keluar: number;
+    koreksi: number;
+    m_gudang: number;
+    m_bbm: number;
+    m_pupuk: number;
+    m_klinik: number;
+  }[];
+  logins: { user_id: number; login: number }[];
+  daily: { user_id: number; tanggal: string; aksi: number }[];
+};
+
 export type Item = {
   id: number;
   kode: string;
@@ -634,6 +653,11 @@ export const api = {
   ) => req<{ success: boolean }>(`/api/bbm/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
 
   deleteBbm: (id: number) => req<{ success: boolean }>(`/api/bbm/${id}`, { method: "DELETE" }),
+
+  userActivity: (dateFrom: string, dateTo: string) =>
+    req<UserActivity>(
+      `/api/user-activity?${new URLSearchParams({ dateFrom, dateTo, tz: Intl.DateTimeFormat().resolvedOptions().timeZone })}`
+    ),
 
   users: (params: Record<string, string | number>) => {
     const qs = new URLSearchParams(params as any).toString();
