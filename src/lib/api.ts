@@ -31,6 +31,8 @@ export type UserAccount = {
   // Comma separated, e.g. "ZAMRUD,FIRUS" and "gudang.view,gudang.input"; null for a superuser.
   estates: string | null;
   perms: string | null;
+  // Temporary full inventory access in its own estates until this moment (null = none).
+  temp_full_until?: string | null;
   created_at: string;
 };
 

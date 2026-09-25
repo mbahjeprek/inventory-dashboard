@@ -2,7 +2,7 @@ import express from "express";
 import cookieParser from "cookie-parser";
 import type { PoolClient } from "pg";
 import { queryMany, queryOne, execute, withTransaction } from "./db.js";
-import { COOKIE_NAME, hashPassword, verifyPassword, signSession, verifySession, ESTATES, ALL_PERMS, parseList, type SessionUser } from "./auth.js";
+import { COOKIE_NAME, hashPassword, verifyPassword, signSession, verifySession, ESTATES, ALL_PERMS, MODULE_PERMS, parseList, type SessionUser } from "./auth.js";
 
 export const app = express();
 // Frontend and API are always same-origin (one Vercel domain in production, Vite's dev proxy
@@ -25,7 +25,16 @@ function setSessionCookie(res: express.Response, token: string) {
 
 // ---- Auth ----
 // ---- Session user: the cookie names the account, access is read fresh from users ----
-type UserRow = { id: number; username: string; nama: string; role: "superuser" | "estate"; estate: string | null; estates: string | null; perms: string | null };
+type UserRow = {
+  id: number;
+  username: string;
+  nama: string;
+  role: "superuser" | "estate";
+  estate: string | null;
+  estates: string | null;
+  perms: string | null;
+  temp_full_until: Date | null;
+};
 
 function toSessionUser(row: UserRow): SessionUser {
   const superuser = row.role === "superuser";
@@ -37,7 +46,10 @@ function toSessionUser(row: UserRow): SessionUser {
     role: row.role,
     estate: (estates[0] ?? null) as SessionUser["estate"],
     estates,
-    perms: superuser ? [...ALL_PERMS] : parseList(row.perms, ALL_PERMS),
+    perms: superuser
+      ? [...ALL_PERMS]
+      : // Temporary full access (users.temp_full_until): every inventory permission in its own estates.
+        [...new Set([...parseList(row.perms, ALL_PERMS), ...(row.temp_full_until && row.temp_full_until > new Date() ? MODULE_PERMS : [])])],
   };
 }
 
@@ -51,7 +63,7 @@ async function sessionFromCookie(req: express.Request): Promise<SessionUser | nu
   if (!claims) return null;
   const hit = sessionCache.get(claims.id);
   if (hit && Date.now() - hit.at < SESSION_TTL_MS) return hit.user;
-  const row = await queryOne<UserRow>("SELECT id, username, nama, role, estate, estates, perms FROM users WHERE id = @id", { id: claims.id });
+  const row = await queryOne<UserRow>("SELECT id, username, nama, role, estate, estates, perms, temp_full_until FROM users WHERE id = @id", { id: claims.id });
   if (!row) return null;
   const user = toSessionUser(row);
   sessionCache.set(user.id, { user, at: Date.now() });
@@ -1543,7 +1555,7 @@ app.get("/api/users", requireSuperuser, async (req, res) => {
   const offset = (Math.max(parseInt(page) || 1, 1) - 1) * limit;
 
   const data = await queryMany(
-    `SELECT id, username, nama, role, estates, perms, created_at FROM users ${where} ORDER BY ${sortCol} ${dir} LIMIT @limit OFFSET @offset`,
+    `SELECT id, username, nama, role, estates, perms, temp_full_until, created_at FROM users ${where} ORDER BY ${sortCol} ${dir} LIMIT @limit OFFSET @offset`,
     { ...params, limit, offset }
   );
 

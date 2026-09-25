@@ -121,8 +121,9 @@ export function pageAllowed(user: AuthUser | null, path: string): boolean {
 
 // One-line summary of an account's access for lists and reports, e.g.
 // "ZAMRUD, FIRUS · Gudang (Lihat, Input) · BBM (Lihat) · Master Obat".
-export function accessSummary(u: { role: string; estates: string | null; perms: string | null }): string {
+export function accessSummary(u: { role: string; estates: string | null; perms: string | null; temp_full_until?: string | null }): string {
   if (u.role === "superuser") return "Super User (semua akses)";
+  const temp = u.temp_full_until && new Date(u.temp_full_until) > new Date() ? new Date(u.temp_full_until) : null;
   const perms = (u.perms ?? "").split(",").filter(Boolean);
   const parts = MODULES.map((m) => {
     const acts = MODULE_ACTIONS[m].filter((a) => perms.includes(modulePerm(m, a)));
@@ -130,5 +131,6 @@ export function accessSummary(u: { role: string; estates: string | null; perms: 
   }).filter(Boolean);
   for (const g of OTHER_PERMS) for (const i of g.items) if (perms.includes(i.key)) parts.push(`${g.group === "Master Data" ? "Master " : ""}${i.label}`);
   const estates = (u.estates ?? "").split(",").filter(Boolean).join(", ") || "tanpa estate";
-  return `${estates} · ${parts.join(" · ") || "tanpa hak akses"}`;
+  const tempNote = temp ? ` · AKSES PENUH SEMENTARA s/d ${temp.toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" })}` : "";
+  return `${estates} · ${parts.join(" · ") || "tanpa hak akses"}${tempNote}`;
 }
