@@ -7,12 +7,14 @@ const inputCls = "w-full text-sm rounded-md border border-[var(--border)] px-3 p
 export function EditObatModal({
   obat,
   kategoriOptions,
+  jenisOptions,
   satuanOptions,
   onClose,
   onSuccess,
 }: {
   obat: Obat | null;
   kategoriOptions: string[];
+  jenisOptions: { kategori: string; jenis: string }[];
   satuanOptions: string[];
   onClose: () => void;
   onSuccess: () => void;
@@ -28,6 +30,13 @@ export function EditObatModal({
   });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  // Jenis/Kelompok: a dropdown of the jenis already used in the chosen kategori (all when none is
+  // chosen); "+ Jenis baru" switches to typing one.
+  const jenisList = [...new Set(jenisOptions.filter((j) => !form.kategori || j.kategori === form.kategori).map((j) => j.jenis))].sort((a, b) =>
+    a.localeCompare(b)
+  );
+  const [jenisBaru, setJenisBaru] = useState(false);
+  const typingJenis = jenisBaru || (!!form.jenis && !jenisList.includes(form.jenis) && !jenisOptions.some((j) => j.jenis === form.jenis));
   const set = (k: keyof typeof form) => (e: { target: { value: string } }) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
   const submit = async () => {
@@ -83,7 +92,42 @@ export function EditObatModal({
             </div>
             <div>
               <label className="text-xs text-[var(--text-secondary)] mb-1 block">Jenis/Kelompok</label>
-              <input value={form.jenis} onChange={set("jenis")} className={inputCls} />
+              {typingJenis ? (
+                <div className="flex gap-1">
+                  <input value={form.jenis} onChange={set("jenis")} placeholder="Jenis baru" autoFocus className={inputCls} />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setJenisBaru(false);
+                      setForm((f) => ({ ...f, jenis: "" }));
+                    }}
+                    title="Kembali ke pilihan"
+                    className="px-2 rounded-md border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              ) : (
+                <select
+                  value={form.jenis}
+                  onChange={(e) => {
+                    if (e.target.value === "__baru") {
+                      setJenisBaru(true);
+                      setForm((f) => ({ ...f, jenis: "" }));
+                    } else set("jenis")(e);
+                  }}
+                  className={inputCls}
+                >
+                  <option value="">- Pilih -</option>
+                  {form.jenis && !jenisList.includes(form.jenis) && <option value={form.jenis}>{form.jenis}</option>}
+                  {jenisList.map((j) => (
+                    <option key={j} value={j}>
+                      {j}
+                    </option>
+                  ))}
+                  <option value="__baru">+ Jenis baru...</option>
+                </select>
+              )}
             </div>
             <div>
               <label className="text-xs text-[var(--text-secondary)] mb-1 block">Satuan</label>

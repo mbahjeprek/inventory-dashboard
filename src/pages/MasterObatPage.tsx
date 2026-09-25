@@ -84,7 +84,11 @@ export function MasterObatPage() {
   const [search, setSearch] = useState("");
   const [kategori, setKategori] = useState("");
   const [satuan, setSatuan] = useState("");
-  const [options, setOptions] = useState<{ kategori: string[]; satuan: string[] }>({ kategori: [], satuan: [] });
+  const [options, setOptions] = useState<{ kategori: string[]; satuan: string[]; jenis: { kategori: string; jenis: string }[] }>({
+    kategori: [],
+    satuan: [],
+    jenis: [],
+  });
   const [sortBy, setSortBy] = useState<SortKey>("kode");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [page, setPage] = useState(1);
@@ -314,6 +318,7 @@ export function MasterObatPage() {
         <EditObatModal
           obat={editing}
           kategoriOptions={options.kategori}
+          jenisOptions={options.jenis}
           satuanOptions={options.satuan}
           onClose={() => {
             setEditing(null);

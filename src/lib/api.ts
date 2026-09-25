@@ -480,7 +480,7 @@ export const api = {
   gudangStockCorrection: (payload: { gudang: string; item_kode: string; actual_qty: number; note?: string }) =>
     req<{ success: boolean; delta: number }>("/api/gudang-stock/correction", { method: "POST", body: JSON.stringify(payload) }),
 
-  obatOptions: () => req<{ kategori: string[]; satuan: string[] }>("/api/obat/options"),
+  obatOptions: () => req<{ kategori: string[]; satuan: string[]; jenis: { kategori: string; jenis: string }[] }>("/api/obat/options"),
 
   obat: (params: Record<string, string | number>) => {
     const qs = new URLSearchParams(params as any).toString();

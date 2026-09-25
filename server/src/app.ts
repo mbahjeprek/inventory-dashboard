@@ -2425,7 +2425,8 @@ const obatPayload = (body: any) =>
 app.get("/api/obat/options", requireSuperuser, async (_req, res) => {
   const kategori = await queryMany<{ v: string }>("SELECT DISTINCT kategori v FROM obat WHERE kategori <> '' ORDER BY 1");
   const satuan = await queryMany<{ v: string }>("SELECT DISTINCT satuan v FROM obat WHERE satuan <> '' ORDER BY 1");
-  res.json({ kategori: kategori.map((r) => r.v), satuan: satuan.map((r) => r.v) });
+  const jenis = await queryMany<{ kategori: string; jenis: string }>("SELECT DISTINCT kategori, jenis FROM obat WHERE jenis <> '' ORDER BY 2");
+  res.json({ kategori: kategori.map((r) => r.v), satuan: satuan.map((r) => r.v), jenis });
 });
 
 app.get("/api/obat", requireSuperuser, async (req, res) => {
