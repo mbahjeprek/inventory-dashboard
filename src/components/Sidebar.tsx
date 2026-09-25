@@ -27,75 +27,36 @@ import { canModule, pageAllowed, userEstates, OPNAME_PATH, type Module } from ".
 type NavItem = { to: string; label: string; icon: typeof Package };
 type NavSection = { title?: string; collapsible?: boolean; items: NavItem[] };
 
-type DropdownOption = { to: string; label: string };
-type DropdownGroup = { key: string; icon: typeof Package; title: string; options: DropdownOption[] };
+// Every inventory module has one page per estate. The sidebar shows one estate picker plus one link
+// per module, so switching estate (same module) or module (same estate) is a single click.
+const ESTATES = [
+  { code: "NILAM", label: "Nilam", suffix: "" },
+  { code: "KNS", label: "KNS", suffix: "-kns" },
+  { code: "WJA", label: "WJA", suffix: "-wja" },
+  { code: "ZAMRUD", label: "Zamrud", suffix: "-zamrud" },
+  { code: "FIRUS", label: "Firus", suffix: "-firus" },
+];
 
-const GUDANG_GROUP: DropdownGroup = {
-  key: "gudang",
-  icon: Package,
-  title: "Gudang",
-  options: [
-    { to: "/inventory", label: "Nilam" },
-    { to: "/inventory-kns", label: "KNS" },
-    { to: "/inventory-wja", label: "WJA" },
-    { to: "/inventory-zamrud", label: "Zamrud" },
-    { to: "/inventory-firus", label: "Firus" },
-  ],
-};
+type ModuleLink = { key: Module; icon: typeof Package; title: string; base: string };
 
-const BBM_GROUP: DropdownGroup = {
-  key: "bbm",
-  icon: Fuel,
-  title: "BBM",
-  options: [
-    { to: "/inventory-bbm", label: "Nilam" },
-    { to: "/inventory-bbm-kns", label: "KNS" },
-    { to: "/inventory-bbm-wja", label: "WJA" },
-    { to: "/inventory-bbm-zamrud", label: "Zamrud" },
-    { to: "/inventory-bbm-firus", label: "Firus" },
-  ],
-};
+const MODULE_LINKS: ModuleLink[] = [
+  { key: "GUDANG", icon: Package, title: "Gudang", base: "/inventory" },
+  { key: "BBM", icon: Fuel, title: "BBM", base: "/inventory-bbm" },
+  { key: "PUPUK", icon: Sprout, title: "Pupuk NPK", base: "/inventory-pupuk" },
+  { key: "OLI", icon: Droplet, title: "Oli", base: "/inventory-oli" },
+  { key: "KLINIK", icon: Stethoscope, title: "Klinik", base: "/inventory-klinik" },
+];
 
-const PUPUK_GROUP: DropdownGroup = {
-  key: "pupuk",
-  icon: Sprout,
-  title: "Pupuk NPK",
-  options: [
-    { to: "/inventory-pupuk", label: "Nilam" },
-    { to: "/inventory-pupuk-kns", label: "KNS" },
-    { to: "/inventory-pupuk-wja", label: "WJA" },
-    { to: "/inventory-pupuk-zamrud", label: "Zamrud" },
-    { to: "/inventory-pupuk-firus", label: "Firus" },
-  ],
-};
+const pathFor = (m: ModuleLink, estate: string) => m.base + (ESTATES.find((e) => e.code === estate)?.suffix ?? "");
 
-const KLINIK_GROUP: DropdownGroup = {
-  key: "klinik",
-  icon: Stethoscope,
-  title: "Klinik",
-  options: [
-    { to: "/inventory-klinik", label: "Nilam" },
-    { to: "/inventory-klinik-kns", label: "KNS" },
-    { to: "/inventory-klinik-wja", label: "WJA" },
-    { to: "/inventory-klinik-zamrud", label: "Zamrud" },
-    { to: "/inventory-klinik-firus", label: "Firus" },
-  ],
-};
+// "/inventory-bbm-kns" -> { BBM, KNS }; null for any other page.
+function pageOf(pathname: string): { module: ModuleLink; estate: string } | null {
+  for (const m of MODULE_LINKS)
+    for (const e of ESTATES) if (pathFor(m, e.code) === pathname) return { module: m, estate: e.code };
+  return null;
+}
 
-const OLI_GROUP: DropdownGroup = {
-  key: "oli",
-  icon: Droplet,
-  title: "Oli",
-  options: [
-    { to: "/inventory-oli", label: "Nilam" },
-    { to: "/inventory-oli-kns", label: "KNS" },
-    { to: "/inventory-oli-wja", label: "WJA" },
-    { to: "/inventory-oli-zamrud", label: "Zamrud" },
-    { to: "/inventory-oli-firus", label: "Firus" },
-  ],
-};
-
-const DROPDOWN_GROUPS: DropdownGroup[] = [GUDANG_GROUP, BBM_GROUP, PUPUK_GROUP, OLI_GROUP, KLINIK_GROUP];
+const LAST_ESTATE_KEY = "sidebar-estate";
 
 const navSections: NavSection[] = [
   { items: [{ to: "/", label: "Dashboard", icon: LayoutDashboard }] },
@@ -144,7 +105,6 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: { mobileOpen?: bo
   const navigate = useNavigate();
   const location = useLocation();
   const [groupCollapsed, setGroupCollapsed] = useState<Record<string, boolean>>({});
-  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const isDesktop = useIsDesktop();
   const [minimizedPref, setMinimized] = useState(() => {
     try {
@@ -174,46 +134,55 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: { mobileOpen?: bo
   const ownEstates = userEstates(user);
   const picked = pickedEstates.filter((e) => ownEstates.includes(e));
   const shownEstates = picked.length ? picked : ownEstates;
-  const dropdownGroups: DropdownGroup[] = DROPDOWN_GROUPS.map((g) => ({
-    ...g,
-    options: g.options.filter((o) => shownEstates.includes(o.label.toUpperCase())),
-  })).filter((g) => g.options.length > 0 && canModule(user, g.key.toUpperCase() as Module));
+  const shownEstateList = ESTATES.filter((e) => shownEstates.includes(e.code));
+  const moduleLinks = MODULE_LINKS.filter((m) => canModule(user, m.key));
 
   const visibleSections = navSections
     .map((s) => ({ ...s, items: s.items.filter((it) => it.to === "/" || pageAllowed(user, it.to)) }))
     .filter((s) => !s.title || s.title === "Inventory" || s.items.length > 0);
 
-  const normalizedPathname = location.pathname;
-  const activeByGroup: Record<string, string | undefined> = {};
-  for (const group of dropdownGroups) {
-    activeByGroup[group.key] = group.options.find((o) => o.to === normalizedPathname)?.to;
-  }
+  // The estate the module links point at: the current page's estate, else the last one used (while
+  // it's still one of this account's estates), else the first.
+  const current = pageOf(location.pathname);
+  const [chosenEstate, setChosenEstate] = useState(() => {
+    try {
+      return localStorage.getItem(LAST_ESTATE_KEY) ?? "";
+    } catch {
+      return "";
+    }
+  });
+  const activeEstate =
+    current && shownEstates.includes(current.estate)
+      ? current.estate
+      : shownEstates.includes(chosenEstate)
+        ? chosenEstate
+        : shownEstateList[0]?.code;
 
   useEffect(() => {
-    for (const group of dropdownGroups) {
-      const active = activeByGroup[group.key];
-      if (!active) continue;
-      try {
-        localStorage.setItem(`last-${group.key}`, active);
-      } catch {
-        // ignore
-      }
+    if (!current) return;
+    setChosenEstate(current.estate);
+    try {
+      localStorage.setItem(LAST_ESTATE_KEY, current.estate);
+    } catch {
+      // ignore
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.pathname]);
 
-  // The remembered page is only used while it's still one of this account's options (the browser
-  // may have been used by another account before).
-  const selectedFor = (group: DropdownGroup) =>
-    activeByGroup[group.key] ??
-    (() => {
-      try {
-        const last = localStorage.getItem(`last-${group.key}`);
-        return group.options.some((o) => o.to === last) ? last! : group.options[0].to;
-      } catch {
-        return group.options[0].to;
-      }
-    })();
+  // On an inventory page, picking another estate opens the same module (and tab) there; elsewhere
+  // it only changes where the module links go.
+  const pickEstate = (code: string) => {
+    setChosenEstate(code);
+    try {
+      localStorage.setItem(LAST_ESTATE_KEY, code);
+    } catch {
+      // ignore
+    }
+    if (current) {
+      const tab = new URLSearchParams(location.search).get("tab");
+      navigate(pathFor(current.module, code) + (tab ? `?tab=${tab}` : ""));
+    }
+  };
 
   return (
     <>
@@ -248,12 +217,13 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: { mobileOpen?: bo
 
       <nav className="flex-1 px-3 space-y-4 overflow-y-auto overflow-x-hidden">
         {visibleSections.map((section, i) => {
-          // Sections start closed so the sidebar stays short; a closed section that holds the
+          // Sections start closed (except Inventory) so the sidebar stays short; a closed section that holds the
           // current page shows a dot so it's still clear where you are.
-          const isOpen = minimized || !section.collapsible ? true : !(groupCollapsed[section.title!] ?? true);
+          const isOpen =
+            minimized || !section.collapsible ? true : !(groupCollapsed[section.title!] ?? section.title !== "Inventory");
           const hasActive =
             section.items.some((it) => it.to === location.pathname || (it.to !== "/" && location.pathname.startsWith(`${it.to}/`))) ||
-            (section.title === "Inventory" && dropdownGroups.some((g) => !!activeByGroup[g.key]));
+            (section.title === "Inventory" && !!current);
 
           return (
             <div key={section.title ?? i} className="space-y-1">
@@ -266,7 +236,7 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: { mobileOpen?: bo
               {section.title && !minimized && section.collapsible && (
                 <button
                   onClick={() =>
-                    setGroupCollapsed((c) => ({ ...c, [section.title!]: !(c[section.title!] ?? true) }))
+                    setGroupCollapsed((c) => ({ ...c, [section.title!]: isOpen }))
                   }
                   className="w-full flex items-center justify-between px-3 py-1.5 rounded-md text-[10px] font-semibold tracking-wider text-white/55 uppercase hover:text-white hover:bg-white/5"
                 >
@@ -278,72 +248,49 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: { mobileOpen?: bo
                 </button>
               )}
 
+              {isOpen && section.title === "Inventory" && shownEstateList.length > 1 && (
+                <div className={`flex flex-wrap gap-1 pb-1 ${minimized ? "flex-col items-center" : "px-1"}`}>
+                  {shownEstateList.map((e) => (
+                    <button
+                      key={e.code}
+                      onClick={() => pickEstate(e.code)}
+                      title={`Estate ${e.label}`}
+                      className={`rounded-md font-semibold transition-colors ${
+                        minimized ? "w-11 py-1 text-[10px]" : "px-2 py-1 text-xs"
+                      } ${
+                        e.code === activeEstate
+                          ? "bg-[#b9f0c9] text-[var(--bg-sidebar)]"
+                          : "bg-white/10 text-white/70 hover:bg-white/20 hover:text-white"
+                      }`}
+                    >
+                      {minimized ? e.label.slice(0, 3).toUpperCase() : e.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+
               {isOpen &&
                 section.title === "Inventory" &&
-                dropdownGroups.map((group) => {
-                  const selected = selectedFor(group);
-                  const active = !!activeByGroup[group.key];
-                  const GroupIcon = group.icon;
-
-                  // Icon-only sidebar, or a group with just one estate (an estate account): the
-                  // menu opens that page directly instead of first asking for the estate.
-                  if (minimized || group.options.length === 1) {
-                    return (
-                      <NavLink
-                        key={group.key}
-                        to={selected}
-                        title={group.title}
-                        className={`flex items-center py-2.5 rounded-md text-sm font-semibold transition-colors ${
-                          minimized ? "justify-center" : "gap-3 px-3"
-                        } ${
-                          active
-                            ? "bg-white/15 text-white"
-                            : "text-white/70 hover:bg-white/10 hover:text-white"
-                        }`}
-                      >
-                        <GroupIcon size={17} className="shrink-0 text-[#b9f0c9]" />
-                        {!minimized && <span className="flex-1 text-left">{group.title}</span>}
-                      </NavLink>
-                    );
-                  }
-
-                  const expanded = expandedGroups[group.key] ?? false;
-
+                activeEstate &&
+                moduleLinks.map((m) => {
+                  const Icon = m.icon;
+                  const active = current?.module.key === m.key;
                   return (
-                    <div key={group.key}>
-                      <button
-                        onClick={() => setExpandedGroups((e) => ({ ...e, [group.key]: !expanded }))}
-                        className={`w-full flex items-center gap-3 py-2.5 px-3 rounded-md text-sm font-semibold transition-colors ${
-                          active
-                            ? "bg-white/15 text-white"
-                            : "text-white/70 hover:bg-white/10 hover:text-white"
-                        }`}
-                      >
-                        <GroupIcon size={17} className="shrink-0 text-[#b9f0c9]" />
-                        <span className="flex-1 text-left">{group.title}</span>
-                        <ChevronDown size={14} className={`transition-transform ${expanded ? "" : "-rotate-90"}`} />
-                      </button>
-
-                      {expanded && (
-                        <div className="mt-1 space-y-1">
-                          {group.options.map((o) => (
-                            <NavLink
-                              key={o.to}
-                              to={o.to}
-                              className={({ isActive }) =>
-                                `flex items-center py-2 pl-11 pr-3 rounded-md text-sm font-semibold transition-colors ${
-                                  isActive
-                                    ? "bg-white/15 text-white border-l-[3px] border-[#b9f0c9] pl-[41px]"
-                                    : "text-white/60 hover:bg-white/10 hover:text-white"
-                                }`
-                              }
-                            >
-                              {o.label}
-                            </NavLink>
-                          ))}
-                        </div>
-                      )}
-                    </div>
+                    <NavLink
+                      key={m.key}
+                      to={pathFor(m, activeEstate)}
+                      title={minimized ? m.title : undefined}
+                      className={`flex items-center gap-3 py-2.5 rounded-md text-sm font-semibold transition-colors ${
+                        minimized ? "justify-center px-0" : "px-3"
+                      } ${
+                        active
+                          ? `bg-white/15 text-white ${minimized ? "" : "border-l-[3px] border-[#b9f0c9] pl-[9px]"}`
+                          : "text-white/70 hover:bg-white/10 hover:text-white"
+                      }`}
+                    >
+                      <Icon size={17} className="shrink-0 text-[#b9f0c9]" />
+                      {!minimized && m.title}
+                    </NavLink>
                   );
                 })}
 
