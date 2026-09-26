@@ -474,3 +474,12 @@ UPDATE stock_in_log s SET created_at = t.created_at FROM transactions t
   WHERE s.created_at IS NULL AND t.mirror_source = 'stock_in_log' AND t.mirror_id = s.id;
 UPDATE stock_out_log s SET created_at = t.created_at FROM transactions t
   WHERE s.created_at IS NULL AND t.mirror_source = 'stock_out_log' AND t.mirror_id = s.id;
+
+-- Pupuk / oli rows bulk-imported from the sheets carry the import time, not when they happened: those
+-- (20+ rows in the same minute) get no time, like the other imported history.
+ALTER TABLE pupuk_log ALTER COLUMN created_at DROP NOT NULL;
+ALTER TABLE oli_log ALTER COLUMN created_at DROP NOT NULL;
+UPDATE pupuk_log SET created_at = NULL WHERE date_trunc('minute', created_at) IN
+  (SELECT date_trunc('minute', created_at) FROM pupuk_log WHERE created_at IS NOT NULL GROUP BY 1 HAVING COUNT(*) >= 20);
+UPDATE oli_log SET created_at = NULL WHERE date_trunc('minute', created_at) IN
+  (SELECT date_trunc('minute', created_at) FROM oli_log WHERE created_at IS NOT NULL GROUP BY 1 HAVING COUNT(*) >= 20);

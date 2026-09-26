@@ -1,6 +1,6 @@
-// A transaction's date with the time it was entered, "25/09/2026 14:03". The time is only shown when
-// the row was entered on that same date (created_at falls on it): imported history and back-dated
-// entries have no real time of their own, so they show the date alone.
+// A transaction's date with the time it was entered: "25/09/2026 14:03" when it was entered on that
+// date; a back-dated entry keeps its own date and says when it was entered, "01/09/2026 (input
+// 25/09/2026 15:04)". Imported history has no time (created_at NULL) and shows the date alone.
 const pad = (n: number) => String(n).padStart(2, "0");
 
 const localIso = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -13,7 +13,7 @@ export function tanggalWaktu(isoDate: string | null | undefined, createdAt: stri
   const c = new Date(createdAt);
   if (Number.isNaN(c.getTime())) return shown || "-";
   if (!isoDate) return shown || `${localIso(c).split("-").reverse().join("/")} ${timeText(c)}`;
-  return localIso(c) === isoDate ? `${shown} ${timeText(c)}` : shown;
+  return localIso(c) === isoDate ? `${shown} ${timeText(c)}` : `${shown} (input ${waktu(createdAt)})`;
 }
 
 // A moment (created_at) as "25/09/2026 14:03".
