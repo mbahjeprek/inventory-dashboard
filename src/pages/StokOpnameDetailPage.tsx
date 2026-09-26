@@ -21,7 +21,7 @@ import {
   X,
   Pencil,
 } from "lucide-react";
-import { api, errorText, type Opname, type OpnameLine, type PickerItem, type StockScope } from "../lib/api";
+import { api, ApiError, errorText, type Opname, type OpnameLine, type PickerItem, type StockScope } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { OpnameStatusBadge } from "../components/OpnameStatusBadge";
 import { canOpname } from "../lib/access";
@@ -378,10 +378,10 @@ export function StokOpnameDetailPage() {
                       await api.deleteOpname(opname.id, catatan);
                     } catch (e) {
                       // Undoing would take stock that has been used since: offer to drop only the record.
-                      if (opname.status !== "APPROVED") throw e;
+                      if (opname.status !== "APPROVED" || !(e instanceof ApiError && e.status === 400)) throw e;
                       setDialog({
                         title: "Koreksi tidak bisa dibalik",
-                        message: `${errorText(e, "Stok tidak cukup")}. Stok sudah terpakai sejak opname disetujui. Hapus catatan opname saja tanpa mengubah stok?`,
+                        message: `${errorText(e, "Stok tidak cukup", true)}. Stok sudah terpakai sejak opname disetujui. Hapus catatan opname saja tanpa mengubah stok?`,
                         confirmLabel: "Hapus tanpa ubah stok",
                         cancelLabel: "Batal",
                         tone: "red",

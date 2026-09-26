@@ -1153,7 +1153,8 @@ async function applyStockEffect(
   const signedQty = qty * direction;
   const delta = type === "IN" ? signedQty : -signedQty;
 
-  const item = (await queryOne<any>("SELECT * FROM items WHERE id = @id", { id: item_id }, client))!;
+  // Locked, so two movements of the same barang at once can't overwrite each other's count.
+  const item = (await queryOne<any>("SELECT * FROM items WHERE id = @id FOR UPDATE", { id: item_id }, client))!;
   const stockTersedia = item.stock_tersedia + delta;
   const stockIn = item.stock_in + (type === "IN" ? signedQty : 0);
   const stockOut = item.stock_out + (type === "OUT" ? signedQty : 0);
@@ -1237,7 +1238,13 @@ app.post("/api/transactions", requireEstate("NILAM"), async (req, res) => {
   if (evidenceId === undefined) return;
 
   let transfer: TransferChange = null;
+  try {
   await withTransaction(async (client) => {
+    // The form checks the stock too, but it may be stale (another tab / user): never below zero.
+    if (type === "OUT") {
+      const cur = (await queryOne<{ s: number }>("SELECT stock_tersedia s FROM items WHERE id = @id FOR UPDATE", { id: item_id }, client))!;
+      if (qty > cur.s) throw new StockError(`Stock tersedia hanya ${cur.s}`);
+    }
     const result = await queryOne<{ id: number }>(
       `INSERT INTO transactions (item_id, tujuan, type, qty, note, penerima, evidence_id)
        VALUES (@item_id, @tujuan, @type, @qty, @note, @penerima, @evidenceId::uuid) RETURNING id`,
@@ -1256,6 +1263,12 @@ app.post("/api/transactions", requireEstate("NILAM"), async (req, res) => {
     await applyStockEffect(client, item_id, type, qty, 1);
     if (type === "OUT") transfer = await addTransfer(client, req, result!.id, item.kode, tujuan, qty, penerima, note, evidenceId);
   });
+  } catch (e) {
+    // Refused (or failed): the photo can be used again when the form is sent again.
+    await releaseEvidence(evidenceId);
+    if (e instanceof StockError) return res.status(400).json({ error: e.message });
+    throw e;
+  }
 
   await logActivity(req, {
     module: "BARANG",
@@ -3941,8 +3954,9 @@ async function refuseIfLocationOpen(o: OpnameRow, client: PoolClient) {
     { m: o.module, e: o.estate, id: o.id },
     client
   );
-  if (other) throw new StockError(`${OPNAME_MODULE_LABEL[o.module]} ${o.estate} sedang Stok Opname #${other.id}; selesaikan itu dulu`);
+  if (other) throw new LocationOpenError(`${OPNAME_MODULE_LABEL[o.module]} ${o.estate} sedang Stok Opname #${other.id}; selesaikan itu dulu`);
 }
+class LocationOpenError extends StockError {}
 
 // Moves the stock of one opname line by `delta` from where it is now (a superuser correcting or
 // deleting an approved opname), booked as a Koreksi. Returns the stock before and after.
@@ -4000,6 +4014,9 @@ app.post("/api/stock-opname/:id/delete", async (req, res) => {
       return { o, undone };
     });
   } catch (e) {
+    // 409 = another opname of the location is open (finish that first); 400 = the stock was used since,
+    // so the client may offer deleting only the record (keep_stock).
+    if (e instanceof LocationOpenError) return res.status(409).json({ error: e.message });
     if (e instanceof StockError) return res.status(400).json({ error: e.message, can_keep_stock: true });
     throw e;
   }

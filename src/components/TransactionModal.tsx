@@ -159,7 +159,7 @@ export function TransactionModal({
       else await api.createTransaction({ evidence_id: evidenceId ?? "", item_id: item.id, tujuan, type: mode, qty, note, penerima });
       onSuccess();
     } catch (e) {
-      setError(errorText(e, "Gagal menyimpan transaksi"));
+      setError(errorText(e, "Gagal menyimpan transaksi", true));
     } finally {
       setSubmitting(false);
     }
