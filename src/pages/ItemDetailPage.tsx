@@ -9,6 +9,7 @@ import { useAuth } from "../context/AuthContext";
 import { can } from "../lib/access";
 import { useDragScroll } from "../hooks/useDragScroll";
 import { EvidenceLink } from "../components/EvidenceInput";
+import { tanggalWaktu, waktu } from "../lib/datetime";
 
 const TUJUAN_OPTIONS = ["NILAM", "KNS", "WJA", "ZAMRUD", "FIRUS"];
 
@@ -19,10 +20,8 @@ const SOURCE_LABEL: Record<Movement["source"], string> = {
 };
 
 function formatDate(m: Movement) {
-  if (m.source === "MANUAL" && m.date) {
-    return new Date(m.date).toLocaleString("id-ID");
-  }
-  return m.dateDisplay || "-";
+  if (m.source === "MANUAL") return waktu(m.date);
+  return tanggalWaktu(m.date, m.created_at, m.dateDisplay);
 }
 
 export function ItemDetailPage() {

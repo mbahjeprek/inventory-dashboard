@@ -29,7 +29,8 @@ import { StatCard } from "../components/StatCard";
 import { ExportButtons } from "../components/ExportButtons";
 import { ItemPickerModal } from "../components/ItemPickerModal";
 import type { TableReport } from "../lib/printTable";
-import { OPNAME_MODULE_LABEL, OPNAME_STATUS, expLabel, fmtQty, isoDisplay, opnameModule, opnameWhole, round3, when } from "../lib/opname";
+import { OPNAME_MODULE_LABEL, OPNAME_STATUS, expLabel, fmtQty, opnameModule, opnameWhole, round3, when } from "../lib/opname";
+import { tanggalWaktu } from "../lib/datetime";
 
 const PAGE_SIZE = 50;
 type Filter = "" | "belum" | "selisih" | "sesuai";
@@ -261,7 +262,7 @@ export function StokOpnameDetailPage() {
   const buildReport = async (): Promise<TableReport> => ({
     title: `Berita Acara Stok Opname #${opname.id} - ${locName}`,
     subtitle: [
-      `Tanggal opname: ${isoDisplay(opname.tanggal)} · Status: ${OPNAME_STATUS[opname.status].label}${opname.catatan ? ` · ${opname.catatan}` : ""}`,
+      `Tanggal opname: ${tanggalWaktu(opname.tanggal, opname.created_at)} · Status: ${OPNAME_STATUS[opname.status].label}${opname.catatan ? ` · ${opname.catatan}` : ""}`,
       [
         `Dibuat: ${opname.created_by_nama ?? "-"} (${when(opname.created_at)})`,
         opname.submitted_by_nama && `Diajukan: ${opname.submitted_by_nama} (${when(opname.submitted_at)})`,
@@ -330,7 +331,7 @@ export function StokOpnameDetailPage() {
             <OpnameStatusBadge status={opname.status} />
           </div>
           <p className="text-sm text-[var(--text-secondary)] mt-0.5">
-            Tanggal {isoDisplay(opname.tanggal)} · Dibuat {opname.created_by_nama ?? "-"}
+            Tanggal {tanggalWaktu(opname.tanggal, opname.created_at)} · Dibuat {opname.created_by_nama ?? "-"}
             {opname.submitted_by_nama && ` · Diajukan ${opname.submitted_by_nama}`}
             {opname.approved_by_nama && ` · Disetujui ${opname.approved_by_nama} (${when(opname.approved_at)})`}
             {opname.catatan && ` · ${opname.catatan}`}

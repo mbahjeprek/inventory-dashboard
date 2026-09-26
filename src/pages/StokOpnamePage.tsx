@@ -5,7 +5,8 @@ import { api, errorText, type OpnameListRow, type OpnameModule } from "../lib/ap
 import { useAuth } from "../context/AuthContext";
 import { OpnameStatusBadge } from "../components/OpnameStatusBadge";
 import { canOpname, userEstates } from "../lib/access";
-import { OPNAME_MODULES, OPNAME_MODULE_LABEL, isoDisplay, localToday, opnameModule } from "../lib/opname";
+import { OPNAME_MODULES, OPNAME_MODULE_LABEL, localToday, opnameModule } from "../lib/opname";
+import { tanggalWaktu } from "../lib/datetime";
 
 const PAGE_SIZE = 25;
 
@@ -118,7 +119,7 @@ export function StokOpnamePage() {
                     className="border-t border-[var(--border)] hover:bg-[#f8fafc] cursor-pointer"
                   >
                     <td className="px-4 py-2.5 font-medium text-[var(--accent-blue)] whitespace-nowrap">#{r.id}</td>
-                    <td className="px-4 py-2.5 whitespace-nowrap">{isoDisplay(r.tanggal)}</td>
+                    <td className="px-4 py-2.5 whitespace-nowrap">{tanggalWaktu(r.tanggal, r.created_at)}</td>
                     <td className="px-4 py-2.5 whitespace-nowrap">
                       {OPNAME_MODULE_LABEL[r.module]} {r.estate}
                     </td>

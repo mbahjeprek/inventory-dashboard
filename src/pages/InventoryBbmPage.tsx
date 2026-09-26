@@ -13,6 +13,7 @@ import { useAuth } from "../context/AuthContext";
 import { can } from "../lib/access";
 import { useDragScroll } from "../hooks/useDragScroll";
 import { EvidenceLink } from "../components/EvidenceInput";
+import { tanggalWaktu } from "../lib/datetime";
 
 const JENIS_OPTIONS = ["SOLAR", "BENSIN"];
 
@@ -137,7 +138,7 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
       // Same rules as the table cells: 0/empty Stok Masuk & Keluar show "-", Saldo shows 0.
       rows: all.map((r) => [
         r.periode,
-        r.tanggal,
+        tanggalWaktu(r.tanggal_iso, r.created_at, r.tanggal),
         r.no_spb,
         r.diterima || ((r.pinjam ?? 0) > 0 ? r.pinjam : null),
         r.pemakaian || ((r.pinjam ?? 0) < 0 ? -r.pinjam! : null),
@@ -372,7 +373,7 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
                 rows.map((r) => (
                   <tr key={r.id} className="border-t border-[var(--border)] hover:bg-[#f8fafc]">
                     <td className="px-4 py-2.5 whitespace-nowrap text-[var(--text-secondary)] text-xs">{r.periode || "-"}</td>
-                    <td className="px-4 py-2.5 whitespace-nowrap text-[var(--text-secondary)]">{r.tanggal || "-"}</td>
+                    <td className="px-4 py-2.5 whitespace-nowrap text-[var(--text-secondary)]">{tanggalWaktu(r.tanggal_iso, r.created_at, r.tanggal)}</td>
                     <td className="px-4 py-2.5 text-xs text-[var(--text-secondary)]">{r.no_spb || "-"}</td>
                     <td className="px-4 py-2.5 text-right font-medium text-[var(--accent-green)]">
                       {r.diterima ? r.diterima.toLocaleString("id-ID") : (r.pinjam ?? 0) > 0 ? <>{r.pinjam!.toLocaleString("id-ID")}<span className="ml-1 text-[10px] font-normal text-[var(--text-muted)]">pinjam</span></> : "-"}

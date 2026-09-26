@@ -13,6 +13,7 @@ import { useDragScroll } from "../hooks/useDragScroll";
 import { useAuth } from "../context/AuthContext";
 import { can } from "../lib/access";
 import { EvidenceLink } from "../components/EvidenceInput";
+import { tanggalWaktu } from "../lib/datetime";
 
 const localIso = (d: Date) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -145,7 +146,7 @@ export function InventoryPupukPage({ estate }: { estate: string }) {
       ],
       rows: all.map((r) => [
         r.periode,
-        r.tanggal,
+        tanggalWaktu(r.tanggal_iso, r.created_at, r.tanggal),
         r.jenis_pupuk,
         r.divisi,
         r.no_embrace,
@@ -325,7 +326,7 @@ export function InventoryPupukPage({ estate }: { estate: string }) {
                 rows.map((r) => (
                   <tr key={r.id}>
                     <td className="px-4 py-2.5 whitespace-nowrap text-[var(--text-secondary)] text-xs">{r.periode || "-"}</td>
-                    <td className="px-4 py-2.5 whitespace-nowrap text-[var(--text-secondary)]">{r.tanggal || "-"}</td>
+                    <td className="px-4 py-2.5 whitespace-nowrap text-[var(--text-secondary)]">{tanggalWaktu(r.tanggal_iso, r.created_at, r.tanggal)}</td>
                     <td className="px-4 py-2.5 whitespace-nowrap text-xs">{r.jenis_pupuk}</td>
                     <td className="px-4 py-2.5 text-xs">{r.divisi || "-"}</td>
                     <td className="px-4 py-2.5 text-xs text-[var(--text-secondary)]">{r.no_embrace || "-"}</td>

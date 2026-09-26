@@ -245,6 +245,7 @@ export type BbmRecord = {
   periode: string;
   tanggal: string;
   tanggal_iso: string | null;
+  created_at?: string | null;
   no_spb: string;
   stock_awal: number | null;
   diterima: number | null;
@@ -267,6 +268,7 @@ export type PupukRecord = {
   periode: string;
   tanggal: string;
   tanggal_iso: string | null;
+  created_at?: string | null;
   divisi: string;
   no_embrace: string;
   kode_barang: string;
@@ -290,6 +292,7 @@ export type OliRecord = {
   periode: string;
   tanggal: string;
   tanggal_iso: string | null;
+  created_at?: string | null;
   no_embrace: string;
   diterima: number | null;
   pemakaian: number | null;
@@ -336,6 +339,7 @@ export type Movement = {
   id: number;
   date: string | null;
   dateDisplay: string;
+  created_at?: string | null;
   type: "IN" | "OUT";
   source: "STOCK_IN" | "STOCK_OUT" | "MANUAL";
   tujuan: string | null;
@@ -380,7 +384,7 @@ export type Pinjaman = {
   created_at: string;
   dibuat_oleh: string;
   evidence_id: string | null;
-  kembali: { qty: number; tanggal_iso: string; note: string; batal: boolean; oleh: string; evidence_id: string | null }[];
+  kembali: { qty: number; tanggal_iso: string; created_at?: string | null; note: string; batal: boolean; oleh: string; evidence_id: string | null }[];
 };
 export type PinjamanBarang = { kode: string; nama: string; satuan: string; stok: number };
 export type OpnameStatus = "DRAFT" | "SUBMITTED" | "APPROVED" | "BATAL";

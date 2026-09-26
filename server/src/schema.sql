@@ -460,3 +460,17 @@ ALTER TABLE pupuk_log ADD COLUMN IF NOT EXISTS evidence_id UUID;
 ALTER TABLE oli_log ADD COLUMN IF NOT EXISTS evidence_id UUID;
 ALTER TABLE pinjaman ADD COLUMN IF NOT EXISTS evidence_id UUID;
 ALTER TABLE pinjaman_kembali ADD COLUMN IF NOT EXISTS evidence_id UUID;
+
+-- Time of entry for the rows that had only a date (BBM, Nilam stock in / out). Added without a default
+-- first so older rows stay NULL (their time is unknown) instead of all getting the migration time; new
+-- rows get now(). Nilam rows mirrored from a manual transaction take that transaction's time.
+ALTER TABLE bbm_log ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ;
+ALTER TABLE bbm_log ALTER COLUMN created_at SET DEFAULT now();
+ALTER TABLE stock_in_log ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ;
+ALTER TABLE stock_in_log ALTER COLUMN created_at SET DEFAULT now();
+ALTER TABLE stock_out_log ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ;
+ALTER TABLE stock_out_log ALTER COLUMN created_at SET DEFAULT now();
+UPDATE stock_in_log s SET created_at = t.created_at FROM transactions t
+  WHERE s.created_at IS NULL AND t.mirror_source = 'stock_in_log' AND t.mirror_id = s.id;
+UPDATE stock_out_log s SET created_at = t.created_at FROM transactions t
+  WHERE s.created_at IS NULL AND t.mirror_source = 'stock_out_log' AND t.mirror_id = s.id;

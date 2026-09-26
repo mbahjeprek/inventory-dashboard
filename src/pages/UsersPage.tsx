@@ -7,6 +7,7 @@ import { useAuth } from "../context/AuthContext";
 import { ExportButtons } from "../components/ExportButtons";
 import { fetchAllRows, type TableReport } from "../lib/printTable";
 import { accessSummary } from "../lib/access";
+import { waktu } from "../lib/datetime";
 
 type SortKey = "username" | "nama" | "created_at";
 
@@ -113,7 +114,7 @@ export function UsersPage() {
         u.username,
         u.nama,
         accessSummary(u),
-        new Date(u.created_at).toLocaleDateString("id-ID"),
+        waktu(u.created_at),
       ]),
     };
   };
@@ -196,7 +197,7 @@ export function UsersPage() {
                       )}
                     </td>
                     <td className="px-4 py-2.5 text-[var(--text-secondary)]">
-                      {new Date(u.created_at).toLocaleDateString("id-ID")}
+                      {waktu(u.created_at)}
                     </td>
                     <td className="px-4 py-2.5 text-right">
                       <div className="flex justify-end gap-2">

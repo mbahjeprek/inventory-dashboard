@@ -1070,13 +1070,13 @@ app.get("/api/items/:id/movements", requireEstate("NILAM"), async (req, res) => 
   const itemId = req.params.id;
 
   const stockIn = await queryMany<any>(
-    `SELECT id, tanggal_terima_iso as date, tanggal_terima as "dateDisplay", qty, satuan, tujuan, keterangan as note, nama_vendor as ref, po_in_akss as "refCode", evidence_id
+    `SELECT id, tanggal_terima_iso as date, tanggal_terima as "dateDisplay", qty, satuan, tujuan, keterangan as note, nama_vendor as ref, po_in_akss as "refCode", evidence_id, created_at
      FROM stock_in_log WHERE item_id = @id`,
     { id: itemId }
   );
 
   const stockOut = await queryMany<any>(
-    `SELECT id, tanggal_keluar_iso as date, tanggal_keluar as "dateDisplay", qty, satuan, tujuan, keterangan as note, penerima as ref, no_embrace_gudang as "refCode", evidence_id
+    `SELECT id, tanggal_keluar_iso as date, tanggal_keluar as "dateDisplay", qty, satuan, tujuan, keterangan as note, penerima as ref, no_embrace_gudang as "refCode", evidence_id, created_at
      FROM stock_out_log WHERE item_id = @id`,
     { id: itemId }
   );
@@ -1103,6 +1103,7 @@ app.get("/api/items/:id/movements", requireEstate("NILAM"), async (req, res) => 
       ref: r.ref === "-" ? "" : r.ref,
       refCode: r.refCode,
       evidence_id: r.evidence_id,
+      created_at: r.created_at,
     })),
     ...stockOut.map((r) => ({
       id: r.id,
@@ -1117,10 +1118,12 @@ app.get("/api/items/:id/movements", requireEstate("NILAM"), async (req, res) => 
       ref: r.ref,
       refCode: r.refCode,
       evidence_id: r.evidence_id,
+      created_at: r.created_at,
     })),
     ...manual.map((r) => ({
       id: r.id,
-      date: r.date,
+      // A timestamp (the others are "yyyy-mm-dd" text), as ISO text so the sort below compares strings.
+      date: new Date(r.date).toISOString(),
       dateDisplay: r.dateDisplay,
       type: r.type,
       source: "MANUAL",
@@ -4687,7 +4690,7 @@ app.get("/api/pinjaman", async (req, res) => {
   const data = await queryMany(
     `SELECT p.*, COALESCE(u.nama, u.username, '') AS dibuat_oleh,
        COALESCE((SELECT json_agg(json_build_object('qty', k.qty, 'tanggal_iso', k.tanggal_iso, 'note', k.note, 'batal', k.batal,
-                   'oleh', COALESCE(ku.nama, ku.username, ''), 'evidence_id', k.evidence_id) ORDER BY k.id)
+                   'oleh', COALESCE(ku.nama, ku.username, ''), 'evidence_id', k.evidence_id, 'created_at', k.created_at) ORDER BY k.id)
                  FROM pinjaman_kembali k LEFT JOIN users ku ON ku.id = k.user_id WHERE k.pinjaman_id = p.id), '[]') AS kembali
      FROM pinjaman p LEFT JOIN users u ON u.id = p.user_id ${where}
      ORDER BY (p.status = 'DIPINJAM') DESC, p.id DESC LIMIT @limit OFFSET @offset`,

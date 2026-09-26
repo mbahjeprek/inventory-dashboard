@@ -5,7 +5,8 @@ import { useAuth } from "../context/AuthContext";
 import { EvidenceInput, EvidenceLink, useEvidenceEnabled } from "../components/EvidenceInput";
 import { can, canModule, userEstates } from "../lib/access";
 import { LOAN_LATE_DAYS, loanDays, useOpenPinjaman } from "../hooks/useOpenPinjaman";
-import { OPNAME_MODULES, OPNAME_MODULE_LABEL, fmtQty, isoDisplay, opnameModule, round3 } from "../lib/opname";
+import { OPNAME_MODULES, OPNAME_MODULE_LABEL, fmtQty, opnameModule, round3 } from "../lib/opname";
+import { tanggalWaktu } from "../lib/datetime";
 
 const ESTATES = ["NILAM", "KNS", "WJA", "ZAMRUD", "FIRUS"];
 const inputCls = "w-full text-sm rounded-md border border-[var(--border)] px-3 py-2";
@@ -130,7 +131,7 @@ export function PinjamanPage() {
                 return (
                   <tr key={l.id} className="align-top">
                     <td className="px-4 py-2.5 whitespace-nowrap">
-                      <div>{isoDisplay(l.tanggal_iso)}</div>
+                      <div>{tanggalWaktu(l.tanggal_iso, l.created_at)}</div>
                       <div className="text-[11px] text-[var(--text-muted)]">#{l.id}</div>
                       {l.status === "DIPINJAM" && (
                         <div
@@ -166,7 +167,7 @@ export function PinjamanPage() {
                       <div className="text-[var(--text-muted)]">oleh {l.dibuat_oleh || "-"}</div>
                       {l.kembali.map((k, i) => (
                         <div key={i} className="mt-1 text-[var(--text-muted)]">
-                          {isoDisplay(k.tanggal_iso)} · {k.batal ? "Dibatalkan" : `Kembali ${fmtQty(k.qty)} ${l.satuan}`}
+                          {tanggalWaktu(k.tanggal_iso, k.created_at)} · {k.batal ? "Dibatalkan" : `Kembali ${fmtQty(k.qty)} ${l.satuan}`}
                           {k.note && `: ${k.note}`} ({k.oleh || "-"}) <EvidenceLink id={k.evidence_id} label="foto" />
                         </div>
                       ))}
