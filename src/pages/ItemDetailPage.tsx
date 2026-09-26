@@ -83,7 +83,7 @@ export function ItemDetailPage() {
         await api.deleteStockOut(m.id);
       }
     } catch (e) {
-      window.alert(errorText(e, "Gagal menghapus transaksi"));
+      window.alert(errorText(e, "Gagal menghapus transaksi", true));
       return;
     }
     load();

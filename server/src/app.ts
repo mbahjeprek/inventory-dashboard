@@ -4860,6 +4860,56 @@ async function loanBack(req: express.Request, res: express.Response, batal: bool
 app.post("/api/pinjaman/:id/kembali", (req, res) => loanBack(req, res, false));
 app.post("/api/pinjaman/:id/batal", (req, res) => loanBack(req, res, true));
 
+// Superuser only: removes a finished loan (Dibatalkan / Lunas) with every movement row it booked in
+// both estates. Everything lent has come back by then, so the stock ends where it is: Nilam's items
+// counters are booked back, and a BBM / pupuk / oli saldo row between the loan and its return drops the
+// loan's qty again (it was counted in there). An open loan is cancelled or returned first.
+app.post("/api/pinjaman/:id/delete", async (req, res) => {
+  if (req.user!.role !== "superuser") return res.status(403).json({ error: "Hanya Super User yang bisa menghapus pinjaman" });
+  const alasan = String(req.body?.catatan ?? "").trim();
+  if (!alasan) return res.status(400).json({ error: "Alasan penghapusan wajib diisi" });
+  const l = await withTransaction(async (client) => {
+    const l = await queryOne<LoanRow>("SELECT * FROM pinjaman WHERE id = @id FOR UPDATE", { id: Number(req.params.id) || 0 }, client);
+    if (!l) return refuse(res, 404, "Pinjaman tidak ditemukan");
+    if (l.status === "DIPINJAM") return refuse(res, 400, "Pinjaman ini belum kembali. Batalkan atau kembalikan dulu, baru bisa dihapus.");
+    const pid = { pid: l.id };
+    if (l.module === "GUDANG") {
+      const txs = await queryMany<{ item_id: number; type: "IN" | "OUT"; qty: number }>(
+        "SELECT item_id, type, qty FROM transactions WHERE pinjaman_id = @pid ORDER BY id",
+        pid,
+        client
+      );
+      for (const t of txs) await applyStockEffect(client, t.item_id, t.type, t.qty, -1);
+      for (const t of ["transactions", "stock_in_log", "stock_out_log", "gudang_stock_tx"]) await execute(`DELETE FROM ${t} WHERE pinjaman_id = @pid`, pid, client);
+    } else if (l.module === "KLINIK") {
+      await execute("DELETE FROM klinik_stock_tx WHERE pinjaman_id = @pid", pid, client);
+    } else {
+      const t = SALDO_LEDGER[l.module as SaldoModule];
+      const rows = await queryMany<{ id: number; iso: string; estate: string; jenis: string; pinjam: number }>(
+        `SELECT id, tanggal_iso iso, ${t.estate} estate, ${t.jenis} jenis, pinjam FROM ${t.table} WHERE pinjaman_id = @pid ORDER BY tanggal_iso, id`,
+        pid,
+        client
+      );
+      for (const r of rows) {
+        await execute(
+          `UPDATE ${t.table} SET saldo_stock = ROUND((saldo_stock - @q)::numeric, 3)
+           WHERE ${t.jenis} = @jenis AND ${t.estate} = @estate AND saldo_stock IS NOT NULL AND pinjaman_id IS DISTINCT FROM @pid
+             AND (tanggal_iso, id) > (@iso, @id)`,
+          { ...pid, q: r.pinjam, jenis: r.jenis, estate: r.estate, iso: r.iso, id: r.id },
+          client
+        );
+      }
+      await execute(`DELETE FROM ${t.table} WHERE pinjaman_id = @pid`, pid, client);
+    }
+    await execute("DELETE FROM pinjaman_kembali WHERE pinjaman_id = @pid", pid, client);
+    await execute("DELETE FROM pinjaman WHERE id = @pid", pid, client);
+    return l;
+  });
+  if (!l) return;
+  await logLoan(req, l, "Hapus Pinjaman", `Status: ${l.status === "LUNAS" ? "Lunas" : "Dibatalkan"}; ${fmtLoanQty(l.qty, l.satuan)} ${l.dari_estate} → ${l.ke_estate}; Alasan: ${alasan}`);
+  res.json({ success: true });
+});
+
 // ---- Perbandingan pemakaian antar estate (Dashboard tab "Perbandingan") ----
 // What left each estate's stock per period: Gudang / Klinik Stok Keluar, BBM pemakaian, pupuk
 // keluar, oli pemakaian. Koreksi, pinjaman, obat dibuang and a Nilam Stok Keluar that was a transfer

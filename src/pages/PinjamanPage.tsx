@@ -38,6 +38,7 @@ export function PinjamanPage() {
   const [reload, setReload] = useState(0);
   const [creating, setCreating] = useState(false);
   const [returning, setReturning] = useState<{ loan: Pinjaman; batal: boolean } | null>(null);
+  const [deleting, setDeleting] = useState<Pinjaman | null>(null);
   const refreshOpen = useOpenPinjaman((s) => s.refresh);
 
   useEffect(() => {
@@ -55,6 +56,7 @@ export function PinjamanPage() {
   const done = () => {
     setCreating(false);
     setReturning(null);
+    setDeleting(null);
     setReload((n) => n + 1);
     refreshOpen();
   };
@@ -188,6 +190,14 @@ export function PinjamanPage() {
                           )}
                         </div>
                       )}
+                      {user?.role === "superuser" && l.status !== "DIPINJAM" && (
+                        <button
+                          onClick={() => setDeleting(l)}
+                          className="text-xs px-2.5 py-1.5 rounded-md border border-[var(--accent-red-border)] text-[var(--accent-red)] hover:bg-[var(--accent-red-bg)]"
+                        >
+                          Hapus
+                        </button>
+                      )}
                     </td>
                   </tr>
                 );
@@ -199,6 +209,7 @@ export function PinjamanPage() {
 
       {creating && <CreatePinjamanModal modules={inputModules} myEstates={myEstates} onClose={() => setCreating(false)} onSuccess={done} />}
       {returning && <KembaliModal loan={returning.loan} batal={returning.batal} onClose={() => setReturning(null)} onSuccess={done} />}
+      {deleting && <HapusModal loan={deleting} onClose={() => setDeleting(null)} onSuccess={done} />}
     </div>
   );
 }
@@ -473,6 +484,49 @@ function KembaliModal({ loan, batal, onClose, onSuccess }: { loan: Pinjaman; bat
         className={`w-full py-2.5 rounded-md text-sm font-medium text-white hover:opacity-90 disabled:opacity-50 ${batal ? "bg-[var(--accent-red)]" : "bg-[var(--accent-blue)]"}`}
       >
         {submitting ? "Menyimpan..." : batal ? "Batalkan Pinjaman" : "Simpan Pengembalian"}
+      </button>
+    </Modal>
+  );
+}
+
+// Superuser: a finished loan (Dibatalkan / Lunas) - e.g. a test or a wrong input - removed with all its
+// rows in both estates' history; the stock stays as it is (everything lent already came back).
+function HapusModal({ loan, onClose, onSuccess }: { loan: Pinjaman; onClose: () => void; onSuccess: () => void }) {
+  const [note, setNote] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
+
+  const submit = async () => {
+    setError("");
+    if (!note.trim()) return setError("Alasan penghapusan wajib diisi");
+    setSubmitting(true);
+    try {
+      await api.deletePinjaman(loan.id, note.trim());
+      onSuccess();
+    } catch (e) {
+      setError(errorText(e, "Gagal menghapus pinjaman", true));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Modal title="Hapus Pinjaman" subtitle={`#${loan.id} · ${loan.nama} · ${loan.dari_estate} → ${loan.ke_estate}`} onClose={onClose}>
+      <p className="text-xs rounded-md px-3 py-2 bg-[var(--accent-red-bg)] text-[var(--accent-red)]">
+        Pinjaman ini beserta semua transaksinya di riwayat {OPNAME_MODULE_LABEL[loan.module]} {loan.dari_estate} dan {loan.ke_estate} dihapus permanen.
+        Stok tidak berubah (barangnya sudah kembali semua).
+      </p>
+      <div>
+        <label className={labelCls}>Alasan penghapusan</label>
+        <input value={note} onChange={(e) => setNote(e.target.value)} className={inputCls} placeholder="cth. data percobaan" />
+      </div>
+      {error && <p className="text-xs text-[var(--accent-red)]">{error}</p>}
+      <button
+        onClick={submit}
+        disabled={submitting}
+        className="w-full py-2.5 rounded-md text-sm font-medium text-white bg-[var(--accent-red)] hover:opacity-90 disabled:opacity-50"
+      >
+        {submitting ? "Menghapus..." : "Hapus Pinjaman"}
       </button>
     </Modal>
   );

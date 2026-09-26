@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { Search, ChevronLeft, ChevronRight, Droplet, PackagePlus, Pencil, Trash2 } from "lucide-react";
 import { api, errorText, type OliRecord, type OliSummary } from "../lib/api";
@@ -296,7 +297,13 @@ export function InventoryOliPage({ estate }: { estate: string }) {
                     {showActions && (
                       <td className="px-4 py-2.5 text-right">
                         <div className="inline-flex gap-1.5">
-                          {canEdit && (
+                          {r.pinjaman_id != null && (
+                            // Booked by a Pinjaman: changed / removed only on the Pinjaman page.
+                            <Link to="/pinjaman" title="Kelola lewat menu Pinjaman" className="text-xs text-[var(--accent-blue)] hover:underline whitespace-nowrap">
+                              Pinjaman #{r.pinjaman_id}
+                            </Link>
+                          )}
+                          {!r.pinjaman_id && canEdit && (
                             <button
                               onClick={() => setEditing(r)}
                               title="Edit"
@@ -305,7 +312,7 @@ export function InventoryOliPage({ estate }: { estate: string }) {
                               <Pencil size={14} />
                             </button>
                           )}
-                          {canDelete && (
+                          {!r.pinjaman_id && canDelete && (
                             <button
                               onClick={() => setConfirmDelete(r)}
                               title="Hapus"
@@ -376,7 +383,7 @@ export function InventoryOliPage({ estate }: { estate: string }) {
             try {
               await api.deleteOli(confirmDelete.id);
             } catch (e) {
-              window.alert(errorText(e, "Gagal menghapus transaksi"));
+              window.alert(errorText(e, "Gagal menghapus transaksi", true));
               return;
             }
             refresh();

@@ -249,6 +249,7 @@ export type BbmRecord = {
   stock_awal: number | null;
   diterima: number | null;
   pinjam: number | null;
+  pinjaman_id?: number | null;
   pemakaian: number | null;
   evidence_id?: string | null;
   saldo_stock: number | null;
@@ -874,6 +875,9 @@ export const api = {
   uploadEvidence: (data: string) => req<{ id: string }>("/api/evidence", { method: "POST", body: JSON.stringify({ data }) }),
   batalPinjaman: (id: number, note: string) =>
     req<{ success: boolean }>(`/api/pinjaman/${id}/batal`, { method: "POST", body: JSON.stringify({ note }) }),
+  // Superuser only, a Dibatalkan / Lunas loan: removed with its movement rows in both estates.
+  deletePinjaman: (id: number, catatan: string) =>
+    req<{ success: boolean }>(`/api/pinjaman/${id}/delete`, { method: "POST", body: JSON.stringify({ catatan }) }),
 
   opnameList: (params: Record<string, string | number>) =>
     req<{ data: OpnameListRow[]; total: number; page: number; pageSize: number }>(
