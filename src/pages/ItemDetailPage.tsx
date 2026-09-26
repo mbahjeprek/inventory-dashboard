@@ -239,7 +239,12 @@ export function ItemDetailPage() {
                       </td>
                       {showActions && (
                         <td className="px-4 py-2.5 text-right">
-                          {canDelete && (<button
+                          {m.pinjaman_id != null && (
+                            <Link to="/pinjaman?status=" title="Kelola lewat menu Pinjaman" className="text-xs text-[var(--accent-blue)] hover:underline whitespace-nowrap">
+                              Pinjaman #{m.pinjaman_id}
+                            </Link>
+                          )}
+                          {!m.pinjaman_id && canDelete && (<button
                             onClick={() => setConfirmDeleteMovement(m)}
                             title="Hapus riwayat"
                             className="p-1.5 rounded-md border border-[var(--accent-red-border)] text-[var(--accent-red)] hover:bg-[var(--accent-red-bg)]"

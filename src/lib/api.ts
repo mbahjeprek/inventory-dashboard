@@ -91,6 +91,7 @@ export type LedgerTx = {
   alloc?: { exp: string; qty: number }[] | null;
   // Stok Masuk booked automatically by a Stok Keluar from another gudang; changed only from there.
   is_transfer: boolean;
+  pinjaman_id?: number | null;
   evidence_id?: string | null;
   kode: string;
   nama: string;
@@ -340,6 +341,7 @@ export type Movement = {
   date: string | null;
   dateDisplay: string;
   created_at?: string | null;
+  pinjaman_id?: number | null;
   type: "IN" | "OUT";
   source: "STOCK_IN" | "STOCK_OUT" | "MANUAL";
   tujuan: string | null;

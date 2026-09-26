@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { ArrowLeftRight, ArrowRight, Plus, X } from "lucide-react";
 import { api, errorText, type OpnameModule, type Pinjaman, type PinjamanBarang, type PinjamanStatus } from "../lib/api";
+import { useSearchParams } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { EvidenceInput, EvidenceLink, useEvidenceEnabled } from "../components/EvidenceInput";
 import { can, canModule, userEstates } from "../lib/access";
@@ -32,7 +33,9 @@ export function PinjamanPage() {
   const inputModules = OPNAME_MODULES.filter((m) => can(user, inputPerm(m)));
 
   const [module, setModule] = useState("");
-  const [status, setStatus] = useState("OPEN");
+  // ?status= (from a "Pinjaman #N" link in a history table) opens every status, not only the open ones.
+  const [searchParams] = useSearchParams();
+  const [status, setStatus] = useState(searchParams.get("status") ?? "OPEN");
   const [rows, setRows] = useState<Pinjaman[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -123,6 +126,11 @@ export function PinjamanPage() {
                 <td colSpan={8} className="px-4 py-10 text-center text-[var(--text-muted)]">
                   <ArrowLeftRight size={20} className="inline mb-1" />
                   <div>{status === "OPEN" ? "Tidak ada pinjaman yang belum kembali." : "Belum ada pinjaman."}</div>
+                  {status === "OPEN" && (
+                    <button onClick={() => setStatus("")} className="mt-1 text-xs text-[var(--accent-blue)] hover:underline">
+                      Lihat pinjaman yang sudah lunas / dibatalkan
+                    </button>
+                  )}
                 </td>
               </tr>
             ) : (

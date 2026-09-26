@@ -6,6 +6,7 @@ import { ConfirmDialog } from "./ConfirmDialog";
 import { EditLedgerTxModal } from "./EditLedgerTxModal";
 import { fetchAllRows, type TableReport } from "../lib/printTable";
 import { useDragScroll } from "../hooks/useDragScroll";
+import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { can } from "../lib/access";
 import { EvidenceLink } from "./EvidenceInput";
@@ -239,6 +240,11 @@ export function LedgerHistory({ scope, type, refreshKey }: { scope: StockScope; 
                           <span className="text-[11px] text-[var(--text-muted)]" title="Ubah atau hapus lewat stok keluar di gudang asalnya">
                             Otomatis
                           </span>
+                        ) : r.pinjaman_id ? (
+                          // Booked by a Pinjaman: changed / removed only on the Pinjaman page.
+                          <Link to="/pinjaman?status=" title="Kelola lewat menu Pinjaman" className="text-xs text-[var(--accent-blue)] hover:underline whitespace-nowrap">
+                            Pinjaman #{r.pinjaman_id}
+                          </Link>
                         ) : (
                           <div className="inline-flex gap-1.5">
                             {canEdit && (<button

@@ -401,7 +401,7 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
                         <div className="inline-flex gap-1.5">
                           {r.pinjaman_id != null && (
                             // Booked by a Pinjaman: changed / removed only on the Pinjaman page.
-                            <Link to="/pinjaman" title="Kelola lewat menu Pinjaman" className="text-xs text-[var(--accent-blue)] hover:underline whitespace-nowrap">
+                            <Link to="/pinjaman?status=" title="Kelola lewat menu Pinjaman" className="text-xs text-[var(--accent-blue)] hover:underline whitespace-nowrap">
                               Pinjaman #{r.pinjaman_id}
                             </Link>
                           )}

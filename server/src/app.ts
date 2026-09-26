@@ -1070,13 +1070,13 @@ app.get("/api/items/:id/movements", requireEstate("NILAM"), async (req, res) => 
   const itemId = req.params.id;
 
   const stockIn = await queryMany<any>(
-    `SELECT id, tanggal_terima_iso as date, tanggal_terima as "dateDisplay", qty, satuan, tujuan, keterangan as note, nama_vendor as ref, po_in_akss as "refCode", evidence_id, created_at
+    `SELECT id, tanggal_terima_iso as date, tanggal_terima as "dateDisplay", qty, satuan, tujuan, keterangan as note, nama_vendor as ref, po_in_akss as "refCode", evidence_id, created_at, pinjaman_id
      FROM stock_in_log WHERE item_id = @id`,
     { id: itemId }
   );
 
   const stockOut = await queryMany<any>(
-    `SELECT id, tanggal_keluar_iso as date, tanggal_keluar as "dateDisplay", qty, satuan, tujuan, keterangan as note, penerima as ref, no_embrace_gudang as "refCode", evidence_id, created_at
+    `SELECT id, tanggal_keluar_iso as date, tanggal_keluar as "dateDisplay", qty, satuan, tujuan, keterangan as note, penerima as ref, no_embrace_gudang as "refCode", evidence_id, created_at, pinjaman_id
      FROM stock_out_log WHERE item_id = @id`,
     { id: itemId }
   );
@@ -1104,6 +1104,7 @@ app.get("/api/items/:id/movements", requireEstate("NILAM"), async (req, res) => 
       refCode: r.refCode,
       evidence_id: r.evidence_id,
       created_at: r.created_at,
+      pinjaman_id: r.pinjaman_id,
     })),
     ...stockOut.map((r) => ({
       id: r.id,
@@ -1119,6 +1120,7 @@ app.get("/api/items/:id/movements", requireEstate("NILAM"), async (req, res) => 
       refCode: r.refCode,
       evidence_id: r.evidence_id,
       created_at: r.created_at,
+      pinjaman_id: r.pinjaman_id,
     })),
     ...manual.map((r) => ({
       id: r.id,
@@ -3120,7 +3122,7 @@ for (const lr of LEDGER_ROUTES) {
     const limit = Math.min(parseInt(pageSize) || 50, 500);
     const offset = (Math.max(parseInt(page) || 1, 1) - 1) * limit;
     const data = await queryMany(
-      `SELECT t.id, t.created_at, t.type, t.qty, t.tujuan, t.penerima, t.note, t.is_correction, t.evidence_id,
+      `SELECT t.id, t.created_at, t.type, t.qty, t.tujuan, t.penerima, t.note, t.is_correction, t.evidence_id, t.pinjaman_id,
               ${l === GUDANG_LEDGER ? "t.transfer_from_id IS NOT NULL" : "false"} AS is_transfer,
               ${l === KLINIK_LEDGER ? "t.alloc" : "NULL"} AS alloc,
               m.kode, m.nama, m.satuan, COALESCE(u.nama, u.username, '') AS input_oleh
