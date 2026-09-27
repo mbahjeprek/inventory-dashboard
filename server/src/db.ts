@@ -9,6 +9,10 @@ export const pool = new Pool({
   connectionString,
   ssl: { rejectUnauthorized: false },
 });
+// Supabase closes connections that sit idle; the pool then emits "error" for that idle client and,
+// with no listener, Node kills the whole process. The pool drops the client and opens a new one on
+// the next query, so logging is enough.
+pool.on("error", (e) => console.error("Postgres idle client error:", e.message));
 
 // Translates named `@param` tokens (as used throughout the route handlers, ported from the
 // better-sqlite3 named-parameter style) into positional $1..$n placeholders + an ordered array,
