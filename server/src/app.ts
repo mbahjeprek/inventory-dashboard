@@ -216,7 +216,7 @@ async function stockLocations(req: express.Request): Promise<StockLocation[]> {
   if (/^\/klinik-stock\/\d+\/batches$/.test(p))
     return K((await queryOne<{ v: string }>("SELECT klinik v FROM klinik_stock WHERE id = @id", { id: p.split("/")[2] }))?.v);
   if (/^\/klinik-stock\/history\/\d+$/.test(p)) return K(await col("klinik_stock_tx", "klinik"));
-  if (p === "/bbm" && m === "POST") return B(b.lokasi);
+  if ((p === "/bbm" || p === "/bbm/batch") && m === "POST") return B(b.lokasi);
   if (/^\/bbm\/\d+$/.test(p)) return B(await col("bbm_log", "lokasi"));
   if (p === "/pupuk" && m === "POST") return P(b.estate);
   if (/^\/pupuk\/\d+$/.test(p)) return P(await col("pupuk_log", "estate"));
@@ -2205,6 +2205,115 @@ app.post("/api/bbm", async (req, res) => {
   });
   res.json({ success: true, id: result!.id, saldo_stock: saldoBaru });
 });
+
+// Input Banyak: many Stok Masuk / Keluar of one jenis + lokasi on one date in one go (the day's
+// usage), sharing one foto bukti. All or nothing: a row that doesn't pass (or would take the saldo
+// below zero) refuses the whole batch and names the row (`row`, 0-based) so the form can mark it.
+// The saldo runs on from the latest row, as for a single entry; the lokasi's ledger is locked while
+// the rows are booked so another entry can't slip in between.
+const BBM_BATCH_MAX = 200;
+app.post("/api/bbm/batch", async (req, res) => {
+  const { jenis_bbm, lokasi, tanggal_iso } = req.body ?? {};
+  const rows: any[] = Array.isArray(req.body?.rows) ? req.body.rows : [];
+  if (!["SOLAR", "BENSIN"].includes(jenis_bbm)) return res.status(400).json({ error: "Jenis BBM tidak valid" });
+  if (!BBM_LOKASI_OPTIONS.includes(lokasi)) return res.status(400).json({ error: "Lokasi tidak valid" });
+  if (!estateAllowed(req.user!, lokasi)) return res.status(403).json({ error: "Akses ditolak" });
+  if (!ISO_DATE.test(tanggal_iso || "")) return res.status(400).json({ error: "Tanggal tidak valid" });
+  if (!rows.length) return res.status(400).json({ error: "Belum ada baris yang diisi" });
+  if (rows.length > BBM_BATCH_MAX) return res.status(400).json({ error: `Maksimal ${BBM_BATCH_MAX} baris sekali simpan` });
+
+  type BatchRow = { tipe: "DITERIMA" | "PEMAKAIAN"; jumlah: number; estate: string; no_spb: string; keterangan: string; kode_kendaraan: string; hm_terakhir: string };
+  const clean: BatchRow[] = [];
+  for (const [i, r] of rows.entries()) {
+    const refuseRow = (error: string) => res.status(400).json({ error: `Baris ${i + 1}: ${error}`, row: i });
+    const tipe = r?.tipe;
+    const jumlah = Number(r?.jumlah);
+    if (!["DITERIMA", "PEMAKAIAN"].includes(tipe)) return refuseRow("tipe transaksi tidak valid");
+    if (!Number.isFinite(jumlah) || jumlah <= 0) return refuseRow("jumlah harus lebih dari 0");
+    const keluar = tipe === "PEMAKAIAN";
+    const estate = keluar ? String(r?.estate ?? "").trim() : lokasi;
+    if (!estate) return refuseRow("estate / sub-lokasi wajib dipilih");
+    clean.push({
+      tipe,
+      jumlah: round3(jumlah),
+      estate,
+      no_spb: String(r?.no_spb ?? "").trim(),
+      keterangan: String(r?.keterangan ?? "").trim(),
+      kode_kendaraan: keluar ? String(r?.kode_kendaraan ?? "").trim() : "",
+      hm_terakhir: keluar ? String(r?.hm_terakhir ?? "").trim() : "",
+    });
+  }
+  const evidenceId = await claimEvidence(req, res);
+  if (evidenceId === undefined) return;
+
+  const { tanggal, periode } = isoToIndoDate(tanggal_iso);
+  let booked: { row: BatchRow; before: number; after: number }[];
+  try {
+    booked = await withTransaction(async (client) => {
+      await execute("SELECT pg_advisory_xact_lock(hashtext(@key))", { key: `bbm:${jenis_bbm}:${lokasi}` }, client);
+      let saldo = (await latestSaldoRow("BBM", lokasi, jenis_bbm, client))?.saldo_stock ?? 0;
+      const out = [];
+      for (const [i, row] of clean.entries()) {
+        const before = saldo;
+        if (row.tipe === "PEMAKAIAN" && row.jumlah > before) throw new BatchRowError(i, `Baris ${i + 1}: stok tinggal ${round3(before).toLocaleString("id-ID")} LTR`);
+        saldo = round3(row.tipe === "DITERIMA" ? before + row.jumlah : before - row.jumlah);
+        await execute(
+          `INSERT INTO bbm_log
+            (jenis_bbm, lokasi, estate, periode, tanggal, tanggal_iso, no_spb, diterima, pemakaian, saldo_stock, keterangan, kode_kendaraan, hm_terakhir, evidence_id)
+           VALUES (@jenis_bbm, @lokasi, @estate, @periode, @tanggal, @tanggal_iso, @no_spb, @diterima, @pemakaian, @saldo, @keterangan, @kode_kendaraan, @hm_terakhir, @evidenceId::uuid)`,
+          {
+            jenis_bbm,
+            lokasi,
+            periode,
+            tanggal,
+            tanggal_iso,
+            evidenceId,
+            ...row,
+            diterima: row.tipe === "DITERIMA" ? row.jumlah : null,
+            pemakaian: row.tipe === "PEMAKAIAN" ? row.jumlah : null,
+            saldo,
+          },
+          client
+        );
+        out.push({ row, before, after: saldo });
+      }
+      return out;
+    });
+  } catch (e) {
+    await releaseEvidence(evidenceId);
+    if (e instanceof BatchRowError) return res.status(400).json({ error: e.message, row: e.row });
+    throw e;
+  }
+
+  await logActivities(
+    req,
+    booked.map(({ row, before, after }) => ({
+      module: "BBM",
+      estate: lokasi,
+      aksi: row.tipe === "DITERIMA" ? "Stok Masuk" : "Stok Keluar",
+      objek: `${jenis_bbm} · ${tanggal}${row.no_spb ? ` · SPB ${row.no_spb}` : ""}`,
+      detail: [
+        `Jumlah: ${row.jumlah} LTR`,
+        `Saldo: ${before} → ${after}`,
+        row.tipe === "PEMAKAIAN" && `Estate: ${row.estate}`,
+        row.kode_kendaraan && `Kendaraan: ${row.kode_kendaraan}`,
+        row.hm_terakhir && `HM: ${row.hm_terakhir}`,
+        row.keterangan && `Keterangan: ${row.keterangan}`,
+        `Input Banyak (${booked.length} baris)`,
+      ]
+        .filter(Boolean)
+        .join("; "),
+    }))
+  );
+  res.json({ success: true, count: booked.length, saldo_stock: booked[booked.length - 1].after });
+});
+class BatchRowError extends Error {
+  row: number;
+  constructor(row: number, message: string) {
+    super(message);
+    this.row = row;
+  }
+}
 
 app.put("/api/bbm/:id", requireSuperuser, async (req, res) => {
   const existing = await queryOne<any>("SELECT * FROM bbm_log WHERE id = @id", { id: req.params.id });

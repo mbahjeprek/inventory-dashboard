@@ -1,12 +1,13 @@
 import { Link } from "react-router-dom";
 import { useEffect, useState } from "react";
-import { Search, ChevronLeft, ChevronRight, Fuel, Droplet, PackagePlus, Pencil, Trash2 } from "lucide-react";
+import { Search, ChevronLeft, ChevronRight, Fuel, Droplet, PackagePlus, Pencil, Trash2, ListPlus } from "lucide-react";
 import { api, errorText, type BbmRecord, type BbmSummary } from "../lib/api";
 import { StatCard } from "../components/StatCard";
 import { ExportButtons } from "../components/ExportButtons";
 import { ActivityLogButton } from "../components/ActivityLogButton";
 import { fetchAllRows, type TableReport } from "../lib/printTable";
 import { BbmTransactionModal } from "../components/BbmTransactionModal";
+import { BbmBatchModal } from "../components/BbmBatchModal";
 import { EditBbmModal } from "../components/EditBbmModal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useAuth } from "../context/AuthContext";
@@ -34,6 +35,8 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [showTransaksi, setShowTransaksi] = useState(false);
+  const [showBatch, setShowBatch] = useState(false);
+  const [notice, setNotice] = useState("");
   const { user } = useAuth();
   // Edit / delete buttons follow the account's ticked permissions (Pengguna); the Aksi column shows
   // when it may do either.
@@ -194,6 +197,15 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
             buildReport={buildReport}
             fileName={`inventory-bbm${lokasiLock ? `-${lokasiLock.toLowerCase()}` : ""}`}
           />
+          {canInput && (
+            <button
+              onClick={() => setShowBatch(true)}
+              title="Banyak transaksi satu tanggal sekaligus"
+              className="inline-flex items-center gap-1.5 text-sm px-3.5 py-2 rounded-md border border-[var(--accent-blue-border)] text-[var(--accent-blue)] hover:bg-[var(--accent-blue-bg)]"
+            >
+              <ListPlus size={16} /> Input Banyak
+            </button>
+          )}
           {canTx && (<button
             onClick={() => setShowTransaksi(true)}
             className="inline-flex items-center gap-1.5 text-sm px-3.5 py-2 rounded-md border border-[var(--accent-blue-border)] text-[var(--accent-blue)] hover:bg-[var(--accent-blue-bg)]"
@@ -451,6 +463,25 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
           </div>
         </div>
       </div>
+
+      {notice && (
+        <div className="fixed bottom-4 right-4 z-50 text-sm rounded-md px-4 py-2.5 shadow-lg bg-[var(--accent-green)] text-white">{notice}</div>
+      )}
+
+      {showBatch && (
+        <BbmBatchModal
+          summary={summary}
+          lokasiLock={lokasiLock}
+          onClose={() => setShowBatch(false)}
+          onSuccess={(count) => {
+            setShowBatch(false);
+            setNotice(`${count} transaksi BBM tersimpan`);
+            setTimeout(() => setNotice(""), 3000);
+            loadSummary();
+            load();
+          }}
+        />
+      )}
 
       {showTransaksi && (
         <BbmTransactionModal

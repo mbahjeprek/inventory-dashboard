@@ -238,6 +238,16 @@ export type AlatBerat = {
   nama: string;
 };
 
+export type BbmBatchRow = {
+  tipe: "DITERIMA" | "PEMAKAIAN";
+  jumlah: number;
+  estate: string;
+  no_spb: string;
+  keterangan: string;
+  kode_kendaraan: string;
+  hm_terakhir: string;
+};
+
 export type BbmRecord = {
   id: number;
   jenis_bbm: "SOLAR" | "BENSIN";
@@ -429,10 +439,13 @@ export type TopKeluar = { rows: TopKeluarRow[]; totalQty: number; totalTrx: numb
 export class ApiError extends Error {
   status: number;
   serverMessage: string;
-  constructor(status: number, serverMessage: string) {
+  // The whole error body, for routes that say more than { error } (e.g. the failing row of a batch).
+  data: any;
+  constructor(status: number, serverMessage: string, data: any = null) {
     super(`API error ${status}`);
     this.status = status;
     this.serverMessage = serverMessage;
+    this.data = data;
   }
 }
 
@@ -454,7 +467,7 @@ async function req<T>(url: string, opts?: RequestInit): Promise<T> {
   });
   if (!res.ok) {
     const body = await res.json().catch(() => null);
-    throw new ApiError(res.status, typeof body?.error === "string" ? body.error : "");
+    throw new ApiError(res.status, typeof body?.error === "string" ? body.error : "", body);
   }
   return res.json();
 }
@@ -825,6 +838,10 @@ export const api = {
     kode_kendaraan?: string;
     hm_terakhir?: string;
   }) => req<{ success: boolean; id: number; saldo_stock: number }>("/api/bbm", { method: "POST", body: JSON.stringify(payload) }),
+
+  // Input Banyak: all rows or none; a refused row comes back as ApiError.data.row (0-based).
+  createBbmBatch: (payload: { evidence_id: string; jenis_bbm: "SOLAR" | "BENSIN"; lokasi: string; tanggal_iso: string; rows: BbmBatchRow[] }) =>
+    req<{ success: boolean; count: number; saldo_stock: number }>("/api/bbm/batch", { method: "POST", body: JSON.stringify(payload) }),
 
   updateBbm: (
     id: number,

@@ -12,8 +12,10 @@ const LOKASI_BY_JENIS: Record<string, string[]> = {
   BENSIN: ["NILAM", "WJA", "KNS", "ZAMRUD", "FIRUS"],
 };
 
+// Local date (toISOString is UTC, which is still yesterday before 07:00 WIB).
 function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 export function BbmTransactionModal({
