@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Camera, Download, Image as ImageIcon, Loader2, RefreshCw, X } from "lucide-react";
+import { Camera, ClipboardPaste, Download, Image as ImageIcon, Loader2, RefreshCw, X } from "lucide-react";
 import { api, errorText } from "../lib/api";
 
 // Photos are shrunk in the browser before upload: longest side at most 1280 px, JPEG at 70% - about
@@ -122,17 +122,34 @@ function EvidenceViewer({ id, onClose }: { id: string; onClose: () => void }) {
 }
 
 // Required "Foto Bukti" field of a Stok Masuk / Keluar form: pick or take a photo, it is shrunk and
-// uploaded at once, and `onChange` gets the evidence id (null while there is none).
+// uploaded at once, and `onChange` gets the evidence id (null while there is none). On a laptop the
+// picture can also be pasted (Ctrl+V anywhere in the form, or the Tempel button) or dropped on it.
 export function EvidenceInput({ value, onChange, label = "Foto Bukti" }: { value: string | null; onChange: (id: string | null) => void; label?: string }) {
   const enabled = useEvidenceEnabled();
   const input = useRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [dragging, setDragging] = useState(false);
 
   useEffect(() => {
     if (!value) setPreview("");
   }, [value]);
+
+  // Ctrl+V of an image while the form is open, wherever the cursor is (a pasted text still goes to
+  // its field). Only one form with a Foto Bukti is open at a time.
+  const pickRef = useRef<(f: File | undefined) => void>(() => {});
+  useEffect(() => {
+    if (!enabled) return;
+    const onPaste = (e: ClipboardEvent) => {
+      const file = [...(e.clipboardData?.files ?? [])].find((f) => f.type.startsWith("image/"));
+      if (!file) return;
+      e.preventDefault();
+      pickRef.current(file);
+    };
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+  }, [enabled]);
 
   const pick = async (file: File | undefined) => {
     if (!file) return;
@@ -152,6 +169,40 @@ export function EvidenceInput({ value, onChange, label = "Foto Bukti" }: { value
       if (input.current) input.current.value = "";
     }
   };
+  pickRef.current = (f) => {
+    if (!busy) pick(f);
+  };
+
+  // The Tempel button reads the clipboard itself (the browser may ask for permission first).
+  const pasteButton = async () => {
+    setError("");
+    try {
+      for (const item of await navigator.clipboard.read()) {
+        const type = item.types.find((t) => t.startsWith("image/"));
+        if (type) {
+          const blob = await item.getType(type);
+          return pick(new File([blob], "tempel.png", { type }));
+        }
+      }
+      setError("Clipboard tidak berisi gambar. Salin (copy) gambarnya dulu.");
+    } catch {
+      setError("Browser tidak mengizinkan membaca clipboard. Tekan Ctrl+V di form ini.");
+    }
+  };
+  const dropProps = {
+    onDragOver: (e: React.DragEvent) => {
+      if ([...e.dataTransfer.items].some((i) => i.type.startsWith("image/"))) {
+        e.preventDefault();
+        setDragging(true);
+      }
+    },
+    onDragLeave: () => setDragging(false),
+    onDrop: (e: React.DragEvent) => {
+      e.preventDefault();
+      setDragging(false);
+      pickRef.current([...e.dataTransfer.files].find((f) => f.type.startsWith("image/")));
+    },
+  };
 
   if (!enabled) return null;
   return (
@@ -159,7 +210,7 @@ export function EvidenceInput({ value, onChange, label = "Foto Bukti" }: { value
       <label className="text-xs text-[var(--text-secondary)] mb-1 block">{label}</label>
       <input ref={input} type="file" accept="image/*" className="hidden" onChange={(e) => pick(e.target.files?.[0])} />
       {preview ? (
-        <div className="flex items-center gap-3 rounded-md border border-[var(--border)] p-2">
+        <div {...dropProps} className={`flex items-center gap-3 rounded-md border p-2 ${dragging ? "border-[var(--accent-blue)] bg-[var(--accent-blue-bg)]" : "border-[var(--border)]"}`}>
           <img src={preview} alt="Foto bukti" className="w-16 h-16 object-cover rounded" />
           <div className="flex-1 min-w-0 text-xs">
             {busy ? (
@@ -180,15 +231,31 @@ export function EvidenceInput({ value, onChange, label = "Foto Bukti" }: { value
           </button>
         </div>
       ) : (
-        <button
-          type="button"
-          onClick={() => input.current?.click()}
-          disabled={busy}
-          className="w-full flex items-center justify-center gap-2 rounded-md border-2 border-dashed border-[var(--border)] px-3 py-3 text-sm text-[var(--text-secondary)] hover:border-[var(--accent-blue)] hover:text-[var(--accent-blue)] disabled:opacity-50"
-        >
-          {busy ? <Loader2 size={16} className="animate-spin" /> : <Camera size={16} />}
-          {busy ? "Memproses foto..." : "Ambil / pilih foto bukti"}
-        </button>
+        <div {...dropProps} className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => input.current?.click()}
+            disabled={busy}
+            className={`flex-1 flex flex-col items-center justify-center rounded-md border-2 border-dashed px-3 py-2.5 text-sm hover:border-[var(--accent-blue)] hover:text-[var(--accent-blue)] disabled:opacity-50 ${
+              dragging ? "border-[var(--accent-blue)] bg-[var(--accent-blue-bg)] text-[var(--accent-blue)]" : "border-[var(--border)] text-[var(--text-secondary)]"
+            }`}
+          >
+            <span className="inline-flex items-center gap-2">
+              {busy ? <Loader2 size={16} className="animate-spin" /> : <Camera size={16} />}
+              {busy ? "Memproses foto..." : dragging ? "Lepas gambar di sini" : "Ambil / pilih foto bukti"}
+            </span>
+            {!busy && !dragging && <span className="hidden sm:block text-[11px] text-[var(--text-muted)]">atau Ctrl+V untuk tempel · seret gambar ke sini</span>}
+          </button>
+          <button
+            type="button"
+            onClick={pasteButton}
+            disabled={busy}
+            title="Tempel gambar dari clipboard (Ctrl+V)"
+            className="hidden sm:flex flex-col items-center justify-center gap-0.5 rounded-md border border-[var(--border)] px-3 text-xs text-[var(--text-secondary)] hover:bg-[#f1f5f9] disabled:opacity-50"
+          >
+            <ClipboardPaste size={16} /> Tempel
+          </button>
+        </div>
       )}
       {error && <p className="text-[11px] text-[var(--accent-red)] mt-1">{error}</p>}
     </div>
