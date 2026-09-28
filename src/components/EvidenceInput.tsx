@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Camera, ClipboardPaste, Download, Image as ImageIcon, Loader2, RefreshCw, X } from "lucide-react";
+import { Camera, ClipboardPaste, Download, Image as ImageIcon, Loader2, RefreshCw, Trash2, X, ZoomIn } from "lucide-react";
 import { api, errorText } from "../lib/api";
 
 // Photos are shrunk in the browser before upload: longest side at most 1280 px, JPEG at 70% - about
@@ -76,8 +76,9 @@ export function EvidenceLink({ id, label }: { id: string | null | undefined; lab
   );
 }
 
-// Pop-up with the photo on the page itself (no new tab); Download saves the original file.
-function EvidenceViewer({ id, onClose }: { id: string; onClose: () => void }) {
+// Pop-up with the photo on the page itself (no new tab); Download saves the original file. With `src`
+// (a form's photo not saved yet) it shows that picture, without Download.
+function EvidenceViewer({ id, src, onClose }: { id?: string; src?: string; onClose: () => void }) {
   const [state, setState] = useState<"loading" | "ok" | "error">("loading");
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -90,12 +91,14 @@ function EvidenceViewer({ id, onClose }: { id: string; onClose: () => void }) {
       <div className="flex items-center justify-between gap-2 px-4 py-3 text-white" onClick={(e) => e.stopPropagation()}>
         <span className="text-sm font-medium">Foto Bukti</span>
         <div className="flex items-center gap-2">
-          <a
-            href={`${evidenceUrl(id)}?download=1`}
-            className="inline-flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-md bg-white/15 hover:bg-white/25"
-          >
-            <Download size={16} /> Download
-          </a>
+          {id && (
+            <a
+              href={`${evidenceUrl(id)}?download=1`}
+              className="inline-flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-md bg-white/15 hover:bg-white/25"
+            >
+              <Download size={16} /> Download
+            </a>
+          )}
           <button onClick={onClose} title="Tutup (Esc)" className="p-1.5 rounded-md hover:bg-white/15">
             <X size={20} />
           </button>
@@ -107,7 +110,7 @@ function EvidenceViewer({ id, onClose }: { id: string; onClose: () => void }) {
           <div className="text-sm text-white/80">Foto tidak bisa dimuat</div>
         ) : (
           <img
-            src={evidenceUrl(id)}
+            src={src || evidenceUrl(id!)}
             alt="Foto bukti"
             onClick={(e) => e.stopPropagation()}
             onLoad={() => setState("ok")}
@@ -131,6 +134,7 @@ export function EvidenceInput({ value, onChange, label = "Foto Bukti" }: { value
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [dragging, setDragging] = useState(false);
+  const [viewing, setViewing] = useState(false);
 
   useEffect(() => {
     if (!value) setPreview("");
@@ -210,25 +214,61 @@ export function EvidenceInput({ value, onChange, label = "Foto Bukti" }: { value
       <label className="text-xs text-[var(--text-secondary)] mb-1 block">{label}</label>
       <input ref={input} type="file" accept="image/*" className="hidden" onChange={(e) => pick(e.target.files?.[0])} />
       {preview ? (
-        <div {...dropProps} className={`flex items-center gap-3 rounded-md border p-2 ${dragging ? "border-[var(--accent-blue)] bg-[var(--accent-blue-bg)]" : "border-[var(--border)]"}`}>
-          <img src={preview} alt="Foto bukti" className="w-16 h-16 object-cover rounded" />
-          <div className="flex-1 min-w-0 text-xs">
+        <div {...dropProps} className={`flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md border p-2 ${dragging ? "border-[var(--accent-blue)] bg-[var(--accent-blue-bg)]" : "border-[var(--border)]"}`}>
+          <button type="button" onClick={() => setViewing(true)} title="Lihat foto" className="relative group shrink-0">
+            <img src={preview} alt="Foto bukti" className="w-16 h-16 object-cover rounded" />
+            <span className="absolute inset-0 rounded flex items-center justify-center bg-black/0 group-hover:bg-black/35 text-white opacity-0 group-hover:opacity-100">
+              <ZoomIn size={18} />
+            </span>
+          </button>
+          <div className="flex-1 min-w-[120px] text-xs">
             {busy ? (
               <span className="inline-flex items-center gap-1.5 text-[var(--text-secondary)]">
                 <Loader2 size={14} className="animate-spin" /> Mengupload...
               </span>
             ) : value ? (
-              <span className="text-[var(--accent-green)] font-medium">Foto terupload</span>
+              <>
+                <div className="text-[var(--accent-green)] font-medium">Foto terupload</div>
+                <button type="button" onClick={() => setViewing(true)} className="text-[var(--accent-blue)] hover:underline">
+                  Lihat foto
+                </button>
+                <div className="hidden sm:block text-[11px] text-[var(--text-muted)]">Salah foto? Ctrl+V atau Tempel untuk ganti</div>
+              </>
             ) : null}
           </div>
-          <button
-            type="button"
-            onClick={() => input.current?.click()}
-            disabled={busy}
-            className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-md border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[#f1f5f9] disabled:opacity-50"
-          >
-            <RefreshCw size={13} /> Ganti
-          </button>
+          <div className="flex gap-1.5 ml-auto">
+            <button
+              type="button"
+              onClick={pasteButton}
+              disabled={busy}
+              title="Ganti dengan gambar dari clipboard (Ctrl+V)"
+              className="hidden sm:inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-md border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[#f1f5f9] disabled:opacity-50"
+            >
+              <ClipboardPaste size={13} /> Tempel
+            </button>
+            <button
+              type="button"
+              onClick={() => input.current?.click()}
+              disabled={busy}
+              title="Ganti dengan foto / file lain"
+              className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-md border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[#f1f5f9] disabled:opacity-50"
+            >
+              <RefreshCw size={13} /> Ganti
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setPreview("");
+                setError("");
+                onChange(null);
+              }}
+              disabled={busy}
+              title="Hapus foto ini"
+              className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-md border border-[var(--accent-red-border)] text-[var(--accent-red)] hover:bg-[var(--accent-red-bg)] disabled:opacity-50"
+            >
+              <Trash2 size={13} /> Hapus
+            </button>
+          </div>
         </div>
       ) : (
         <div {...dropProps} className="flex gap-2">
@@ -258,6 +298,7 @@ export function EvidenceInput({ value, onChange, label = "Foto Bukti" }: { value
         </div>
       )}
       {error && <p className="text-[11px] text-[var(--accent-red)] mt-1">{error}</p>}
+      {viewing && preview && <EvidenceViewer src={preview} onClose={() => setViewing(false)} />}
     </div>
   );
 }
