@@ -119,17 +119,16 @@ export function BbmBatchModal({
     setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...patch } : r)));
     setRowErrors((e) => (Object.keys(e).length ? {} : e));
   };
-  // At once when the cell is there (a fast typist's next key must land in it); a row that is only
-  // being added gets its focus once it has rendered.
-  const focusCell = (row: number, col: Col) => {
+  // At once (a fast typist's next key must land in the new cell); a row that is only being added
+  // gets its focus once it has rendered (until then its index still belongs to the row after it).
+  const focusCell = (row: number, col: Col, afterRender = false) => {
     const find = () => tableRef.current?.querySelector<HTMLElement>(`[data-r="${row}"][data-c="${col}"]`);
-    const el = find();
-    if (el) el.focus();
-    else requestAnimationFrame(() => find()?.focus());
+    if (afterRender) requestAnimationFrame(() => find()?.focus());
+    else find()?.focus();
   };
   const addRow = (at: number, from?: Partial<Row>) => {
     setRows((rs) => [...rs.slice(0, at), newRow(from), ...rs.slice(at)]);
-    focusCell(at, "kendaraan");
+    focusCell(at, "kendaraan", true);
   };
   const copyRow = (i: number) => {
     const { tipe, kendaraan, jumlah, estate, spb, ket } = rows[i];
