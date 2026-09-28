@@ -203,14 +203,17 @@ async function stockLocations(req: express.Request): Promise<StockLocation[]> {
 
   if (p === "/stock-correction") return G("NILAM");
   if (p === "/transactions" && m === "POST") return [...G("NILAM"), ...transferTo(b.tujuan, b.type)];
+  // Input Banyak: the location(s) of every row.
+  const batchRows: any[] = Array.isArray(b.rows) ? b.rows : [];
+  if (p === "/transactions/batch" && m === "POST") return [...G("NILAM"), ...batchRows.flatMap((r) => transferTo(r?.tujuan, r?.type))];
   if (/^\/transactions\/\d+$/.test(p)) {
     const t = await queryOne<{ gudang: string }>("SELECT gudang FROM gudang_stock_tx WHERE transfer_from_id = @id", { id });
     return [...G("NILAM"), ...G(t?.gudang), ...(m === "PUT" ? transferTo(b.tujuan, b.type) : [])];
   }
-  if (/^\/gudang-stock(\/transactions|\/correction)?$/.test(p) && m === "POST") return G(b.gudang);
+  if (/^\/gudang-stock(\/transactions|\/transactions\/batch|\/correction)?$/.test(p) && m === "POST") return G(b.gudang);
   if (/^\/gudang-stock\/\d+$/.test(p)) return G(await col("gudang_stock", "gudang"));
   if (/^\/gudang-stock\/history\/\d+$/.test(p)) return G(await col("gudang_stock_tx", "gudang"));
-  if (/^\/klinik-stock\/(transactions|correction)$/.test(p)) return K(b.klinik);
+  if (/^\/klinik-stock\/(transactions|transactions\/batch|correction)$/.test(p)) return K(b.klinik);
   if (/^\/klinik-stock\/batch\/\d+$/.test(p)) return K(await col("klinik_batch", "klinik"));
   if (/^\/klinik-stock\/\d+$/.test(p) && m === "DELETE") return K(await col("klinik_stock", "klinik"));
   if (/^\/klinik-stock\/\d+\/batches$/.test(p))
@@ -218,9 +221,9 @@ async function stockLocations(req: express.Request): Promise<StockLocation[]> {
   if (/^\/klinik-stock\/history\/\d+$/.test(p)) return K(await col("klinik_stock_tx", "klinik"));
   if ((p === "/bbm" || p === "/bbm/batch") && m === "POST") return B(b.lokasi);
   if (/^\/bbm\/\d+$/.test(p)) return B(await col("bbm_log", "lokasi"));
-  if (p === "/pupuk" && m === "POST") return P(b.estate);
+  if ((p === "/pupuk" || p === "/pupuk/batch") && m === "POST") return P(b.estate);
   if (/^\/pupuk\/\d+$/.test(p)) return P(await col("pupuk_log", "estate"));
-  if (p === "/oli" && m === "POST") return O(b.estate);
+  if ((p === "/oli" || p === "/oli/batch") && m === "POST") return O(b.estate);
   // Pinjaman: both the lending and the borrowing estate's stock move.
   const loanAt = (module: unknown, ...estates: unknown[]) =>
     OPNAME_MODULES_LIST.includes(module as OpnameModule) ? estates.flatMap(at(module as OpnameModule)) : [];
@@ -4573,6 +4576,346 @@ app.delete("/api/master-oli/:id", async (req, res) => {
   await execute("DELETE FROM master_oli WHERE id = @id", { id: existing.id });
   await logActivity(req, { module: "OLI", estate: null, aksi: "Hapus Jenis Oli", objek: `${existing.kode} - ${existing.nama}` });
   res.json({ success: true });
+});
+
+// ---- Input Banyak for the other inventories (see /api/bbm/batch) ----
+// Many Stok Masuk / Keluar in one go with one foto bukti, each booked exactly as its single-entry
+// route books it, all inside one transaction: a row that doesn't pass refuses the whole batch and
+// is named (`row`, 0-based) so the form can mark it. Gudang / Klinik movements are timestamped when
+// saved (they have no date of their own); pupuk / oli take the batch's date.
+function batchInput(req: express.Request, res: express.Response): any[] | null {
+  const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
+  if (!rows.length) {
+    res.status(400).json({ error: "Belum ada baris yang diisi" });
+    return null;
+  }
+  if (rows.length > BBM_BATCH_MAX) {
+    res.status(400).json({ error: `Maksimal ${BBM_BATCH_MAX} baris sekali simpan` });
+    return null;
+  }
+  return rows;
+}
+const refuseRow = (res: express.Response, i: number, error: string) => res.status(400).json({ error: `Baris ${i + 1}: ${error}`, row: i });
+
+// Runs the booking; a BatchRowError (or a StockError thrown for row `at`) refuses it and gives the
+// foto bukti back. Returns false when the answer has been sent.
+async function bookBatch(res: express.Response, evidenceId: string | null, book: (client: PoolClient, at: (i: number) => void) => Promise<void>) {
+  let current = 0;
+  try {
+    await withTransaction((client) => book(client, (i) => (current = i)));
+    return true;
+  } catch (e) {
+    await releaseEvidence(evidenceId);
+    if (e instanceof BatchRowError) {
+      res.status(400).json({ error: e.message, row: e.row });
+      return false;
+    }
+    if (e instanceof StockError) {
+      res.status(400).json({ error: `Baris ${current + 1}: ${e.message}`, row: current });
+      return false;
+    }
+    throw e;
+  }
+}
+
+const NILAM_TUJUAN = ["NILAM", ...GUDANG_STOCK_OPTIONS];
+
+// Gudang Nilam (items): like POST /api/transactions, a Stok Keluar to another estate also books its
+// Stok Masuk there (addTransfer).
+app.post("/api/transactions/batch", requireEstate("NILAM"), async (req, res) => {
+  const rows = batchInput(req, res);
+  if (!rows) return;
+  const items = new Map(
+    (await queryMany<any>("SELECT * FROM items WHERE kode = ANY(@kodes::text[])", { kodes: rows.map((r) => String(r?.item_kode ?? "")) })).map((i) => [i.kode, i])
+  );
+  type R = { item: any; type: "IN" | "OUT"; qty: number; tujuan: string; penerima: string; note: string };
+  const clean: R[] = [];
+  for (const [i, r] of rows.entries()) {
+    const item = items.get(String(r?.item_kode ?? ""));
+    const qty = Number(r?.qty);
+    const tujuan = String(r?.tujuan ?? "");
+    if (!item) return refuseRow(res, i, "barang tidak ditemukan di master data");
+    if (!["IN", "OUT"].includes(r?.type)) return refuseRow(res, i, "tipe transaksi tidak valid");
+    if (!Number.isFinite(qty) || qty <= 0) return refuseRow(res, i, "jumlah harus lebih dari 0");
+    if (r.type === "OUT" && !NILAM_TUJUAN.includes(tujuan)) return refuseRow(res, i, "tujuan wajib dipilih");
+    clean.push({ item, type: r.type, qty, tujuan: r.type === "OUT" ? tujuan : "", penerima: String(r?.penerima ?? "").trim(), note: String(r?.note ?? "").trim() });
+  }
+  const evidenceId = await claimEvidence(req, res);
+  if (evidenceId === undefined) return;
+
+  const transfers: TransferChange[] = [];
+  const ok = await bookBatch(res, evidenceId, async (client, at) => {
+    for (const [i, r] of clean.entries()) {
+      at(i);
+      if (r.type === "OUT") {
+        const cur = (await queryOne<{ s: number }>("SELECT stock_tersedia s FROM items WHERE id = @id FOR UPDATE", { id: r.item.id }, client))!;
+        if (r.qty > cur.s) throw new BatchRowError(i, `Baris ${i + 1}: stok ${r.item.kode} tinggal ${cur.s}`);
+      }
+      const tx = await queryOne<{ id: number }>(
+        `INSERT INTO transactions (item_id, tujuan, type, qty, note, penerima, evidence_id)
+         VALUES (@item_id, @tujuan, @type, @qty, @note, @penerima, @evidenceId::uuid) RETURNING id`,
+        { item_id: r.item.id, tujuan: r.tujuan, type: r.type, qty: r.qty, note: r.note || null, penerima: r.penerima, evidenceId },
+        client
+      );
+      const mirror = await mirrorTransaction(client, r.item, r.type, r.tujuan, r.qty, r.note || null, r.penerima);
+      await execute(`UPDATE ${mirror.source} SET evidence_id = @evidenceId::uuid WHERE id = @id`, { evidenceId, id: mirror.id }, client);
+      await execute("UPDATE transactions SET mirror_source = @s, mirror_id = @m WHERE id = @id", { s: mirror.source, m: mirror.id, id: tx!.id }, client);
+      await applyStockEffect(client, r.item.id, r.type, r.qty, 1);
+      transfers.push(r.type === "OUT" ? await addTransfer(client, req, tx!.id, r.item.kode, r.tujuan, r.qty, r.penerima, r.note, evidenceId) : null);
+    }
+  });
+  if (!ok) return;
+  await logActivities(
+    req,
+    clean.map((r) => ({
+      module: "BARANG" as const,
+      estate: "NILAM",
+      aksi: r.type === "IN" ? "Stok Masuk" : "Stok Keluar",
+      objek: `${r.item.kode} - ${r.item.nama}`,
+      detail: `${movementDetail(r.qty, r.tujuan, r.penerima, r.note)}; Input Banyak (${clean.length} baris)`,
+    }))
+  );
+  for (const [i, r] of clean.entries()) await logTransfer(req, `${r.item.kode} - ${r.item.nama}`, null, transfers[i]);
+  res.json({ success: true, count: clean.length });
+});
+
+// Gudang KNS / WJA / Zamrud / Firus (gudang_stock): like POST /api/gudang-stock/transactions.
+app.post("/api/gudang-stock/transactions/batch", async (req, res) => {
+  const { gudang } = req.body ?? {};
+  if (!GUDANG_STOCK_OPTIONS.includes(gudang)) return res.status(400).json({ error: "Gudang tidak valid" });
+  if (!estateAllowed(req.user!, gudang)) return res.status(403).json({ error: "Akses ditolak" });
+  const rows = batchInput(req, res);
+  if (!rows) return;
+  const items = new Map(
+    (await queryMany<any>("SELECT kode, nama FROM items WHERE kode = ANY(@kodes::text[])", { kodes: rows.map((r) => String(r?.item_kode ?? "")) })).map((i) => [i.kode, i])
+  );
+  type R = { item: any; type: "IN" | "OUT"; qty: number; tujuan: string; penerima: string; note: string };
+  const clean: R[] = [];
+  for (const [i, r] of rows.entries()) {
+    const item = items.get(String(r?.item_kode ?? ""));
+    const tujuan = String(r?.tujuan ?? "");
+    if (!item) return refuseRow(res, i, "barang tidak ditemukan di master data");
+    if (!["IN", "OUT"].includes(r?.type)) return refuseRow(res, i, "tipe transaksi tidak valid");
+    if (!validQty(GUDANG_LEDGER, r?.qty) || r.qty <= 0) return refuseRow(res, i, "jumlah harus lebih dari 0");
+    if (r.type === "OUT" && !GUDANG_TUJUAN[gudang].includes(tujuan)) return refuseRow(res, i, `tujuan harus ${GUDANG_TUJUAN[gudang].join(" / ")}`);
+    clean.push({ item, type: r.type, qty: round3(r.qty), tujuan: r.type === "OUT" ? tujuan : "", penerima: String(r?.penerima ?? "").trim(), note: String(r?.note ?? "").trim() });
+  }
+  const evidenceId = await claimEvidence(req, res);
+  if (evidenceId === undefined) return;
+
+  const ok = await bookBatch(res, evidenceId, async (client, at) => {
+    for (const [i, r] of clean.entries()) {
+      at(i);
+      const before = await applyMovement(client, req, GUDANG_LEDGER, {
+        scope: gudang,
+        item: r.item.kode,
+        type: r.type,
+        qty: r.qty,
+        tujuan: r.tujuan,
+        penerima: r.penerima,
+        note: r.note || null,
+        is_correction: 0,
+        evidenceId,
+      });
+      if (r.type === "OUT" && r.qty > before) throw new BatchRowError(i, `Baris ${i + 1}: stok ${r.item.kode} tinggal ${before}`);
+    }
+  });
+  if (!ok) return;
+  await logActivities(
+    req,
+    clean.map((r) => ({
+      module: "BARANG" as const,
+      estate: gudang,
+      aksi: r.type === "IN" ? "Stok Masuk" : "Stok Keluar",
+      objek: `${r.item.kode} - ${r.item.nama}`,
+      detail: `${movementDetail(r.qty, r.tujuan, r.penerima, r.note)}; Input Banyak (${clean.length} baris)`,
+    }))
+  );
+  res.json({ success: true, count: clean.length });
+});
+
+// Klinik: like POST /api/klinik-stock/transactions. Stok Masuk goes to the batch of its expiry date,
+// Stok Keluar / Buang takes the batches that expire first (FEFO).
+app.post("/api/klinik-stock/transactions/batch", async (req, res) => {
+  const { klinik } = req.body ?? {};
+  if (!checkKlinik(req, res, klinik)) return;
+  const rows = batchInput(req, res);
+  if (!rows) return;
+  const obat = new Map(
+    (await queryMany<any>("SELECT kode, nama FROM obat WHERE kode = ANY(@kodes::text[])", { kodes: rows.map((r) => String(r?.obat_kode ?? "")) })).map((o) => [o.kode, o])
+  );
+  type R = { obat: any; type: "IN" | "OUT"; qty: number; exp?: string; buang: boolean; penerima: string; note: string };
+  const clean: R[] = [];
+  for (const [i, r] of rows.entries()) {
+    const o = obat.get(String(r?.obat_kode ?? ""));
+    const exp = String(r?.expired_date ?? "");
+    if (!o) return refuseRow(res, i, "obat tidak ditemukan di master data");
+    if (!["IN", "OUT"].includes(r?.type)) return refuseRow(res, i, "tipe transaksi tidak valid");
+    if (!Number.isInteger(r?.qty) || r.qty <= 0) return refuseRow(res, i, "jumlah harus bilangan bulat lebih dari 0");
+    if (exp && !ISO_DATE.test(exp)) return refuseRow(res, i, "tanggal expired tidak valid");
+    const buang = r.type === "OUT" && r.buang === true;
+    clean.push({ obat: o, type: r.type, qty: r.qty, exp: r.type === "IN" ? exp : undefined, buang, penerima: buang ? "" : String(r?.penerima ?? "").trim(), note: String(r?.note ?? "").trim() });
+  }
+  const evidenceId = await claimEvidence(req, res);
+  if (evidenceId === undefined) return;
+
+  const ok = await bookBatch(res, evidenceId, async (client, at) => {
+    for (const [i, r] of clean.entries()) {
+      at(i);
+      await klinikMoveTx(client, req, {
+        klinik,
+        obat: r.obat.kode,
+        type: r.type,
+        qty: r.qty,
+        exp: r.exp,
+        tujuan: r.buang ? TUJUAN_DIBUANG : "",
+        penerima: r.penerima,
+        note: r.note || null,
+        is_correction: 0,
+        evidenceId,
+      });
+    }
+  });
+  if (!ok) return;
+  await logActivities(
+    req,
+    clean.map((r) => ({
+      module: "KLINIK" as const,
+      estate: klinik,
+      aksi: r.type === "IN" ? "Stok Masuk" : r.buang ? "Buang Obat Expired" : "Stok Keluar",
+      objek: `${r.obat.kode} - ${r.obat.nama}`,
+      detail: [movementDetail(r.qty, undefined, r.penerima, r.note), r.exp !== undefined && `Batch expired: ${expText(r.exp)}`, `Input Banyak (${clean.length} baris)`]
+        .filter(Boolean)
+        .join("; "),
+    }))
+  );
+  res.json({ success: true, count: clean.length });
+});
+
+// Pupuk / oli: saldo rows on the batch's date, each jenis running on from its latest saldo (like the
+// single entry, keluar / pemakaian may take it below zero). The estate's ledger is locked meanwhile.
+app.post("/api/pupuk/batch", async (req, res) => {
+  const { estate, tanggal_iso } = req.body ?? {};
+  if (!checkPupukEstate(req, res, estate)) return;
+  if (!ISO_DATE.test(tanggal_iso || "")) return res.status(400).json({ error: "Tanggal tidak valid" });
+  const rows = batchInput(req, res);
+  if (!rows) return;
+  type R = { jenis: string; tipe: "MASUK" | "KELUAR"; qty: number; divisi: string; blok: string; ha: number | null; pokok: number | null; keterangan: string };
+  const clean: R[] = [];
+  for (const [i, r] of rows.entries()) {
+    const jenis = String(r?.jenis_pupuk ?? "").trim().toUpperCase();
+    const qty = Number(r?.jumlah);
+    if (!jenis) return refuseRow(res, i, "jenis pupuk wajib diisi");
+    if (!["MASUK", "KELUAR"].includes(r?.tipe)) return refuseRow(res, i, "tipe transaksi tidak valid");
+    if (!Number.isFinite(qty) || qty <= 0) return refuseRow(res, i, "jumlah harus lebih dari 0");
+    const keluar = r.tipe === "KELUAR";
+    const ha = keluar ? optNum(r?.ha) : null;
+    const pokok = keluar ? optNum(r?.pokok) : null;
+    if ((ha !== null && !Number.isFinite(ha)) || (pokok !== null && !Number.isFinite(pokok))) return refuseRow(res, i, "HA / pokok harus angka");
+    clean.push({
+      jenis,
+      tipe: r.tipe,
+      qty: round3(qty),
+      divisi: keluar ? String(r?.divisi ?? "").trim() : "",
+      blok: keluar ? String(r?.blok ?? "").trim().toUpperCase().replace(/\./g, "") : "",
+      ha,
+      pokok,
+      keterangan: String(r?.keterangan ?? "").trim() || (r.tipe === "MASUK" ? "PUPUK MASUK" : ""),
+    });
+  }
+  const evidenceId = await claimEvidence(req, res);
+  if (evidenceId === undefined) return;
+
+  const [y, m, d] = tanggal_iso.split("-");
+  const tanggal = `${d}/${m}/${y}`;
+  const periode = `${INDO_MONTHS[Number(m) - 1]} ${y}`;
+  const saldo: { before: number; after: number }[] = [];
+  const ok = await bookBatch(res, evidenceId, async (client) => {
+    await execute("SELECT pg_advisory_xact_lock(hashtext(@key))", { key: `pupuk:${estate}` }, client);
+    const run = new Map<string, number>();
+    for (const r of clean) {
+      if (!run.has(r.jenis)) run.set(r.jenis, (await latestSaldoRow("PUPUK", estate, r.jenis, client))?.saldo_stock ?? 0);
+      const before = run.get(r.jenis)!;
+      const after = round3(r.tipe === "MASUK" ? before + r.qty : before - r.qty);
+      run.set(r.jenis, after);
+      saldo.push({ before, after });
+      await execute(
+        `INSERT INTO pupuk_log (estate, jenis_pupuk, periode, tanggal, tanggal_iso, divisi, no_embrace, kode_barang, keluar, diterima, saldo_stock, keterangan, blok, ha, pokok, evidence_id)
+         VALUES (@estate, @jenis, @periode, @tanggal, @tanggal_iso, @divisi, '', '', @keluar, @diterima, @after, @keterangan, @blok, @ha, @pokok, @evidenceId::uuid)`,
+        { estate, periode, tanggal, tanggal_iso, evidenceId, ...r, after, keluar: r.tipe === "KELUAR" ? r.qty : null, diterima: r.tipe === "MASUK" ? r.qty : null },
+        client
+      );
+    }
+  });
+  if (!ok) return;
+  await logActivities(
+    req,
+    clean.map((r, i) => ({
+      module: "PUPUK" as const,
+      estate,
+      aksi: r.tipe === "MASUK" ? "Stok Masuk" : "Stok Keluar",
+      objek: pupukObjek({ jenis_pupuk: r.jenis, tanggal, blok: r.blok }),
+      detail: [`Jumlah: ${r.qty} KG`, `Saldo: ${saldo[i].before} → ${saldo[i].after}`, r.divisi && `Divisi: ${r.divisi}`, r.keterangan && `Keterangan: ${r.keterangan}`, `Input Banyak (${clean.length} baris)`]
+        .filter(Boolean)
+        .join("; "),
+    }))
+  );
+  res.json({ success: true, count: clean.length });
+});
+
+app.post("/api/oli/batch", async (req, res) => {
+  const { estate, tanggal_iso } = req.body ?? {};
+  if (!checkOliEstate(req, res, estate)) return;
+  if (!ISO_DATE.test(tanggal_iso || "")) return res.status(400).json({ error: "Tanggal tidak valid" });
+  const rows = batchInput(req, res);
+  if (!rows) return;
+  const known = new Set((await queryMany<{ nama: string }>("SELECT nama FROM master_oli")).map((o) => o.nama));
+  type R = { jenis: string; tipe: "MASUK" | "PEMAKAIAN"; qty: number; no_embrace: string; keterangan: string };
+  const clean: R[] = [];
+  for (const [i, r] of rows.entries()) {
+    const jenis = String(r?.jenis_oli ?? "").trim().toUpperCase();
+    const qty = Number(r?.jumlah);
+    if (!known.has(jenis)) return refuseRow(res, i, `jenis oli ${jenis || "-"} belum ada di Master Data Oli`);
+    if (!["MASUK", "PEMAKAIAN"].includes(r?.tipe)) return refuseRow(res, i, "tipe transaksi tidak valid");
+    if (!Number.isFinite(qty) || qty <= 0) return refuseRow(res, i, "jumlah harus lebih dari 0");
+    clean.push({ jenis, tipe: r.tipe, qty: round3(qty), no_embrace: String(r?.no_embrace ?? "").trim(), keterangan: String(r?.keterangan ?? "").trim() || (r.tipe === "MASUK" ? "OLI MASUK" : "") });
+  }
+  const evidenceId = await claimEvidence(req, res);
+  if (evidenceId === undefined) return;
+
+  const { tanggal, periode } = oliDate(tanggal_iso);
+  const saldo: { before: number; after: number }[] = [];
+  const ok = await bookBatch(res, evidenceId, async (client) => {
+    await execute("SELECT pg_advisory_xact_lock(hashtext(@key))", { key: `oli:${estate}` }, client);
+    const run = new Map<string, number>();
+    for (const r of clean) {
+      if (!run.has(r.jenis)) run.set(r.jenis, (await latestSaldoRow("OLI", estate, r.jenis, client))?.saldo_stock ?? 0);
+      const before = run.get(r.jenis)!;
+      const after = round3(r.tipe === "MASUK" ? before + r.qty : before - r.qty);
+      run.set(r.jenis, after);
+      saldo.push({ before, after });
+      await execute(
+        `INSERT INTO oli_log (estate, jenis_oli, periode, tanggal, tanggal_iso, no_embrace, diterima, pemakaian, saldo_stock, keterangan, evidence_id)
+         VALUES (@estate, @jenis, @periode, @tanggal, @tanggal_iso, @no_embrace, @diterima, @pemakaian, @after, @keterangan, @evidenceId::uuid)`,
+        { estate, periode, tanggal, tanggal_iso, evidenceId, ...r, after, diterima: r.tipe === "MASUK" ? r.qty : null, pemakaian: r.tipe === "PEMAKAIAN" ? r.qty : null },
+        client
+      );
+    }
+  });
+  if (!ok) return;
+  await logActivities(
+    req,
+    clean.map((r, i) => ({
+      module: "OLI" as const,
+      estate,
+      aksi: r.tipe === "MASUK" ? "Stok Masuk" : "Stok Keluar",
+      objek: oliObjek({ jenis_oli: r.jenis, tanggal }),
+      detail: [`Jumlah: ${r.qty} LTR`, `Saldo: ${saldo[i].before} → ${saldo[i].after}`, r.no_embrace && `No. BPB: ${r.no_embrace}`, r.keterangan && `Keterangan: ${r.keterangan}`, `Input Banyak (${clean.length} baris)`]
+        .filter(Boolean)
+        .join("; "),
+    }))
+  );
+  res.json({ success: true, count: clean.length });
 });
 
 // ---- Pinjaman antar estate (see schema.sql pinjaman) ----

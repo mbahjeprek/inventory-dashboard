@@ -4,6 +4,7 @@ import {
   ChevronLeft,
   ChevronRight,
   PackagePlus,
+  ListPlus,
   ArrowUp,
   ArrowDown,
   ArrowUpDown,
@@ -29,6 +30,7 @@ import { can } from "../lib/access";
 import { useDragScroll } from "../hooks/useDragScroll";
 import { InventoryTabs, useInventoryTab } from "../components/InventoryTabs";
 import { LedgerHistory } from "../components/LedgerHistory";
+import { StockBatchModal } from "../components/StockBatchModal";
 
 const STATUSES = ["AMAN", "BUFFER STOCK"];
 
@@ -117,6 +119,9 @@ export function InventoryGudangStockPage({ gudang }: { gudang: string }) {
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [showPicker, setShowPicker] = useState(false);
+  // Input Banyak (many Stok Masuk / Keluar in one go) and its "saved" notice.
+  const [showBatch, setShowBatch] = useState(false);
+  const [batchNotice, setBatchNotice] = useState("");
   const [selectedItem, setSelectedItem] = useState<PickerItem | null>(null);
   const [tab, setTab] = useInventoryTab();
   // Bumped after a new transaction so an open Stock In/Out tab reloads.
@@ -229,6 +234,15 @@ export function InventoryGudangStockPage({ gudang }: { gudang: string }) {
         <div className="flex flex-wrap items-center gap-2">
           <ActivityLogButton module="BARANG" estate={gudang} />
           {tab === "stok" && <ExportButtons total={total} buildReport={buildReport} fileName={`inventory-gudang-${gudang.toLowerCase()}`} />}
+          {canInput && (
+            <button
+              onClick={() => setShowBatch(true)}
+              title="Banyak transaksi sekaligus"
+              className="inline-flex items-center gap-1.5 text-sm px-3.5 py-2 rounded-md border border-[var(--accent-blue-border)] text-[var(--accent-blue)] hover:bg-[var(--accent-blue-bg)]"
+            >
+              <ListPlus size={16} /> Input Banyak
+            </button>
+          )}
           {canTx && (<button
             onClick={() => setShowPicker(true)}
             className="inline-flex items-center gap-1.5 text-sm px-3.5 py-2 rounded-md border border-[var(--accent-blue-border)] text-[var(--accent-blue)] hover:bg-[var(--accent-blue-bg)]"
@@ -393,6 +407,23 @@ export function InventoryGudangStockPage({ gudang }: { gudang: string }) {
         </>
       )}
 
+      {batchNotice && (
+        <div className="fixed bottom-4 right-4 z-50 text-sm rounded-md px-4 py-2.5 shadow-lg bg-[var(--accent-green)] text-white">{batchNotice}</div>
+      )}
+      {showBatch && (
+        <StockBatchModal
+          scope={{ kind: "gudang", name: gudang }}
+          onClose={() => setShowBatch(false)}
+          onSuccess={(count) => {
+            setShowBatch(false);
+            setBatchNotice(`${count} transaksi tersimpan`);
+            setTimeout(() => setBatchNotice(""), 3000);
+            setHistoryKey((k) => k + 1);
+            load();
+            loadSummary();
+          }}
+        />
+      )}
       {showPicker && (
         <ItemPickerModal
           scope={{ kind: "gudang", name: gudang }}
