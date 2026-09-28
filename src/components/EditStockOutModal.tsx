@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { X } from "lucide-react";
 import { api, type StockOutRecord } from "../lib/api";
+import { EditEvidenceField } from "./EvidenceInput";
 
 const TUJUAN_OPTIONS = ["NILAM", "KNS", "WJA", "ZAMRUD", "FIRUS"];
 
@@ -14,6 +15,8 @@ export function EditStockOutModal({
   onSuccess: () => void;
 }) {
   const [penerima, setPenerima] = useState(record.penerima || "");
+  // A new foto bukti replaces the current one (none picked = it stays).
+  const [newEvidence, setNewEvidence] = useState<string | null>(null);
   const [qty, setQty] = useState(record.qty);
   const [satuan, setSatuan] = useState(record.satuan || "");
   const [tujuan, setTujuan] = useState(record.tujuan || "");
@@ -31,6 +34,7 @@ export function EditStockOutModal({
     setError("");
     try {
       await api.updateStockOut(record.id, {
+        ...(newEvidence ? { evidence_id: newEvidence } : {}),
         penerima,
         qty,
         satuan,
@@ -127,6 +131,8 @@ export function EditStockOutModal({
               className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-2"
             />
           </div>
+
+          <EditEvidenceField current={record.evidence_id} value={newEvidence} onChange={setNewEvidence} />
 
           {error && <p className="text-xs text-[var(--accent-red)]">{error}</p>}
 

@@ -46,8 +46,8 @@ export function PupukBatchModal({
       width: 100,
       type: "select",
       options: [
-        { value: "KELUAR", label: "Keluar" },
-        { value: "MASUK", label: "Masuk" },
+        { value: "KELUAR", label: "Stock Out" },
+        { value: "MASUK", label: "Stock In" },
       ],
       tone: (c) => (masuk(c) ? "text-[var(--accent-green)]" : "text-[var(--accent-red)]"),
     },
@@ -92,7 +92,7 @@ export function PupukBatchModal({
   return (
     <BatchGrid
       title={`Input Banyak Pupuk - ${estate}`}
-      subtitle="Pemupukan / penerimaan satu hari sekaligus"
+      subtitle="Stock In / Stock Out pupuk satu hari sekaligus"
       draftKey={`batch:pupuk:${estate}`}
       extra={{ tanggal }}
       onRestoreExtra={restore}
@@ -103,7 +103,7 @@ export function PupukBatchModal({
       saldo={(rows) => run(rows).map((s) => s && { text: fmtNum(s.after), bad: s.after < 0 })}
       summary={(rows) => (
         <>
-          keluar <b className="text-[var(--accent-red)]">{fmtNum(sum(rows, (c) => !masuk(c)))} KG</b> · masuk{" "}
+          stock out <b className="text-[var(--accent-red)]">{fmtNum(sum(rows, (c) => !masuk(c)))} KG</b> · stock in{" "}
           <b className="text-[var(--accent-green)]">{fmtNum(sum(rows, masuk))} KG</b>
         </>
       )}
@@ -156,8 +156,8 @@ export function OliBatchModal({
       width: 115,
       type: "select",
       options: [
-        { value: "PEMAKAIAN", label: "Pemakaian" },
-        { value: "MASUK", label: "Masuk" },
+        { value: "PEMAKAIAN", label: "Stock Out" },
+        { value: "MASUK", label: "Stock In" },
       ],
       tone: (c) => (masuk(c) ? "text-[var(--accent-green)]" : "text-[var(--accent-red)]"),
     },
@@ -184,7 +184,7 @@ export function OliBatchModal({
   return (
     <BatchGrid
       title={`Input Banyak Oli - ${estate}`}
-      subtitle="Pemakaian / penerimaan satu hari sekaligus"
+      subtitle="Stock In / Stock Out oli satu hari sekaligus"
       draftKey={`batch:oli:${estate}`}
       extra={{ tanggal }}
       onRestoreExtra={restore}
@@ -195,7 +195,7 @@ export function OliBatchModal({
       saldo={(rows) => run(rows).map((s) => s && { text: fmtNum(s.after), bad: s.after < 0 })}
       summary={(rows) => (
         <>
-          pemakaian <b className="text-[var(--accent-red)]">{fmtNum(sum(rows, (c) => !masuk(c)))} LTR</b> · masuk{" "}
+          stock out <b className="text-[var(--accent-red)]">{fmtNum(sum(rows, (c) => !masuk(c)))} LTR</b> · stock in{" "}
           <b className="text-[var(--accent-green)]">{fmtNum(sum(rows, masuk))} LTR</b>
         </>
       )}

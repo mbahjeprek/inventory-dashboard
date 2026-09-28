@@ -142,7 +142,7 @@ export function PupukTransactionModal({
                   : "border-[var(--border)] text-[var(--text-secondary)]"
               }`}
             >
-              Pupuk Masuk
+              Stock In
             </button>
             <button
               onClick={() => setTipe("KELUAR")}
@@ -152,7 +152,7 @@ export function PupukTransactionModal({
                   : "border-[var(--border)] text-[var(--text-secondary)]"
               }`}
             >
-              Pemakaian (Keluar)
+              Stock Out
             </button>
           </div>
 

@@ -623,7 +623,7 @@ export const api = {
     );
   },
 
-  updateLedgerTx: (scope: StockScope, id: number, payload: { qty: number; tujuan: string; penerima: string; note: string; expired_date?: string }) =>
+  updateLedgerTx: (scope: StockScope, id: number, payload: { qty: number; tujuan: string; penerima: string; note: string; expired_date?: string; evidence_id?: string }) =>
     req<{ success: boolean }>(`/api/${scope.kind === "klinik" ? "klinik-stock" : "gudang-stock"}/history/${id}`, {
       method: "PUT",
       body: JSON.stringify(payload),
@@ -752,14 +752,14 @@ export const api = {
 
   updateStockIn: (
     id: number,
-    payload: { nama_vendor: string; qty: number; satuan: string; tujuan: string | null; tanggal_terima_iso: string | null; keterangan: string }
+    payload: { nama_vendor: string; qty: number; satuan: string; tujuan: string | null; tanggal_terima_iso: string | null; keterangan: string; evidence_id?: string }
   ) => req<{ success: boolean }>(`/api/stock-in/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
 
   deleteStockIn: (id: number) => req<{ success: boolean }>(`/api/stock-in/${id}`, { method: "DELETE" }),
 
   updateStockOut: (
     id: number,
-    payload: { penerima: string; qty: number; satuan: string; tujuan: string | null; tanggal_keluar_iso: string | null; keterangan: string }
+    payload: { penerima: string; qty: number; satuan: string; tujuan: string | null; tanggal_keluar_iso: string | null; keterangan: string; evidence_id?: string }
   ) => req<{ success: boolean }>(`/api/stock-out/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
 
   deleteStockOut: (id: number) => req<{ success: boolean }>(`/api/stock-out/${id}`, { method: "DELETE" }),
@@ -879,6 +879,8 @@ export const api = {
       estate?: string;
       kode_kendaraan?: string;
       hm_terakhir?: string;
+      // A new foto bukti (replaces the current one).
+      evidence_id?: string;
     }
   ) => req<{ success: boolean }>(`/api/bbm/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
 

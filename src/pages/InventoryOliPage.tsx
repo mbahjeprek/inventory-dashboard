@@ -123,7 +123,7 @@ export function InventoryOliPage({ estate }: { estate: string }) {
       title: `Inventory Oli - ${estate}`,
       subtitle: [
         ...(active.length ? [`Filter: ${active.join(" · ")}`] : []),
-        `${total.toLocaleString("id-ID")} transaksi · total stok masuk ${fmt(diterimaSum)} LTR · total pemakaian ${fmt(pemakaianSum)} LTR`,
+        `${total.toLocaleString("id-ID")} transaksi · total stock in ${fmt(diterimaSum)} LTR · total stock out ${fmt(pemakaianSum)} LTR`,
       ],
       landscape: true,
       columns: [
@@ -131,8 +131,8 @@ export function InventoryOliPage({ estate }: { estate: string }) {
         { label: "Tanggal", nowrap: true },
         { label: "Jenis Oli", nowrap: true },
         { label: "No. BPB" },
-        { label: "Diterima (LTR)", align: "right" },
-        { label: "Pemakaian (LTR)", align: "right" },
+        { label: "Stock In (LTR)", align: "right" },
+        { label: "Stock Out (LTR)", align: "right" },
         { label: "Stock (LTR)", align: "right" },
         { label: "Keterangan" },
       ],
@@ -194,11 +194,11 @@ export function InventoryOliPage({ estate }: { estate: string }) {
                   <div className="text-[11px] text-[var(--text-muted)] mb-1.5">{flowLabel}</div>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <div className="text-[11px] text-[var(--text-secondary)]">Stok Masuk</div>
+                      <div className="text-[11px] text-[var(--text-secondary)]">Stock In</div>
                       <div className="text-sm font-semibold text-[var(--accent-green)]">{fmt(flowFor(j)?.diterima ?? 0)} LTR</div>
                     </div>
                     <div>
-                      <div className="text-[11px] text-[var(--text-secondary)]">Pemakaian</div>
+                      <div className="text-[11px] text-[var(--text-secondary)]">Stock Out</div>
                       <div className="text-sm font-semibold text-[var(--accent-red)]">{fmt(flowFor(j)?.pemakaian ?? 0)} LTR</div>
                     </div>
                   </div>
@@ -256,8 +256,8 @@ export function InventoryOliPage({ estate }: { estate: string }) {
       </div>
 
       <div className="text-sm text-[var(--text-secondary)]">
-        {total.toLocaleString("id-ID")} transaksi · total stok masuk <span className="font-medium text-[var(--text-primary)]">{fmt(diterimaSum)} LTR</span> ·
-        total pemakaian <span className="font-medium text-[var(--text-primary)]">{fmt(pemakaianSum)} LTR</span>
+        {total.toLocaleString("id-ID")} transaksi · total stock in <span className="font-medium text-[var(--text-primary)]">{fmt(diterimaSum)} LTR</span> ·
+        total stock out <span className="font-medium text-[var(--text-primary)]">{fmt(pemakaianSum)} LTR</span>
       </div>
 
       <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg overflow-hidden">
@@ -269,8 +269,8 @@ export function InventoryOliPage({ estate }: { estate: string }) {
                 <th className="px-4 py-2.5 whitespace-nowrap">Tanggal</th>
                 <th className="px-4 py-2.5 whitespace-nowrap">Jenis Oli</th>
                 <th className="px-4 py-2.5 whitespace-nowrap">No. BPB</th>
-                <th className="px-4 py-2.5 text-right whitespace-nowrap">Diterima (LTR)</th>
-                <th className="px-4 py-2.5 text-right whitespace-nowrap">Pemakaian (LTR)</th>
+                <th className="px-4 py-2.5 text-right whitespace-nowrap">Stock In (LTR)</th>
+                <th className="px-4 py-2.5 text-right whitespace-nowrap">Stock Out (LTR)</th>
                 <th className="px-4 py-2.5 text-right whitespace-nowrap">Stock (LTR)</th>
                 <th className="px-4 py-2.5">Keterangan</th>
                 <th className="px-4 py-2.5 text-center">Bukti</th>

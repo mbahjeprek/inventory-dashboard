@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { X } from "lucide-react";
 import { api, errorText, type BbmRecord } from "../lib/api";
+import { EditEvidenceField } from "./EvidenceInput";
 
 export function EditBbmModal({
   record,
@@ -12,6 +13,8 @@ export function EditBbmModal({
   onSuccess: () => void;
 }) {
   const [tanggal, setTanggal] = useState(record.tanggal_iso || "");
+  // A new foto bukti replaces the current one (none picked = it stays).
+  const [newEvidence, setNewEvidence] = useState<string | null>(null);
   const [noSpb, setNoSpb] = useState(record.no_spb || "");
   const [diterima, setDiterima] = useState(record.diterima ?? "");
   const [pemakaian, setPemakaian] = useState(record.pemakaian ?? "");
@@ -35,6 +38,7 @@ export function EditBbmModal({
     setError("");
     try {
       await api.updateBbm(record.id, {
+        ...(newEvidence ? { evidence_id: newEvidence } : {}),
         tanggal_iso: tanggal || undefined,
         no_spb: noSpb,
         diterima: diterima === "" ? null : Number(diterima),
@@ -87,7 +91,7 @@ export function EditBbmModal({
 
           <div className="grid grid-cols-3 gap-3">
             <div>
-              <label className="text-xs text-[var(--text-secondary)] mb-1 block">Stok Masuk</label>
+              <label className="text-xs text-[var(--text-secondary)] mb-1 block">Stock In</label>
               <input
                 type="number"
                 min={0}
@@ -97,7 +101,7 @@ export function EditBbmModal({
               />
             </div>
             <div>
-              <label className="text-xs text-[var(--text-secondary)] mb-1 block">Stok Keluar</label>
+              <label className="text-xs text-[var(--text-secondary)] mb-1 block">Stock Out</label>
               <input
                 type="number"
                 min={0}
@@ -157,6 +161,8 @@ export function EditBbmModal({
               className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-2"
             />
           </div>
+
+          <EditEvidenceField current={record.evidence_id} value={newEvidence} onChange={setNewEvidence} />
 
           {error && <p className="text-xs text-[var(--accent-red)]">{error}</p>}
 

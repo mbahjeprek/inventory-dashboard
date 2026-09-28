@@ -1,12 +1,15 @@
 import { useState } from "react";
 import { X } from "lucide-react";
 import { api, errorText, type OliRecord } from "../lib/api";
+import { EditEvidenceField } from "./EvidenceInput";
 
 const inputCls = "w-full text-sm rounded-md border border-[var(--border)] px-3 py-1.5";
 const labelCls = "text-xs text-[var(--text-secondary)] mb-1 block";
 const str = (n: number | null) => (n === null || n === undefined ? "" : String(n));
 
 export function EditOliModal({ record, onClose, onSuccess }: { record: OliRecord; onClose: () => void; onSuccess: () => void }) {
+  // A new foto bukti replaces the current one (none picked = it stays).
+  const [newEvidence, setNewEvidence] = useState<string | null>(null);
   const [form, setForm] = useState({
     tanggal_iso: record.tanggal_iso || "",
     no_embrace: record.no_embrace || "",
@@ -23,7 +26,7 @@ export function EditOliModal({ record, onClose, onSuccess }: { record: OliRecord
     setSubmitting(true);
     setError("");
     try {
-      await api.updateOli(record.id, { ...form, tanggal_iso: form.tanggal_iso || undefined });
+      await api.updateOli(record.id, { ...form, tanggal_iso: form.tanggal_iso || undefined, ...(newEvidence ? { evidence_id: newEvidence } : {}) });
       onSuccess();
     } catch (e) {
       setError(errorText(e, "Gagal menyimpan perubahan"));
@@ -61,11 +64,11 @@ export function EditOliModal({ record, onClose, onSuccess }: { record: OliRecord
 
           <div className="grid grid-cols-3 gap-3">
             <div>
-              <label className={labelCls}>Diterima (LTR)</label>
+              <label className={labelCls}>Stock In (LTR)</label>
               <input type="number" min={0} step="any" value={form.diterima} onChange={set("diterima")} className={inputCls} />
             </div>
             <div>
-              <label className={labelCls}>Pemakaian (LTR)</label>
+              <label className={labelCls}>Stock Out (LTR)</label>
               <input type="number" min={0} step="any" value={form.pemakaian} onChange={set("pemakaian")} className={inputCls} />
             </div>
             <div>
@@ -78,6 +81,8 @@ export function EditOliModal({ record, onClose, onSuccess }: { record: OliRecord
             <label className={labelCls}>Keterangan</label>
             <input value={form.keterangan} onChange={set("keterangan")} className={inputCls} />
           </div>
+
+          <EditEvidenceField current={record.evidence_id} value={newEvidence} onChange={setNewEvidence} />
 
           {error && <p className="text-xs text-[var(--accent-red)]">{error}</p>}
 

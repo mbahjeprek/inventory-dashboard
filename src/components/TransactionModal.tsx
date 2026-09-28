@@ -258,7 +258,7 @@ export function TransactionModal({
               </select>
               {!scope && tujuan && tujuan !== "NILAM" && (
                 <p className="text-[11px] text-[var(--accent-blue)] mt-1">
-                  Jumlah ini otomatis tercatat sebagai Stok Masuk di Gudang {tujuan}.
+                  Jumlah ini otomatis tercatat sebagai Stock In di Gudang {tujuan}.
                 </p>
               )}
             </div>

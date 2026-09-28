@@ -114,8 +114,8 @@ export function OliTransactionModal({
           </div>
 
           <div className="grid grid-cols-2 gap-2">
-            {tipeBtn("MASUK", "Oli Masuk", "bg-[var(--accent-green-bg)] text-[var(--accent-green)] border-[var(--accent-green-border)]")}
-            {tipeBtn("PEMAKAIAN", "Pemakaian", "bg-[var(--accent-red-bg)] text-[var(--accent-red)] border-[var(--accent-red-border)]")}
+            {tipeBtn("MASUK", "Stock In", "bg-[var(--accent-green-bg)] text-[var(--accent-green)] border-[var(--accent-green-border)]")}
+            {tipeBtn("PEMAKAIAN", "Stock Out", "bg-[var(--accent-red-bg)] text-[var(--accent-red)] border-[var(--accent-red-border)]")}
           </div>
 
           <div className="grid grid-cols-2 gap-3">

@@ -237,7 +237,7 @@ export function LedgerHistory({ scope, type, refreshKey }: { scope: StockScope; 
                       <td className="px-4 py-2.5 text-right">
                         {r.is_transfer ? (
                           // Booked by a Stok Keluar from another gudang; it follows that one.
-                          <span className="text-[11px] text-[var(--text-muted)]" title="Ubah atau hapus lewat stok keluar di gudang asalnya">
+                          <span className="text-[11px] text-[var(--text-muted)]" title="Ubah atau hapus lewat Stock Out di gudang asalnya">
                             Otomatis
                           </span>
                         ) : r.pinjaman_id ? (

@@ -122,15 +122,15 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
       title: `Inventory BBM${lokasiLock ? ` - ${lokasiLock}` : ""}`,
       subtitle: [
         `Filter: ${filters.join(" · ")}`,
-        `${total.toLocaleString("id-ID")} transaksi · total stok keluar ${pemakaianSum.toLocaleString("id-ID")} LTR · total stok masuk ${diterimaSum.toLocaleString("id-ID")} LTR`,
+        `${total.toLocaleString("id-ID")} transaksi · total stock out ${pemakaianSum.toLocaleString("id-ID")} LTR · total stock in ${diterimaSum.toLocaleString("id-ID")} LTR`,
       ],
       landscape: true,
       columns: [
         { label: "Periode", nowrap: true },
         { label: "Tanggal", nowrap: true },
         { label: "No. SPB" },
-        { label: "Stok Masuk", align: "right" },
-        { label: "Stok Keluar", align: "right" },
+        { label: "Stock In", align: "right" },
+        { label: "Stock Out", align: "right" },
         { label: "Saldo Stock", align: "right" },
         { label: "Keterangan" },
         { label: "Status Kepemilikan" },
@@ -232,13 +232,13 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
                   <div className="text-[11px] text-[var(--text-muted)] mb-1.5">{flowLabel}</div>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <div className="text-[11px] text-[var(--text-secondary)]">Stok Masuk</div>
+                      <div className="text-[11px] text-[var(--text-secondary)]">Stock In</div>
                       <div className="text-sm font-semibold text-[var(--accent-green)]">
                         {(flowFor(jenis, lok)?.diterima ?? 0).toLocaleString("id-ID")} LTR
                       </div>
                     </div>
                     <div>
-                      <div className="text-[11px] text-[var(--text-secondary)]">Stok Keluar</div>
+                      <div className="text-[11px] text-[var(--text-secondary)]">Stock Out</div>
                       <div className="text-sm font-semibold text-[var(--accent-red)]">
                         {(flowFor(jenis, lok)?.pemakaian ?? 0).toLocaleString("id-ID")} LTR
                       </div>
@@ -343,9 +343,9 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
       </div>
 
       <div className="text-sm text-[var(--text-secondary)]">
-        {total.toLocaleString("id-ID")} transaksi · total stok keluar{" "}
+        {total.toLocaleString("id-ID")} transaksi · total stock out{" "}
         <span className="font-medium text-[var(--text-primary)]">{pemakaianSum.toLocaleString("id-ID")} LTR</span> · total
-        stok masuk <span className="font-medium text-[var(--text-primary)]">{diterimaSum.toLocaleString("id-ID")} LTR</span>
+        stock in <span className="font-medium text-[var(--text-primary)]">{diterimaSum.toLocaleString("id-ID")} LTR</span>
       </div>
 
       <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg overflow-hidden">
@@ -356,8 +356,8 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
                 <th className="px-4 py-2.5 whitespace-nowrap">Periode</th>
                 <th className="px-4 py-2.5 whitespace-nowrap">Tanggal</th>
                 <th className="px-4 py-2.5 whitespace-nowrap">No. SPB</th>
-                <th className="px-4 py-2.5 text-right whitespace-nowrap">Stok Masuk</th>
-                <th className="px-4 py-2.5 text-right whitespace-nowrap">Stok Keluar</th>
+                <th className="px-4 py-2.5 text-right whitespace-nowrap">Stock In</th>
+                <th className="px-4 py-2.5 text-right whitespace-nowrap">Stock Out</th>
                 <th className="px-4 py-2.5 text-right whitespace-nowrap">Saldo Stock</th>
                 <th className="px-4 py-2.5">Keterangan</th>
                 <th className="px-4 py-2.5 text-center">Bukti</th>

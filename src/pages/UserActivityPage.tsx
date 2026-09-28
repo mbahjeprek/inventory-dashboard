@@ -194,8 +194,8 @@ export function UserActivityPage() {
       { label: "Akses" },
       { label: "Aksi", align: "right" },
       { label: "Hari Aktif", align: "right" },
-      { label: "Stok Masuk", align: "right" },
-      { label: "Stok Keluar", align: "right" },
+      { label: "Stock In", align: "right" },
+      { label: "Stock Out", align: "right" },
       { label: "Koreksi", align: "right" },
       { label: "Edit/Tambah/Hapus", align: "right" },
       { label: "Login", align: "right" },
@@ -287,7 +287,7 @@ export function UserActivityPage() {
             <Tile icon={<Activity size={16} />} label="Total Aksi" value={fmt(totalAksi)} note={`${days} hari`} onClick={() => scrollTo(tableRef)} />
             <Tile icon={<UserCheck size={16} />} label="User Aktif" value={fmt(active.length)} note={`dari ${rows.length} akun, klik untuk rincian`} onClick={() => scrollTo(tableRef)} />
             <Tile icon={<UserX size={16} />} label="User Tanpa Aksi" value={fmt(idle.length)} note="pada periode ini, klik untuk rincian" onClick={() => scrollTo(idleRef)} />
-            <Tile icon={<ArrowLeftRight size={16} />} label="Transaksi Stok" value={fmt(totalStok)} note="stok masuk + stok keluar" />
+            <Tile icon={<ArrowLeftRight size={16} />} label="Transaksi Stok" value={fmt(totalStok)} note="stock in + stock out" />
             <Tile icon={<LogIn size={16} />} label="Login" value={fmt(totalLogin)} note={`${loggedIn} user pernah login di periode ini`} />
           </div>
 
@@ -379,8 +379,8 @@ export function UserActivityPage() {
                       <th className="px-4 py-2 font-medium">User</th>
                       <th className="px-3 py-2 font-medium text-right">Aksi</th>
                       <th className="px-3 py-2 font-medium text-right whitespace-nowrap">Hari Aktif</th>
-                      <th className="px-3 py-2 font-medium text-right whitespace-nowrap">Stok Masuk</th>
-                      <th className="px-3 py-2 font-medium text-right whitespace-nowrap">Stok Keluar</th>
+                      <th className="px-3 py-2 font-medium text-right whitespace-nowrap">Stock In</th>
+                      <th className="px-3 py-2 font-medium text-right whitespace-nowrap">Stock Out</th>
                       <th className="px-3 py-2 font-medium text-right">Koreksi</th>
                       <th className="px-3 py-2 font-medium text-right">Login</th>
                       <th className="px-3 py-2 font-medium text-right whitespace-nowrap">Rata-rata/Hari</th>

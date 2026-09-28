@@ -302,3 +302,19 @@ export function EvidenceInput({ value, onChange, label = "Foto Bukti" }: { value
     </div>
   );
 }
+
+// Edit forms: the row's current foto bukti (click to view) and a field to replace it. Leaving the
+// field empty keeps the current photo; `onChange` gets the new photo's id.
+export function EditEvidenceField({ current, value, onChange }: { current: string | null | undefined; value: string | null; onChange: (id: string | null) => void }) {
+  const enabled = useEvidenceEnabled();
+  if (!enabled) return null;
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between text-xs text-[var(--text-secondary)]">
+        <span>Foto bukti sekarang</span>
+        {current ? <EvidenceLink id={current} label="Lihat foto" /> : <span className="text-[var(--text-muted)]">Belum ada foto</span>}
+      </div>
+      <EvidenceInput value={value} onChange={onChange} label={current ? "Ganti Foto Bukti (kosongkan jika tidak diganti)" : "Tambah Foto Bukti"} />
+    </div>
+  );
+}

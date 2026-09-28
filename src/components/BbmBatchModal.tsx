@@ -42,8 +42,8 @@ export function BbmBatchModal({
       width: 105,
       type: "select",
       options: [
-        { value: "PEMAKAIAN", label: "Keluar" },
-        { value: "DITERIMA", label: "Masuk" },
+        { value: "PEMAKAIAN", label: "Stock Out" },
+        { value: "DITERIMA", label: "Stock In" },
       ],
       tone: (c) => (masuk(c) ? "text-[var(--accent-green)]" : "text-[var(--accent-red)]"),
     },
@@ -105,7 +105,7 @@ export function BbmBatchModal({
   return (
     <BatchGrid
       title="Input Banyak BBM"
-      subtitle="Pemakaian / penerimaan satu hari sekaligus"
+      subtitle="Stock In / Stock Out satu hari sekaligus"
       draftKey={`batch:bbm:${jenis}:${lokasi}`}
       extra={{ tanggal }}
       onRestoreExtra={(x) => {
@@ -146,11 +146,11 @@ export function BbmBatchModal({
         const akhir = saldoAwal + masukTotal - keluar;
         return (
           <>
-            keluar <b className="text-[var(--accent-red)]">{fmtNum(keluar)} LTR</b>
+            stock out <b className="text-[var(--accent-red)]">{fmtNum(keluar)} LTR</b>
             {masukTotal > 0 && (
               <>
                 {" "}
-                · masuk <b className="text-[var(--accent-green)]">{fmtNum(masukTotal)} LTR</b>
+                · stock in <b className="text-[var(--accent-green)]">{fmtNum(masukTotal)} LTR</b>
               </>
             )}{" "}
             · stok {fmtNum(saldoAwal)} → <b className={akhir < 0 ? "text-[var(--accent-red)]" : "text-[var(--text-primary)]"}>{fmtNum(akhir)} LTR</b>

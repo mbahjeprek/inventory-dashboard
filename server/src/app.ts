@@ -1483,6 +1483,8 @@ app.get("/api/stock-in/vendors", requireEstate("NILAM"), async (_req, res) => {
 app.put("/api/stock-in/:id", requireSuperuser, async (req, res) => {
   const existing = await queryOne("SELECT * FROM stock_in_log WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Not found" });
+  const newEvidence = await checkEditEvidence(req, res, existing.evidence_id);
+  if (newEvidence === undefined) return;
 
   const { nama_vendor, qty, satuan, tujuan, tanggal_terima_iso, keterangan } = req.body;
   await execute(
@@ -1509,6 +1511,7 @@ app.put("/api/stock-in/:id", requireSuperuser, async (req, res) => {
       { nama_vendor: "Vendor", qty: "Jumlah", satuan: "Satuan", tujuan: "Tujuan", tanggal_terima_iso: "Tanggal", keterangan: "Keterangan" }
     ),
   });
+  await useEditEvidence(newEvidence, nilamEvidenceRows("stock_in_log", existing.id));
   res.json({ success: true });
 });
 
@@ -1573,6 +1576,8 @@ app.get("/api/stock-out", requireEstate("NILAM"), async (req, res) => {
 app.put("/api/stock-out/:id", requireSuperuser, async (req, res) => {
   const existing = await queryOne("SELECT * FROM stock_out_log WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Not found" });
+  const newEvidence = await checkEditEvidence(req, res, existing.evidence_id);
+  if (newEvidence === undefined) return;
 
   const { penerima, qty, satuan, tujuan, tanggal_keluar_iso, keterangan } = req.body;
   await execute(
@@ -1599,6 +1604,7 @@ app.put("/api/stock-out/:id", requireSuperuser, async (req, res) => {
       { penerima: "Penerima", qty: "Jumlah", satuan: "Satuan", tujuan: "Tujuan", tanggal_keluar_iso: "Tanggal", keterangan: "Keterangan" }
     ),
   });
+  await useEditEvidence(newEvidence, nilamEvidenceRows("stock_out_log", existing.id));
   res.json({ success: true });
 });
 
@@ -2322,6 +2328,8 @@ app.put("/api/bbm/:id", requireSuperuser, async (req, res) => {
   const existing = await queryOne<any>("SELECT * FROM bbm_log WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Not found" });
   if (!estateAllowed(req.user!, existing.lokasi)) return res.status(403).json({ error: "Akses ditolak" });
+  const newEvidence = await checkEditEvidence(req, res, existing.evidence_id);
+  if (newEvidence === undefined) return;
 
   const { tanggal_iso, no_spb, diterima, pemakaian, saldo_stock, keterangan, estate, kode_kendaraan, hm_terakhir } = req.body;
   if (tanggal_iso && !/^\d{4}-\d{2}-\d{2}$/.test(tanggal_iso)) return res.status(400).json({ error: "Tanggal tidak valid" });
@@ -2365,6 +2373,7 @@ app.put("/api/bbm/:id", requireSuperuser, async (req, res) => {
       hm_terakhir: "HM",
     }),
   });
+  await useEditEvidence(newEvidence, [{ table: "bbm_log", where: "id = @id", params: { id: existing.id } }]);
   res.json({ success: true });
 });
 
@@ -2556,6 +2565,8 @@ app.put("/api/pupuk/:id", requireSuperuser, async (req, res) => {
   const existing = await queryOne<any>("SELECT * FROM pupuk_log WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Not found" });
   if (!estateAllowed(req.user!, existing.estate)) return res.status(403).json({ error: "Akses ditolak" });
+  const newEvidence = await checkEditEvidence(req, res, existing.evidence_id);
+  if (newEvidence === undefined) return;
   const b = req.body;
   if (b.tanggal_iso && !/^\d{4}-\d{2}-\d{2}$/.test(b.tanggal_iso)) return res.status(400).json({ error: "Tanggal tidak valid" });
 
@@ -2602,6 +2613,7 @@ app.put("/api/pupuk/:id", requireSuperuser, async (req, res) => {
       pokok: "Pokok",
     }),
   });
+  await useEditEvidence(newEvidence, [{ table: "pupuk_log", where: "id = @id", params: { id: existing.id } }]);
   res.json({ success: true });
 });
 
@@ -3249,6 +3261,8 @@ for (const lr of LEDGER_ROUTES) {
     const existing = await queryOne<any>(`SELECT * FROM ${l.tx} WHERE id = @id`, { id: req.params.id });
     if (!existing) return res.status(404).json({ error: "Not found" });
     if (existing.transfer_from_id) return res.status(400).json({ error: TRANSFER_LOCKED });
+    const newEvidence = await checkEditEvidence(req, res, existing.evidence_id);
+    if (newEvidence === undefined) return;
     const { qty, tujuan, penerima, note } = req.body;
     if (!validQty(l, qty) || qty <= 0) return res.status(400).json({ error: "Jumlah harus lebih dari 0" });
     // An older row keeps the tujuan it already had.
@@ -3311,6 +3325,7 @@ for (const lr of LEDGER_ROUTES) {
         { qty: "Jumlah", tujuan: "Tujuan", penerima: "Penerima", note: "Catatan" }
       ),
     });
+    await useEditEvidence(newEvidence, [{ table: l.tx, where: "id = @id", params: { id: existing.id } }]);
     res.json({ success: true });
   });
 
@@ -4447,6 +4462,8 @@ app.put("/api/oli/:id", requireSuperuser, async (req, res) => {
   const existing = await queryOne<any>("SELECT * FROM oli_log WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Not found" });
   if (!estateAllowed(req.user!, existing.estate)) return res.status(403).json({ error: "Akses ditolak" });
+  const newEvidence = await checkEditEvidence(req, res, existing.evidence_id);
+  if (newEvidence === undefined) return;
   const b = req.body;
   if (b.tanggal_iso && !ISO_DATE.test(b.tanggal_iso)) return res.status(400).json({ error: "Tanggal tidak valid" });
   const iso = b.tanggal_iso || existing.tanggal_iso;
@@ -4479,6 +4496,7 @@ app.put("/api/oli/:id", requireSuperuser, async (req, res) => {
       keterangan: "Keterangan",
     }),
   });
+  await useEditEvidence(newEvidence, [{ table: "oli_log", where: "id = @id", params: { id: existing.id } }]);
   res.json({ success: true });
 });
 
@@ -5584,3 +5602,41 @@ async function claimEvidence(req: express.Request, res: express.Response): Promi
 async function releaseEvidence(id: string | null | undefined) {
   if (id) await execute("UPDATE evidence SET used = false WHERE id = @id::uuid", { id });
 }
+
+// Edit forms: a new foto bukti (body.evidence_id other than the row's) replaces the row's. Checked
+// before the edit (it must exist, be this account's upload and unused) and taken only once the edit
+// is saved (useEditEvidence), so a refused edit doesn't use it up. Returns the new id, null = the
+// photo stays as it is, undefined = refused (the error is sent).
+async function checkEditEvidence(req: express.Request, res: express.Response, current: string | null | undefined): Promise<string | null | undefined> {
+  const next = req.body?.evidence_id;
+  if (typeof next !== "string" || !next || next === current || !evidenceEnabled()) return null;
+  const ok =
+    /^[0-9a-f-]{36}$/.test(next) &&
+    (await queryOne("SELECT 1 FROM evidence WHERE id = @id::uuid AND used = false AND (user_id = @uid OR @su)", {
+      id: next,
+      uid: req.user!.id,
+      su: req.user!.role === "superuser",
+    }));
+  if (!ok) {
+    res.status(400).json({ error: "Foto bukti tidak valid, upload ulang fotonya" });
+    return undefined;
+  }
+  return next;
+}
+// Puts the checked photo on the edited row (and the rows that share it, e.g. a Nilam transaction's mirror).
+async function useEditEvidence(id: string | null | undefined, rows: { table: string; where: string; params: Record<string, unknown> }[]) {
+  if (!id) return;
+  await execute("UPDATE evidence SET used = true WHERE id = @id::uuid", { id });
+  for (const r of rows) await execute(`UPDATE ${r.table} SET evidence_id = @evidenceId::uuid WHERE ${r.where}`, { ...r.params, evidenceId: id });
+}
+// A Nilam Stock In / Out row, the manual transaction it mirrors and the Stok Masuk that transaction
+// booked in another gudang all show the same photo.
+const nilamEvidenceRows = (table: "stock_in_log" | "stock_out_log", id: unknown) => [
+  { table, where: "id = @id", params: { id } },
+  { table: "transactions", where: "mirror_source = @t AND mirror_id = @id", params: { t: table, id } },
+  {
+    table: "gudang_stock_tx",
+    where: "transfer_from_id IN (SELECT t.id FROM transactions t WHERE t.mirror_source = @t AND t.mirror_id = @id)",
+    params: { t: table, id },
+  },
+];

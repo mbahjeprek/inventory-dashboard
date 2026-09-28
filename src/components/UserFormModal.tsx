@@ -221,7 +221,7 @@ export function UserFormModal({
                   </table>
                 </div>
                 <p className="text-[11px] text-[var(--text-muted)] mt-1.5">
-                  Lihat = buka halaman & data · Input = stok masuk/keluar & tambah data · Edit / Hapus = ubah atau hapus data & transaksi · Koreksi =
+                  Lihat = buka halaman & data · Input = Stock In / Stock Out & tambah data · Edit / Hapus = ubah atau hapus data & transaksi · Koreksi =
                   koreksi stok satu barang · Opname = buat & isi hitungan Stok Opname · Approve Opname = setujui / kembalikan Stok Opname
                   (stok baru berubah setelah disetujui)
                 </p>

@@ -208,7 +208,7 @@ function EstateRow({ e, d, monthLabel }: { e: EstateInfo; d: EstateData; monthLa
                 </div>
               );
             })}
-            <div className="text-[11px] text-[var(--text-muted)]">Masuk/pemakaian {monthLabel}</div>
+            <div className="text-[11px] text-[var(--text-muted)]">Stock In / Out {monthLabel}</div>
           </div>
         )}
       </Panel>

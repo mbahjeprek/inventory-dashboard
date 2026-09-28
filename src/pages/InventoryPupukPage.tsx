@@ -130,7 +130,7 @@ export function InventoryPupukPage({ estate }: { estate: string }) {
       title: `Inventory Pupuk NPK - ${estate}`,
       subtitle: [
         ...(active.length ? [`Filter: ${active.join(" · ")}`] : []),
-        `${total.toLocaleString("id-ID")} transaksi · total stok masuk ${diterimaSum.toLocaleString("id-ID")} KG · total stok keluar ${keluarSum.toLocaleString("id-ID")} KG`,
+        `${total.toLocaleString("id-ID")} transaksi · total stock in ${diterimaSum.toLocaleString("id-ID")} KG · total stock out ${keluarSum.toLocaleString("id-ID")} KG`,
       ],
       landscape: true,
       columns: [
@@ -140,8 +140,8 @@ export function InventoryPupukPage({ estate }: { estate: string }) {
         { label: "Divisi" },
         { label: "No. BPB" },
         { label: "Kode Barang" },
-        { label: "Stok Masuk (KG)", align: "right" },
-        { label: "Stok Keluar (KG)", align: "right" },
+        { label: "Stock In (KG)", align: "right" },
+        { label: "Stock Out (KG)", align: "right" },
         { label: "Saldo Stok (KG)", align: "right" },
         { label: "Keterangan" },
         { label: "Blok" },
@@ -218,11 +218,11 @@ export function InventoryPupukPage({ estate }: { estate: string }) {
                   <div className="text-[11px] text-[var(--text-muted)] mb-1.5">{flowLabel}</div>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <div className="text-[11px] text-[var(--text-secondary)]">Stok Masuk</div>
+                      <div className="text-[11px] text-[var(--text-secondary)]">Stock In</div>
                       <div className="text-sm font-semibold text-[var(--accent-green)]">{(flowFor(j)?.diterima ?? 0).toLocaleString("id-ID")} KG</div>
                     </div>
                     <div>
-                      <div className="text-[11px] text-[var(--text-secondary)]">Stok Keluar</div>
+                      <div className="text-[11px] text-[var(--text-secondary)]">Stock Out</div>
                       <div className="text-sm font-semibold text-[var(--accent-red)]">{(flowFor(j)?.keluar ?? 0).toLocaleString("id-ID")} KG</div>
                     </div>
                   </div>
@@ -295,8 +295,8 @@ export function InventoryPupukPage({ estate }: { estate: string }) {
       </div>
 
       <div className="text-sm text-[var(--text-secondary)]">
-        {total.toLocaleString("id-ID")} transaksi · total stok masuk{" "}
-        <span className="font-medium text-[var(--text-primary)]">{diterimaSum.toLocaleString("id-ID")} KG</span> · total stok keluar{" "}
+        {total.toLocaleString("id-ID")} transaksi · total stock in{" "}
+        <span className="font-medium text-[var(--text-primary)]">{diterimaSum.toLocaleString("id-ID")} KG</span> · total stock out{" "}
         <span className="font-medium text-[var(--text-primary)]">{keluarSum.toLocaleString("id-ID")} KG</span>
       </div>
 
@@ -311,8 +311,8 @@ export function InventoryPupukPage({ estate }: { estate: string }) {
                 <th className="px-4 py-2.5">Divisi</th>
                 <th className="px-4 py-2.5 whitespace-nowrap">No. BPB</th>
                 <th className="px-4 py-2.5 whitespace-nowrap">Kode Barang</th>
-                <th className="px-4 py-2.5 text-right whitespace-nowrap">Stok Masuk (KG)</th>
-                <th className="px-4 py-2.5 text-right whitespace-nowrap">Stok Keluar (KG)</th>
+                <th className="px-4 py-2.5 text-right whitespace-nowrap">Stock In (KG)</th>
+                <th className="px-4 py-2.5 text-right whitespace-nowrap">Stock Out (KG)</th>
                 <th className="px-4 py-2.5 text-right whitespace-nowrap">Saldo Stok (KG)</th>
                 <th className="px-4 py-2.5">Keterangan</th>
                 <th className="px-4 py-2.5 text-center">Bukti</th>

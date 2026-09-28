@@ -2,6 +2,7 @@ import { useState } from "react";
 import { X } from "lucide-react";
 import { api, errorText, GUDANG_TUJUAN, type LedgerTx, type StockScope } from "../lib/api";
 import { KaryawanAutocomplete } from "./KaryawanAutocomplete";
+import { EditEvidenceField } from "./EvidenceInput";
 
 // Superuser correction of one Stock In/Out row of a gudang or klinik; the stock follows the qty change.
 export function EditLedgerTxModal({
@@ -16,6 +17,8 @@ export function EditLedgerTxModal({
   onSuccess: () => void;
 }) {
   const [qty, setQty] = useState(tx.qty);
+  // A new foto bukti replaces the current one (none picked = it stays).
+  const [newEvidence, setNewEvidence] = useState<string | null>(null);
   const [tujuan, setTujuan] = useState(tx.tujuan ?? "");
   const [penerima, setPenerima] = useState(tx.penerima ?? "");
   const [note, setNote] = useState(tx.note ?? "");
@@ -34,7 +37,7 @@ export function EditLedgerTxModal({
     setSubmitting(true);
     setError("");
     try {
-      await api.updateLedgerTx(scope, tx.id, { qty, tujuan, penerima, note, ...(klinikIn ? { expired_date: expired } : {}) });
+      await api.updateLedgerTx(scope, tx.id, { qty, tujuan, penerima, note, ...(klinikIn ? { expired_date: expired } : {}), ...(newEvidence ? { evidence_id: newEvidence } : {}) });
       onSuccess();
     } catch (e: any) {
       setError(errorText(e, e?.message?.includes("400") ? "Tidak bisa disimpan: stok batch tidak mencukupi atau sudah terpakai" : "Gagal menyimpan perubahan"));
@@ -114,6 +117,8 @@ export function EditLedgerTxModal({
             <label className="text-xs text-[var(--text-secondary)] mb-1 block">Catatan</label>
             <input value={note} onChange={(e) => setNote(e.target.value)} className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-2" />
           </div>
+
+          <EditEvidenceField current={tx.evidence_id} value={newEvidence} onChange={setNewEvidence} />
 
           {error && <p className="text-xs text-[var(--accent-red)]">{error}</p>}
 

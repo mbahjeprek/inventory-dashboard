@@ -178,7 +178,7 @@ export function BbmTransactionModal({
                   : "border-[var(--border)] text-[var(--text-secondary)]"
               }`}
             >
-              Stok Masuk
+              Stock In
             </button>
             <button
               onClick={() => setTipe("PEMAKAIAN")}
@@ -188,7 +188,7 @@ export function BbmTransactionModal({
                   : "border-[var(--border)] text-[var(--text-secondary)]"
               }`}
             >
-              Stok Keluar
+              Stock Out
             </button>
           </div>
 

@@ -59,8 +59,8 @@ export function StockBatchModal({ scope, onClose, onSuccess }: { scope?: StockSc
       width: klinik ? 125 : 105,
       type: "select",
       options: [
-        { value: "OUT", label: "Keluar" },
-        { value: "IN", label: "Masuk" },
+        { value: "OUT", label: "Stock Out" },
+        { value: "IN", label: "Stock In" },
         ...(klinik ? [{ value: "BUANG", label: "Buang (expired)" }] : []),
       ],
       tone: (c) => (masuk(c) ? "text-[var(--accent-green)]" : buang(c) ? "text-[var(--accent-amber)]" : "text-[var(--accent-red)]"),
@@ -88,7 +88,7 @@ export function StockBatchModal({ scope, onClose, onSuccess }: { scope?: StockSc
             carry: true,
             options: [{ value: "", label: "-- Pilih --" }, ...tujuanOptions.map((t) => ({ value: t }))],
             off: (c: Cells) => masuk(c) && "-",
-            hint: (c: Cells) => (nilam && !masuk(c) && c.tujuan && c.tujuan !== "NILAM" ? `→ Stok Masuk Gudang ${c.tujuan}` : undefined),
+            hint: (c: Cells) => (nilam && !masuk(c) && c.tujuan && c.tujuan !== "NILAM" ? `→ Stock In Gudang ${c.tujuan}` : undefined),
           },
         ]),
     {
@@ -163,7 +163,7 @@ export function StockBatchModal({ scope, onClose, onSuccess }: { scope?: StockSc
   return (
     <BatchGrid
       title={klinik ? `Input Banyak Klinik - ${estate}` : `Input Banyak Gudang - ${estate}`}
-      subtitle={klinik ? "Obat & alat medis masuk / keluar sekaligus" : "Barang masuk / keluar sekaligus"}
+      subtitle={klinik ? "Stock In / Stock Out obat & alat medis sekaligus" : "Stock In / Stock Out barang sekaligus"}
       draftKey={`batch:${scope?.kind ?? "nilam"}:${estate}`}
       columns={columns}
       blankRow={blankRow}
@@ -174,7 +174,7 @@ export function StockBatchModal({ scope, onClose, onSuccess }: { scope?: StockSc
         const out = rows.filter((c) => !masuk(c)).length;
         return (
           <>
-            <b className="text-[var(--accent-red)]">{out}</b> keluar · <b className="text-[var(--accent-green)]">{rows.length - out}</b> masuk
+            <b className="text-[var(--accent-red)]">{out}</b> stock out · <b className="text-[var(--accent-green)]">{rows.length - out}</b> stock in
           </>
         );
       }}
