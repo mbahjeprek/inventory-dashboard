@@ -210,6 +210,13 @@ async function stockLocations(req: express.Request): Promise<StockLocation[]> {
     const t = await queryOne<{ gudang: string }>("SELECT gudang FROM gudang_stock_tx WHERE transfer_from_id = @id", { id });
     return [...G("NILAM"), ...G(t?.gudang), ...(m === "PUT" ? transferTo(b.tujuan, b.type) : [])];
   }
+  if (/^\/stock-(in|out)\/\d+$/.test(p)) {
+    const t = await queryOne<{ gudang: string }>(
+      "SELECT g.gudang FROM transactions x JOIN gudang_stock_tx g ON g.transfer_from_id = x.id WHERE x.mirror_source = @s AND x.mirror_id = @id",
+      { s: p.startsWith("/stock-in") ? "stock_in_log" : "stock_out_log", id }
+    );
+    return [...G("NILAM"), ...G(t?.gudang), ...(m === "PUT" && p.startsWith("/stock-out") ? transferTo(b.tujuan, "OUT") : [])];
+  }
   if (/^\/gudang-stock(\/transactions|\/transactions\/batch|\/correction)?$/.test(p) && m === "POST") return G(b.gudang);
   if (/^\/gudang-stock\/\d+$/.test(p)) return G(await col("gudang_stock", "gudang"));
   if (/^\/gudang-stock\/history\/\d+$/.test(p)) return G(await col("gudang_stock_tx", "gudang"));
@@ -383,7 +390,7 @@ async function mirrorTransaction(
   note: string | null,
   penerima: string
 ): Promise<{ source: "stock_in_log" | "stock_out_log"; id: number }> {
-  const iso = todayIso();
+  const iso = jakartaToday();
   const display = isoToDisplay(iso);
 
   if (type === "IN") {
@@ -977,6 +984,13 @@ async function recordMovement(req: express.Request, l: StockLedger, m: Movement)
   }
 }
 
+// An edit / delete of a gudang movement may not take the stock below zero (e.g. removing a Stock In
+// whose barang has gone out since).
+async function ledgerStockCheck(client: PoolClient, l: StockLedger, scope: string, item: string) {
+  const s = (await queryOne<{ s: number }>(`SELECT stock_tersedia::float8 s FROM ${l.stock} WHERE ${l.scope} = @scope AND ${l.item} = @item`, { scope, item }, client))?.s ?? 0;
+  if (s < 0) throw new StockError(`Stok ${item} di ${scope} tidak cukup (jadi ${round3(s)}). Ubah / hapus dulu Stock Out-nya.`);
+}
+
 // Koreksi: sets the stock to the counted quantity via one IN/OUT movement. Returns the stock before.
 async function recordCorrection(req: express.Request, l: StockLedger, scope: string, item: string, actual: number, note: string) {
   return withTransaction((client) => ledgerCorrection(client, req, l, scope, item, actual, `Koreksi Stok (Opname)${note ? `: ${note}` : ""}`));
@@ -1210,10 +1224,26 @@ async function addTransfer(
   return { estate: tujuan, qty };
 }
 
-// Undoes the Stok Masuk a Nilam Stok Keluar transferred into another gudang, if any.
-async function removeTransfer(client: PoolClient, nilamTxId: number): Promise<TransferChange> {
-  const g = await queryOne<any>(`DELETE FROM gudang_stock_tx WHERE transfer_from_id = @id RETURNING *`, { id: nilamTxId }, client);
+// Undoes the Stok Masuk a Nilam Stok Keluar transferred into another gudang, if any. Refused
+// (StockError) once that gudang has used the stock: its Stok Keluar has to change first.
+// `rowId`: only that transfer row (the old one, when an edit has booked its replacement already).
+async function removeTransfer(client: PoolClient, nilamTxId: number, rowId?: number): Promise<TransferChange> {
+  const g = await queryOne<any>(
+    `DELETE FROM gudang_stock_tx WHERE transfer_from_id = @id ${rowId ? "AND id = @rowId" : ""} RETURNING *`,
+    { id: nilamTxId, rowId: rowId ?? 0 },
+    client
+  );
   if (!g) return null;
+  const have = (await queryOne<{ s: number }>(
+    "SELECT stock_tersedia::float8 s FROM gudang_stock WHERE gudang = @gudang AND item_kode = @item FOR UPDATE",
+    { gudang: g.gudang, item: g.item_kode },
+    client
+  ))?.s ?? 0;
+  if (round3(have - g.qty) < 0) {
+    throw new StockError(
+      `${g.item_kode} dari transfer ini sudah terpakai di Gudang ${g.gudang}, jadi transfernya tidak bisa dikurangi / dipindah / dihapus sebanyak itu. Ubah / hapus dulu Stock Out-nya di Gudang ${g.gudang}.`
+    );
+  }
   await execute(
     `UPDATE gudang_stock SET stock_tersedia = ROUND((stock_tersedia - @qty)::numeric, 3) WHERE gudang = @gudang AND item_kode = @item`,
     { qty: g.qty, gudang: g.gudang, item: g.item_kode },
@@ -1221,6 +1251,44 @@ async function removeTransfer(client: PoolClient, nilamTxId: number): Promise<Tr
   );
   return { estate: g.gudang, qty: g.qty };
 }
+
+// A manual Nilam transaction changed or removed, with everything it booked: Nilam's stock (items),
+// its Stock In / Out history row and the Stock In it transferred into another gudang. Refused
+// (StockError) when Nilam's or that gudang's stock would go below zero. Used by the Transaksi edit
+// and by the Stock In / Out tabs, whose rows are these transactions' history rows.
+type NilamTxChange = { type: "IN" | "OUT"; qty: number; tujuan: string; penerima: string; note: string | null };
+async function nilamStockCheck(client: PoolClient, itemId: number) {
+  const it = (await queryOne<{ kode: string; s: number }>("SELECT kode, stock_tersedia s FROM items WHERE id = @id", { id: itemId }, client))!;
+  if (it.s < 0) throw new StockError(`Stok ${it.kode} di Gudang NILAM tidak cukup (jadi ${it.s})`);
+}
+async function reviseNilamTx(client: PoolClient, req: express.Request, tx: any, next: NilamTxChange) {
+  const item = (await queryOne<any>("SELECT * FROM items WHERE id = @id", { id: tx.item_id }, client))!;
+  // The new transfer is booked before the old one is taken back, so only the net change has to be
+  // in that gudang's stock (10 -> 8 needs 2 there, not 10).
+  const old = await queryOne<{ id: number }>("SELECT id FROM gudang_stock_tx WHERE transfer_from_id = @id", { id: tx.id }, client);
+  const added = next.type === "OUT" && !tx.is_correction ? await addTransfer(client, req, tx.id, item.kode, next.tujuan, next.qty, next.penerima, next.note ?? "", tx.evidence_id) : null;
+  const removed = old ? await removeTransfer(client, tx.id, old.id) : null;
+  await applyStockEffect(client, tx.item_id, tx.type, tx.qty, -1);
+  await applyStockEffect(client, tx.item_id, next.type, next.qty, 1);
+  await nilamStockCheck(client, tx.item_id);
+  await execute(
+    "UPDATE transactions SET tujuan = @tujuan, type = @type, qty = @qty, note = @note, penerima = @penerima WHERE id = @id",
+    { ...next, tujuan: next.tujuan || "", penerima: next.penerima || "", id: tx.id },
+    client
+  );
+  return { item, removed, added };
+}
+async function deleteNilamTx(client: PoolClient, tx: any) {
+  const removed = await removeTransfer(client, tx.id);
+  await applyStockEffect(client, tx.item_id, tx.type, tx.qty, -1);
+  await nilamStockCheck(client, tx.item_id);
+  if (!tx.is_correction) await deleteMirror(client, tx.mirror_source, tx.mirror_id);
+  await execute("DELETE FROM transactions WHERE id = @id", { id: tx.id }, client);
+  return removed;
+}
+// The manual transaction a Nilam Stock In / Out history row mirrors; null = imported history.
+const mirroredTx = (table: "stock_in_log" | "stock_out_log", id: unknown) =>
+  queryOne<any>("SELECT * FROM transactions WHERE mirror_source = @t AND mirror_id = @id", { t: table, id });
 
 // Logs the receiving side of a transfer in the receiving estate's activity log.
 async function logTransfer(req: express.Request, objek: string, removed: TransferChange, added: TransferChange) {
@@ -1300,33 +1368,38 @@ app.put("/api/transactions/:id", requireSuperuser, async (req, res) => {
     return res.status(400).json({ error: "Invalid payload" });
   }
 
-  const item = await queryOne<any>("SELECT * FROM items WHERE id = @id", { id: existing.item_id });
-
+  let item: any;
   let removed: TransferChange = null;
   let added: TransferChange = null;
-  await withTransaction(async (client) => {
-    removed = await removeTransfer(client, existing.id);
-    if (type === "OUT" && !existing.is_correction) {
-      added = await addTransfer(client, req, existing.id, item.kode, tujuan, qty, penerima, note);
-    }
-    await applyStockEffect(client, existing.item_id, existing.type, existing.qty, -1);
-    await applyStockEffect(client, existing.item_id, type, qty, 1);
-    await execute(
-      "UPDATE transactions SET tujuan = @tujuan, type = @type, qty = @qty, note = @note, penerima = @penerima WHERE id = @id",
-      { tujuan: tujuan || "", type, qty, note: note || null, penerima: penerima || "", id: req.params.id },
-      client
-    );
-
-    if (!existing.is_correction) {
-      await deleteMirror(client, existing.mirror_source, existing.mirror_id);
-      const mirror = await mirrorTransaction(client, item, type, tujuan || "", qty, note, penerima || "");
-      await execute(
-        `UPDATE transactions SET mirror_source = @source, mirror_id = @mirror_id WHERE id = @id`,
-        { source: mirror.source, mirror_id: mirror.id, id: req.params.id },
-        client
-      );
-    }
-  });
+  try {
+    await withTransaction(async (client) => {
+      ({ item, removed, added } = await reviseNilamTx(client, req, existing, { type, qty, tujuan: tujuan || "", penerima: penerima || "", note: note || null }));
+      if (existing.is_correction) return;
+      // Same type: its history row changes in place (keeping its date); another type moves it to the
+      // other history.
+      if (existing.mirror_source === (type === "IN" ? "stock_in_log" : "stock_out_log")) {
+        if (type === "IN")
+          await execute("UPDATE stock_in_log SET qty = @qty, keterangan = @note WHERE id = @id", { qty, note: note || "", id: existing.mirror_id }, client);
+        else
+          await execute(
+            "UPDATE stock_out_log SET qty = @qty, tujuan = @tujuan, penerima = @penerima, keterangan = @note WHERE id = @id",
+            { qty, tujuan: tujuan || null, penerima: penerima || "", note: note || "", id: existing.mirror_id },
+            client
+          );
+      } else {
+        await deleteMirror(client, existing.mirror_source, existing.mirror_id);
+        const mirror = await mirrorTransaction(client, item, type, tujuan || "", qty, note, penerima || "");
+        await execute(
+          `UPDATE transactions SET mirror_source = @source, mirror_id = @mirror_id WHERE id = @id`,
+          { source: mirror.source, mirror_id: mirror.id, id: req.params.id },
+          client
+        );
+      }
+    });
+  } catch (e) {
+    if (e instanceof StockError) return res.status(400).json({ error: e.message });
+    throw e;
+  }
 
   await logActivity(req, {
     module: "BARANG",
@@ -1347,12 +1420,14 @@ app.delete("/api/transactions/:id", requireSuperuser, async (req, res) => {
   const existing = await queryOne<any>("SELECT * FROM transactions WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Not found" });
   let removed: TransferChange = null;
-  await withTransaction(async (client) => {
-    removed = await removeTransfer(client, existing.id);
-    await applyStockEffect(client, existing.item_id, existing.type, existing.qty, -1);
-    if (!existing.is_correction) await deleteMirror(client, existing.mirror_source, existing.mirror_id);
-    await execute("DELETE FROM transactions WHERE id = @id", { id: req.params.id }, client);
-  });
+  try {
+    await withTransaction(async (client) => {
+      removed = await deleteNilamTx(client, existing);
+    });
+  } catch (e) {
+    if (e instanceof StockError) return res.status(400).json({ error: e.message });
+    throw e;
+  }
 
   const item = await queryOne<any>("SELECT kode, nama FROM items WHERE id = @id", { id: existing.item_id });
   await logActivity(req, {
@@ -1487,6 +1562,20 @@ app.put("/api/stock-in/:id", requireSuperuser, async (req, res) => {
   if (newEvidence === undefined) return;
 
   const { nama_vendor, qty, satuan, tujuan, tanggal_terima_iso, keterangan } = req.body;
+  // Made by a manual transaction: Nilam's stock follows the new jumlah.
+  const tx = await mirroredTx("stock_in_log", existing.id);
+  let sync: Awaited<ReturnType<typeof reviseNilamTx>> | null = null;
+  if (tx) {
+    if (!(Number(qty) > 0)) return res.status(400).json({ error: "Jumlah harus lebih dari 0" });
+    try {
+      sync = await withTransaction((client) =>
+        reviseNilamTx(client, req, tx, { type: "IN", qty: Number(qty), tujuan: tx.tujuan ?? "", penerima: tx.penerima ?? "", note: keterangan ?? "" })
+      );
+    } catch (e) {
+      if (e instanceof StockError) return res.status(400).json({ error: e.message });
+      throw e;
+    }
+  }
   await execute(
     `UPDATE stock_in_log SET nama_vendor = @nama_vendor, qty = @qty, satuan = @satuan, tujuan = @tujuan, tanggal_terima_iso = @tanggal_terima_iso, tanggal_terima = @tanggal_terima, keterangan = @keterangan WHERE id = @id`,
     {
@@ -1511,14 +1600,26 @@ app.put("/api/stock-in/:id", requireSuperuser, async (req, res) => {
       { nama_vendor: "Vendor", qty: "Jumlah", satuan: "Satuan", tujuan: "Tujuan", tanggal_terima_iso: "Tanggal", keterangan: "Keterangan" }
     ),
   });
+  if (sync) await logTransfer(req, `${existing.kode} - ${existing.nama}`, sync.removed, sync.added);
   await useEditEvidence(newEvidence, nilamEvidenceRows("stock_in_log", existing.id));
   res.json({ success: true });
 });
 
 app.delete("/api/stock-in/:id", requireSuperuser, async (req, res) => {
   const existing = await queryOne<any>("SELECT * FROM stock_in_log WHERE id = @id", { id: req.params.id });
-  const result = await execute("DELETE FROM stock_in_log WHERE id = @id", { id: req.params.id });
-  if (result.rowCount === 0) return res.status(404).json({ error: "Not found" });
+  if (!existing) return res.status(404).json({ error: "Not found" });
+  // Made by a manual transaction: that transaction goes too, with its stock and transfer. An
+  // imported history row is only a record (the stock never came from it).
+  const tx = await mirroredTx("stock_in_log", existing.id);
+  let removed: TransferChange = null;
+  try {
+    if (tx) await withTransaction(async (client) => void (removed = await deleteNilamTx(client, tx)));
+    else await execute("DELETE FROM stock_in_log WHERE id = @id", { id: existing.id });
+  } catch (e) {
+    if (e instanceof StockError) return res.status(400).json({ error: e.message });
+    throw e;
+  }
+  if (tx) await logTransfer(req, `${existing.kode} - ${existing.nama}`, removed, null);
   await logActivity(req, {
     module: "BARANG",
     estate: "NILAM",
@@ -1580,6 +1681,26 @@ app.put("/api/stock-out/:id", requireSuperuser, async (req, res) => {
   if (newEvidence === undefined) return;
 
   const { penerima, qty, satuan, tujuan, tanggal_keluar_iso, keterangan } = req.body;
+  // Made by a manual transaction: Nilam's stock and the transfer into another gudang follow.
+  const tx = await mirroredTx("stock_out_log", existing.id);
+  let sync: Awaited<ReturnType<typeof reviseNilamTx>> | null = null;
+  if (tx) {
+    if (!(Number(qty) > 0)) return res.status(400).json({ error: "Jumlah harus lebih dari 0" });
+    try {
+      sync = await withTransaction((client) =>
+        reviseNilamTx(client, req, tx, {
+          type: "OUT",
+          qty: Number(qty),
+          tujuan: tujuan && TUJUAN_OPTIONS.includes(tujuan) ? tujuan : "",
+          penerima: penerima ?? "",
+          note: keterangan ?? "",
+        })
+      );
+    } catch (e) {
+      if (e instanceof StockError) return res.status(400).json({ error: e.message });
+      throw e;
+    }
+  }
   await execute(
     `UPDATE stock_out_log SET penerima = @penerima, qty = @qty, satuan = @satuan, tujuan = @tujuan, tanggal_keluar_iso = @tanggal_keluar_iso, tanggal_keluar = @tanggal_keluar, keterangan = @keterangan WHERE id = @id`,
     {
@@ -1604,14 +1725,26 @@ app.put("/api/stock-out/:id", requireSuperuser, async (req, res) => {
       { penerima: "Penerima", qty: "Jumlah", satuan: "Satuan", tujuan: "Tujuan", tanggal_keluar_iso: "Tanggal", keterangan: "Keterangan" }
     ),
   });
+  if (sync) await logTransfer(req, `${existing.kode} - ${existing.nama}`, sync.removed, sync.added);
   await useEditEvidence(newEvidence, nilamEvidenceRows("stock_out_log", existing.id));
   res.json({ success: true });
 });
 
 app.delete("/api/stock-out/:id", requireSuperuser, async (req, res) => {
   const existing = await queryOne<any>("SELECT * FROM stock_out_log WHERE id = @id", { id: req.params.id });
-  const result = await execute("DELETE FROM stock_out_log WHERE id = @id", { id: req.params.id });
-  if (result.rowCount === 0) return res.status(404).json({ error: "Not found" });
+  if (!existing) return res.status(404).json({ error: "Not found" });
+  // Made by a manual transaction: that transaction goes too, with its stock and transfer. An
+  // imported history row is only a record (the stock never came from it).
+  const tx = await mirroredTx("stock_out_log", existing.id);
+  let removed: TransferChange = null;
+  try {
+    if (tx) await withTransaction(async (client) => void (removed = await deleteNilamTx(client, tx)));
+    else await execute("DELETE FROM stock_out_log WHERE id = @id", { id: existing.id });
+  } catch (e) {
+    if (e instanceof StockError) return res.status(400).json({ error: e.message });
+    throw e;
+  }
+  if (tx) await logTransfer(req, `${existing.kode} - ${existing.nama}`, removed, null);
   await logActivity(req, {
     module: "BARANG",
     estate: "NILAM",
@@ -3298,6 +3431,7 @@ for (const lr of LEDGER_ROUTES) {
     } else {
     const sign = existing.type === "IN" ? 1 : -1;
     const delta = round3(sign * (qty - existing.qty));
+    try {
     await withTransaction(async (client) => {
       await execute(`UPDATE ${l.tx} SET qty = @qty, tujuan = @tujuan, penerima = @penerima, note = @note WHERE id = @id`, {
         qty,
@@ -3311,7 +3445,12 @@ for (const lr of LEDGER_ROUTES) {
         { delta, scope: existing[l.scope], item: existing[l.item] },
         client
       );
+      await ledgerStockCheck(client, l, existing[l.scope], existing[l.item]);
     });
+    } catch (e) {
+      if (e instanceof StockError) return res.status(400).json({ error: e.message });
+      throw e;
+    }
     }
     const m = await queryOne<any>(`SELECT nama FROM ${master} WHERE kode = @k`, { k: existing[l.item] });
     await logActivity(req, {
@@ -3345,6 +3484,7 @@ for (const lr of LEDGER_ROUTES) {
             { delta: existing.type === "IN" ? existing.qty : -existing.qty, scope: existing[l.scope], item: existing[l.item] },
             client
           );
+        if (l !== KLINIK_LEDGER) await ledgerStockCheck(client, l, existing[l.scope], existing[l.item]);
       });
     } catch (e) {
       if (e instanceof StockError) return res.status(400).json({ error: e.message });
