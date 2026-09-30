@@ -2305,13 +2305,7 @@ app.post("/api/bbm", async (req, res) => {
   const evidenceId = await claimEvidence(req, res);
   if (evidenceId === undefined) return;
 
-  const last = await queryOne<{ saldo_stock: number }>(
-    `SELECT saldo_stock FROM bbm_log WHERE jenis_bbm = @jenis_bbm AND lokasi = @lokasi AND saldo_stock IS NOT NULL
-     ORDER BY tanggal_iso DESC, id DESC LIMIT 1`,
-    { jenis_bbm, lokasi }
-  );
-
-  const lastSaldo = last?.saldo_stock ?? 0;
+  const lastSaldo = await saldoAsOf("BBM", lokasi, jenis_bbm, tanggal_iso);
   const saldoBaru = tipe === "DITERIMA" ? lastSaldo + jumlah : lastSaldo - jumlah;
   const { tanggal, periode } = isoToIndoDate(tanggal_iso);
 
@@ -2338,6 +2332,7 @@ app.post("/api/bbm", async (req, res) => {
       hm_terakhir: hm_terakhir || "",
     }
   );
+  await rechainSaldo("BBM", lokasi, jenis_bbm, tanggal_iso);
 
   await logActivity(req, {
     module: "BBM",
@@ -2403,12 +2398,15 @@ app.post("/api/bbm/batch", async (req, res) => {
   try {
     booked = await withTransaction(async (client) => {
       await execute("SELECT pg_advisory_xact_lock(hashtext(@key))", { key: `bbm:${jenis_bbm}:${lokasi}` }, client);
-      let saldo = (await latestSaldoRow("BBM", lokasi, jenis_bbm, client))?.saldo_stock ?? 0;
+      // The rows run on from the saldo of their date; what can go out is checked against the stock now.
+      let saldo = await saldoAsOf("BBM", lokasi, jenis_bbm, tanggal_iso, client);
+      let stock = (await latestSaldoRow("BBM", lokasi, jenis_bbm, client))?.saldo_stock ?? 0;
       const out = [];
       for (const [i, row] of clean.entries()) {
         const before = saldo;
-        if (row.tipe === "PEMAKAIAN" && row.jumlah > before) throw new BatchRowError(i, `Baris ${i + 1}: stok tinggal ${round3(before).toLocaleString("id-ID")} LTR`);
+        if (row.tipe === "PEMAKAIAN" && row.jumlah > stock) throw new BatchRowError(i, `Baris ${i + 1}: stok tinggal ${round3(stock).toLocaleString("id-ID")} LTR`);
         saldo = round3(row.tipe === "DITERIMA" ? before + row.jumlah : before - row.jumlah);
+        stock = round3(row.tipe === "DITERIMA" ? stock + row.jumlah : stock - row.jumlah);
         await execute(
           `INSERT INTO bbm_log
             (jenis_bbm, lokasi, estate, periode, tanggal, tanggal_iso, no_spb, diterima, pemakaian, saldo_stock, keterangan, kode_kendaraan, hm_terakhir, evidence_id)
@@ -2429,6 +2427,7 @@ app.post("/api/bbm/batch", async (req, res) => {
         );
         out.push({ row, before, after: saldo });
       }
+      await rechainSaldo("BBM", lokasi, jenis_bbm, tanggal_iso, client);
       return out;
     });
   } catch (e) {
@@ -2499,6 +2498,8 @@ app.put("/api/bbm/:id", requireSuperuser, async (req, res) => {
      WHERE id = @id`,
     { ...updated, id: req.params.id }
   );
+  const fromBbm = minIso(existing.tanggal_iso, updated.tanggal_iso);
+  if (fromBbm) await rechainSaldo("BBM", existing.lokasi, existing.jenis_bbm, fromBbm);
   await logActivity(req, {
     module: "BBM",
     estate: existing.lokasi,
@@ -2526,6 +2527,7 @@ app.delete("/api/bbm/:id", requireSuperuser, async (req, res) => {
   if (!estateAllowed(req.user!, existing.lokasi)) return res.status(403).json({ error: "Akses ditolak" });
 
   await execute("DELETE FROM bbm_log WHERE id = @id", { id: req.params.id });
+  if (existing.tanggal_iso) await rechainSaldo("BBM", existing.lokasi, existing.jenis_bbm, existing.tanggal_iso);
   await logActivity(req, {
     module: "BBM",
     estate: existing.lokasi,
@@ -2657,12 +2659,7 @@ app.post("/api/pupuk", async (req, res) => {
   if (evidenceId === undefined) return;
 
   const jenis = String(jenis_pupuk).trim().toUpperCase();
-  const last = await queryOne<{ saldo_stock: number }>(
-    `SELECT saldo_stock FROM pupuk_log WHERE estate = @estate AND jenis_pupuk = @jenis AND saldo_stock IS NOT NULL
-     ORDER BY tanggal_iso DESC, id DESC LIMIT 1`,
-    { estate, jenis }
-  );
-  const lastSaldo = last?.saldo_stock ?? 0;
+  const lastSaldo = await saldoAsOf("PUPUK", estate, jenis, tanggal_iso);
   const qty = Number(jumlah);
   const saldoBaru = tipe === "MASUK" ? lastSaldo + qty : lastSaldo - qty;
   const [y, m, d] = tanggal_iso.split("-");
@@ -2692,6 +2689,7 @@ app.post("/api/pupuk", async (req, res) => {
       pokok: optNum(pokok),
     }
   );
+  await rechainSaldo("PUPUK", estate, jenis, tanggal_iso);
   await logActivity(req, {
     module: "PUPUK",
     estate,
@@ -2737,6 +2735,8 @@ app.put("/api/pupuk/:id", requireSuperuser, async (req, res) => {
      WHERE id = @id`,
     { ...updated, id: req.params.id }
   );
+  const fromPupuk = minIso(existing.tanggal_iso, updated.tanggal_iso);
+  if (fromPupuk) await rechainSaldo("PUPUK", existing.estate, existing.jenis_pupuk, fromPupuk);
   await logActivity(req, {
     module: "PUPUK",
     estate: existing.estate,
@@ -2765,6 +2765,7 @@ app.delete("/api/pupuk/:id", requireSuperuser, async (req, res) => {
   if (!existing) return res.status(404).json({ error: "Not found" });
   if (!estateAllowed(req.user!, existing.estate)) return res.status(403).json({ error: "Akses ditolak" });
   await execute("DELETE FROM pupuk_log WHERE id = @id", { id: req.params.id });
+  if (existing.tanggal_iso) await rechainSaldo("PUPUK", existing.estate, existing.jenis_pupuk, existing.tanggal_iso);
   await logActivity(req, {
     module: "PUPUK",
     estate: existing.estate,
@@ -3842,12 +3843,79 @@ async function opnameSnapshot(module: OpnameModule, estate: string, client?: Poo
 
 // The running-balance ledgers (no movement table, a saldo per row): table, jenis and estate column.
 const SALDO_LEDGER = {
-  BBM: { table: "bbm_log", jenis: "jenis_bbm", estate: "lokasi" },
-  PUPUK: { table: "pupuk_log", jenis: "jenis_pupuk", estate: "estate" },
-  OLI: { table: "oli_log", jenis: "jenis_oli", estate: "estate" },
+  BBM: { table: "bbm_log", jenis: "jenis_bbm", estate: "lokasi", out: "pemakaian" },
+  PUPUK: { table: "pupuk_log", jenis: "jenis_pupuk", estate: "estate", out: "keluar" },
+  OLI: { table: "oli_log", jenis: "jenis_oli", estate: "estate", out: "pemakaian" },
 } as const;
 type SaldoModule = keyof typeof SALDO_LEDGER;
 const isSaldoModule = (m: OpnameModule): m is SaldoModule => m in SALDO_LEDGER;
+
+// The saldo a row dated `iso` runs on from: the last saldo row up to and including that day (a new
+// row goes after the rows already on its date).
+const saldoAsOf = async (module: SaldoModule, estate: string, jenis: string, iso: string, client?: PoolClient) => {
+  const t = SALDO_LEDGER[module];
+  const r = await queryOne<{ saldo_stock: number }>(
+    `SELECT saldo_stock FROM ${t.table} WHERE ${t.jenis} = @jenis AND ${t.estate} = @estate AND saldo_stock IS NOT NULL AND tanggal_iso <= @iso
+     ORDER BY tanggal_iso DESC, id DESC LIMIT 1`,
+    { estate, jenis, iso },
+    client
+  );
+  return r?.saldo_stock ?? 0;
+};
+
+// Rebuilds the running saldo of one estate + jenis from `fromIso` on, in (tanggal_iso, id) order, so
+// a backdated, edited or deleted row moves every saldo after it (a row used to take the saldo of
+// the latest row at the time it was booked, and nothing after it followed). A row booked in the app
+// runs on from the row before it: saldo = before + diterima + pinjam - keluar/pemakaian. Imported
+// rows (created_at NULL) keep the sheet's own saldo, and a Stok Opname row (koreksi) keeps the
+// counted saldo - its koreksi becomes the count minus the saldo before it.
+async function rechainSaldo(module: SaldoModule, estate: string, jenis: string, fromIso: string, client?: PoolClient): Promise<number> {
+  if (!client) return withTransaction((c) => rechainSaldo(module, estate, jenis, fromIso, c));
+  const t = SALDO_LEDGER[module];
+  const key = { estate, jenis, iso: fromIso };
+  await execute("SELECT pg_advisory_xact_lock(hashtext(@k))", { k: `saldo:${module}:${estate}:${jenis}` }, client);
+  let prev =
+    (
+      await queryOne<{ s: number }>(
+        `SELECT saldo_stock::float8 s FROM ${t.table} WHERE ${t.jenis} = @jenis AND ${t.estate} = @estate AND saldo_stock IS NOT NULL AND tanggal_iso < @iso
+         ORDER BY tanggal_iso DESC, id DESC LIMIT 1`,
+        key,
+        client
+      )
+    )?.s ?? 0;
+  const rows = await queryMany<{ id: number; imported: boolean; i: number; p: number; o: number; k: number | null; s: number | null }>(
+    `SELECT id, created_at IS NULL imported, COALESCE(diterima, 0)::float8 i, COALESCE(pinjam, 0)::float8 p, COALESCE(${t.out}, 0)::float8 o,
+       koreksi::float8 k, saldo_stock::float8 s
+     FROM ${t.table} WHERE ${t.jenis} = @jenis AND ${t.estate} = @estate AND tanggal_iso >= @iso ORDER BY tanggal_iso, id FOR UPDATE`,
+    key,
+    client
+  );
+  const changed: { id: number; s: number | null; k: number | null }[] = [];
+  for (const r of rows) {
+    if (r.imported) {
+      if (r.s !== null) prev = r.s;
+      continue;
+    }
+    if (r.k !== null && r.s !== null) {
+      const k = round3(r.s - prev);
+      if (k !== r.k) changed.push({ id: r.id, s: r.s, k });
+      prev = r.s;
+      continue;
+    }
+    const s = round3(prev + r.i + r.p - r.o);
+    if (s !== r.s) changed.push({ id: r.id, s, k: r.k });
+    prev = s;
+  }
+  if (changed.length) {
+    await execute(
+      `UPDATE ${t.table} l SET saldo_stock = x.s, koreksi = x.k FROM json_to_recordset(@rows::json) AS x(id int, s float8, k float8) WHERE l.id = x.id`,
+      { rows: JSON.stringify(changed) },
+      client
+    );
+  }
+  return changed.length;
+}
+const minIso = (...d: (string | null | undefined)[]) => d.filter((x): x is string => !!x).sort()[0];
 
 // Latest BBM / pupuk / oli saldo row of one jenis (the running balance new entries continue from).
 const latestSaldoRow = (module: SaldoModule, estate: string, jenis: string, client?: PoolClient) => {
@@ -3958,6 +4026,7 @@ async function applyOpnameLine(client: PoolClient, req: express.Request, o: Opna
       client
     );
   }
+  await rechainSaldo(o.module, o.estate, line.kode, iso, client);
   return before;
 }
 
@@ -4633,7 +4702,7 @@ app.post("/api/oli", async (req, res) => {
   }
   const evidenceId = await claimEvidence(req, res);
   if (evidenceId === undefined) return;
-  const lastSaldo = (await latestSaldoRow("OLI", estate, jenis))?.saldo_stock ?? 0;
+  const lastSaldo = await saldoAsOf("OLI", estate, jenis, tanggal_iso);
   const saldoBaru = round3(tipe === "MASUK" ? lastSaldo + qty : lastSaldo - qty);
   const { tanggal, periode } = oliDate(tanggal_iso);
   const row = await queryOne<{ id: number }>(
@@ -4654,6 +4723,7 @@ app.post("/api/oli", async (req, res) => {
       keterangan: keterangan || (tipe === "MASUK" ? "OLI MASUK" : ""),
     }
   );
+  await rechainSaldo("OLI", estate, jenis, tanggal_iso);
   await logActivity(req, {
     module: "OLI",
     estate,
@@ -4690,6 +4760,8 @@ app.put("/api/oli/:id", requireSuperuser, async (req, res) => {
      WHERE id = @id`,
     { ...updated, id: req.params.id }
   );
+  const fromOli = minIso(existing.tanggal_iso, updated.tanggal_iso);
+  if (fromOli) await rechainSaldo("OLI", existing.estate, existing.jenis_oli, fromOli);
   await logActivity(req, {
     module: "OLI",
     estate: existing.estate,
@@ -4713,6 +4785,7 @@ app.delete("/api/oli/:id", requireSuperuser, async (req, res) => {
   if (!existing) return res.status(404).json({ error: "Not found" });
   if (!estateAllowed(req.user!, existing.estate)) return res.status(403).json({ error: "Akses ditolak" });
   await execute("DELETE FROM oli_log WHERE id = @id", { id: req.params.id });
+  if (existing.tanggal_iso) await rechainSaldo("OLI", existing.estate, existing.jenis_oli, existing.tanggal_iso);
   await logActivity(req, {
     module: "OLI",
     estate: existing.estate,
@@ -5060,7 +5133,7 @@ app.post("/api/pupuk/batch", async (req, res) => {
     await execute("SELECT pg_advisory_xact_lock(hashtext(@key))", { key: `pupuk:${estate}` }, client);
     const run = new Map<string, number>();
     for (const r of clean) {
-      if (!run.has(r.jenis)) run.set(r.jenis, (await latestSaldoRow("PUPUK", estate, r.jenis, client))?.saldo_stock ?? 0);
+      if (!run.has(r.jenis)) run.set(r.jenis, await saldoAsOf("PUPUK", estate, r.jenis, tanggal_iso, client));
       const before = run.get(r.jenis)!;
       const after = round3(r.tipe === "MASUK" ? before + r.qty : before - r.qty);
       run.set(r.jenis, after);
@@ -5072,6 +5145,7 @@ app.post("/api/pupuk/batch", async (req, res) => {
         client
       );
     }
+    for (const jenis of run.keys()) await rechainSaldo("PUPUK", estate, jenis, tanggal_iso, client);
   });
   if (!ok) return;
   await logActivities(
@@ -5115,7 +5189,7 @@ app.post("/api/oli/batch", async (req, res) => {
     await execute("SELECT pg_advisory_xact_lock(hashtext(@key))", { key: `oli:${estate}` }, client);
     const run = new Map<string, number>();
     for (const r of clean) {
-      if (!run.has(r.jenis)) run.set(r.jenis, (await latestSaldoRow("OLI", estate, r.jenis, client))?.saldo_stock ?? 0);
+      if (!run.has(r.jenis)) run.set(r.jenis, await saldoAsOf("OLI", estate, r.jenis, tanggal_iso, client));
       const before = run.get(r.jenis)!;
       const after = round3(r.tipe === "MASUK" ? before + r.qty : before - r.qty);
       run.set(r.jenis, after);
@@ -5127,6 +5201,7 @@ app.post("/api/oli/batch", async (req, res) => {
         client
       );
     }
+    for (const jenis of run.keys()) await rechainSaldo("OLI", estate, jenis, tanggal_iso, client);
   });
   if (!ok) return;
   await logActivities(
@@ -5573,16 +5648,14 @@ app.post("/api/pinjaman/:id/delete", async (req, res) => {
         pid,
         client
       );
-      for (const r of rows) {
-        await execute(
-          `UPDATE ${t.table} SET saldo_stock = ROUND((saldo_stock - @q)::numeric, 3)
-           WHERE ${t.jenis} = @jenis AND ${t.estate} = @estate AND saldo_stock IS NOT NULL AND pinjaman_id IS DISTINCT FROM @pid
-             AND (tanggal_iso, id) > (@iso, @id)`,
-          { ...pid, q: r.pinjam, jenis: r.jenis, estate: r.estate, iso: r.iso, id: r.id },
-          client
-        );
-      }
       await execute(`DELETE FROM ${t.table} WHERE pinjaman_id = @pid`, pid, client);
+      // The saldo of every row after the loan's rows no longer carries them.
+      const from = new Map<string, { estate: string; jenis: string; iso: string }>();
+      for (const r of rows) {
+        const k = `${r.estate}|${r.jenis}`;
+        if (!from.has(k) || r.iso < from.get(k)!.iso) from.set(k, r);
+      }
+      for (const f of from.values()) await rechainSaldo(l.module as SaldoModule, f.estate, f.jenis, f.iso, client);
     }
     await execute("DELETE FROM pinjaman_kembali WHERE pinjaman_id = @pid", pid, client);
     await execute("DELETE FROM pinjaman WHERE id = @pid", pid, client);
