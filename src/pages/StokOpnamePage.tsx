@@ -4,22 +4,26 @@ import { ClipboardCheck, Plus, ChevronLeft, ChevronRight, X, Lock } from "lucide
 import { api, errorText, type OpnameListRow, type OpnameModule } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { OpnameStatusBadge } from "../components/OpnameStatusBadge";
-import { canOpname, userEstates } from "../lib/access";
+import { canOpname } from "../lib/access";
+import { useShownEstates } from "../hooks/useEstateFilter";
 import { OPNAME_MODULES, OPNAME_MODULE_LABEL, localToday, opnameModule } from "../lib/opname";
 import { tanggalWaktu } from "../lib/datetime";
 
 const PAGE_SIZE = 25;
 
-// Stok Opname sessions of every location the account can see; "Buat Opname" starts a count.
+// Stok Opname sessions of every location the account can see (narrowed to the estates picked on the
+// dashboard, if any); "Buat Opname" starts a count.
 export function StokOpnamePage() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const estates = userEstates(user);
+  const { estates, param: pickedEstates } = useShownEstates();
   const visibleModules = OPNAME_MODULES.filter((m) => canOpname(user, opnameModule(m)));
   const createModules = OPNAME_MODULES.filter((m) => canOpname(user, opnameModule(m), "opname"));
 
   const [module, setModule] = useState("");
-  const [estate, setEstate] = useState("");
+  const [estatePick, setEstate] = useState("");
+  // A picked estate the dashboard filter no longer shows falls back to all shown ones.
+  const estate = estates.includes(estatePick) ? estatePick : "";
   const [status, setStatus] = useState("");
   const [page, setPage] = useState(1);
   const [rows, setRows] = useState<OpnameListRow[]>([]);
@@ -29,12 +33,12 @@ export function StokOpnamePage() {
 
   useEffect(() => {
     setLoading(true);
-    api.opnameList({ module, estate, status, page, pageSize: PAGE_SIZE }).then((res) => {
+    api.opnameList({ module, estate, estates: pickedEstates, status, page, pageSize: PAGE_SIZE }).then((res) => {
       setRows(res.data);
       setTotal(res.total);
       setLoading(false);
     });
-  }, [module, estate, status, page]);
+  }, [module, estate, pickedEstates, status, page]);
 
   const totalPages = Math.max(Math.ceil(total / PAGE_SIZE), 1);
   const selectCls = "text-sm rounded-md border border-[var(--border)] px-3 py-2 bg-white";

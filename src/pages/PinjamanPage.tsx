@@ -5,6 +5,7 @@ import { useSearchParams } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { EvidenceInput, EvidenceLink, useEvidenceEnabled } from "../components/EvidenceInput";
 import { can, canModule, userEstates } from "../lib/access";
+import { useShownEstates } from "../hooks/useEstateFilter";
 import { LOAN_LATE_DAYS, loanDays, useOpenPinjaman } from "../hooks/useOpenPinjaman";
 import { OPNAME_MODULES, OPNAME_MODULE_LABEL, fmtQty, opnameModule, round3 } from "../lib/opname";
 import { tanggalWaktu } from "../lib/datetime";
@@ -29,6 +30,8 @@ const inputPerm = (m: OpnameModule) => `${m.toLowerCase()}.input`;
 export function PinjamanPage() {
   const { user } = useAuth();
   const myEstates = userEstates(user);
+  // Loans of the estates picked on the dashboard, if any.
+  const { param: pickedEstates } = useShownEstates();
   const viewModules = OPNAME_MODULES.filter((m) => canModule(user, opnameModule(m)));
   const inputModules = OPNAME_MODULES.filter((m) => can(user, inputPerm(m)));
 
@@ -48,13 +51,13 @@ export function PinjamanPage() {
   useEffect(() => {
     setLoading(true);
     api
-      .pinjamanList({ module, status, pageSize: 200 })
+      .pinjamanList({ module, status, estates: pickedEstates, pageSize: 200 })
       .then((res) => {
         setRows(res.data);
         setTotal(res.total);
       })
       .finally(() => setLoading(false));
-  }, [module, status, reload]);
+  }, [module, status, pickedEstates, reload]);
 
   const canAct = (l: Pinjaman) => l.status === "DIPINJAM" && can(user, inputPerm(l.module)) && (myEstates.includes(l.dari_estate) || myEstates.includes(l.ke_estate));
   const done = () => {

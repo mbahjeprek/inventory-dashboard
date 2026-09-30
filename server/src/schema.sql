@@ -353,6 +353,9 @@ CREATE TABLE IF NOT EXISTS opname_line (
   ditambahkan BOOLEAN NOT NULL DEFAULT false,
   UNIQUE(opname_id, kode, exp)
 );
+-- Klinik: the expiry found on the counted batch when it differs from `exp` (NULL = as in the system).
+-- Approval empties batch `exp` and puts the count in batch `exp_fisik`.
+ALTER TABLE opname_line ADD COLUMN IF NOT EXISTS exp_fisik TEXT;
 
 -- BBM / pupuk have no movement table, only a running saldo: an approved opname adds a row whose
 -- saldo_stock is the counted amount and `koreksi` the difference, with diterima/pemakaian/keluar left

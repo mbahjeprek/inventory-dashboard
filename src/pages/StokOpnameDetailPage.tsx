@@ -35,7 +35,8 @@ import { tanggalWaktu } from "../lib/datetime";
 const PAGE_SIZE = 50;
 type Filter = "" | "belum" | "selisih" | "sesuai";
 // What the counter typed, kept as text until saved (so "1," or "" can be typed freely).
-type Edit = { fisik: string; ket: string };
+// exp: klinik batch expiry as found, only once changed ('' = none).
+type Edit = { fisik: string; ket: string; exp?: string };
 
 // Indonesian number format, as shown everywhere else: "." groups thousands, "," is the decimal
 // separator ("47.600" = 47600, "2,5" = 2.5).
@@ -104,6 +105,9 @@ export function StokOpnameDetailPage() {
     const v = parseQty(e.fisik);
     return v === undefined ? l.stok_fisik : v;
   };
+  // Klinik: the batch expiry as found (typed, saved correction or the system's).
+  const expOf = (l: OpnameLine) => edits[l.id]?.exp ?? l.exp_fisik ?? l.exp;
+  const expCell = (l: OpnameLine) => (expOf(l) === l.exp ? expLabel(l.exp) : `${expLabel(expOf(l))} (sistem: ${expLabel(l.exp)})`);
   const selisihOf = (l: OpnameLine) => {
     const f = fisikOf(l);
     return f === null ? null : round3(f - l.stok_sistem);
@@ -165,6 +169,8 @@ export function StokOpnameDetailPage() {
   const superEdit = isSuper && (opname.status === "SUBMITTED" || opname.status === "APPROVED");
   const canEdit = canCount || superEdit;
   const editableLine = (l: OpnameLine) => canCount || (superEdit && (opname.status !== "APPROVED" || l.stok_fisik !== null));
+  // The expiry of a klinik batch can be corrected until approval (the approval moves the stock to it).
+  const canExp = isKlinik && (canCount || (isSuper && opname.status === "SUBMITTED"));
 
   const totalPages = Math.max(Math.ceil(filtered.length / PAGE_SIZE), 1);
   const pageRows = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
@@ -177,7 +183,7 @@ export function StokOpnameDetailPage() {
     setTouched((t) => ({ key: viewKey, ids: new Set([...(t.key === viewKey ? t.ids : []), l.id]) }));
     setEdits((cur) => ({
       ...cur,
-      [l.id]: { fisik: cur[l.id]?.fisik ?? toInput(l.stok_fisik), ket: cur[l.id]?.ket ?? l.keterangan, ...patch },
+      [l.id]: { ...cur[l.id], fisik: cur[l.id]?.fisik ?? toInput(l.stok_fisik), ket: cur[l.id]?.ket ?? l.keterangan, ...patch },
     }));
   };
 
@@ -191,7 +197,16 @@ export function StokOpnameDetailPage() {
     setError("");
     try {
       const res = await api.saveOpname(opname.id, {
-        lines: dirtyIds.map((lid) => ({ id: lid, stok_fisik: parseQty(edits[lid].fisik) ?? null, keterangan: edits[lid].ket })),
+        lines: dirtyIds.map((lid) => {
+          const e = edits[lid];
+          const sysExp = lines.find((l) => l.id === lid)?.exp;
+          return {
+            id: lid,
+            stok_fisik: parseQty(e.fisik) ?? null,
+            keterangan: e.ket,
+            ...(e.exp !== undefined ? { exp_fisik: e.exp === sysExp ? null : e.exp } : {}),
+          };
+        }),
       });
       await load();
       setNotice(opname.status === "APPROVED" ? `Perubahan tersimpan: ${res.adjusted ?? 0} item stoknya disesuaikan` : "Hitungan tersimpan");
@@ -292,7 +307,7 @@ export function StokOpnameDetailPage() {
         i + 1,
         l.kode,
         l.nama,
-        ...(isKlinik ? [expLabel(l.exp)] : []),
+        ...(isKlinik ? [expCell(l)] : []),
         l.satuan,
         l.stok_sistem,
         fisikOf(l),
@@ -614,7 +629,27 @@ export function StokOpnameDetailPage() {
                         {l.nama}
                         {l.ditambahkan && <span className="ml-1.5 text-[10px] uppercase text-[var(--accent-blue)]">ditambahkan</span>}
                       </td>
-                      {isKlinik && <td className="px-4 py-2 whitespace-nowrap text-[var(--text-secondary)]">{expLabel(l.exp)}</td>}
+                      {isKlinik && (
+                        <td className="px-4 py-2 whitespace-nowrap text-[var(--text-secondary)]">
+                          {canExp ? (
+                            <div className="flex flex-col gap-0.5">
+                              <input
+                                type="date"
+                                value={expOf(l)}
+                                onChange={(ev) => setEdit(l, { exp: ev.target.value })}
+                                title="Tanggal expired di fisik barang (kosongkan kalau tidak ada)"
+                                aria-label={`Expired ${l.nama}`}
+                                className={`text-sm rounded-md border px-2 py-1 ${
+                                  expOf(l) !== l.exp ? "border-[var(--accent-amber-border)] bg-[var(--accent-amber-bg)]" : "border-[var(--border)]"
+                                }`}
+                              />
+                              {expOf(l) !== l.exp && <span className="text-[11px] text-[var(--text-muted)]">Sistem: {expLabel(l.exp)}</span>}
+                            </div>
+                          ) : (
+                            expCell(l)
+                          )}
+                        </td>
+                      )}
                       <td className="px-4 py-2 text-[var(--text-secondary)] whitespace-nowrap">{l.satuan || "-"}</td>
                       <td className="px-4 py-2 text-right">{fmtQty(l.stok_sistem)}</td>
                       <td className="px-4 py-2 text-right">

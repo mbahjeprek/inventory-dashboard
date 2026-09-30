@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Search, ChevronLeft, ChevronRight, X, Pencil, Trash2 } from "lucide-react";
 import { api, type ActivityLog } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
-import { userEstates } from "../lib/access";
+import { useShownEstates } from "../hooks/useEstateFilter";
 import { ExportButtons } from "../components/ExportButtons";
 import { fetchAllRows, type TableReport } from "../lib/printTable";
 import { EditActivityLogModal } from "../components/EditActivityLogModal";
@@ -41,7 +41,8 @@ export function ActivityLogPage({
   const { user } = useAuth();
   // Editing / deleting log entries stays superuser-only; the estate filter lists the account's estates.
   const isSuperuser = user?.role === "superuser";
-  const ownEstates = userEstates(user);
+  // The account's estates, narrowed to the ones picked on the dashboard, if any.
+  const { estates: ownEstates, param: pickedEstates } = useShownEstates();
   const estateLabel = module === "BBM" ? "Lokasi" : module === "PUPUK" || module === "OLI" ? "Estate" : module === "KLINIK" ? "Klinik" : "Gudang";
   const title = `${module === "BBM" ? "Log Activity BBM" : module === "PUPUK" ? "Log Activity Pupuk NPK" : module === "KLINIK" ? "Log Activity Klinik" : module === "OLI" ? "Log Activity Oli" : "Log Activity Barang"}${estateLock ? ` - ${estateLock}` : ""}`;
 
@@ -61,7 +62,7 @@ export function ActivityLogPage({
   const objekLabel = module === "BARANG" ? "Barang" : module === "KLINIK" ? "Obat" : "Transaksi";
   const colCount = isSuperuser ? 7 : 6;
 
-  const filters = () => ({ module, estate, aksi, search, dateFrom, dateTo });
+  const filters = () => ({ module, estate, estates: estateLock ? "" : pickedEstates, aksi, search, dateFrom, dateTo });
 
   const load = () => {
     setLoading(true);
@@ -76,7 +77,7 @@ export function ActivityLogPage({
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [module, page, estate, aksi, dateFrom, dateTo]);
+  }, [module, page, estate, pickedEstates, aksi, dateFrom, dateTo]);
 
   useEffect(() => {
     const t = setTimeout(() => {

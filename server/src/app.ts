@@ -300,6 +300,16 @@ function estateAllowed(user: SessionUser, estate: string | null | undefined) {
   return user.role === "superuser" || (!!estate && user.estates.includes(estate));
 }
 
+// The estates a cross-estate list (stok opname, pinjaman, log) shows: the account's own, narrowed to
+// `estate` if given, else to the estates picked on the dashboard (`estates`, comma separated) if any.
+function listEstates(user: SessionUser, estate: string, picked: string): string[] {
+  const own = ESTATES.filter((e) => estateAllowed(user, e));
+  if (estate) return own.filter((e) => e === estate);
+  const pick = picked.split(",").filter(Boolean);
+  const narrowed = own.filter((e) => pick.includes(e));
+  return narrowed.length ? narrowed : own;
+}
+
 function requireEstate(estate: string) {
   return (req: express.Request, res: express.Response, next: express.NextFunction) => {
     if (!estateAllowed(req.user!, estate)) return res.status(403).json({ error: "Akses ditolak" });
@@ -3546,7 +3556,7 @@ app.get("/api/user-activity", requireSuperuser, async (req, res) => {
 
 // ---- Activity log listing: separate logs per module, scoped to the caller's estate ----
 app.get("/api/activity-log", async (req, res) => {
-  const { module = "", estate = "", aksi = "", search = "", dateFrom = "", dateTo = "", tz = "", page = "1", pageSize = "50" } =
+  const { module = "", estate = "", estates = "", aksi = "", search = "", dateFrom = "", dateTo = "", tz = "", page = "1", pageSize = "50" } =
     req.query as Record<string, string>;
   if (!["BARANG", "BBM", "PUPUK", "KLINIK", "OLI"].includes(module)) return res.status(400).json({ error: "Modul tidak valid" });
 
@@ -3557,9 +3567,10 @@ app.get("/api/activity-log", async (req, res) => {
   if (estate && estateAllowed(req.user!, estate)) {
     conditions.push("estate = @estate");
     params.estate = estate;
-  } else if (req.user!.role !== "superuser") {
+  } else if (req.user!.role !== "superuser" || estates) {
+    // Own estates, or the dashboard's pick of them.
     conditions.push("estate = ANY(@estates::text[])");
-    params.estates = req.user!.estates;
+    params.estates = listEstates(req.user!, "", estates);
   }
   if (aksi) {
     conditions.push("aksi = @aksi");
@@ -3725,7 +3736,21 @@ function opnameCan(user: SessionUser, module: string, action: OpnameAction) {
 }
 
 type OpnameRow = { id: number; module: OpnameModule; estate: string; status: string; tanggal: string; submitted_by: number | null; [k: string]: any };
-type OpnameLine = { id?: number; kode: string; nama: string; satuan: string; exp: string; stok_sistem: number; stok_fisik?: number | null; keterangan?: string };
+type OpnameLine = {
+  id?: number;
+  kode: string;
+  nama: string;
+  satuan: string;
+  exp: string;
+  // Klinik: expiry found on the batch when it differs from `exp` (see schema.sql opname_line).
+  exp_fisik?: string | null;
+  stok_sistem: number;
+  stok_fisik?: number | null;
+  keterangan?: string;
+};
+// The batch a klinik line ends up in once approved, and how the log names it.
+const lineExp = (l: OpnameLine) => l.exp_fisik ?? l.exp;
+const batchText = (l: OpnameLine) => (l.exp_fisik != null && l.exp_fisik !== l.exp ? `${expText(l.exp)} → ${expText(l.exp_fisik)}` : expText(l.exp));
 
 // Loads an opname the account may act on, or answers the request itself and returns null.
 async function loadOpname(req: express.Request, res: express.Response, action: OpnameAction, client?: PoolClient) {
@@ -4026,21 +4051,30 @@ async function applyOpnameLines(client: PoolClient, req: express.Request, o: Opn
   }
 
   // Klinik: each line is one batch (obat + expiry); the batch is set to the count, klinik_stock follows.
+  // A line whose expiry was corrected (exp_fisik) empties its old batch and sets the new one to the count.
   const cur = await queryMany<{ kode: string; exp: string; qty: number }>(
     "SELECT obat_kode kode, expired_date exp, qty FROM klinik_batch WHERE klinik = @estate AND obat_kode = ANY(@kodes::text[]) FOR UPDATE",
     base,
     client
   );
   const qty = new Map(cur.map((r) => [`${r.kode}|${r.exp}`, r.qty]));
-  const befores = lines.map((l) => qty.get(`${l.kode}|${l.exp}`) ?? 0);
-  const moved = lines
-    .map((l, i) => ({
-      kode: l.kode,
-      exp: l.exp,
-      actual: l.stok_fisik,
-      delta: l.stok_fisik - befores[i],
-      note: `Koreksi Stok (Opname #${o.id}) batch ${expText(l.exp)}${l.keterangan ? `: ${l.keterangan}` : ""}`,
-    }))
+  const sets = lines.flatMap((l, i) => {
+    const note = `Koreksi Stok (Opname #${o.id}) batch ${batchText(l)}${l.keterangan ? `: ${l.keterangan}` : ""}`;
+    const to = lineExp(l);
+    return to === l.exp
+      ? [{ i, kode: l.kode, exp: l.exp, actual: l.stok_fisik, note }]
+      : [
+          { i, kode: l.kode, exp: l.exp, actual: 0, note },
+          { i, kode: l.kode, exp: to, actual: l.stok_fisik, note },
+        ];
+  });
+  const befores = lines.map(() => 0);
+  const moved = sets
+    .map((s) => {
+      const before = qty.get(`${s.kode}|${s.exp}`) ?? 0;
+      befores[s.i] += before;
+      return { kode: s.kode, exp: s.exp, actual: s.actual, delta: s.actual - before, note: s.note };
+    })
     .filter((r) => r.delta !== 0);
   if (moved.length) {
     const p = { ...base, rows: JSON.stringify(moved), changed: [...new Set(moved.map((r) => r.kode))] };
@@ -4086,11 +4120,11 @@ const OPNAME_COUNTS = `COUNT(l.id)::int total, COUNT(l.stok_fisik)::int dihitung
   COUNT(*) FILTER (WHERE l.stok_fisik IS NOT NULL AND ROUND((l.stok_fisik - l.stok_sistem)::numeric, 3) <> 0)::int selisih`;
 
 app.get("/api/stock-opname", async (req, res) => {
-  const { module = "", estate = "", status = "", page = "1", pageSize = "25" } = req.query as Record<string, string>;
+  const { module = "", estate = "", estates = "", status = "", page = "1", pageSize = "25" } = req.query as Record<string, string>;
   const u = req.user!;
   const params: any = {
     mods: OPNAME_MODULES.filter((m) => opnameCan(u, m, "view") && (!module || m === module)),
-    estates: ESTATES.filter((e) => estateAllowed(u, e) && (!estate || e === estate)),
+    estates: listEstates(u, estate, estates),
   };
   const conditions = ["o.module = ANY(@mods::text[])", "o.estate = ANY(@estates::text[])"];
   if (status === "OPEN") conditions.push("o.status IN ('DRAFT', 'SUBMITTED')");
@@ -4177,6 +4211,16 @@ app.put("/api/stock-opname/:id", async (req, res) => {
       }
       rows.push({ id: Number(l.id), stok_fisik: v === null ? null : round3(v), keterangan: String(l.keterangan ?? "").trim() });
     }
+    // Klinik: the expiry found on a batch (sent only when changed; null = as in the system). Not on an
+    // approved opname - its stock already sits in the batch it was approved into.
+    const expRows: { id: number; exp: string | null }[] = [];
+    for (const l of lines) {
+      if (!l || !("exp_fisik" in l)) continue;
+      const e = l.exp_fisik;
+      if (o.module !== "KLINIK" || o.status === "APPROVED") return refuse(res, 400, "Tanggal expired tidak bisa diubah di opname ini");
+      if (e !== null && (typeof e !== "string" || (e !== "" && !ISO_DATE.test(e)))) return refuse(res, 400, "Tanggal expired tidak valid");
+      expRows.push({ id: Number(l.id), exp: e });
+    }
     // Approved: the stock already carries the count, so a changed count moves it by the difference.
     if (o.status === "APPROVED" && rows.length) {
       await refuseIfLocationOpen(o, client);
@@ -4206,6 +4250,23 @@ app.put("/api/stock-opname/:id", async (req, res) => {
         client
       );
     }
+    if (expRows.length) {
+      await execute(
+        `UPDATE opname_line l SET exp_fisik = NULLIF(x.exp, l.exp)
+         FROM json_to_recordset(@rows::json) AS x(id int, exp text)
+         WHERE l.id = x.id AND l.opname_id = @oid`,
+        { rows: JSON.stringify(expRows), oid: o.id },
+        client
+      );
+      // Two lines ending in the same batch would each set it to their own count.
+      const dup = await queryOne<{ nama: string; e: string }>(
+        `SELECT MIN(nama) nama, COALESCE(exp_fisik, exp) e FROM opname_line WHERE opname_id = @oid
+         GROUP BY kode, COALESCE(exp_fisik, exp) HAVING COUNT(*) > 1 LIMIT 1`,
+        { oid: o.id },
+        client
+      );
+      if (dup) throw new StockError(`${dup.nama}: batch expired ${expText(dup.e)} sudah ada di baris lain, hitung di baris itu`);
+    }
     if (typeof catatan === "string") await execute("UPDATE opname SET catatan = @c WHERE id = @id", { c: catatan.trim(), id: o.id }, client);
     return o;
   });
@@ -4232,7 +4293,9 @@ class LocationOpenError extends StockError {}
 
 // Moves the stock of one opname line by `delta` from where it is now (a superuser correcting or
 // deleting an approved opname), booked as a Koreksi. Returns the stock before and after.
-async function opnameAdjust(client: PoolClient, req: express.Request, o: OpnameRow, line: OpnameLine, delta: number, label: string) {
+async function opnameAdjust(client: PoolClient, req: express.Request, o: OpnameRow, orig: OpnameLine, delta: number, label: string) {
+  // The stock sits in the batch the approval put it in.
+  const line = { ...orig, exp: lineExp(orig), exp_fisik: null };
   const now = await opnameCurrent(o.module, o.estate, line.kode, line.exp);
   if (!now) throw new StockError(`${line.kode} sudah tidak ada di master data`);
   const before = round3(now.stok_sistem);
@@ -4250,7 +4313,7 @@ async function logOpnameAdjust(req: express.Request, o: OpnameRow, changes: { li
       estate: o.estate,
       aksi: "Koreksi Stok",
       objek: isSaldoModule(o.module) ? line.kode : `${line.kode} - ${line.nama}`,
-      detail: `${aksi} #${o.id}${o.module === "KLINIK" ? `; Batch ${expText(line.exp)}` : ""}: ${before} → ${after} (selisih ${signed(round3(after - before))})`,
+      detail: `${aksi} #${o.id}${o.module === "KLINIK" ? `; Batch ${expText(lineExp(line))}` : ""}: ${before} → ${after} (selisih ${signed(round3(after - before))})`,
     }))
   );
 }
@@ -4318,6 +4381,11 @@ app.post("/api/stock-opname/:id/lines", async (req, res) => {
   if (exp && !ISO_DATE.test(exp)) return res.status(400).json({ error: "Tanggal expired tidak valid" });
   const cur = await opnameCurrent(o.module, o.estate, kode, exp);
   if (!cur) return res.status(404).json({ error: "Tidak ditemukan di master data" });
+  if (
+    o.module === "KLINIK" &&
+    (await queryOne("SELECT 1 FROM opname_line WHERE opname_id = @oid AND kode = @kode AND exp_fisik = @exp", { oid: o.id, kode: cur.kode, exp }))
+  )
+    return res.status(409).json({ error: "Batch dengan tanggal expired itu sudah ada di daftar opname" });
   try {
     const line = await queryOne(
       `INSERT INTO opname_line (opname_id, kode, nama, satuan, exp, stok_sistem, ditambahkan)
@@ -4429,7 +4497,7 @@ app.post("/api/stock-opname/:id/approve", async (req, res) => {
       estate: o.estate,
       aksi: "Koreksi Stok",
       objek: isSaldoModule(o.module) ? line.kode : `${line.kode} - ${line.nama}`,
-      detail: `Stok Opname #${o.id}${o.module === "KLINIK" ? `; Batch ${expText(line.exp)}` : ""}: ${before} → ${after} (selisih ${signed(round3(after - before))})${
+      detail: `Stok Opname #${o.id}${o.module === "KLINIK" ? `; Batch ${batchText(line)}` : ""}: ${before} → ${after} (selisih ${signed(round3(after - before))})${
         line.keterangan ? `; Catatan: ${line.keterangan}` : ""
       }`,
     }))
@@ -5286,10 +5354,10 @@ async function logLoan(req: express.Request, l: LoanRow, aksi: string, detail: s
 }
 
 app.get("/api/pinjaman", async (req, res) => {
-  const { module = "", estate = "", status = "", page = "1", pageSize = "50" } = req.query as Record<string, string>;
+  const { module = "", estate = "", estates: picked = "", status = "", page = "1", pageSize = "50" } = req.query as Record<string, string>;
   const u = req.user!;
   const modules = OPNAME_MODULES_LIST.filter((m) => canLoan(u, m, "view") && (!module || m === module));
-  const estates = u.estates.filter((e) => !estate || e === estate);
+  const estates = listEstates(u, estate, picked);
   if (!modules.length || !estates.length) return res.json({ data: [], total: 0 });
   const conditions = ["p.module = ANY(@modules::text[])", "(p.dari_estate = ANY(@estates::text[]) OR p.ke_estate = ANY(@estates::text[]))"];
   if (status === "OPEN") conditions.push("p.status = 'DIPINJAM'");

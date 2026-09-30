@@ -426,6 +426,8 @@ export type OpnameLine = {
   satuan: string;
   // Klinik batch expiry ('' = none); '' for the other modules.
   exp: string;
+  // Klinik: expiry found on the batch when it differs from `exp` (null = as in the system).
+  exp_fisik: string | null;
   stok_sistem: number;
   stok_fisik: number | null;
   keterangan: string;
@@ -935,7 +937,7 @@ export const api = {
   createOpname: (payload: { module: OpnameModule; estate: string; tanggal: string; catatan?: string }) =>
     req<{ success: boolean; id: number }>("/api/stock-opname", { method: "POST", body: JSON.stringify(payload) }),
   opname: (id: number) => req<{ opname: Opname; lines: OpnameLine[] }>(`/api/stock-opname/${id}`),
-  saveOpname: (id: number, payload: { catatan?: string; lines: { id: number; stok_fisik: number | null; keterangan: string }[] }) =>
+  saveOpname: (id: number, payload: { catatan?: string; lines: { id: number; stok_fisik: number | null; keterangan: string; exp_fisik?: string | null }[] }) =>
     req<{ success: boolean; adjusted?: number }>(`/api/stock-opname/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
   addOpnameLine: (id: number, kode: string, exp = "") =>
     req<OpnameLine>(`/api/stock-opname/${id}/lines`, { method: "POST", body: JSON.stringify({ kode, exp }) }),
