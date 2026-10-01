@@ -457,8 +457,12 @@ export const isOpnameLock = (e: unknown) => e instanceof ApiError && e.status ==
 // Text for a failed request: the lock explanation when a Stok Opname blocks it, otherwise
 // `fallback` (or the server's message when `useServer` is set, for screens whose server messages
 // are written for users).
-export function errorText(e: unknown, fallback: string, useServer = false): string {
-  if (e instanceof ApiError && e.serverMessage && (useServer || e.status === 423)) return e.serverMessage;
+// The reason the server gave (a refused entry says why: foto bukti, stok, tanggal...), else the
+// fallback with the status code (e.g. a server error or a timeout), so the cause can be traced.
+// `useServer` is kept for the call sites that already passed it; every refusal is shown now.
+export function errorText(e: unknown, fallback: string, _useServer = false): string {
+  if (e instanceof ApiError) return e.serverMessage || `${fallback} (kode ${e.status})`;
+  if (e instanceof TypeError) return `${fallback}: koneksi ke server terputus, coba lagi`;
   return fallback;
 }
 

@@ -120,21 +120,24 @@ export function TopKeluarPanel({ estates }: { estates: EstateLink[] }) {
           <Segmented<Period> value={period} onChange={setPeriod} options={PERIODS} />
           {period === "custom" && (
             <div className="flex items-center gap-1 text-xs">
-              <input
-                type="date"
-                value={custom.dateFrom}
-                max={custom.dateTo || undefined}
-                onChange={(e) => setCustom((c) => ({ ...c, dateFrom: e.target.value }))}
-                className="border border-[var(--border)] rounded px-1.5 py-0.5 bg-[var(--bg-card)]"
-              />
-              <span className="text-[var(--text-muted)]">s/d</span>
-              <input
-                type="date"
-                value={custom.dateTo}
-                min={custom.dateFrom || undefined}
-                onChange={(e) => setCustom((c) => ({ ...c, dateTo: e.target.value }))}
-                className="border border-[var(--border)] rounded px-1.5 py-0.5 bg-[var(--bg-card)]"
-              />
+              {/* Tanggal dari - sampai: side by side, half the width each on a phone */}
+              <div className="flex items-center gap-2 w-full sm:w-auto">
+                <input
+                  type="date"
+                  value={custom.dateFrom}
+                  max={custom.dateTo || undefined}
+                  onChange={(e) => setCustom((c) => ({ ...c, dateFrom: e.target.value }))}
+                  className="border border-[var(--border)] rounded px-1.5 py-0.5 bg-[var(--bg-card)] flex-1 min-w-0 sm:flex-none"
+                />
+                <span className="text-[var(--text-muted)]">s/d</span>
+                <input
+                  type="date"
+                  value={custom.dateTo}
+                  min={custom.dateFrom || undefined}
+                  onChange={(e) => setCustom((c) => ({ ...c, dateTo: e.target.value }))}
+                  className="border border-[var(--border)] rounded px-1.5 py-0.5 bg-[var(--bg-card)] flex-1 min-w-0 sm:flex-none"
+                />
+              </div>
             </div>
           )}
         </div>

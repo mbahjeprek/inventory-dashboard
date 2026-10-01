@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { wrongJenis } from "../lib/bbmJenis";
 import { X } from "lucide-react";
 import { api, errorText, type BbmSummary } from "../lib/api";
 import { AlatAutocomplete, type AlatOption } from "./AlatAutocomplete";
@@ -21,15 +22,18 @@ function todayIso(): string {
 export function BbmTransactionModal({
   summary,
   lokasiLock,
+  jenisAwal,
   onClose,
   onSuccess,
 }: {
   summary: BbmSummary | null;
   lokasiLock?: string;
+  // The jenis the page is showing, so a Bensin entry isn't typed into Solar by accident.
+  jenisAwal?: "SOLAR" | "BENSIN";
   onClose: () => void;
   onSuccess: () => void;
 }) {
-  const [jenisBbm, setJenisBbm] = useState<"SOLAR" | "BENSIN">("SOLAR");
+  const [jenisBbm, setJenisBbm] = useState<"SOLAR" | "BENSIN">(jenisAwal ?? "SOLAR");
   const [lokasi, setLokasi] = useState(lokasiLock ?? "NILAM");
   const [tipe, setTipe] = useState<"DITERIMA" | "PEMAKAIAN">("PEMAKAIAN");
   const [tanggal, setTanggal] = useState(todayIso());
@@ -76,6 +80,11 @@ export function BbmTransactionModal({
     }
     if (jumlah <= 0) {
       setError("Jumlah harus lebih dari 0");
+      return;
+    }
+    const salahJenis = wrongJenis(jenisBbm, keterangan);
+    if (salahJenis) {
+      setError(salahJenis);
       return;
     }
     if (tipe === "PEMAKAIAN" && jumlah > saldoSaatIni) {

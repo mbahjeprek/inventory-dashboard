@@ -135,25 +135,28 @@ export function StockOutPage({ embedded = false }: { embedded?: boolean }) {
           ))}
         </select>
 
-        <input
-          type="date"
-          value={dateFrom}
-          onChange={(e) => {
-            setDateFrom(e.target.value);
-            setPage(1);
-          }}
-          className="text-sm rounded-md border border-[var(--border)] px-3 py-2"
-        />
-        <span className="text-[var(--text-muted)] text-sm">-</span>
-        <input
-          type="date"
-          value={dateTo}
-          onChange={(e) => {
-            setDateTo(e.target.value);
-            setPage(1);
-          }}
-          className="text-sm rounded-md border border-[var(--border)] px-3 py-2"
-        />
+        {/* Tanggal dari - sampai: side by side, half the width each on a phone */}
+        <div className="flex items-center gap-2 w-full sm:w-auto">
+          <input
+            type="date"
+            value={dateFrom}
+            onChange={(e) => {
+              setDateFrom(e.target.value);
+              setPage(1);
+            }}
+            className="text-sm rounded-md border border-[var(--border)] px-3 py-2 flex-1 min-w-0 sm:flex-none"
+          />
+          <span className="text-[var(--text-muted)] text-sm">-</span>
+          <input
+            type="date"
+            value={dateTo}
+            onChange={(e) => {
+              setDateTo(e.target.value);
+              setPage(1);
+            }}
+            className="text-sm rounded-md border border-[var(--border)] px-3 py-2 flex-1 min-w-0 sm:flex-none"
+          />
+        </div>
       </div>
 
       <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg overflow-hidden">
@@ -194,7 +197,7 @@ export function StockOutPage({ embedded = false }: { embedded?: boolean }) {
                     <td className="px-4 py-2.5 text-[var(--text-secondary)]">{r.penerima || "-"}</td>
                     <td className="px-4 py-2.5 text-right font-medium text-[var(--accent-red)]">-{r.qty} {r.satuan}</td>
                     <td className="px-4 py-2.5">{r.tujuan || <span className="text-[var(--text-muted)]">-</span>}</td>
-                    <td className="px-4 py-2.5 text-[var(--text-secondary)] text-xs max-w-[220px] truncate" title={r.keterangan}>
+                    <td className="px-4 py-2.5 text-[var(--text-secondary)] text-xs min-w-[200px] max-w-[360px] whitespace-normal break-words" title={r.keterangan}>
                       {r.keterangan || "-"}
                     </td>
                     <td className="px-4 py-2.5 text-center whitespace-nowrap">

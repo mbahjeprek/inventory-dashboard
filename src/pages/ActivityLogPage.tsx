@@ -197,25 +197,28 @@ export function ActivityLogPage({
           ))}
         </select>
 
-        <input
-          type="date"
-          value={dateFrom}
-          onChange={(e) => {
-            setDateFrom(e.target.value);
-            setPage(1);
-          }}
-          className={selectCls}
-        />
-        <span className="text-[var(--text-muted)] text-sm">-</span>
-        <input
-          type="date"
-          value={dateTo}
-          onChange={(e) => {
-            setDateTo(e.target.value);
-            setPage(1);
-          }}
-          className={selectCls}
-        />
+        {/* Tanggal dari - sampai: side by side, half the width each on a phone */}
+        <div className="flex items-center gap-2 w-full sm:w-auto">
+          <input
+            type="date"
+            value={dateFrom}
+            onChange={(e) => {
+              setDateFrom(e.target.value);
+              setPage(1);
+            }}
+            className={`${selectCls} flex-1 min-w-0 sm:flex-none`}
+          />
+          <span className="text-[var(--text-muted)] text-sm">-</span>
+          <input
+            type="date"
+            value={dateTo}
+            onChange={(e) => {
+              setDateTo(e.target.value);
+              setPage(1);
+            }}
+            className={`${selectCls} flex-1 min-w-0 sm:flex-none`}
+          />
+        </div>
       </div>
 
       <div className="text-sm text-[var(--text-secondary)]">{total.toLocaleString("id-ID")} aktivitas</div>

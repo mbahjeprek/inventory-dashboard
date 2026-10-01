@@ -234,25 +234,28 @@ export function InventoryOliPage({ estate }: { estate: string }) {
             </option>
           ))}
         </select>
-        <input
-          type="date"
-          value={dateFrom}
-          onChange={(e) => {
-            setDateFrom(e.target.value);
-            setPage(1);
-          }}
-          className={selectCls}
-        />
-        <span className="text-[var(--text-muted)] text-sm">-</span>
-        <input
-          type="date"
-          value={dateTo}
-          onChange={(e) => {
-            setDateTo(e.target.value);
-            setPage(1);
-          }}
-          className={selectCls}
-        />
+        {/* Tanggal dari - sampai: side by side, half the width each on a phone */}
+        <div className="flex items-center gap-2 w-full sm:w-auto">
+          <input
+            type="date"
+            value={dateFrom}
+            onChange={(e) => {
+              setDateFrom(e.target.value);
+              setPage(1);
+            }}
+            className={`${selectCls} flex-1 min-w-0 sm:flex-none`}
+          />
+          <span className="text-[var(--text-muted)] text-sm">-</span>
+          <input
+            type="date"
+            value={dateTo}
+            onChange={(e) => {
+              setDateTo(e.target.value);
+              setPage(1);
+            }}
+            className={`${selectCls} flex-1 min-w-0 sm:flex-none`}
+          />
+        </div>
       </div>
 
       <div className="text-sm text-[var(--text-secondary)]">
@@ -302,7 +305,7 @@ export function InventoryOliPage({ estate }: { estate: string }) {
                     <td className={`px-4 py-2.5 text-right ${(r.saldo_stock ?? 0) < 0 ? "text-[var(--accent-red)]" : "text-[var(--text-primary)]"}`}>
                       {r.saldo_stock !== null ? fmt(r.saldo_stock) : "-"}
                     </td>
-                    <td className="px-4 py-2.5 text-[var(--text-secondary)] text-xs max-w-[320px] truncate" title={r.keterangan}>
+                    <td className="px-4 py-2.5 text-[var(--text-secondary)] text-xs min-w-[200px] max-w-[360px] whitespace-normal break-words" title={r.keterangan}>
                       {r.keterangan || "-"}
                     </td>
                     <td className="px-4 py-2.5 text-center whitespace-nowrap">

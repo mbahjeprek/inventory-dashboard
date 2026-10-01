@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { wrongJenis } from "../lib/bbmJenis";
 import { api, type BbmSummary } from "../lib/api";
 import type { AlatOption } from "./AlatAutocomplete";
 import { BatchGrid, HeaderField, fmtNum, headerInputCls, isBlankIn, localToday, parseNum, runningStock, type Cells, type GridCol } from "./BatchGrid";
@@ -9,15 +10,18 @@ const LOKASI = ["NILAM", "WJA", "KNS", "ZAMRUD", "FIRUS"];
 export function BbmBatchModal({
   summary,
   lokasiLock,
+  jenisAwal,
   onClose,
   onSuccess,
 }: {
   summary: BbmSummary | null;
   lokasiLock?: string;
+  // The jenis the page is showing, so a Bensin entry isn't typed into Solar by accident.
+  jenisAwal?: "SOLAR" | "BENSIN";
   onClose: () => void;
   onSuccess: (count: number) => void;
 }) {
-  const [jenis, setJenis] = useState<"SOLAR" | "BENSIN">("SOLAR");
+  const [jenis, setJenis] = useState<"SOLAR" | "BENSIN">(jenisAwal ?? "SOLAR");
   const [lokasi, setLokasi] = useState(lokasiLock ?? "NILAM");
   const [tanggal, setTanggal] = useState(localToday());
   const [estateOptions, setEstateOptions] = useState<string[]>([]);
@@ -97,6 +101,8 @@ export function BbmBatchModal({
       !c.ket.trim() && "Keterangan",
     ].filter(Boolean);
     if (missing.length) return `Wajib diisi: ${missing.join(", ")}`;
+    const salahJenis = wrongJenis(jenis, c.ket);
+    if (salahJenis) return salahJenis;
     const s = run(rows)[i];
     if (keluar && s && s.after < 0) return `Stok tidak cukup (tinggal ${fmtNum(s.before)} LTR)`;
     return "";

@@ -2295,6 +2295,13 @@ function isoToIndoDate(iso: string): { tanggal: string; periode: string } {
   };
 }
 
+// A keterangan naming the other fuel ("BENSIN MASUK DARI ...") means the wrong Jenis BBM was picked:
+// Bensin got typed into the Solar ledger while the form opened on SOLAR (src/lib/bbmJenis.ts).
+function wrongJenisBbm(jenis: string, keterangan: unknown) {
+  const other = jenis === "SOLAR" ? "BENSIN" : "SOLAR";
+  return new RegExp("\\b" + other + "\\b", "i").test(String(keterangan ?? "")) ? `Keterangan menyebut ${other}, tapi Jenis BBM ${jenis}. Ganti Jenis BBM ke ${other}.` : "";
+}
+
 // ---- Manual BBM transaction entry (mirrors the "Transaksi" flow on Inventory Gudang) ----
 app.post("/api/bbm", async (req, res) => {
   const { jenis_bbm, lokasi, tanggal_iso, tipe, jumlah, keterangan, no_spb, estate, kode_kendaraan, hm_terakhir } = req.body;
@@ -2306,6 +2313,8 @@ app.post("/api/bbm", async (req, res) => {
   if (!jumlah || jumlah <= 0) return res.status(400).json({ error: "Jumlah harus lebih dari 0" });
   if (!tanggal_iso || !/^\d{4}-\d{2}-\d{2}$/.test(tanggal_iso)) return res.status(400).json({ error: "Tanggal tidak valid" });
   if (!estate || !String(estate).trim()) return res.status(400).json({ error: "Estate/sub-lokasi wajib dipilih" });
+  const salahJenis = wrongJenisBbm(jenis_bbm, keterangan);
+  if (salahJenis) return res.status(400).json({ error: salahJenis });
   const evidenceId = await claimEvidence(req, res);
   if (evidenceId === undefined) return;
 
@@ -2384,6 +2393,8 @@ app.post("/api/bbm/batch", async (req, res) => {
     const keluar = tipe === "PEMAKAIAN";
     const estate = keluar ? String(r?.estate ?? "").trim() : lokasi;
     if (!estate) return refuseRow("estate / sub-lokasi wajib dipilih");
+    const salahJenis = wrongJenisBbm(jenis_bbm, r?.keterangan);
+    if (salahJenis) return refuseRow(salahJenis);
     clean.push({
       tipe,
       jumlah: round3(jumlah),
@@ -5892,6 +5903,9 @@ app.get("/api/evidence/:id", async (req, res) => {
 // belong to another transaction yet. Returns its id; undefined = refused (the error is sent); null =
 // photo storage isn't set up on this server (SUPABASE_URL / SUPABASE_SERVICE_KEY), so no photo is
 // asked and transactions keep working until it is.
+// Every table whose rows keep a foto bukti (schema.sql evidence_id columns).
+const EVIDENCE_HOLDERS = ["transactions", "stock_in_log", "stock_out_log", "gudang_stock_tx", "klinik_stock_tx", "bbm_log", "pupuk_log", "oli_log", "pinjaman", "pinjaman_kembali"];
+
 async function claimEvidence(req: express.Request, res: express.Response): Promise<string | null | undefined> {
   if (!evidenceEnabled()) return null;
   const id = String(req.body?.evidence_id ?? "");
@@ -5899,8 +5913,12 @@ async function claimEvidence(req: express.Request, res: express.Response): Promi
     res.status(400).json({ error: "Foto bukti wajib diupload" });
     return undefined;
   }
+  // A photo whose earlier save failed after taking it (used, but no transaction holds it) can be
+  // used again, so retrying the same form doesn't answer "foto tidak valid".
   const ok = await queryOne(
-    "UPDATE evidence SET used = true WHERE id = @id::uuid AND used = false AND (user_id = @uid OR @su) RETURNING id",
+    `UPDATE evidence SET used = true WHERE id = @id::uuid AND (user_id = @uid OR @su)
+       AND (used = false OR NOT (${EVIDENCE_HOLDERS.map((t) => `EXISTS (SELECT 1 FROM ${t} WHERE evidence_id = @id::uuid)`).join(" OR ")}))
+     RETURNING id`,
     { id, uid: req.user!.id, su: req.user!.role === "superuser" }
   );
   if (!ok) {

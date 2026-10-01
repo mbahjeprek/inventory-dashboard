@@ -247,27 +247,30 @@ export function UserActivityPage() {
           <button onClick={() => shift(-1)} title="Periode sebelumnya" className="p-1.5 rounded-md border border-[var(--border)] hover:bg-[#f1f5f9]">
             <ChevronLeft size={16} />
           </button>
-          <input
-            type="date"
-            value={range.from}
-            max={range.to}
-            onChange={(e) => {
-              setPreset("custom");
-              setRange((r) => ({ ...r, from: e.target.value }));
-            }}
-            className={inputCls}
-          />
-          <span className="text-[var(--text-muted)] text-sm">s/d</span>
-          <input
-            type="date"
-            value={range.to}
-            min={range.from}
-            onChange={(e) => {
-              setPreset("custom");
-              setRange((r) => ({ ...r, to: e.target.value }));
-            }}
-            className={inputCls}
-          />
+          {/* Tanggal dari - sampai: side by side, half the width each on a phone */}
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <input
+              type="date"
+              value={range.from}
+              max={range.to}
+              onChange={(e) => {
+                setPreset("custom");
+                setRange((r) => ({ ...r, from: e.target.value }));
+              }}
+              className={`${inputCls} flex-1 min-w-0 sm:flex-none`}
+            />
+            <span className="text-[var(--text-muted)] text-sm">s/d</span>
+            <input
+              type="date"
+              value={range.to}
+              min={range.from}
+              onChange={(e) => {
+                setPreset("custom");
+                setRange((r) => ({ ...r, to: e.target.value }));
+              }}
+              className={`${inputCls} flex-1 min-w-0 sm:flex-none`}
+            />
+          </div>
           <button onClick={() => shift(1)} title="Periode berikutnya" className="p-1.5 rounded-md border border-[var(--border)] hover:bg-[#f1f5f9]">
             <ChevronRight size={16} />
           </button>
