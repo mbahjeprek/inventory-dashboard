@@ -9,7 +9,7 @@ DOMAIN="${DOMAIN:?isi DOMAIN, mis. DOMAIN=inventory.contoh.com}"
 EMAIL="${EMAIL:?isi EMAIL untuk sertifikat HTTPS}"
 APP_DIR=/opt/agrobarokah
 DATA_DIR=/var/lib/agrobarokah
-REPO=git@github.com:mbahjeprek/inventory-dashboard.git
+REPO=https://github.com/mbahjeprek/inventory-dashboard.git
 DB_NAME=inventory
 DB_USER=agro
 
@@ -48,21 +48,8 @@ sudo -u postgres psql -tc "SELECT 1 FROM pg_roles WHERE rolname = '$DB_USER'" | 
 sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname = '$DB_NAME'" | grep -q 1 ||
   sudo -u postgres psql -c "CREATE DATABASE $DB_NAME OWNER $DB_USER"
 
-echo "== Deploy key GitHub (repo private)"
-if [ ! -f /home/agro/.ssh/id_ed25519 ]; then
-  sudo -u agro mkdir -p /home/agro/.ssh
-  sudo -u agro ssh-keygen -t ed25519 -N "" -C "agrobarokah-vps" -f /home/agro/.ssh/id_ed25519 >/dev/null
-  sudo -u agro bash -c 'ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null'
-fi
-if [ ! -d "$APP_DIR/.git" ]; then
-  if ! sudo -u agro git clone "$REPO" "$APP_DIR"; then
-    echo
-    echo "!! Clone gagal: daftarkan public key ini di GitHub -> repo inventory-dashboard -> Settings -> Deploy keys (read-only):"
-    cat /home/agro/.ssh/id_ed25519.pub
-    echo "   lalu jalankan skrip ini lagi."
-    exit 1
-  fi
-fi
+echo "== Kode aplikasi (repo public, tanpa kunci)"
+[ -d "$APP_DIR/.git" ] || sudo -u agro git clone "$REPO" "$APP_DIR"
 
 echo "== File .env"
 if [ ! -f "$APP_DIR/.env" ]; then

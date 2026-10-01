@@ -20,12 +20,9 @@ memakai `server/src/serve.ts` (`npm start`).
 Login ke VPS sebagai root, lalu:
 
 ```bash
-# dari laptop: scp deploy/setup-vps.sh root@IP_VPS:/root/
-DOMAIN=inventory.contoh.com EMAIL=admin@contoh.com bash /root/setup-vps.sh
+curl -fsSLO https://raw.githubusercontent.com/mbahjeprek/inventory-dashboard/master/deploy/setup-vps.sh
+DOMAIN=inventory.contoh.com EMAIL=admin@contoh.com bash setup-vps.sh
 ```
-
-Pertama kali, skrip berhenti di clone repo dan menampilkan **public key**. Daftarkan di GitHub →
-repo `inventory-dashboard` → Settings → Deploy keys → Add (read-only), lalu jalankan skrip lagi.
 
 Skrip memasang Node 22, PostgreSQL 17, Nginx, HTTPS, firewall, service `agrobarokah`, dan backup
 harian jam 02:30 (`/var/backups/agrobarokah`, 14 hari).
@@ -46,7 +43,8 @@ Supabase, `systemctl start agrobarokah`, buka `https://DOMAIN`. Kembalikan ke UR
 
    ```bash
    cd /tmp
-   pg_dump "postgresql://postgres.lenwetjhfvbncysjnmqy:PASSWORD@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres" \
+   # PROJECT_REF & PASSWORD: Supabase -> Connect -> Session pooler (atau DIRECT_URL di .env laptop)
+   pg_dump "postgresql://postgres.PROJECT_REF:PASSWORD@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres" \
      --schema=public --no-owner --no-privileges -Fc -f supabase.dump
    sudo -u postgres pg_restore --no-owner --role=agro -d inventory supabase.dump
    ```
@@ -56,7 +54,7 @@ Supabase, `systemctl start agrobarokah`, buka `https://DOMAIN`. Kembalikan ke UR
 
    ```bash
    cd /opt/agrobarokah
-   sudo -u agro SUPABASE_URL=https://lenwetjhfvbncysjnmqy.supabase.co SUPABASE_SERVICE_KEY=... npm run evidence:copy
+   sudo -u agro SUPABASE_URL=https://PROJECT_REF.supabase.co SUPABASE_SERVICE_KEY=... npm run evidence:copy
    ```
 4. Jalankan: `systemctl start agrobarokah`, buka `https://DOMAIN`, cek login, stok, riwayat, foto bukti.
 5. Arahkan alamat lama ke yang baru: ganti `vercel.json` dengan redirect ke domain baru dan push,
