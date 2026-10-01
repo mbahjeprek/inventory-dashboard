@@ -19,6 +19,7 @@ export function StatCard({
   onClick,
   active = false,
   footer,
+  title,
 }: {
   label: string;
   value: string | number;
@@ -28,11 +29,13 @@ export function StatCard({
   onClick?: () => void;
   active?: boolean;
   footer?: ReactNode;
+  // Tooltip for a clickable card (default: show / clear its list).
+  title?: string;
 }) {
   const Tag = onClick ? "button" : "div";
   return (
     <Tag
-      {...(onClick ? { type: "button" as const, onClick, title: active ? "Tampilkan semua barang" : `Lihat daftar ${label}` } : {})}
+      {...(onClick ? { type: "button" as const, onClick, title: title ?? (active ? "Tampilkan semua barang" : `Lihat daftar ${label}`) } : {})}
       className={`bg-[var(--bg-card)] border rounded-lg p-3 sm:p-4 text-left w-full min-w-0 ${
         active ? "border-[var(--accent-blue)] ring-2 ring-[var(--accent-blue-border)]" : "border-[var(--border)]"
       } ${onClick ? "cursor-pointer hover:shadow-md hover:border-[var(--accent-blue-border)] transition" : ""}`}

@@ -37,7 +37,7 @@ import { StockBatchModal } from "../components/StockBatchModal";
 const EXPIRY_WARNING_DAYS = 30;
 
 type SortKey = "kode" | "nama" | "kategori" | "jenis" | "stock_tersedia" | "expired_date";
-type StockFilter = "" | "menipis" | "habis" | "expired";
+type StockFilter = "" | "tersedia" | "menipis" | "habis" | "expired";
 
 const formatTanggal = (iso: string | null) => (iso ? iso.split("-").reverse().join("/") : "");
 
@@ -212,6 +212,7 @@ export function InventoryKlinikPage({ klinik }: { klinik: string }) {
       search && `Cari: "${search}"`,
       kategori && `Kategori: ${kategori}`,
       stockFilter === "menipis" && "Stock Menipis (Buffer)",
+      stockFilter === "tersedia" && "Stok Tersedia (> 0)",
       stockFilter === "habis" && "Stock Habis",
       stockFilter === "expired" && `Expired / ≤ ${EXPIRY_WARNING_DAYS} hari`,
     ].filter(Boolean);
@@ -299,8 +300,23 @@ export function InventoryKlinikPage({ klinik }: { klinik: string }) {
         <>
           {summary && (
             <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-              <StatCard label="Total Item" value={summary.totalItems.toLocaleString("id-ID")} icon={Pill} tone="blue" />
-              <StatCard label="Total Stock Tersedia" value={summary.totalStock.toLocaleString("id-ID")} icon={Boxes} tone="green" />
+              <StatCard
+                label="Total Item"
+                value={summary.totalItems.toLocaleString("id-ID")}
+                icon={Pill}
+                tone="blue"
+                title="Tampilkan semua item"
+                onClick={() => (setStockFilter(""), setPage(1))}
+              />
+              <StatCard
+                label="Total Stock Tersedia"
+                value={summary.totalStock.toLocaleString("id-ID")}
+                icon={Boxes}
+                tone="green"
+                active={stockFilter === "tersedia"}
+                title={stockFilter === "tersedia" ? "Tampilkan semua item" : "Lihat item yang stoknya ada"}
+                onClick={() => toggleStockFilter("tersedia")}
+              />
               <StatCard
                 label="Stock Menipis (Buffer)"
                 value={summary.lowStock.toLocaleString("id-ID")}

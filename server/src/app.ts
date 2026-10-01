@@ -604,6 +604,7 @@ app.get("/api/items", async (req, res) => {
   // Same conditions as the lowStock/outOfStock counts in /api/summary, so the stat cards link to matching rows.
   if (stock === "menipis") conditions.push("stock_tersedia <= buffer_stock AND buffer_stock > 0");
   if (stock === "habis") conditions.push("stock_tersedia <= 0");
+  if (stock === "tersedia") conditions.push("stock_tersedia > 0");
 
   const where = conditions.length ? "WHERE " + conditions.join(" AND ") : "";
 
@@ -798,6 +799,7 @@ app.get("/api/gudang-stock", async (req, res) => {
   // Same conditions as the lowStock/outOfStock counts in /api/gudang-stock/summary.
   if (stock === "menipis") conditions.push("gs.stock_tersedia <= gs.buffer_stock AND gs.buffer_stock > 0");
   if (stock === "habis") conditions.push("gs.stock_tersedia <= 0");
+  if (stock === "tersedia") conditions.push("gs.stock_tersedia > 0");
 
   const where = "WHERE " + conditions.join(" AND ");
   const joinSql = `FROM gudang_stock gs JOIN items i ON i.kode = gs.item_kode ${where}`;
@@ -3072,6 +3074,7 @@ app.get("/api/klinik-stock", async (req, res) => {
   else if (status === "BUFFER STOCK") conditions.push("ks.stock_tersedia <= 0");
   if (stock === "menipis") conditions.push("ks.stock_tersedia <= ks.buffer_stock AND ks.buffer_stock > 0");
   if (stock === "habis") conditions.push("ks.stock_tersedia <= 0");
+  if (stock === "tersedia") conditions.push("ks.stock_tersedia > 0");
   if (stock === "expired") conditions.push(EXPIRING_SQL);
 
   const joinSql = `FROM klinik_stock ks JOIN obat o ON o.kode = ks.obat_kode WHERE ${conditions.join(" AND ")}`;

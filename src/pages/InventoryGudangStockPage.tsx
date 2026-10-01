@@ -113,7 +113,7 @@ export function InventoryGudangStockPage({ gudang }: { gudang: string }) {
   const [total, setTotal] = useState(0);
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("");
-  const [stockFilter, setStockFilter] = useState<"" | "menipis" | "habis">("");
+  const [stockFilter, setStockFilter] = useState<"" | "tersedia" | "menipis" | "habis">("");
   const [sortBy, setSortBy] = useState<SortKey>("kode");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [page, setPage] = useState(1);
@@ -162,7 +162,7 @@ export function InventoryGudangStockPage({ gudang }: { gudang: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gudang, page, status, stockFilter, sortBy, sortDir]);
 
-  const toggleStockFilter = (f: "menipis" | "habis") => {
+  const toggleStockFilter = (f: "tersedia" | "menipis" | "habis") => {
     setStockFilter((cur) => (cur === f ? "" : f));
     setPage(1);
   };
@@ -196,6 +196,7 @@ export function InventoryGudangStockPage({ gudang }: { gudang: string }) {
       search && `Cari: "${search}"`,
       status && `Status: ${status}`,
       stockFilter === "menipis" && "Stock Menipis (Buffer)",
+      stockFilter === "tersedia" && "Stok Tersedia (> 0)",
       stockFilter === "habis" && "Stock Habis",
     ].filter(Boolean);
     return {
@@ -260,8 +261,23 @@ export function InventoryGudangStockPage({ gudang }: { gudang: string }) {
         <>
           {summary && (
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              <StatCard label="Total Item Barang" value={summary.totalItems.toLocaleString("id-ID")} icon={Package} tone="blue" />
-              <StatCard label="Total Stock Tersedia" value={summary.totalStock.toLocaleString("id-ID")} icon={Boxes} tone="green" />
+              <StatCard
+                label="Total Item Barang"
+                value={summary.totalItems.toLocaleString("id-ID")}
+                icon={Package}
+                tone="blue"
+                title="Tampilkan semua item"
+                onClick={() => (setStockFilter(""), setPage(1))}
+              />
+              <StatCard
+                label="Total Stock Tersedia"
+                value={summary.totalStock.toLocaleString("id-ID")}
+                icon={Boxes}
+                tone="green"
+                active={stockFilter === "tersedia"}
+                title={stockFilter === "tersedia" ? "Tampilkan semua item" : "Lihat item yang stoknya ada"}
+                onClick={() => toggleStockFilter("tersedia")}
+              />
               <StatCard
                 label="Stock Menipis (Buffer)"
                 value={summary.lowStock.toLocaleString("id-ID")}

@@ -33,7 +33,7 @@ import { OPNAME_MODULE_LABEL, OPNAME_STATUS, expLabel, fmtQty, opnameModule, opn
 import { tanggalWaktu } from "../lib/datetime";
 
 const PAGE_SIZE = 50;
-type Filter = "" | "belum" | "selisih" | "sesuai";
+type Filter = "" | "dihitung" | "belum" | "selisih" | "sesuai";
 // What the counter typed, kept as text until saved (so "1," or "" can be typed freely).
 // exp: klinik batch expiry as found, only once changed ('' = none).
 type Edit = { fisik: string; ket: string; exp?: string };
@@ -135,6 +135,7 @@ export function StokOpnameDetailPage() {
       if (!words.every((w) => hay.includes(w))) return false;
       if (keep?.has(l.id)) return true;
       const s = selisihOf(l);
+      if (filter === "dihitung") return s !== null;
       if (filter === "belum") return s === null;
       if (filter === "selisih") return s !== null && s !== 0;
       if (filter === "sesuai") return s === 0;
@@ -286,7 +287,7 @@ export function StokOpnameDetailPage() {
         .filter(Boolean)
         .join(" · "),
       `Dihitung ${stats.dihitung} dari ${stats.total} item · Selisih lebih ${stats.plus} · Selisih kurang ${stats.minus}${
-        filter || search ? ` · Filter: ${[filter === "belum" ? "Belum dihitung" : filter === "selisih" ? "Ada selisih" : filter === "sesuai" ? "Sesuai" : "", search && `"${search}"`].filter(Boolean).join(", ")}` : ""
+        filter || search ? ` · Filter: ${[filter === "dihitung" ? "Sudah dihitung" : filter === "belum" ? "Belum dihitung" : filter === "selisih" ? "Ada selisih" : filter === "sesuai" ? "Sesuai" : "", search && `"${search}"`].filter(Boolean).join(", ")}` : ""
       }`,
     ],
     landscape: true,
@@ -538,13 +539,22 @@ export function StokOpnameDetailPage() {
       {error && <p className="text-sm text-[var(--accent-red)]">{error}</p>}
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <StatCard label="Total Item" value={stats.total.toLocaleString("id-ID")} icon={Boxes} tone="blue" />
+        <StatCard
+          label="Total Item"
+          value={stats.total.toLocaleString("id-ID")}
+          icon={Boxes}
+          tone="blue"
+          title="Tampilkan semua item"
+          onClick={() => (setFilter(""), setPage(1))}
+        />
         <StatCard
           label="Sudah Dihitung"
           value={stats.dihitung.toLocaleString("id-ID")}
           suffix={stats.total ? `${Math.round((stats.dihitung / stats.total) * 100)}%` : undefined}
           icon={ClipboardList}
           tone="green"
+          active={filter === "dihitung"}
+          onClick={() => (setFilter(filter === "dihitung" ? "" : "dihitung"), setPage(1))}
         />
         <StatCard
           label="Ada Selisih"
