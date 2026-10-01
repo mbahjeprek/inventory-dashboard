@@ -5,9 +5,12 @@ if (!connectionString) {
   throw new Error("DATABASE_URL env var is not set");
 }
 
+// Supabase needs SSL; a Postgres on the same machine (the VPS, see deploy/PINDAH-VPS.md) doesn't
+// speak it: DATABASE_SSL=false, or a localhost URL, turns it off.
+const local = /@(localhost|127\.0\.0\.1)(:|\/)/.test(connectionString);
 export const pool = new Pool({
   connectionString,
-  ssl: { rejectUnauthorized: false },
+  ssl: process.env.DATABASE_SSL === "false" || local ? false : { rejectUnauthorized: false },
 });
 // Supabase closes connections that sit idle; the pool then emits "error" for that idle client and,
 // with no listener, Node kills the whole process. The pool drops the client and opens a new one on

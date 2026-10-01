@@ -8,6 +8,8 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
+    "start": "NODE_ENV=production tsx server/src/serve.ts",
+    "evidence:copy": "tsx server/src/copyEvidenceToDisk.ts",
     "db:schema": "tsx server/src/applySchema.ts",
     "db:migrate": "tsx server/src/migrateSqliteToSupabase.ts",
     "db:import-pupuk": "tsx server/src/importPupuk.ts",

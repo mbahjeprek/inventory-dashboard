@@ -1,0 +1,15 @@
+[Unit]
+Description=Inventory Dashboard Agro Barokah
+After=network.target postgresql.service
+Requires=postgresql.service
+
+[Service]
+User=agro
+WorkingDirectory=/opt/agrobarokah
+EnvironmentFile=/opt/agrobarokah/.env
+ExecStart=/usr/bin/npx tsx server/src/serve.ts
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

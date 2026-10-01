@@ -1,4 +1,6 @@
 import express from "express";
+import fs from "fs/promises";
+import nodePath from "path";
 import cookieParser from "cookie-parser";
 import type { PoolClient } from "pg";
 import { queryMany, queryOne, execute, withTransaction } from "./db.js";
@@ -5778,13 +5780,16 @@ app.get("/api/perbandingan/barang", async (req, res) => {
 // a photo. The form uploads it first (POST /api/evidence, already shrunk in the browser); the photo
 // lives in the private Supabase Storage bucket `evidence` and the transaction keeps its id. It is
 // shown through GET /api/evidence/:id, which redirects to a short-lived signed URL.
-const STORAGE_URL = (process.env.SUPABASE_URL ?? "").replace(/\/$/, "");
-const STORAGE_KEY = process.env.SUPABASE_SERVICE_KEY ?? "";
+// On a server of our own (VPS, see deploy/PINDAH-VPS.md) EVIDENCE_DIR keeps the photos on its disk
+// instead, at the same `path` (YYYY-MM/<id>.<ext>), and GET /api/evidence/:id sends the file.
+const EVIDENCE_DIR = (process.env.EVIDENCE_DIR ?? "").replace(/[\/]$/, "");
+const STORAGE_URL = EVIDENCE_DIR ? "" : (process.env.SUPABASE_URL ?? "").replace(/\/$/, "");
+const STORAGE_KEY = EVIDENCE_DIR ? "" : process.env.SUPABASE_SERVICE_KEY ?? "";
 const EVIDENCE_BUCKET = "evidence";
 const EVIDENCE_MAX_BYTES = 3 * 1024 * 1024;
 const EVIDENCE_MIME: Record<string, string> = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" };
 function evidenceEnabled() {
-  return !!(STORAGE_URL && STORAGE_KEY);
+  return !!EVIDENCE_DIR || !!(STORAGE_URL && STORAGE_KEY);
 }
 // A legacy service_role key (a JWT, "eyJ...") goes in both headers; a new secret key ("sb_secret_...")
 // only in apikey - Supabase turns it into the service role itself.
@@ -5792,6 +5797,12 @@ const storageHeaders = (): Record<string, string> =>
   STORAGE_KEY.startsWith("sb_") ? { apikey: STORAGE_KEY } : { Authorization: `Bearer ${STORAGE_KEY}`, apikey: STORAGE_KEY };
 
 async function storageUpload(path: string, body: Buffer, mime: string) {
+  if (EVIDENCE_DIR) {
+    const file = nodePath.join(EVIDENCE_DIR, path);
+    await fs.mkdir(nodePath.dirname(file), { recursive: true });
+    await fs.writeFile(file, body, { flag: "wx" });
+    return;
+  }
   const put = () =>
     fetch(`${STORAGE_URL}/storage/v1/object/${EVIDENCE_BUCKET}/${path}`, {
       method: "POST",
@@ -5814,7 +5825,7 @@ async function storageUpload(path: string, body: Buffer, mime: string) {
 }
 
 app.post("/api/evidence", async (req, res) => {
-  if (!STORAGE_URL || !STORAGE_KEY) return res.status(503).json({ error: "Penyimpanan foto belum disiapkan" });
+  if (!evidenceEnabled()) return res.status(503).json({ error: "Penyimpanan foto belum disiapkan" });
   const m = String(req.body?.data ?? "").match(/^data:(image\/[a-z]+);base64,(.+)$/);
   const ext = m && EVIDENCE_MIME[m[1]];
   if (!m || !ext) return res.status(400).json({ error: "File harus berupa gambar (JPG / PNG / WEBP)" });
@@ -5842,7 +5853,13 @@ app.post("/api/evidence", async (req, res) => {
 app.get("/api/evidence/:id", async (req, res) => {
   if (!/^[0-9a-f-]{36}$/.test(req.params.id)) return res.status(404).send("Foto tidak ditemukan");
   const ev = await queryOne<{ path: string; created_at: Date }>("SELECT path, created_at FROM evidence WHERE id = @id::uuid", { id: req.params.id });
-  if (!ev || !STORAGE_URL) return res.status(404).send("Foto tidak ditemukan");
+  if (!ev || !evidenceEnabled()) return res.status(404).send("Foto tidak ditemukan");
+  const name = `bukti-${new Date(ev.created_at.getTime() + 7 * 3600_000).toISOString().slice(0, 10)}-${req.params.id.slice(0, 8)}.${ev.path.split(".").pop()}`;
+  if (EVIDENCE_DIR) {
+    const file = nodePath.join(EVIDENCE_DIR, ev.path);
+    if (req.query.download) return res.download(file, name, (e) => e && !res.headersSent && res.status(404).send("Foto tidak ditemukan"));
+    return res.sendFile(file, { headers: { "Cache-Control": "private, max-age=600" } }, (e) => e && !res.headersSent && res.status(404).send("Foto tidak ditemukan"));
+  }
   const r = await fetch(`${STORAGE_URL}/storage/v1/object/sign/${EVIDENCE_BUCKET}/${ev.path}`, {
     method: "POST",
     headers: { ...storageHeaders(), "Content-Type": "application/json" },
@@ -5851,7 +5868,6 @@ app.get("/api/evidence/:id", async (req, res) => {
   const j: any = await r.json().catch(() => ({}));
   if (!r.ok || !j.signedURL) return res.status(502).send("Foto tidak bisa dibuka");
   // ?download=1 makes the storage answer an attachment, so the browser saves it instead of showing it.
-  const name = `bukti-${new Date(ev.created_at.getTime() + 7 * 3600_000).toISOString().slice(0, 10)}-${req.params.id.slice(0, 8)}.${ev.path.split(".").pop()}`;
   const download = req.query.download ? `&download=${encodeURIComponent(name)}` : "";
   res.redirect(`${STORAGE_URL}/storage/v1${j.signedURL}${download}`);
 });
