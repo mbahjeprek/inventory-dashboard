@@ -486,3 +486,18 @@ UPDATE pupuk_log SET created_at = NULL WHERE date_trunc('minute', created_at) IN
   (SELECT date_trunc('minute', created_at) FROM pupuk_log WHERE created_at IS NOT NULL GROUP BY 1 HAVING COUNT(*) >= 20);
 UPDATE oli_log SET created_at = NULL WHERE date_trunc('minute', created_at) IN
   (SELECT date_trunc('minute', created_at) FROM oli_log WHERE created_at IS NOT NULL GROUP BY 1 HAVING COUNT(*) >= 20);
+
+-- BBM / pupuk / oli: a row whose saldo_stock is fixed (the Google Sheet's own saldo from the import,
+-- or a saldo typed by hand in Edit) rather than worked out from the row before it (rechainSaldo in
+-- app.ts). Added once, marking the imported rows (created_at NULL); an edit of an imported row's
+-- jumlah / tanggal clears it so the row runs on with the others.
+DO $$
+DECLARE t text;
+BEGIN
+  FOREACH t IN ARRAY ARRAY['bbm_log', 'pupuk_log', 'oli_log'] LOOP
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = t AND column_name = 'dari_sheet') THEN
+      EXECUTE format('ALTER TABLE %I ADD COLUMN dari_sheet BOOLEAN NOT NULL DEFAULT false', t);
+      EXECUTE format('UPDATE %I SET dari_sheet = true WHERE created_at IS NULL', t);
+    END IF;
+  END LOOP;
+END $$;

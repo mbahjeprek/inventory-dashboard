@@ -2502,8 +2502,7 @@ app.put("/api/bbm/:id", requireSuperuser, async (req, res) => {
      WHERE id = @id`,
     { ...updated, id: req.params.id }
   );
-  const fromBbm = minIso(existing.tanggal_iso, updated.tanggal_iso);
-  if (fromBbm) await rechainSaldo("BBM", existing.lokasi, existing.jenis_bbm, fromBbm);
+  await afterSaldoEdit("BBM", existing, updated, existing.lokasi, existing.jenis_bbm);
   await logActivity(req, {
     module: "BBM",
     estate: existing.lokasi,
@@ -2739,8 +2738,7 @@ app.put("/api/pupuk/:id", requireSuperuser, async (req, res) => {
      WHERE id = @id`,
     { ...updated, id: req.params.id }
   );
-  const fromPupuk = minIso(existing.tanggal_iso, updated.tanggal_iso);
-  if (fromPupuk) await rechainSaldo("PUPUK", existing.estate, existing.jenis_pupuk, fromPupuk);
+  await afterSaldoEdit("PUPUK", existing, updated, existing.estate, existing.jenis_pupuk);
   await logActivity(req, {
     module: "PUPUK",
     estate: existing.estate,
@@ -3871,9 +3869,10 @@ const saldoAsOf = async (module: SaldoModule, estate: string, jenis: string, iso
 // Rebuilds the running saldo of one estate + jenis from `fromIso` on, in (tanggal_iso, id) order, so
 // a backdated, edited or deleted row moves every saldo after it (a row used to take the saldo of
 // the latest row at the time it was booked, and nothing after it followed). A row booked in the app
-// runs on from the row before it: saldo = before + diterima + pinjam - keluar/pemakaian. Imported
-// rows (created_at NULL) keep the sheet's own saldo, and a Stok Opname row (koreksi) keeps the
-// counted saldo - its koreksi becomes the count minus the saldo before it.
+// runs on from the row before it: saldo = before + diterima + pinjam - keluar/pemakaian. A row with
+// a fixed saldo (dari_sheet: the sheet's own saldo from the import, or one typed by hand in Edit)
+// keeps it, and a Stok Opname row (koreksi) keeps the counted saldo - its koreksi becomes the count
+// minus the saldo before it.
 async function rechainSaldo(module: SaldoModule, estate: string, jenis: string, fromIso: string, client?: PoolClient): Promise<number> {
   if (!client) return withTransaction((c) => rechainSaldo(module, estate, jenis, fromIso, c));
   const t = SALDO_LEDGER[module];
@@ -3889,7 +3888,7 @@ async function rechainSaldo(module: SaldoModule, estate: string, jenis: string, 
       )
     )?.s ?? 0;
   const rows = await queryMany<{ id: number; imported: boolean; i: number; p: number; o: number; k: number | null; s: number | null }>(
-    `SELECT id, created_at IS NULL imported, COALESCE(diterima, 0)::float8 i, COALESCE(pinjam, 0)::float8 p, COALESCE(${t.out}, 0)::float8 o,
+    `SELECT id, dari_sheet imported, COALESCE(diterima, 0)::float8 i, COALESCE(pinjam, 0)::float8 p, COALESCE(${t.out}, 0)::float8 o,
        koreksi::float8 k, saldo_stock::float8 s
      FROM ${t.table} WHERE ${t.jenis} = @jenis AND ${t.estate} = @estate AND tanggal_iso >= @iso ORDER BY tanggal_iso, id FOR UPDATE`,
     key,
@@ -3921,6 +3920,21 @@ async function rechainSaldo(module: SaldoModule, estate: string, jenis: string, 
   return changed.length;
 }
 const minIso = (...d: (string | null | undefined)[]) => d.filter((x): x is string => !!x).sort()[0];
+
+// After an Edit of a BBM / pupuk / oli row: a saldo typed by hand becomes fixed (the rows after run
+// on from it); a changed jumlah or tanggal on a row whose saldo was fixed (an imported sheet row)
+// lets it run on from the row before, so the edit moves the saldo. Then the saldo is rebuilt.
+async function afterSaldoEdit(module: SaldoModule, existing: any, updated: any, estate: string, jenis: string) {
+  const t = SALDO_LEDGER[module];
+  const n = (v: any) => (v === null || v === undefined || v === "" ? null : Number(v));
+  const saldoTyped = n(updated.saldo_stock) !== n(existing.saldo_stock);
+  const moved =
+    n(updated.diterima) !== n(existing.diterima) || n(updated[t.out]) !== n(existing[t.out]) || (updated.tanggal_iso ?? existing.tanggal_iso) !== existing.tanggal_iso;
+  const fixed = saldoTyped && n(updated.saldo_stock) !== null ? true : moved ? false : existing.dari_sheet;
+  if (fixed !== existing.dari_sheet) await execute(`UPDATE ${t.table} SET dari_sheet = @f WHERE id = @id`, { f: fixed, id: existing.id });
+  const from = minIso(existing.tanggal_iso, updated.tanggal_iso);
+  if (from) await rechainSaldo(module, estate, jenis, from);
+}
 
 // Latest BBM / pupuk / oli saldo row of one jenis (the running balance new entries continue from).
 const latestSaldoRow = (module: SaldoModule, estate: string, jenis: string, client?: PoolClient) => {
@@ -4765,8 +4779,7 @@ app.put("/api/oli/:id", requireSuperuser, async (req, res) => {
      WHERE id = @id`,
     { ...updated, id: req.params.id }
   );
-  const fromOli = minIso(existing.tanggal_iso, updated.tanggal_iso);
-  if (fromOli) await rechainSaldo("OLI", existing.estate, existing.jenis_oli, fromOli);
+  await afterSaldoEdit("OLI", existing, updated, existing.estate, existing.jenis_oli);
   await logActivity(req, {
     module: "OLI",
     estate: existing.estate,
