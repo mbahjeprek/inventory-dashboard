@@ -41,7 +41,14 @@ export function EditPupukModal({
     setSubmitting(true);
     setError("");
     try {
-      await api.updatePupuk(record.id, { ...form, tanggal_iso: form.tanggal_iso || undefined, ...(newEvidence ? { evidence_id: newEvidence } : {}) });
+      // Only a saldo typed here is sent (the prefilled one may be stale, see EditBbmModal).
+      const { saldo_stock, ...rest } = form;
+      await api.updatePupuk(record.id, {
+        ...rest,
+        ...(saldo_stock !== str(record.saldo_stock) ? { saldo_stock } : {}),
+        tanggal_iso: form.tanggal_iso || undefined,
+        ...(newEvidence ? { evidence_id: newEvidence } : {}),
+      });
       onSuccess();
     } catch (e) {
       setError(errorText(e, "Gagal menyimpan perubahan"));

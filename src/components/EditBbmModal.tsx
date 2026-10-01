@@ -43,7 +43,9 @@ export function EditBbmModal({
         no_spb: noSpb,
         diterima: diterima === "" ? null : Number(diterima),
         pemakaian: pemakaian === "" ? null : Number(pemakaian),
-        saldo_stock: saldoStock === "" ? null : Number(saldoStock),
+        // Only a saldo typed here is sent: it becomes the fixed saldo the rows after run on from. The
+        // prefilled one may be stale (another entry moved it since the list loaded).
+        ...(String(saldoStock) !== String(record.saldo_stock ?? "") ? { saldo_stock: saldoStock === "" ? null : Number(saldoStock) } : {}),
         keterangan,
         estate,
         kode_kendaraan: kodeKendaraan,

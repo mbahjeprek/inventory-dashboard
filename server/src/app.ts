@@ -2500,7 +2500,7 @@ app.put("/api/bbm/:id", requireSuperuser, async (req, res) => {
     no_spb: no_spb ?? "",
     diterima: diterima === "" || diterima === undefined ? null : Number(diterima),
     pemakaian: pemakaian === "" || pemakaian === undefined ? null : Number(pemakaian),
-    saldo_stock: saldo_stock === "" || saldo_stock === undefined ? null : Number(saldo_stock),
+    saldo_stock: saldo_stock === undefined ? existing.saldo_stock : saldo_stock === "" ? null : Number(saldo_stock),
     keterangan: keterangan ?? "",
     estate: estate ?? "",
     kode_kendaraan: kode_kendaraan ?? existing.kode_kendaraan ?? "",
@@ -3583,8 +3583,8 @@ app.get("/api/activity-log", async (req, res) => {
     conditions.push("estate = @estate");
     params.estate = estate;
   } else if (req.user!.role !== "superuser" || estates) {
-    // Own estates, or the dashboard's pick of them.
-    conditions.push("estate = ANY(@estates::text[])");
+    // Own estates, or the dashboard's pick of them (a superuser keeps the rows of no estate: master data).
+    conditions.push(`(estate = ANY(@estates::text[])${req.user!.role === "superuser" ? " OR estate IS NULL OR estate = ''" : ""})`);
     params.estates = listEstates(req.user!, "", estates);
   }
   if (aksi) {
@@ -4365,6 +4365,16 @@ app.put("/api/stock-opname/:id", async (req, res) => {
         client
       );
       if (dup) throw new StockError(`${dup.nama}: batch expired ${expText(dup.e)} sudah ada di baris lain, hitung di baris itu`);
+      // Nor a batch another line moves away from (X -> Y while Y -> Z, or a swap): approval empties
+      // that batch, which would wipe this line's count.
+      const chain = await queryOne<{ nama: string; e: string }>(
+        `SELECT a.nama, a.exp_fisik e FROM opname_line a JOIN opname_line b
+           ON b.opname_id = a.opname_id AND b.kode = a.kode AND b.id <> a.id AND b.exp = a.exp_fisik AND b.exp_fisik IS NOT NULL
+         WHERE a.opname_id = @oid AND a.exp_fisik IS NOT NULL LIMIT 1`,
+        { oid: o.id },
+        client
+      );
+      if (chain) throw new StockError(`${chain.nama}: batch expired ${expText(chain.e)} sedang dipindah ke tanggal lain di baris lain; koreksi tanggalnya satu per satu`);
     }
     if (typeof catatan === "string") await execute("UPDATE opname SET catatan = @c WHERE id = @id", { c: catatan.trim(), id: o.id }, client);
     return o;
@@ -5913,18 +5923,32 @@ async function claimEvidence(req: express.Request, res: express.Response): Promi
     res.status(400).json({ error: "Foto bukti wajib diupload" });
     return undefined;
   }
-  // A photo whose earlier save failed after taking it (used, but no transaction holds it) can be
-  // used again, so retrying the same form doesn't answer "foto tidak valid".
+  // used = false is what stops the same form being booked twice (a resend while the first request
+  // is still saving can't take the photo again).
   const ok = await queryOne(
-    `UPDATE evidence SET used = true WHERE id = @id::uuid AND (user_id = @uid OR @su)
-       AND (used = false OR NOT (${EVIDENCE_HOLDERS.map((t) => `EXISTS (SELECT 1 FROM ${t} WHERE evidence_id = @id::uuid)`).join(" OR ")}))
-     RETURNING id`,
+    "UPDATE evidence SET used = true WHERE id = @id::uuid AND used = false AND (user_id = @uid OR @su) RETURNING id",
     { id, uid: req.user!.id, su: req.user!.role === "superuser" }
   );
   if (!ok) {
     res.status(400).json({ error: "Foto bukti tidak valid, upload ulang fotonya" });
     return undefined;
   }
+  // The request is refused or fails after this (stok kurang, a server error...): the photo goes back,
+  // if no saved row holds it, just before that answer goes out - so sending the same form again
+  // works instead of answering "foto tidak valid". Done before the answer, not after: on Vercel the
+  // function may stop as soon as it has answered.
+  const end = res.end.bind(res) as (...a: unknown[]) => express.Response;
+  res.end = ((...args: unknown[]) => {
+    if (res.statusCode < 400) return end(...args);
+    execute(
+      `UPDATE evidence SET used = false WHERE id = @id::uuid
+         AND NOT (${EVIDENCE_HOLDERS.map((t) => `EXISTS (SELECT 1 FROM ${t} WHERE evidence_id = @id::uuid)`).join(" OR ")})`,
+      { id }
+    )
+      .catch((e) => console.error("Foto bukti tidak bisa dilepas:", e))
+      .finally(() => end(...args));
+    return res;
+  }) as typeof res.end;
   return id;
 }
 
