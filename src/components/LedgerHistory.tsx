@@ -207,14 +207,14 @@ export function LedgerHistory({ scope, type, refreshKey }: { scope: StockScope; 
                   <tr key={r.id}>
                     <td className="px-4 py-2.5 whitespace-nowrap text-[var(--text-secondary)]">{formatWaktu(r.created_at)}</td>
                     <td className="px-4 py-2.5 font-mono text-xs whitespace-nowrap text-[var(--text-secondary)]">{r.kode}</td>
-                    <td className="px-4 py-2.5">{r.nama}</td>
+                    <td className="col-grow px-4 py-2.5">{r.nama}</td>
                     <td className={`px-4 py-2.5 text-right font-medium whitespace-nowrap ${isOut ? "text-[var(--accent-red)]" : "text-[var(--accent-green)]"}`}>
                       {isOut ? "-" : "+"}
                       {r.qty.toLocaleString("id-ID")} {r.satuan}
                     </td>
                     {showTujuan && <td className="px-4 py-2.5">{r.tujuan || <span className="text-[var(--text-muted)]">-</span>}</td>}
                     <td className="px-4 py-2.5 text-[var(--text-secondary)]">{r.penerima || "-"}</td>
-                    <td className="px-4 py-2.5 text-xs text-[var(--text-secondary)] max-w-[260px]">
+                    <td className="col-grow px-4 py-2.5 text-xs text-[var(--text-secondary)]">
                       {r.is_correction ? (
                         <span className="mr-1.5 text-[10px] px-1.5 py-0.5 rounded-full border bg-[var(--accent-amber-bg)] text-[var(--accent-amber)] border-[var(--accent-amber-border)]">
                           Koreksi

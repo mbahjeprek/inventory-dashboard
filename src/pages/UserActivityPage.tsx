@@ -402,7 +402,7 @@ export function UserActivityPage() {
                         const i = top.findIndex((t) => t.id === r.id);
                         return (
                           <tr key={r.id} className="hover:bg-[#f8fafc]">
-                            <td className="px-4 py-2.5 min-w-[200px]">
+                            <td className="col-grow px-4 py-2.5">
                               <div className="flex items-center gap-2 font-medium text-[var(--text-primary)]">
                                 <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: i >= 0 ? SERIES[i] : OTHER }} />
                                 {r.nama}

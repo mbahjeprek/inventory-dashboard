@@ -232,7 +232,7 @@ export function ItemDetailPage() {
                         {m.qty} {m.satuan || item.satuan}
                       </td>
                       <td className="px-4 py-2.5 text-xs text-[var(--text-secondary)]">{m.ref || "-"}</td>
-                      <td className="px-4 py-2.5 text-xs text-[var(--text-secondary)] min-w-[200px] max-w-[360px] whitespace-normal break-words" title={m.note || ""}>
+                      <td className="col-grow px-4 py-2.5 text-xs text-[var(--text-secondary)] whitespace-normal break-words" title={m.note || ""}>
                         {m.note || "-"}
                       </td>
                       <td className="px-4 py-2.5 text-center whitespace-nowrap">

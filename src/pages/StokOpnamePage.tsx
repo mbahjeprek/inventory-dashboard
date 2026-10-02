@@ -127,7 +127,7 @@ export function StokOpnamePage() {
                     <td className="px-4 py-2.5 whitespace-nowrap">
                       {OPNAME_MODULE_LABEL[r.module]} {r.estate}
                     </td>
-                    <td className="px-4 py-2.5">
+                    <td className="col-grow px-4 py-2.5">
                       <div className="flex items-center gap-1.5">
                         <OpnameStatusBadge status={r.status} />
                         {(r.status === "DRAFT" || r.status === "SUBMITTED") && (

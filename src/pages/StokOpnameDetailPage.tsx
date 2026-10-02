@@ -635,7 +635,7 @@ export function StokOpnameDetailPage() {
                     <tr key={l.id} className={`border-t border-[var(--border)] ${e ? "bg-[#fffbeb]" : "hover:bg-[#f8fafc]"}`}>
                       <td className="px-4 py-2 text-right text-[var(--text-muted)]">{(page - 1) * PAGE_SIZE + idx + 1}</td>
                       <td className="px-4 py-2 font-mono text-xs whitespace-nowrap">{l.kode}</td>
-                      <td className="px-4 py-2">
+                      <td className="col-grow px-4 py-2">
                         {l.nama}
                         {l.ditambahkan && <span className="ml-1.5 text-[10px] uppercase text-[var(--accent-blue)]">ditambahkan</span>}
                       </td>
@@ -698,7 +698,7 @@ export function StokOpnameDetailPage() {
                       >
                         {s === null ? "-" : s === 0 ? "0" : `${s > 0 ? "+" : "−"}${fmtQty(Math.abs(s))}`}
                       </td>
-                      <td className="px-4 py-2 min-w-[180px]">
+                      <td className="col-grow px-4 py-2">
                         {editableLine(l) ? (
                           <input
                             data-ket={l.id}

@@ -261,10 +261,10 @@ export function MasterObatPage() {
                   <tr key={o.id} className="border-t border-[var(--border)] hover:bg-[#f8fafc]">
                     <td className="px-4 py-2.5 text-right text-[var(--text-muted)]">{(page - 1) * pageSize + idx + 1}</td>
                     <td className="px-4 py-2.5 font-mono text-xs whitespace-nowrap">{o.kode}</td>
-                    <td className="px-4 py-2.5">{o.nama}</td>
+                    <td className="col-grow px-4 py-2.5">{o.nama}</td>
                     <td className="px-4 py-2.5 text-[var(--text-secondary)]">{o.kategori || "-"}</td>
                     <td className="px-4 py-2.5 text-[var(--text-secondary)]">{o.jenis || "-"}</td>
-                    <td className="px-4 py-2.5 text-xs text-[var(--text-secondary)] max-w-[360px]">{o.deskripsi || "-"}</td>
+                    <td className="col-grow px-4 py-2.5 text-xs text-[var(--text-secondary)]">{o.deskripsi || "-"}</td>
                     <td className="px-4 py-2.5 text-[var(--text-secondary)]">{o.satuan}</td>
                     <td className="px-4 py-2.5 text-right">
                       <div className="inline-flex gap-1.5">

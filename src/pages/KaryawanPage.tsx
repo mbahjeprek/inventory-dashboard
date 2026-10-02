@@ -231,7 +231,7 @@ export function KaryawanPage() {
                 rows.map((k) => (
                   <tr key={k.id} className="border-t border-[var(--border)] hover:bg-[#f8fafc]">
                     <td className="px-4 py-2.5 font-mono text-xs">{k.nik}</td>
-                    <td className="px-4 py-2.5">{k.nama}</td>
+                    <td className="col-grow px-4 py-2.5">{k.nama}</td>
                     <td className="px-4 py-2.5 text-[var(--text-secondary)]">{k.status}</td>
                     <td className="px-4 py-2.5 text-[var(--text-secondary)]">{k.estate}</td>
                     <td className="px-4 py-2.5 text-[var(--text-secondary)]">{k.lokasi_kerja}</td>

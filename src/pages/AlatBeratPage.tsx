@@ -218,7 +218,7 @@ export function AlatBeratPage() {
                   <tr key={a.id} className="border-t border-[var(--border)] hover:bg-[#f8fafc]">
                     <td className="px-4 py-2.5 font-mono text-xs">{a.kode}</td>
                     <td className="px-4 py-2.5 text-[var(--text-secondary)]">{a.jenis_unit || "-"}</td>
-                    <td className="px-4 py-2.5">{a.nama}</td>
+                    <td className="col-grow px-4 py-2.5">{a.nama}</td>
                     <td className="px-4 py-2.5 text-right">
                       <div className="inline-flex gap-1.5">
                         <button

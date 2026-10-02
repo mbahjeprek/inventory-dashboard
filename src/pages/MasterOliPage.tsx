@@ -95,9 +95,9 @@ export function MasterOliPage() {
                 rows.map((o) => (
                   <tr key={o.id} className="border-t border-[var(--border)] hover:bg-[#f8fafc]">
                     <td className="px-4 py-2.5 font-mono text-xs whitespace-nowrap">{o.kode}</td>
-                    <td className="px-4 py-2.5 font-medium">{o.nama}</td>
+                    <td className="col-grow px-4 py-2.5 font-medium">{o.nama}</td>
                     <td className="px-4 py-2.5 text-[var(--text-secondary)]">{o.satuan}</td>
-                    <td className="px-4 py-2.5 text-[var(--text-secondary)]">{o.keterangan || "-"}</td>
+                    <td className="col-grow px-4 py-2.5 text-[var(--text-secondary)]">{o.keterangan || "-"}</td>
                     <td className="px-4 py-2.5 text-right text-[var(--text-secondary)]">{o.transaksi.toLocaleString("id-ID")}</td>
                     <td className="px-4 py-2.5 text-right">
                       <div className="inline-flex gap-1.5">

@@ -356,7 +356,7 @@ export function InventoryGudangStockPage({ gudang }: { gudang: string }) {
                     items.map((item) => (
                       <tr key={item.id} className="border-t border-[var(--border)] hover:bg-[#f8fafc]">
                         <td className="px-4 py-2.5 font-mono text-xs">{item.kode}</td>
-                        <td className="px-4 py-2.5">{item.nama}</td>
+                        <td className="col-grow px-4 py-2.5">{item.nama}</td>
                         <td className="px-4 py-2.5 text-[var(--text-secondary)]">{item.satuan}</td>
                         <td className="px-4 py-2.5 text-right text-[var(--text-secondary)]">{item.buffer_stock}</td>
                         <td className="px-4 py-2.5 text-right font-medium">{item.stock_tersedia.toLocaleString("id-ID")}</td>

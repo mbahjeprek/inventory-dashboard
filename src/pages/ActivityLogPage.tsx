@@ -259,8 +259,8 @@ export function ActivityLogPage({
                     <td className="px-4 py-2.5 whitespace-nowrap">
                       <span className={`text-xs px-2 py-0.5 rounded-full border ${aksiTone(r.aksi)}`}>{r.aksi}</span>
                     </td>
-                    <td className="px-4 py-2.5">{r.objek || "-"}</td>
-                    <td className="px-4 py-2.5 text-xs text-[var(--text-secondary)] max-w-[420px]">{r.detail || "-"}</td>
+                    <td className="col-grow px-4 py-2.5">{r.objek || "-"}</td>
+                    <td className="col-grow px-4 py-2.5 text-xs text-[var(--text-secondary)]">{r.detail || "-"}</td>
                     {isSuperuser && (
                       <td className="px-4 py-2.5 text-right">
                         <div className="inline-flex gap-1.5">

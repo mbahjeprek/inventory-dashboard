@@ -423,10 +423,10 @@ export function InventoryKlinikPage({ klinik }: { klinik: string }) {
                         <tr key={item.id} className="border-t border-[var(--border)] hover:bg-[#f8fafc]">
                           <td className="px-4 py-2.5 text-right text-[var(--text-muted)]">{(page - 1) * pageSize + idx + 1}</td>
                           <td className="px-4 py-2.5 font-mono text-xs whitespace-nowrap">{item.kode}</td>
-                          <td className="px-4 py-2.5">{item.nama}</td>
+                          <td className="col-grow px-4 py-2.5">{item.nama}</td>
                           <td className="px-4 py-2.5 text-[var(--text-secondary)]">{item.kategori || "-"}</td>
                           <td className="px-4 py-2.5 text-[var(--text-secondary)]">{item.jenis || "-"}</td>
-                          <td className="px-4 py-2.5 text-xs text-[var(--text-secondary)] min-w-[220px] max-w-[360px]">{item.deskripsi || "-"}</td>
+                          <td className="col-grow px-4 py-2.5 text-xs text-[var(--text-secondary)]">{item.deskripsi || "-"}</td>
                           <td className="px-4 py-2.5 text-[var(--text-secondary)] whitespace-nowrap">{item.satuan}</td>
                           <td
                             className={`px-4 py-2.5 text-right font-medium ${

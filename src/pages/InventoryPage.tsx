@@ -351,7 +351,7 @@ export function InventoryPage() {
                             {item.kode}
                           </Link>
                         </td>
-                        <td className="px-4 py-2.5">
+                        <td className="col-grow px-4 py-2.5">
                           <Link to={`/inventory/${item.id}`} className="hover:underline">
                             {item.nama}
                           </Link>

@@ -167,7 +167,7 @@ export function PinjamanPage() {
                         </div>
                       )}
                     </td>
-                    <td className="px-4 py-2.5">
+                    <td className="col-grow px-4 py-2.5">
                       <div className="font-medium text-[var(--text-primary)]">{l.nama}</div>
                       <div className="text-[11px] text-[var(--text-muted)]">
                         {OPNAME_MODULE_LABEL[l.module]}
@@ -186,7 +186,7 @@ export function PinjamanPage() {
                     <td className="px-4 py-2.5">
                       <span className={`text-xs px-2 py-0.5 rounded-full border whitespace-nowrap ${STATUS[l.status].cls}`}>{STATUS[l.status].label}</span>
                     </td>
-                    <td className="px-4 py-2.5 text-xs text-[var(--text-secondary)] min-w-[200px]">
+                    <td className="col-grow px-4 py-2.5 text-xs text-[var(--text-secondary)]">
                       <div>
                         {l.alasan} <EvidenceLink id={l.evidence_id} label="foto" />
                       </div>

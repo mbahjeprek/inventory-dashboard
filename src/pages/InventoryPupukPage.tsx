@@ -353,7 +353,7 @@ export function InventoryPupukPage({ estate }: { estate: string }) {
                     <td className={`px-4 py-2.5 text-right ${(r.saldo_stock ?? 0) < 0 ? "text-[var(--accent-red)]" : "text-[var(--text-primary)]"}`}>
                       {r.saldo_stock !== null ? r.saldo_stock.toLocaleString("id-ID", { maximumFractionDigits: 2 }) : "-"}
                     </td>
-                    <td className="px-4 py-2.5 text-[var(--text-secondary)] text-xs min-w-[200px] max-w-[360px] whitespace-normal break-words" title={r.keterangan}>
+                    <td className="col-grow px-4 py-2.5 text-[var(--text-secondary)] text-xs whitespace-normal break-words" title={r.keterangan}>
                       {r.keterangan || "-"}
                     </td>
                     <td className="px-4 py-2.5 text-center whitespace-nowrap">

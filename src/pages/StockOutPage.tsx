@@ -193,11 +193,11 @@ export function StockOutPage({ embedded = false }: { embedded?: boolean }) {
                   <tr key={r.id} className="border-t border-[var(--border)] hover:bg-[#f8fafc]">
                     <td className="px-4 py-2.5 whitespace-nowrap text-[var(--text-secondary)]">{r.tanggal_keluar || "-"}</td>
                     <td className="px-4 py-2.5 font-mono text-xs text-[var(--text-secondary)]">{r.kode}</td>
-                    <td className="px-4 py-2.5">{r.nama}</td>
+                    <td className="col-grow px-4 py-2.5">{r.nama}</td>
                     <td className="px-4 py-2.5 text-[var(--text-secondary)]">{r.penerima || "-"}</td>
                     <td className="px-4 py-2.5 text-right font-medium text-[var(--accent-red)]">-{r.qty} {r.satuan}</td>
                     <td className="px-4 py-2.5">{r.tujuan || <span className="text-[var(--text-muted)]">-</span>}</td>
-                    <td className="px-4 py-2.5 text-[var(--text-secondary)] text-xs min-w-[200px] max-w-[360px] whitespace-normal break-words" title={r.keterangan}>
+                    <td className="col-grow px-4 py-2.5 text-[var(--text-secondary)] text-xs whitespace-normal break-words" title={r.keterangan}>
                       {r.keterangan || "-"}
                     </td>
                     <td className="px-4 py-2.5 text-center whitespace-nowrap">
