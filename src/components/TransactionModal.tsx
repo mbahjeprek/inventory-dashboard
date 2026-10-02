@@ -12,6 +12,10 @@ const NILAM_TUJUAN = ["NILAM", "KNS", "WJA", "ZAMRUD", "FIRUS"];
 
 type Mode = "IN" | "OUT" | "KOREKSI";
 
+// Opens the form pre-filled, e.g. the "Buang" shortcut on an expired batch in Inventory Klinik:
+// Stock Out of exactly that batch, marked as thrown away, its whole remaining qty.
+export type TransactionPreset = { mode?: Mode; batchOut?: string; buang?: boolean; qty?: number; note?: string };
+
 // Klinik batch pickers: FEFO = take the batch that expires first; NEW = count a batch not listed yet.
 const FEFO = "__fefo";
 const NEW_BATCH = "__new";
@@ -23,11 +27,13 @@ const isPast = (iso: string) => !!iso && iso < new Date().toISOString().slice(0,
 export function TransactionModal({
   item: initialItem,
   scope,
+  preset,
   onClose,
   onSuccess,
 }: {
   item: PickerItem;
   scope?: StockScope;
+  preset?: TransactionPreset;
   onClose: () => void;
   onSuccess: () => void;
 }) {
@@ -40,10 +46,15 @@ export function TransactionModal({
   const [item, setItem] = useState(initialItem);
   const [tujuan, setTujuan] = useState("");
   const [penerima, setPenerima] = useState("");
-  const [mode, setMode] = useState<Mode>(canInput ? "IN" : "KOREKSI");
-  const [qty, setQty] = useState(1);
+  const [mode, setMode] = useState<Mode>(() => {
+    const wanted = preset?.mode;
+    if (wanted === "KOREKSI") return canKoreksi ? "KOREKSI" : "IN";
+    if (wanted && canInput) return wanted;
+    return canInput ? "IN" : "KOREKSI";
+  });
+  const [qty, setQty] = useState(preset?.qty && preset.qty > 0 ? preset.qty : 1);
   const [actualQty, setActualQty] = useState(0);
-  const [note, setNote] = useState("");
+  const [note, setNote] = useState(preset?.note ?? "");
   // Foto bukti, required for Stock In / Out (not for Koreksi).
   const [evidenceId, setEvidenceId] = useState<string | null>(null);
   const evidenceOn = useEvidenceEnabled();
@@ -52,8 +63,8 @@ export function TransactionModal({
   // Klinik only: stock is kept per expiry-date batch.
   const [batches, setBatches] = useState<KlinikBatch[]>([]);
   const [expIn, setExpIn] = useState("");
-  const [batchOut, setBatchOut] = useState(FEFO);
-  const [buang, setBuang] = useState(false);
+  const [batchOut, setBatchOut] = useState(preset?.batchOut ?? FEFO);
+  const [buang, setBuang] = useState(!!preset?.buang);
   const [batchKor, setBatchKor] = useState(NEW_BATCH);
   const [newExp, setNewExp] = useState("");
 
@@ -315,7 +326,8 @@ export function TransactionModal({
             </div>
           )}
 
-          {mode !== "KOREKSI" && (
+          {/* Obat expired yang dibuang has no one receiving it. */}
+          {mode !== "KOREKSI" && !(mode === "OUT" && buang) && (
             <div>
               <label className="text-xs text-[var(--text-secondary)] mb-1 block">
                 {mode === "OUT" ? (isKlinik ? "Pasien / Penerima" : "Penerima / Pengambil") : "Diterima Oleh"}

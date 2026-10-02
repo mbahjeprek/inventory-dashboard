@@ -16,6 +16,7 @@ import {
   AlertTriangle,
   XCircle,
   CalendarClock,
+  ArrowLeftRight,
 } from "lucide-react";
 import { api, errorText, type KlinikStockItem, type KlinikSummary, type PickerItem } from "../lib/api";
 import { StatCard } from "../components/StatCard";
@@ -25,7 +26,7 @@ import { fetchAllRows, type TableReport } from "../lib/printTable";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { EditKlinikStockModal } from "../components/EditKlinikStockModal";
 import { ItemPickerModal } from "../components/ItemPickerModal";
-import { TransactionModal } from "../components/TransactionModal";
+import { TransactionModal, type TransactionPreset } from "../components/TransactionModal";
 import { useDragScroll } from "../hooks/useDragScroll";
 import { useAuth } from "../context/AuthContext";
 import { can } from "../lib/access";
@@ -138,6 +139,8 @@ export function InventoryKlinikPage({ klinik }: { klinik: string }) {
   const [showBatch, setShowBatch] = useState(false);
   const [batchNotice, setBatchNotice] = useState("");
   const [selectedItem, setSelectedItem] = useState<PickerItem | null>(null);
+  // Set when the form was opened from a row shortcut (e.g. "Buang" on an expired batch).
+  const [txPreset, setTxPreset] = useState<TransactionPreset | undefined>(undefined);
   const [tab, setTab] = useInventoryTab();
   // Bumped after a new transaction so an open Stock In/Out tab reloads.
   const [historyKey, setHistoryKey] = useState(0);
@@ -146,10 +149,11 @@ export function InventoryKlinikPage({ klinik }: { klinik: string }) {
   // when it may do either.
   const canEdit = can(user, "klinik.edit");
   const canDelete = can(user, "klinik.delete");
-  const showActions = canEdit || canDelete;
   // "Transaksi" opens the Stok Masuk / Keluar / Koreksi form: shown when any of those is allowed.
   const canInput = can(user, "klinik.input");
   const canTx = canInput || can(user, "klinik.koreksi");
+  // Aksi column: per-row Transaksi shortcut plus Edit / Hapus.
+  const showActions = canEdit || canDelete || canTx;
   const [editingItem, setEditingItem] = useState<KlinikStockItem | null>(null);
   const [deleteError, setDeleteError] = useState("");
   const [confirmDelete, setConfirmDelete] = useState<KlinikStockItem | null>(null);
@@ -251,6 +255,12 @@ export function InventoryKlinikPage({ klinik }: { klinik: string }) {
           .join(" · "),
       ]),
     };
+  };
+
+  // Opens the Transaksi form straight on this row's obat, skipping the picker.
+  const openTx = (item: KlinikStockItem, preset?: TransactionPreset) => {
+    setTxPreset(preset);
+    setSelectedItem(item);
   };
 
   const remove = async (item: KlinikStockItem) => {
@@ -450,6 +460,23 @@ export function InventoryKlinikPage({ klinik }: { klinik: string }) {
                                     {item.batches.length > 1 && (
                                       <span className="text-xs font-normal text-[var(--text-muted)]"> · {b.qty.toLocaleString("id-ID")}</span>
                                     )}
+                                    {st === "expired" && canInput && b.qty > 0 && (
+                                      <button
+                                        onClick={() =>
+                                          openTx(item, {
+                                            mode: "OUT",
+                                            batchOut: b.expired_date,
+                                            buang: true,
+                                            qty: b.qty,
+                                            note: `Obat expired ${formatTanggal(b.expired_date)} dibuang`,
+                                          })
+                                        }
+                                        title={`Stock Out ${b.qty} ${item.satuan} batch ini sebagai obat expired yang dibuang`}
+                                        className="ml-2 align-middle text-[11px] font-medium px-1.5 py-0.5 rounded border border-[var(--accent-red-border)] bg-[var(--accent-red-bg)] text-[var(--accent-red)] hover:opacity-80"
+                                      >
+                                        Buang
+                                      </button>
+                                    )}
                                   </div>
                                 );
                               })
@@ -459,6 +486,15 @@ export function InventoryKlinikPage({ klinik }: { klinik: string }) {
                           {showActions && (
                             <td className="px-4 py-2.5 text-right">
                               <div className="inline-flex gap-1.5">
+                                {canTx && (
+                                  <button
+                                    onClick={() => openTx(item)}
+                                    title="Stock In / Stock Out / Koreksi obat ini"
+                                    className="p-1.5 rounded-md border border-[var(--accent-blue-border)] text-[var(--accent-blue)] hover:bg-[var(--accent-blue-bg)]"
+                                  >
+                                    <ArrowLeftRight size={14} />
+                                  </button>
+                                )}
                                 {canEdit && (<button
                                   onClick={() => setEditingItem(item)}
                                   title="Edit buffer, catatan & tanggal expired batch"
@@ -532,6 +568,7 @@ export function InventoryKlinikPage({ klinik }: { klinik: string }) {
           onClose={() => setShowPicker(false)}
           onSelect={(item) => {
             setShowPicker(false);
+            setTxPreset(undefined);
             setSelectedItem(item);
           }}
         />
@@ -541,6 +578,7 @@ export function InventoryKlinikPage({ klinik }: { klinik: string }) {
         <TransactionModal
           item={selectedItem}
           scope={{ kind: "klinik", name: klinik }}
+          preset={txPreset}
           onClose={() => setSelectedItem(null)}
           onSuccess={() => {
             setSelectedItem(null);
