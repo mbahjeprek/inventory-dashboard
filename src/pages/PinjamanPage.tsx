@@ -7,7 +7,7 @@ import { EvidenceInput, EvidenceLink, useEvidenceEnabled } from "../components/E
 import { can, canModule, userEstates } from "../lib/access";
 import { useShownEstates } from "../hooks/useEstateFilter";
 import { LOAN_LATE_DAYS, loanDays, useOpenPinjaman } from "../hooks/useOpenPinjaman";
-import { OPNAME_MODULES, OPNAME_MODULE_LABEL, fmtQty, opnameModule, round3 } from "../lib/opname";
+import { OPNAME_MODULES, OPNAME_MODULE_LABEL, fmtQty, localToday, opnameModule, round3 } from "../lib/opname";
 import { tanggalWaktu } from "../lib/datetime";
 
 const ESTATES = ["NILAM", "KNS", "WJA", "ZAMRUD", "FIRUS"];
@@ -19,6 +19,7 @@ const STATUS: Record<PinjamanStatus, { label: string; cls: string }> = {
   DIPINJAM: { label: "Belum Kembali", cls: "bg-[var(--accent-amber-bg)] border-[var(--accent-amber-border)] text-[var(--accent-amber)]" },
   LUNAS: { label: "Lunas", cls: "bg-[var(--accent-green-bg)] border-[var(--accent-green-border)] text-[var(--accent-green)]" },
   BATAL: { label: "Dibatalkan", cls: "bg-[#f1f5f9] border-[var(--border)] text-[var(--text-secondary)]" },
+  TRANSFER: { label: "Transfer", cls: "bg-[var(--accent-blue-bg)] border-[var(--accent-blue-border)] text-[var(--accent-blue)]" },
 };
 
 // Nilam's gudang, Klinik and BBM are counted in whole units (as on the server).
@@ -27,6 +28,7 @@ const inputPerm = (m: OpnameModule) => `${m.toLowerCase()}.input`;
 
 // Pinjaman antar estate: one estate lends another stock of one item; the stock moves at once and
 // the loan stays open until the same item has been returned (Kembalikan, may be partial).
+// Transfer: the same, sent for good - nothing comes back (e.g. Firus -> Nilam, BBM into an estate's tank).
 export function PinjamanPage() {
   const { user } = useAuth();
   const myEstates = userEstates(user);
@@ -43,7 +45,7 @@ export function PinjamanPage() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [reload, setReload] = useState(0);
-  const [creating, setCreating] = useState(false);
+  const [creating, setCreating] = useState<"" | "PINJAM" | "TRANSFER">("");
   const [returning, setReturning] = useState<{ loan: Pinjaman; batal: boolean } | null>(null);
   const [deleting, setDeleting] = useState<Pinjaman | null>(null);
   const refreshOpen = useOpenPinjaman((s) => s.refresh);
@@ -61,7 +63,7 @@ export function PinjamanPage() {
 
   const canAct = (l: Pinjaman) => l.status === "DIPINJAM" && can(user, inputPerm(l.module)) && (myEstates.includes(l.dari_estate) || myEstates.includes(l.ke_estate));
   const done = () => {
-    setCreating(false);
+    setCreating("");
     setReturning(null);
     setDeleting(null);
     setReload((n) => n + 1);
@@ -72,16 +74,26 @@ export function PinjamanPage() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold text-[var(--text-primary)]">Pinjaman Antar Estate</h1>
-          <p className="text-sm text-[var(--text-secondary)]">Stok yang dipinjamkan ke estate lain sampai dikembalikan</p>
+          <h1 className="text-xl font-semibold text-[var(--text-primary)]">Pinjaman &amp; Transfer Antar Estate</h1>
+          <p className="text-sm text-[var(--text-secondary)]">
+            Pinjaman: dipinjamkan sampai dikembalikan · Transfer: dikirim ke estate lain, stok tujuan langsung bertambah
+          </p>
         </div>
         {inputModules.length > 0 && (
-          <button
-            onClick={() => setCreating(true)}
-            className="inline-flex items-center gap-1.5 text-sm px-3.5 py-2 rounded-md bg-[var(--accent-blue)] text-white hover:opacity-90"
-          >
-            <Plus size={16} /> Catat Pinjaman
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => setCreating("TRANSFER")}
+              className="inline-flex items-center gap-1.5 text-sm px-3.5 py-2 rounded-md border border-[var(--accent-blue-border)] text-[var(--accent-blue)] hover:bg-[var(--accent-blue-bg)]"
+            >
+              <ArrowRight size={16} /> Catat Transfer
+            </button>
+            <button
+              onClick={() => setCreating("PINJAM")}
+              className="inline-flex items-center gap-1.5 text-sm px-3.5 py-2 rounded-md bg-[var(--accent-blue)] text-white hover:opacity-90"
+            >
+              <Plus size={16} /> Catat Pinjaman
+            </button>
+          </div>
         )}
       </div>
 
@@ -98,9 +110,10 @@ export function PinjamanPage() {
           <option value="OPEN">Belum kembali</option>
           <option value="LUNAS">Lunas</option>
           <option value="BATAL">Dibatalkan</option>
+          <option value="TRANSFER">Transfer</option>
           <option value="">Semua status</option>
         </select>
-        <span className="text-xs text-[var(--text-muted)] ml-auto">{total.toLocaleString("id-ID")} pinjaman</span>
+        <span className="text-xs text-[var(--text-muted)] ml-auto">{total.toLocaleString("id-ID")} catatan</span>
       </div>
 
       <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg overflow-x-auto">
@@ -110,10 +123,10 @@ export function PinjamanPage() {
               <th className="px-4 py-2.5 whitespace-nowrap">Tanggal</th>
               <th className="px-4 py-2.5">Barang</th>
               <th className="px-4 py-2.5 whitespace-nowrap">Dari → Ke</th>
-              <th className="px-4 py-2.5 text-right whitespace-nowrap">Dipinjam</th>
+              <th className="px-4 py-2.5 text-right whitespace-nowrap">Jumlah</th>
               <th className="px-4 py-2.5 text-right whitespace-nowrap">Sisa</th>
               <th className="px-4 py-2.5">Status</th>
-              <th className="px-4 py-2.5">Alasan / Riwayat</th>
+              <th className="px-4 py-2.5">Alasan / Keterangan</th>
               <th className="px-4 py-2.5 text-right">Aksi</th>
             </tr>
           </thead>
@@ -143,7 +156,9 @@ export function PinjamanPage() {
                   <tr key={l.id} className="align-top">
                     <td className="px-4 py-2.5 whitespace-nowrap">
                       <div>{tanggalWaktu(l.tanggal_iso, l.created_at)}</div>
-                      <div className="text-[11px] text-[var(--text-muted)]">#{l.id}</div>
+                      <div className="text-[11px] text-[var(--text-muted)]">
+                        {l.jenis === "TRANSFER" ? "Transfer" : "Pinjaman"} #{l.id}
+                      </div>
                       {l.status === "DIPINJAM" && (
                         <div
                           className={`text-[11px] font-medium ${loanDays(l.tanggal_iso) >= LOAN_LATE_DAYS ? "text-[var(--accent-red)]" : "text-[var(--accent-amber)]"}`}
@@ -219,7 +234,7 @@ export function PinjamanPage() {
         </table>
       </div>
 
-      {creating && <CreatePinjamanModal modules={inputModules} myEstates={myEstates} onClose={() => setCreating(false)} onSuccess={done} />}
+      {creating && <CreatePinjamanModal jenis={creating} modules={inputModules} myEstates={myEstates} onClose={() => setCreating("")} onSuccess={done} />}
       {returning && <KembaliModal loan={returning.loan} batal={returning.batal} onClose={() => setReturning(null)} onSuccess={done} />}
       {deleting && <HapusModal loan={deleting} onClose={() => setDeleting(null)} onSuccess={done} />}
     </div>
@@ -245,29 +260,46 @@ function Modal({ title, subtitle, onClose, children }: { title: string; subtitle
   );
 }
 
-function CreatePinjamanModal({
+export function CreatePinjamanModal({
   modules,
   myEstates,
+  jenis = "PINJAM",
+  initial,
   onClose,
   onSuccess,
 }: {
   modules: OpnameModule[];
   myEstates: string[];
+  jenis?: "PINJAM" | "TRANSFER";
+  // Opened from a Stock Out form ("Kirim ke estate lain"): that module, estate and barang.
+  initial?: { module: OpnameModule; dari: string; kode: string; qty?: number; note?: string };
   onClose: () => void;
   onSuccess: () => void;
 }) {
-  const [module, setModule] = useState<OpnameModule>(modules[0]);
-  const [dari, setDari] = useState(myEstates[0] ?? "NILAM");
+  const transfer = jenis === "TRANSFER";
+  const [module, setModule] = useState<OpnameModule>(initial?.module ?? modules[0]);
+  const [dari, setDari] = useState(initial?.dari ?? myEstates[0] ?? "NILAM");
   const [ke, setKe] = useState(() => ESTATES.find((e) => e !== (myEstates[0] ?? "NILAM"))!);
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState(initial?.kode ?? "");
   const [options, setOptions] = useState<PinjamanBarang[]>([]);
   const [barang, setBarang] = useState<PinjamanBarang | null>(null);
-  const [qty, setQty] = useState("");
-  const [alasan, setAlasan] = useState("");
+  const [qty, setQty] = useState(initial?.qty ? String(initial.qty).replace(".", ",") : "");
+  const [alasan, setAlasan] = useState(initial?.note ?? "");
+  const [tanggal, setTanggal] = useState(localToday());
   const [evidenceId, setEvidenceId] = useState<string | null>(null);
   const evidenceOn = useEvidenceEnabled();
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  // The barang the form was opened on is picked as soon as the list has it.
+  const [wanted, setWanted] = useState(initial?.kode ?? "");
+  useEffect(() => {
+    if (!wanted) return;
+    const hit = options.find((o) => o.kode === wanted);
+    if (hit) {
+      setBarang(hit);
+      setWanted("");
+    }
+  }, [options, wanted]);
 
   // Only the lending estate records a loan: "dari" is one of the account's own estates.
   const dariOptions = ESTATES.filter((e) => myEstates.includes(e));
@@ -294,26 +326,43 @@ function CreatePinjamanModal({
 
   const submit = async () => {
     setError("");
-    if (!ke) return setError("Pilih estate peminjam");
-    if (!barang) return setError("Pilih barang yang dipinjamkan");
+    if (!ke) return setError(transfer ? "Pilih estate tujuan" : "Pilih estate peminjam");
+    if (!barang) return setError(transfer ? "Pilih barang yang dikirim" : "Pilih barang yang dipinjamkan");
     if (!(n > 0)) return setError("Jumlah harus lebih dari 0");
     if (isWhole && !Number.isInteger(n)) return setError("Jumlah harus bilangan bulat");
     if (!saldoModule && n > barang.stok) return setError(`Stok ${dari} hanya ${fmtQty(barang.stok)} ${barang.satuan}`);
-    if (!alasan.trim()) return setError("Alasan wajib diisi");
+    if (!alasan.trim()) return setError(transfer ? "Keterangan wajib diisi" : "Alasan wajib diisi");
     if (evidenceOn && !evidenceId) return setError("Foto bukti wajib diupload");
     setSubmitting(true);
     try {
-      await api.createPinjaman({ evidence_id: evidenceId ?? "", module, dari, ke, kode: barang.kode, qty: n, alasan: alasan.trim() });
+      await api.createPinjaman({
+        evidence_id: evidenceId ?? "",
+        module,
+        dari,
+        ke,
+        kode: barang.kode,
+        qty: n,
+        alasan: alasan.trim(),
+        ...(transfer ? { jenis: "TRANSFER" as const, tanggal_iso: tanggal } : {}),
+      });
       onSuccess();
     } catch (e) {
-      setError(errorText(e, "Gagal menyimpan pinjaman"));
+      setError(errorText(e, transfer ? "Gagal menyimpan transfer" : "Gagal menyimpan pinjaman"));
     } finally {
       setSubmitting(false);
     }
   };
 
   return (
-    <Modal title="Catat Pinjaman" subtitle="Dicatat oleh estate yang meminjamkan; stok kedua estate langsung berubah" onClose={onClose}>
+    <Modal
+      title={transfer ? "Kirim ke Estate Lain (Transfer)" : "Catat Pinjaman"}
+      subtitle={
+        transfer
+          ? "Dicatat oleh estate pengirim; stok pengirim berkurang dan stok tujuan langsung bertambah (tidak perlu Stock In lagi)"
+          : "Dicatat oleh estate yang meminjamkan; stok kedua estate langsung berubah"
+      }
+      onClose={onClose}
+    >
       <div>
         <label className={labelCls}>Modul</label>
         <select value={module} onChange={(e) => setModule(e.target.value as OpnameModule)} className={inputCls}>
@@ -327,7 +376,7 @@ function CreatePinjamanModal({
 
       <div className="grid grid-cols-[1fr_auto_1fr] items-end gap-2">
         <div>
-          <label className={labelCls}>Dipinjamkan oleh</label>
+          <label className={labelCls}>{transfer ? "Dari estate" : "Dipinjamkan oleh"}</label>
           <select value={dari} onChange={(e) => setDari(e.target.value)} className={inputCls}>
             {dariOptions.map((e) => (
               <option key={e} value={e}>
@@ -338,7 +387,7 @@ function CreatePinjamanModal({
         </div>
         <ArrowRight size={16} className="mb-2.5 text-[var(--text-muted)]" />
         <div>
-          <label className={labelCls}>Dipinjam oleh</label>
+          <label className={labelCls}>{transfer ? "Ke estate" : "Dipinjam oleh"}</label>
           <select value={ke} onChange={(e) => setKe(e.target.value)} className={inputCls}>
             {keOptions.map((e) => (
               <option key={e} value={e}>
@@ -396,14 +445,25 @@ function CreatePinjamanModal({
           <input value={qty} onChange={(e) => setQty(e.target.value)} inputMode="decimal" placeholder={isWhole ? "cth. 10" : "cth. 2,5"} className={inputCls} />
         </div>
         <div>
-          <label className={labelCls}>Alasan</label>
-          <input value={alasan} onChange={(e) => setAlasan(e.target.value)} placeholder="cth. stok habis" className={inputCls} />
+          <label className={labelCls}>{transfer ? "Keterangan" : "Alasan"}</label>
+          <input value={alasan} onChange={(e) => setAlasan(e.target.value)} placeholder={transfer ? "cth. No. surat / untuk alat CKSL" : "cth. stok habis"} className={inputCls} />
         </div>
       </div>
 
+      {transfer && (
+        <div>
+          <label className={labelCls}>Tanggal</label>
+          <input type="date" value={tanggal} max={localToday()} onChange={(e) => setTanggal(e.target.value)} className={inputCls} />
+          {(module === "GUDANG" || module === "KLINIK") && (
+            <p className="text-[11px] text-[var(--text-muted)] mt-1">Riwayat Gudang / Klinik mencatat waktu input; tanggal ini berlaku untuk BBM, Pupuk dan Oli.</p>
+          )}
+        </div>
+      )}
+
       {barang && n > 0 && (
         <p className="text-xs rounded-md px-3 py-2 bg-[#f8fafc] text-[var(--text-secondary)]">
-          Stok {dari} berkurang {fmtQty(n)} {barang.satuan}, stok {ke} bertambah {fmtQty(n)} {barang.satuan}. {ke} mengembalikan barang yang sama nanti.
+          Stok {dari} berkurang {fmtQty(n)} {barang.satuan}, stok {ke} bertambah {fmtQty(n)} {barang.satuan}.{" "}
+          {transfer ? `${ke} tidak perlu mencatat Stock In lagi.` : `${ke} mengembalikan barang yang sama nanti.`}
         </p>
       )}
 
@@ -416,7 +476,7 @@ function CreatePinjamanModal({
         disabled={submitting}
         className="w-full py-2.5 rounded-md text-sm font-medium bg-[var(--accent-blue)] text-white hover:opacity-90 disabled:opacity-50"
       >
-        {submitting ? "Menyimpan..." : "Simpan Pinjaman"}
+        {submitting ? "Menyimpan..." : transfer ? "Kirim (Simpan Transfer)" : "Simpan Pinjaman"}
       </button>
     </Modal>
   );
@@ -522,11 +582,15 @@ function HapusModal({ loan, onClose, onSuccess }: { loan: Pinjaman; onClose: () 
     }
   };
 
+  const transfer = loan.jenis === "TRANSFER";
   return (
-    <Modal title="Hapus Pinjaman" subtitle={`#${loan.id} · ${loan.nama} · ${loan.dari_estate} → ${loan.ke_estate}`} onClose={onClose}>
+    <Modal title={transfer ? "Hapus Transfer" : "Hapus Pinjaman"} subtitle={`#${loan.id} · ${loan.nama} · ${loan.dari_estate} → ${loan.ke_estate}`} onClose={onClose}>
       <p className="text-xs rounded-md px-3 py-2 bg-[var(--accent-red-bg)] text-[var(--accent-red)]">
-        Pinjaman ini beserta semua transaksinya di riwayat {OPNAME_MODULE_LABEL[loan.module]} {loan.dari_estate} dan {loan.ke_estate} dihapus permanen.
-        Stok tidak berubah (barangnya sudah kembali semua).
+        {transfer ? "Transfer" : "Pinjaman"} ini beserta semua transaksinya di riwayat {OPNAME_MODULE_LABEL[loan.module]} {loan.dari_estate} dan {loan.ke_estate} dihapus
+        permanen.{" "}
+        {transfer
+          ? `Stok ${fmtQty(loan.qty)} ${loan.satuan} kembali ke ${loan.dari_estate} (ditolak kalau ${loan.ke_estate} sudah memakainya).`
+          : "Stok tidak berubah (barangnya sudah kembali semua)."}
       </p>
       <div>
         <label className={labelCls}>Alasan penghapusan</label>
@@ -538,7 +602,7 @@ function HapusModal({ loan, onClose, onSuccess }: { loan: Pinjaman; onClose: () 
         disabled={submitting}
         className="w-full py-2.5 rounded-md text-sm font-medium text-white bg-[var(--accent-red)] hover:opacity-90 disabled:opacity-50"
       >
-        {submitting ? "Menghapus..." : "Hapus Pinjaman"}
+        {submitting ? "Menghapus..." : transfer ? "Hapus Transfer" : "Hapus Pinjaman"}
       </button>
     </Modal>
   );

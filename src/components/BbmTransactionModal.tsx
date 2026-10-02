@@ -4,6 +4,7 @@ import { X } from "lucide-react";
 import { api, errorText, type BbmSummary } from "../lib/api";
 import { AlatAutocomplete, type AlatOption } from "./AlatAutocomplete";
 import { EvidenceInput, useEvidenceEnabled } from "./EvidenceInput";
+import { TransferShortcut } from "./TransferShortcut";
 
 const JENIS_OPTIONS = ["SOLAR", "BENSIN"] as const;
 // BBM storage sites (see BBM_LOKASI_OPTIONS in server/src/app.ts). Sub-locations like AKSS/UKM are
@@ -200,6 +201,8 @@ export function BbmTransactionModal({
               Stock Out
             </button>
           </div>
+
+          {tipe === "PEMAKAIAN" && <TransferShortcut module="BBM" dari={lokasi} kode={jenisBbm} qty={jumlah} note={keterangan} onDone={onSuccess} />}
 
           <div className="grid grid-cols-2 gap-3">
             <div>

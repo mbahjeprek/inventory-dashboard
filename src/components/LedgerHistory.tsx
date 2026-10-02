@@ -10,6 +10,7 @@ import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { can } from "../lib/access";
 import { EvidenceLink } from "./EvidenceInput";
+import { loanTag } from "../lib/opname";
 
 const formatWaktu = (iso: string) =>
   new Date(iso).toLocaleString("id-ID", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
@@ -245,8 +246,8 @@ export function LedgerHistory({ scope, type, refreshKey }: { scope: StockScope; 
                           </span>
                         ) : r.pinjaman_id ? (
                           // Booked by a Pinjaman: changed / removed only on the Pinjaman page.
-                          <Link to="/pinjaman?status=" title="Kelola lewat menu Pinjaman" className="text-xs text-[var(--accent-blue)] hover:underline whitespace-nowrap">
-                            Pinjaman #{r.pinjaman_id}
+                          <Link to="/pinjaman?status=" title="Kelola lewat menu Pinjaman & Transfer" className="text-xs text-[var(--accent-blue)] hover:underline whitespace-nowrap">
+                            {loanTag(r.pinjaman_id, r.note)}
                           </Link>
                         ) : (
                           <div className="inline-flex gap-1.5">

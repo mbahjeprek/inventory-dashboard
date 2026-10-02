@@ -15,6 +15,7 @@ import { can } from "../lib/access";
 import { EvidenceLink } from "../components/EvidenceInput";
 import { tanggalWaktu } from "../lib/datetime";
 import { OliBatchModal } from "../components/SaldoBatchModal";
+import { loanTag } from "../lib/opname";
 
 const localIso = (d: Date) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -316,8 +317,8 @@ export function InventoryOliPage({ estate }: { estate: string }) {
                         <div className="inline-flex gap-1.5">
                           {r.pinjaman_id != null && (
                             // Booked by a Pinjaman: changed / removed only on the Pinjaman page.
-                            <Link to="/pinjaman?status=" title="Kelola lewat menu Pinjaman" className="text-xs text-[var(--accent-blue)] hover:underline whitespace-nowrap">
-                              Pinjaman #{r.pinjaman_id}
+                            <Link to="/pinjaman?status=" title="Kelola lewat menu Pinjaman & Transfer" className="text-xs text-[var(--accent-blue)] hover:underline whitespace-nowrap">
+                              {loanTag(r.pinjaman_id, r.keterangan)}
                             </Link>
                           )}
                           {!r.pinjaman_id && canEdit && (

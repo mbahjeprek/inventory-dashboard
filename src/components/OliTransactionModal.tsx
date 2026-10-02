@@ -2,6 +2,7 @@ import { useState } from "react";
 import { X } from "lucide-react";
 import { api, errorText, type OliSummary } from "../lib/api";
 import { EvidenceInput, useEvidenceEnabled } from "./EvidenceInput";
+import { TransferShortcut } from "./TransferShortcut";
 
 const todayIso = () => {
   const d = new Date();
@@ -117,6 +118,8 @@ export function OliTransactionModal({
             {tipeBtn("MASUK", "Stock In", "bg-[var(--accent-green-bg)] text-[var(--accent-green)] border-[var(--accent-green-border)]")}
             {tipeBtn("PEMAKAIAN", "Stock Out", "bg-[var(--accent-red-bg)] text-[var(--accent-red)] border-[var(--accent-red-border)]")}
           </div>
+
+          {tipe === "PEMAKAIAN" && <TransferShortcut module="OLI" dari={estate} kode={jenis} qty={jumlah} note={keterangan} onDone={onSuccess} />}
 
           <div className="grid grid-cols-2 gap-3">
             <div>

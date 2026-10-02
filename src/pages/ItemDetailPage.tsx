@@ -10,6 +10,7 @@ import { can } from "../lib/access";
 import { useDragScroll } from "../hooks/useDragScroll";
 import { EvidenceLink } from "../components/EvidenceInput";
 import { tanggalWaktu, waktu } from "../lib/datetime";
+import { loanTag } from "../lib/opname";
 
 const TUJUAN_OPTIONS = ["NILAM", "KNS", "WJA", "ZAMRUD", "FIRUS"];
 
@@ -240,8 +241,8 @@ export function ItemDetailPage() {
                       {showActions && (
                         <td className="px-4 py-2.5 text-right">
                           {m.pinjaman_id != null && (
-                            <Link to="/pinjaman?status=" title="Kelola lewat menu Pinjaman" className="text-xs text-[var(--accent-blue)] hover:underline whitespace-nowrap">
-                              Pinjaman #{m.pinjaman_id}
+                            <Link to="/pinjaman?status=" title="Kelola lewat menu Pinjaman & Transfer" className="text-xs text-[var(--accent-blue)] hover:underline whitespace-nowrap">
+                              {loanTag(m.pinjaman_id, m.note)}
                             </Link>
                           )}
                           {!m.pinjaman_id && canDelete && (<button

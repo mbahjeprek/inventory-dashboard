@@ -421,6 +421,9 @@ CREATE TABLE IF NOT EXISTS pinjaman (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_pinjaman_estates ON pinjaman(dari_estate, ke_estate, status);
+-- PINJAM = a loan, returned later (status DIPINJAM -> LUNAS / BATAL); TRANSFER = stock sent to another
+-- estate for good (status TRANSFER, nothing comes back): the same pair of movement rows, no return.
+ALTER TABLE pinjaman ADD COLUMN IF NOT EXISTS jenis TEXT NOT NULL DEFAULT 'PINJAM';
 CREATE TABLE IF NOT EXISTS pinjaman_kembali (
   id SERIAL PRIMARY KEY,
   pinjaman_id INTEGER NOT NULL REFERENCES pinjaman(id),

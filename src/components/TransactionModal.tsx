@@ -5,6 +5,7 @@ import { KaryawanAutocomplete } from "./KaryawanAutocomplete";
 import { EvidenceInput, useEvidenceEnabled } from "./EvidenceInput";
 import { useAuth } from "../context/AuthContext";
 import { can } from "../lib/access";
+import { TransferShortcut } from "./TransferShortcut";
 
 // Gudang Nilam supplies every estate (a Stok Keluar to another estate becomes Stok Masuk in that
 // estate's gudang); the other gudang only supply their own estate and its sub-estates.
@@ -251,6 +252,10 @@ export function TransactionModal({
               </button>
             )}
           </div>
+
+          {mode === "OUT" && scope && !buang && (
+            <TransferShortcut module={isKlinik ? "KLINIK" : "GUDANG"} dari={scope.name} kode={item.kode} qty={qty} note={note} onDone={onSuccess} />
+          )}
 
           {mode === "OUT" && !isKlinik && (
             <div>

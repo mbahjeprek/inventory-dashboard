@@ -86,7 +86,8 @@ body {
 .data-table {
   width: auto;
 }
-div:has(> .overflow-x-auto > .data-table) {
+div:has(> .overflow-x-auto > .data-table),
+.overflow-x-auto:has(> .data-table) {
   width: fit-content;
   max-width: 100%;
 }

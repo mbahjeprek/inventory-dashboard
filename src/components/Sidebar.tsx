@@ -69,7 +69,7 @@ const navSections: NavSection[] = [
     collapsible: true,
     items: [
       { to: OPNAME_PATH, label: "Stok Opname", icon: ClipboardCheck },
-      { to: PINJAMAN_PATH, label: "Pinjaman Estate", icon: ArrowLeftRight },
+      { to: PINJAMAN_PATH, label: "Pinjaman & Transfer", icon: ArrowLeftRight },
     ],
   },
   {

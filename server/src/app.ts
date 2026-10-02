@@ -5264,6 +5264,8 @@ app.post("/api/oli/batch", async (req, res) => {
 // until the loan is LUNAS; a loan nothing came back on yet can be cancelled (Batal = full return).
 // Only the lending estate (module Input permission there) records a loan; a return or cancel may be
 // recorded by either of the two estates.
+// A Transfer (jenis TRANSFER) is the same pair of rows with nothing coming back: stock one estate
+// sends another for good (e.g. Firus -> Nilam, or BBM from the Nilam depot into Zamrud's tank).
 type LoanModule = OpnameModule;
 type LoanRow = {
   id: number;
@@ -5275,10 +5277,12 @@ type LoanRow = {
   ke_estate: string;
   qty: number;
   qty_kembali: number;
-  status: "DIPINJAM" | "LUNAS" | "BATAL";
+  status: "DIPINJAM" | "LUNAS" | "BATAL" | "TRANSFER";
+  jenis: "PINJAM" | "TRANSFER";
   alasan: string;
   tanggal_iso: string;
 };
+const loanLabel = (l: Pick<LoanRow, "id" | "jenis">) => `${l.jenis === "TRANSFER" ? "Transfer" : "Pinjaman"} #${l.id}`;
 const loanPerm = (m: LoanModule, a: "view" | "input") => `${m.toLowerCase()}.${a}`;
 const canLoan = (user: SessionUser, m: LoanModule, a: "view" | "input") => user.role === "superuser" || user.perms.includes(loanPerm(m, a));
 // Nilam's gudang (items), Klinik and BBM count whole units; the other gudang, pupuk and oli decimals.
@@ -5327,6 +5331,8 @@ async function loanMove(
     pinjamanId: number;
     evidenceId: string | null;
     alloc?: Alloc[];
+    // BBM / pupuk / oli: the date of the row (a transfer dated by the form); absent = today.
+    iso?: string;
   }
 ): Promise<Alloc[] | undefined> {
   const short = (have: number) => new StockError(`Stok ${l.kode} di ${l.estate} hanya ${round3(have)}`);
@@ -5393,8 +5399,8 @@ async function loanMove(
   // it becomes the saldo). A BBM Stok Keluar can't exceed the saldo, like on the BBM page.
   const module = l.module as SaldoModule;
   const t = SALDO_LEDGER[module];
-  const before = (await latestSaldoRow(module, l.estate, l.kode, client))?.saldo_stock ?? 0;
-  if (module === "BBM" && l.type === "OUT" && before < l.qty) throw short(before);
+  const now = (await latestSaldoRow(module, l.estate, l.kode, client))?.saldo_stock ?? 0;
+  if (module === "BBM" && l.type === "OUT" && now < l.qty) throw short(now);
   const signed = l.type === "IN" ? l.qty : -l.qty;
   const lastIso =
     (
@@ -5405,7 +5411,8 @@ async function loanMove(
       )
     )?.d ?? "";
   const today = jakartaToday();
-  const iso = lastIso > today ? lastIso : today;
+  const iso = l.iso ?? (lastIso > today ? lastIso : today);
+  const before = l.iso ? await saldoAsOf(module, l.estate, l.kode, iso, client) : now;
   const p = { estate: l.estate, jenis: l.kode, iso, saldo: round3(before + signed), pinjam: signed, note: l.note, pid: l.pinjamanId, ev: l.evidenceId };
   if (module === "BBM") {
     const { tanggal, periode } = isoToIndoDate(iso);
@@ -5415,6 +5422,7 @@ async function loanMove(
       { ...p, tanggal, periode },
       client
     );
+    if (l.iso) await rechainSaldo(module, l.estate, l.kode, iso, client);
     return undefined;
   }
   const [y, m, d] = iso.split("-");
@@ -5434,10 +5442,11 @@ async function loanMove(
       client
     );
   }
+  if (l.iso) await rechainSaldo(module, l.estate, l.kode, iso, client);
   return undefined;
 }
 
-const loanObjek = (l: Pick<LoanRow, "id" | "kode" | "nama">) => `Pinjaman #${l.id} - ${l.kode === l.nama ? l.nama : `${l.kode} - ${l.nama}`}`;
+const loanObjek = (l: Pick<LoanRow, "id" | "jenis" | "kode" | "nama">) => `${loanLabel(l)} - ${l.kode === l.nama ? l.nama : `${l.kode} - ${l.nama}`}`;
 const fmtLoanQty = (n: number, satuan: string) => `${round3(n).toLocaleString("id-ID")} ${satuan}`;
 
 // Moves `qty` of loan `l`'s item from `from` to `to` (the loan itself, or a return the other way).
@@ -5450,9 +5459,10 @@ async function loanTransfer(
   qty: number,
   outNote: string,
   inNote: string,
-  evidenceId: string | null
+  evidenceId: string | null,
+  iso?: string
 ) {
-  const base = { module: l.module, kode: l.kode, qty, pinjamanId: l.id, evidenceId };
+  const base = { module: l.module, kode: l.kode, qty, pinjamanId: l.id, evidenceId, iso };
   const alloc = await loanMove(client, req, { ...base, estate: from, type: "OUT", note: outNote });
   await loanMove(client, req, { ...base, estate: to, type: "IN", note: inNote, alloc });
 }
@@ -5475,7 +5485,7 @@ app.get("/api/pinjaman", async (req, res) => {
   if (!modules.length || !estates.length) return res.json({ data: [], total: 0 });
   const conditions = ["p.module = ANY(@modules::text[])", "(p.dari_estate = ANY(@estates::text[]) OR p.ke_estate = ANY(@estates::text[]))"];
   if (status === "OPEN") conditions.push("p.status = 'DIPINJAM'");
-  else if (["LUNAS", "BATAL"].includes(status)) conditions.push("p.status = @status");
+  else if (["LUNAS", "BATAL", "TRANSFER"].includes(status)) conditions.push("p.status = @status");
   const where = `WHERE ${conditions.join(" AND ")}`;
   const params = { modules, estates, status };
   const total = (await queryOne<{ c: number }>(`SELECT COUNT(*)::int c FROM pinjaman p ${where}`, params))!.c;
@@ -5545,14 +5555,19 @@ app.post("/api/pinjaman", async (req, res) => {
   const qty = Number(req.body.qty);
   const u = req.user!;
   const m = module as LoanModule;
+  const transfer = req.body.jenis === "TRANSFER";
+  const word = transfer ? "Transfer" : "Pinjaman";
+  // A transfer may be dated back (BBM / pupuk / oli rows follow it); a loan is booked today.
+  const tanggal = transfer && ISO_DATE.test(String(req.body.tanggal_iso ?? "")) ? String(req.body.tanggal_iso) : jakartaToday();
+  if (tanggal > jakartaToday()) return res.status(400).json({ error: "Tanggal tidak boleh di masa depan" });
   if (!OPNAME_MODULES_LIST.includes(m)) return res.status(400).json({ error: "Modul tidak valid" });
   if (!(ESTATES as readonly string[]).includes(dari) || !(ESTATES as readonly string[]).includes(ke)) return res.status(400).json({ error: "Estate tidak valid" });
-  if (dari === ke) return res.status(400).json({ error: "Estate peminjam harus beda dengan estate yang meminjamkan" });
+  if (dari === ke) return res.status(400).json({ error: "Estate tujuan harus beda dengan estate asal" });
   if (!canLoan(u, m, "input") || !estateAllowed(u, dari))
-    return res.status(403).json({ error: "Pinjaman hanya bisa dicatat oleh estate yang meminjamkan barang" });
+    return res.status(403).json({ error: `${word} hanya bisa dicatat oleh estate yang mengirim barang` });
   if (!Number.isFinite(qty) || qty <= 0) return res.status(400).json({ error: "Jumlah harus lebih dari 0" });
   if (loanWhole(m, dari, ke) && !Number.isInteger(qty)) return res.status(400).json({ error: "Jumlah harus bilangan bulat" });
-  if (!alasan) return res.status(400).json({ error: "Alasan wajib diisi" });
+  if (!alasan) return res.status(400).json({ error: transfer ? "Keterangan wajib diisi" : "Alasan wajib diisi" });
   const item = await loanItem(m, dari, String(kode ?? ""));
   if (!item) return res.status(404).json({ error: "Barang tidak ditemukan di master data" });
   const evidenceId = await claimEvidence(req, res);
@@ -5562,9 +5577,23 @@ app.post("/api/pinjaman", async (req, res) => {
   try {
     loan = await withTransaction(async (client) => {
       const l = (await queryOne<LoanRow>(
-        `INSERT INTO pinjaman (module, kode, nama, satuan, dari_estate, ke_estate, qty, alasan, tanggal_iso, user_id, evidence_id)
-         VALUES (@module, @kode, @nama, @satuan, @dari, @ke, @qty, @alasan, @today, @uid, @ev::uuid) RETURNING *`,
-        { module: m, kode: item.kode, nama: item.nama, satuan: item.satuan, dari, ke, qty: round3(qty), alasan, today: jakartaToday(), uid: u.id, ev: evidenceId },
+        `INSERT INTO pinjaman (module, kode, nama, satuan, dari_estate, ke_estate, qty, alasan, tanggal_iso, user_id, evidence_id, jenis, status)
+         VALUES (@module, @kode, @nama, @satuan, @dari, @ke, @qty, @alasan, @tanggal, @uid, @ev::uuid, @jenis, @status) RETURNING *`,
+        {
+          module: m,
+          kode: item.kode,
+          nama: item.nama,
+          satuan: item.satuan,
+          dari,
+          ke,
+          qty: round3(qty),
+          alasan,
+          tanggal,
+          uid: u.id,
+          ev: evidenceId,
+          jenis: transfer ? "TRANSFER" : "PINJAM",
+          status: transfer ? "TRANSFER" : "DIPINJAM",
+        },
         client
       ))!;
       await loanTransfer(
@@ -5574,9 +5603,10 @@ app.post("/api/pinjaman", async (req, res) => {
         dari,
         ke,
         l.qty,
-        `Dipinjamkan ke ${ke} (Pinjaman #${l.id}): ${alasan}`,
-        `Pinjam dari ${dari} (Pinjaman #${l.id}): ${alasan}`,
-        evidenceId
+        transfer ? `Transfer ke ${ke} (Transfer #${l.id}): ${alasan}` : `Dipinjamkan ke ${ke} (Pinjaman #${l.id}): ${alasan}`,
+        transfer ? `Transfer dari ${dari} (Transfer #${l.id}): ${alasan}` : `Pinjam dari ${dari} (Pinjaman #${l.id}): ${alasan}`,
+        evidenceId,
+        transfer ? tanggal : undefined
       );
       return l;
     });
@@ -5585,7 +5615,14 @@ app.post("/api/pinjaman", async (req, res) => {
     if (e instanceof StockError) return res.status(400).json({ error: e.message });
     throw e;
   }
-  await logLoan(req, loan, "Pinjaman Baru", `${dari} meminjamkan ${fmtLoanQty(loan.qty, loan.satuan)} ke ${ke}; Alasan: ${alasan}`);
+  await logLoan(
+    req,
+    loan,
+    transfer ? "Transfer Baru" : "Pinjaman Baru",
+    transfer
+      ? `${dari} mengirim ${fmtLoanQty(loan.qty, loan.satuan)} ke ${ke} (${tanggal}); Keterangan: ${alasan}`
+      : `${dari} meminjamkan ${fmtLoanQty(loan.qty, loan.satuan)} ke ${ke}; Alasan: ${alasan}`
+  );
   res.json({ success: true, id: loan.id });
 });
 
@@ -5597,6 +5634,7 @@ async function loanBack(req: express.Request, res: express.Response, batal: bool
   if (!l) return res.status(404).json({ error: "Pinjaman tidak ditemukan" });
   if (!canLoan(u, l.module, "input") || !(estateAllowed(u, l.dari_estate) || estateAllowed(u, l.ke_estate)))
     return res.status(403).json({ error: "Akses ditolak" });
+  if (l.jenis === "TRANSFER") return res.status(400).json({ error: "Transfer tidak dikembalikan. Kirim balik dengan transfer baru, atau minta Super User menghapusnya." });
   if (l.status !== "DIPINJAM") return res.status(400).json({ error: `Pinjaman ini sudah ${l.status === "LUNAS" ? "lunas" : "dibatalkan"}` });
   const sisa = round3(l.qty - l.qty_kembali);
   if (batal && l.qty_kembali > 0) return res.status(400).json({ error: "Sudah ada pengembalian, pinjaman tidak bisa dibatalkan. Kembalikan sisanya." });
@@ -5669,6 +5707,12 @@ app.post("/api/pinjaman/:id/delete", async (req, res) => {
     const l = await queryOne<LoanRow>("SELECT * FROM pinjaman WHERE id = @id FOR UPDATE", { id: Number(req.params.id) || 0 }, client);
     if (!l) return refuse(res, 404, "Pinjaman tidak ditemukan");
     if (l.status === "DIPINJAM") return refuse(res, 400, "Pinjaman ini belum kembali. Batalkan atau kembalikan dulu, baru bisa dihapus.");
+    // A transfer never came back: send it back first (refused when the receiving estate has used
+    // it), so removing every row of both sides below leaves the stock as before the transfer.
+    if (l.jenis === "TRANSFER") {
+      const back = `Hapus ${loanLabel(l)}: ${alasan}`;
+      await loanTransfer(client, req, l, l.ke_estate, l.dari_estate, l.qty, back, back, null, isSaldoModule(l.module) ? l.tanggal_iso : undefined);
+    }
     const pid = { pid: l.id };
     if (l.module === "GUDANG") {
       const txs = await queryMany<{ item_id: number; type: "IN" | "OUT"; qty: number }>(
@@ -5701,7 +5745,12 @@ app.post("/api/pinjaman/:id/delete", async (req, res) => {
     return l;
   });
   if (!l) return;
-  await logLoan(req, l, "Hapus Pinjaman", `Status: ${l.status === "LUNAS" ? "Lunas" : "Dibatalkan"}; ${fmtLoanQty(l.qty, l.satuan)} ${l.dari_estate} → ${l.ke_estate}; Alasan: ${alasan}`);
+  await logLoan(
+    req,
+    l,
+    l.jenis === "TRANSFER" ? "Hapus Transfer" : "Hapus Pinjaman",
+    `${l.jenis === "TRANSFER" ? `Stok kembali ke ${l.dari_estate}` : `Status: ${l.status === "LUNAS" ? "Lunas" : "Dibatalkan"}`}; ${fmtLoanQty(l.qty, l.satuan)} ${l.dari_estate} → ${l.ke_estate}; Alasan: ${alasan}`
+  );
   res.json({ success: true });
 });
 

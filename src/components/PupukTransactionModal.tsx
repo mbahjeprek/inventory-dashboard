@@ -2,6 +2,7 @@ import { useState } from "react";
 import { X } from "lucide-react";
 import { api, errorText, type PupukSummary } from "../lib/api";
 import { EvidenceInput, useEvidenceEnabled } from "./EvidenceInput";
+import { TransferShortcut } from "./TransferShortcut";
 
 const todayIso = () => {
   const d = new Date();
@@ -155,6 +156,8 @@ export function PupukTransactionModal({
               Stock Out
             </button>
           </div>
+
+          {tipe === "KELUAR" && <TransferShortcut module="PUPUK" dari={estate} kode={jenis} qty={jumlah} note={keterangan} onDone={onSuccess} />}
 
           <div className="grid grid-cols-2 gap-3">
             <div>

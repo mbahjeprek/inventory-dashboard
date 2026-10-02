@@ -26,3 +26,7 @@ export const localToday = () => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 };
+
+// A history row booked by the Pinjaman page: a loan or a transfer, told apart by the note it was
+// booked with ("Transfer ke / dari X (Transfer #N): ...").
+export const loanTag = (id: number, note?: string | null) => `${/\(Transfer #\d+\)|^Hapus Transfer/.test(note ?? "") ? "Transfer" : "Pinjaman"} #${id}`;

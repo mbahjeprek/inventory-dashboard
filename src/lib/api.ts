@@ -379,7 +379,8 @@ export type Perbandingan = {
   series: { bucket: string; estate: string; value: number }[];
 };
 
-export type PinjamanStatus = "DIPINJAM" | "LUNAS" | "BATAL";
+// TRANSFER = stock sent to another estate for good (jenis TRANSFER), nothing comes back.
+export type PinjamanStatus = "DIPINJAM" | "LUNAS" | "BATAL" | "TRANSFER";
 export type Pinjaman = {
   id: number;
   module: OpnameModule;
@@ -391,6 +392,7 @@ export type Pinjaman = {
   qty: number;
   qty_kembali: number;
   status: PinjamanStatus;
+  jenis: "PINJAM" | "TRANSFER";
   alasan: string;
   tanggal_iso: string;
   created_at: string;
@@ -921,7 +923,18 @@ export const api = {
     req<{ data: Pinjaman[]; total: number }>(`/api/pinjaman?${new URLSearchParams(params as any)}`),
   pinjamanBarang: (module: OpnameModule, estate: string, search: string) =>
     req<PinjamanBarang[]>(`/api/pinjaman/barang?${new URLSearchParams({ module, estate, search })}`),
-  createPinjaman: (payload: { evidence_id: string; module: OpnameModule; dari: string; ke: string; kode: string; qty: number; alasan: string }) =>
+  // jenis TRANSFER: sent for good, may be dated back (tanggal_iso); a loan is booked today.
+  createPinjaman: (payload: {
+    evidence_id: string;
+    module: OpnameModule;
+    dari: string;
+    ke: string;
+    kode: string;
+    qty: number;
+    alasan: string;
+    jenis?: "PINJAM" | "TRANSFER";
+    tanggal_iso?: string;
+  }) =>
     req<{ success: boolean; id: number }>("/api/pinjaman", { method: "POST", body: JSON.stringify(payload) }),
   kembalikanPinjaman: (id: number, qty: number, note: string, evidence_id: string) =>
     req<{ success: boolean }>(`/api/pinjaman/${id}/kembali`, { method: "POST", body: JSON.stringify({ qty, note, evidence_id }) }),
