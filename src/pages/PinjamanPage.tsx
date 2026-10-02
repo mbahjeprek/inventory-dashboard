@@ -280,7 +280,9 @@ export function CreatePinjamanModal({
   const [module, setModule] = useState<OpnameModule>(initial?.module ?? modules[0]);
   const [dari, setDari] = useState(initial?.dari ?? myEstates[0] ?? "NILAM");
   const [ke, setKe] = useState(() => ESTATES.find((e) => e !== (myEstates[0] ?? "NILAM"))!);
-  const [search, setSearch] = useState(initial?.kode ?? "");
+  // BBM / pupuk / oli have a handful of jenis, picked from a list; Gudang / Klinik barang are searched.
+  const jenisModule = module === "BBM" || module === "PUPUK" || module === "OLI";
+  const [search, setSearch] = useState(initial && (initial.module === "GUDANG" || initial.module === "KLINIK") ? initial.kode : "");
   const [options, setOptions] = useState<PinjamanBarang[]>([]);
   const [barang, setBarang] = useState<PinjamanBarang | null>(null);
   const [qty, setQty] = useState(initial?.qty ? String(initial.qty).replace(".", ",") : "");
@@ -399,8 +401,17 @@ export function CreatePinjamanModal({
       </div>
 
       <div>
-        <label className={labelCls}>Barang (stok {dari})</label>
-        {barang ? (
+        <label className={labelCls}>{jenisModule ? `Jenis (stok ${dari})` : `Barang (stok ${dari})`}</label>
+        {jenisModule ? (
+          <select value={barang?.kode ?? ""} onChange={(e) => setBarang(options.find((o) => o.kode === e.target.value) ?? null)} className={inputCls}>
+            <option value="">-- Pilih jenis --</option>
+            {options.map((o) => (
+              <option key={o.kode} value={o.kode}>
+                {o.nama} · stok {fmtQty(o.stok)} {o.satuan}
+              </option>
+            ))}
+          </select>
+        ) : barang ? (
           <div className="flex items-center justify-between gap-2 rounded-md border border-[var(--accent-blue-border)] bg-[var(--accent-blue-bg)] px-3 py-2">
             <div className="min-w-0">
               <div className="text-sm font-medium text-[var(--text-primary)] truncate">{barang.nama}</div>
@@ -408,7 +419,7 @@ export function CreatePinjamanModal({
                 {barang.kode !== barang.nama && `${barang.kode} · `}stok {fmtQty(barang.stok)} {barang.satuan}
               </div>
             </div>
-            <button onClick={() => setBarang(null)} className="text-xs text-[var(--accent-blue)] hover:underline shrink-0">
+            <button onClick={() => (setBarang(null), setSearch(""))} className="text-xs text-[var(--accent-blue)] hover:underline shrink-0">
               Ganti
             </button>
           </div>
