@@ -507,3 +507,12 @@ BEGIN
     END IF;
   END LOOP;
 END $$;
+
+-- BBM liters can be fractional (the sheets have 76,5 / 142,5 L): the amounts were INTEGER, so a
+-- comma value was imported as 765 / 1425 and couldn't be typed in. Same type as pupuk / oli.
+ALTER TABLE bbm_log
+  ALTER COLUMN stock_awal TYPE DOUBLE PRECISION,
+  ALTER COLUMN diterima TYPE DOUBLE PRECISION,
+  ALTER COLUMN pinjam TYPE DOUBLE PRECISION,
+  ALTER COLUMN pemakaian TYPE DOUBLE PRECISION,
+  ALTER COLUMN saldo_stock TYPE DOUBLE PRECISION;

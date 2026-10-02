@@ -10,7 +10,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const num = (v: string): number | null => {
   const s = (v || "").trim();
   if (!s) return null;
-  const n = parseInt(s.replace(/\./g, "").replace(/[^\d-]/g, ""), 10);
+  // "1.000" = thousands, "76,5" = decimal comma
+  const n = parseFloat(s.replace(/\./g, "").replace(",", ".").replace(/[^\d.-]/g, ""));
   return Number.isNaN(n) ? null : n;
 };
 

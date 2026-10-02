@@ -96,9 +96,10 @@ export function EditBbmModal({
               <label className="text-xs text-[var(--text-secondary)] mb-1 block">Stock In</label>
               <input
                 type="number"
+                step="any"
                 min={0}
                 value={diterima}
-                onChange={(e) => setDiterima(e.target.value === "" ? "" : parseInt(e.target.value) || 0)}
+                onChange={(e) => setDiterima(e.target.value === "" ? "" : Number(e.target.value) || 0)}
                 className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-2"
               />
             </div>
@@ -106,9 +107,10 @@ export function EditBbmModal({
               <label className="text-xs text-[var(--text-secondary)] mb-1 block">Stock Out</label>
               <input
                 type="number"
+                step="any"
                 min={0}
                 value={pemakaian}
-                onChange={(e) => setPemakaian(e.target.value === "" ? "" : parseInt(e.target.value) || 0)}
+                onChange={(e) => setPemakaian(e.target.value === "" ? "" : Number(e.target.value) || 0)}
                 className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-2"
               />
             </div>
@@ -116,8 +118,9 @@ export function EditBbmModal({
               <label className="text-xs text-[var(--text-secondary)] mb-1 block">Sisa</label>
               <input
                 type="number"
+                step="any"
                 value={saldoStock}
-                onChange={(e) => setSaldoStock(e.target.value === "" ? "" : parseInt(e.target.value) || 0)}
+                onChange={(e) => setSaldoStock(e.target.value === "" ? "" : Number(e.target.value) || 0)}
                 className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-2"
               />
             </div>

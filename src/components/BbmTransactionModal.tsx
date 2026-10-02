@@ -223,9 +223,10 @@ export function BbmTransactionModal({
               <label className="text-xs text-[var(--text-secondary)] mb-1 block">Jumlah (LTR)</label>
               <input
                 type="number"
-                min={1}
+                min={0}
+                step="any"
                 value={jumlah}
-                onChange={(e) => setJumlah(parseInt(e.target.value) || 0)}
+                onChange={(e) => setJumlah(Number(e.target.value) || 0)}
                 className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-1.5"
               />
             </div>
