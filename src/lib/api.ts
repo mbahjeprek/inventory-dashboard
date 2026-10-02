@@ -924,6 +924,9 @@ export const api = {
   pinjamanBarang: (module: OpnameModule, estate: string, search: string) =>
     req<PinjamanBarang[]>(`/api/pinjaman/barang?${new URLSearchParams({ module, estate, search })}`),
   // jenis TRANSFER: sent for good, may be dated back (tanggal_iso); a loan is booked today.
+  evidenceMeta: (id: string) => req<{ rotation: number }>(`/api/evidence/${id}/meta`),
+  saveEvidenceRotation: (id: string, rotation: number) =>
+    req<{ success: boolean }>(`/api/evidence/${id}/rotation`, { method: "POST", body: JSON.stringify({ rotation }) }),
   createPinjaman: (payload: {
     evidence_id: string;
     module: OpnameModule;

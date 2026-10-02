@@ -456,6 +456,9 @@ CREATE TABLE IF NOT EXISTS evidence (
   used BOOLEAN NOT NULL DEFAULT false,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- How the photo is shown, in degrees clockwise (0 / 90 / 180 / 270): a photo taken sideways or upside
+-- down is turned in the viewer and saved here; the file itself stays as uploaded.
+ALTER TABLE evidence ADD COLUMN IF NOT EXISTS rotation INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE transactions ADD COLUMN IF NOT EXISTS evidence_id UUID;
 ALTER TABLE stock_in_log ADD COLUMN IF NOT EXISTS evidence_id UUID;
 ALTER TABLE stock_out_log ADD COLUMN IF NOT EXISTS evidence_id UUID;

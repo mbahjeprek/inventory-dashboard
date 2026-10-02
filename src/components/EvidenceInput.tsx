@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Camera, ClipboardPaste, Download, Image as ImageIcon, Loader2, RefreshCw, Trash2, X, ZoomIn } from "lucide-react";
+import { Camera, ClipboardPaste, Download, Image as ImageIcon, Loader2, RefreshCw, RotateCcw, RotateCw, Save, Trash2, X, ZoomIn } from "lucide-react";
 import { api, errorText } from "../lib/api";
 
 // Photos are shrunk in the browser before upload: longest side at most 1280 px, JPEG at 70% - about
@@ -30,6 +30,24 @@ async function shrink(file: File): Promise<string> {
   } finally {
     URL.revokeObjectURL(url);
   }
+}
+
+// A form's photo turned a quarter clockwise before it is saved (a new upload replaces the old one).
+async function rotateData(data: string): Promise<string> {
+  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const i = new Image();
+    i.onload = () => resolve(i);
+    i.onerror = () => reject(new Error("Gambar tidak bisa diputar"));
+    i.src = data;
+  });
+  const canvas = document.createElement("canvas");
+  canvas.width = img.naturalHeight;
+  canvas.height = img.naturalWidth;
+  const ctx = canvas.getContext("2d")!;
+  ctx.translate(canvas.width / 2, canvas.height / 2);
+  ctx.rotate(Math.PI / 2);
+  ctx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
+  return canvas.toDataURL("image/jpeg", QUALITY);
 }
 
 // Whether foto bukti is switched on (the server has photo storage). Asked once per page load; until
@@ -77,9 +95,37 @@ export function EvidenceLink({ id, label }: { id: string | null | undefined; lab
 }
 
 // Pop-up with the photo on the page itself (no new tab); Download saves the original file. With `src`
-// (a form's photo not saved yet) it shows that picture, without Download.
+// (a form's photo not saved yet) it shows that picture, without Download. A photo taken sideways or
+// upside down is turned with the rotate buttons; for a stored one "Simpan arah" keeps that for everyone.
 function EvidenceViewer({ id, src, onClose }: { id?: string; src?: string; onClose: () => void }) {
   const [state, setState] = useState<"loading" | "ok" | "error">("loading");
+  const [rotation, setRotation] = useState(0);
+  const [saved, setSaved] = useState(0);
+  const [saving, setSaving] = useState(false);
+  const [note, setNote] = useState("");
+  useEffect(() => {
+    if (!id) return;
+    api
+      .evidenceMeta(id)
+      .then((m) => (setRotation(m.rotation), setSaved(m.rotation)))
+      .catch(() => {});
+  }, [id]);
+  const turn = (by: number) => (setRotation((r) => (((r + by) % 360) + 360) % 360), setNote(""));
+  const saveRotation = async () => {
+    if (!id) return;
+    setSaving(true);
+    try {
+      await api.saveEvidenceRotation(id, rotation);
+      setSaved(rotation);
+      setNote("Arah foto tersimpan");
+    } catch (e) {
+      setNote(errorText(e, "Arah foto gagal disimpan"));
+    } finally {
+      setSaving(false);
+    }
+  };
+  // Turned a quarter, the picture's width is limited by the screen's height and the other way round.
+  const sideways = rotation % 180 !== 0;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     window.addEventListener("keydown", onKey);
@@ -91,6 +137,23 @@ function EvidenceViewer({ id, src, onClose }: { id?: string; src?: string; onClo
       <div className="flex items-center justify-between gap-2 px-4 py-3 text-white" onClick={(e) => e.stopPropagation()}>
         <span className="text-sm font-medium">Foto Bukti</span>
         <div className="flex items-center gap-2">
+          {note && <span className="text-xs text-white/80">{note}</span>}
+          <button onClick={() => turn(-90)} title="Putar ke kiri" className="p-1.5 rounded-md bg-white/15 hover:bg-white/25">
+            <RotateCcw size={18} />
+          </button>
+          <button onClick={() => turn(90)} title="Putar ke kanan" className="p-1.5 rounded-md bg-white/15 hover:bg-white/25">
+            <RotateCw size={18} />
+          </button>
+          {id && rotation !== saved && (
+            <button
+              onClick={saveRotation}
+              disabled={saving}
+              title="Simpan arah ini supaya foto selalu tampil begini"
+              className="inline-flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-md bg-[var(--accent-blue)] hover:opacity-90 disabled:opacity-50"
+            >
+              <Save size={16} /> {saving ? "Menyimpan..." : "Simpan arah"}
+            </button>
+          )}
           {id && (
             <a
               href={`${evidenceUrl(id)}?download=1`}
@@ -115,7 +178,12 @@ function EvidenceViewer({ id, src, onClose }: { id?: string; src?: string; onClo
             onClick={(e) => e.stopPropagation()}
             onLoad={() => setState("ok")}
             onError={() => setState("error")}
-            className={`max-w-full max-h-full object-contain rounded shadow-2xl bg-white ${state === "ok" ? "" : "invisible"}`}
+            style={{
+              transform: `rotate(${rotation}deg)`,
+              maxWidth: sideways ? "calc(100vh - 6rem)" : "100%",
+              maxHeight: sideways ? "calc(100vw - 2rem)" : "100%",
+            }}
+            className={`object-contain rounded shadow-2xl bg-white transition-transform ${state === "ok" ? "" : "invisible"}`}
           />
         )}
       </div>
@@ -154,6 +222,24 @@ export function EvidenceInput({ value, onChange, label = "Foto Bukti" }: { value
     window.addEventListener("paste", onPaste);
     return () => window.removeEventListener("paste", onPaste);
   }, [enabled]);
+
+  // The photo came in sideways / upside down: turn it a quarter and upload that instead.
+  const rotate = async () => {
+    if (!preview) return;
+    setError("");
+    setBusy(true);
+    onChange(null);
+    try {
+      const data = await rotateData(preview);
+      setPreview(data);
+      const { id } = await api.uploadEvidence(data);
+      onChange(id);
+    } catch (e) {
+      setError(errorText(e, "Foto gagal diputar, coba lagi"));
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const pick = async (file: File | undefined) => {
     if (!file) return;
@@ -237,6 +323,15 @@ export function EvidenceInput({ value, onChange, label = "Foto Bukti" }: { value
             ) : null}
           </div>
           <div className="flex gap-1.5 ml-auto">
+            <button
+              type="button"
+              onClick={rotate}
+              disabled={busy}
+              title="Putar foto 90° ke kanan (kalau terbalik / miring)"
+              className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-md border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[#f1f5f9] disabled:opacity-50"
+            >
+              <RotateCw size={13} /> Putar
+            </button>
             <button
               type="button"
               onClick={pasteButton}

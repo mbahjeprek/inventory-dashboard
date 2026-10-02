@@ -5936,6 +5936,23 @@ app.post("/api/evidence", async (req, res) => {
 });
 
 // Opens the photo (any logged-in account; the id is a random uuid only shown next to the transaction).
+// How a photo is shown (its saved rotation), and saving a new one from the viewer: any logged-in
+// account that can open the photo may turn one taken sideways / upside down so it reads right.
+app.get("/api/evidence/:id/meta", async (req, res) => {
+  if (!/^[0-9a-f-]{36}$/.test(req.params.id)) return res.status(404).json({ error: "Foto tidak ditemukan" });
+  const ev = await queryOne<{ rotation: number }>("SELECT rotation FROM evidence WHERE id = @id::uuid", { id: req.params.id });
+  if (!ev) return res.status(404).json({ error: "Foto tidak ditemukan" });
+  res.json({ rotation: ev.rotation });
+});
+app.post("/api/evidence/:id/rotation", async (req, res) => {
+  const rotation = Number(req.body?.rotation);
+  if (!/^[0-9a-f-]{36}$/.test(req.params.id)) return res.status(404).json({ error: "Foto tidak ditemukan" });
+  if (![0, 90, 180, 270].includes(rotation)) return res.status(400).json({ error: "Putaran tidak valid" });
+  const r = await execute("UPDATE evidence SET rotation = @rotation WHERE id = @id::uuid", { id: req.params.id, rotation });
+  if (!r.rowCount) return res.status(404).json({ error: "Foto tidak ditemukan" });
+  res.json({ success: true });
+});
+
 app.get("/api/evidence/:id", async (req, res) => {
   if (!/^[0-9a-f-]{36}$/.test(req.params.id)) return res.status(404).send("Foto tidak ditemukan");
   const ev = await queryOne<{ path: string; created_at: Date }>("SELECT path, created_at FROM evidence WHERE id = @id::uuid", { id: req.params.id });
