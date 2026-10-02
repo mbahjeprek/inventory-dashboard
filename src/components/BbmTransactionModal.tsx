@@ -50,9 +50,14 @@ export function BbmTransactionModal({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
+  // Who used the fuel: starts on the lokasi itself (or its only choice); changed when another estate /
+  // sub-lokasi took it at this depot (e.g. a Zamrud motorbike filling up at Nilam).
   useEffect(() => {
     setEstate("");
-    api.bbmEstateOptions(jenisBbm, lokasi).then(setEstateOptions);
+    api.bbmEstateOptions(jenisBbm, lokasi).then((opts) => {
+      setEstateOptions(opts);
+      setEstate(opts.includes(lokasi) ? lokasi : opts.length === 1 ? opts[0] : "");
+    });
   }, [jenisBbm, lokasi]);
 
   // A genset has no HM/KM reading, so the field is hidden once the kode kendaraan names one (by its
@@ -226,9 +231,10 @@ export function BbmTransactionModal({
             </div>
           </div>
 
-          {tipe === "PEMAKAIAN" && (
+          {/* Only one choice (Zamrud, Firus): nothing to ask, it's filled in above. */}
+          {tipe === "PEMAKAIAN" && estateOptions.length > 1 && (
             <div>
-              <label className="text-xs text-[var(--text-secondary)] mb-1 block">Estate / Sub-lokasi</label>
+              <label className="text-xs text-[var(--text-secondary)] mb-1 block">Dipakai oleh (Estate / Sub-lokasi)</label>
               <select
                 value={estate}
                 onChange={(e) => setEstate(e.target.value)}
