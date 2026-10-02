@@ -184,7 +184,7 @@ export function ItemDetailPage() {
 
         <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg overflow-hidden">
           <div ref={tableScrollRef} className="overflow-x-auto max-h-[520px] overflow-y-auto">
-            <table className="w-full text-sm">
+            <table className="data-table text-sm">
               <thead className="sticky top-0">
                 <tr className="bg-[#f8fafc] text-left text-[var(--text-secondary)] text-xs uppercase">
                   <th className="px-4 py-2.5 whitespace-nowrap">Tanggal</th>

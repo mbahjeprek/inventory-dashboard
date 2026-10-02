@@ -104,7 +104,7 @@ export function PinjamanPage() {
       </div>
 
       <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg overflow-x-auto">
-        <table className="w-full text-sm">
+        <table className="data-table text-sm">
           <thead>
             <tr className="bg-[#d5edc9] text-left text-xs text-[var(--text-primary)]">
               <th className="px-4 py-2.5 whitespace-nowrap">Tanggal</th>

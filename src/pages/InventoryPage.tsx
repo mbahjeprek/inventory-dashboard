@@ -88,7 +88,7 @@ function FilterHeader({
           <select
             value={value}
             onChange={(e) => onChange(e.target.value)}
-            className={`appearance-none bg-transparent text-xs pl-1 pr-4 py-0.5 rounded border cursor-pointer ${
+            className={`appearance-none bg-transparent text-xs pl-1 pr-4 py-0.5 max-w-[8rem] truncate [field-sizing:content] rounded border cursor-pointer ${
               value
                 ? "border-[var(--accent-blue-border)] text-[var(--accent-blue)] bg-[var(--accent-blue-bg)]"
                 : "border-transparent text-[var(--text-muted)] hover:border-[var(--border)]"
@@ -304,7 +304,7 @@ export function InventoryPage() {
 
           <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg overflow-hidden">
             <div ref={tableScrollRef} className="overflow-x-auto">
-              <table className="grid-table w-full text-sm">
+              <table className="grid-table data-table text-sm">
                 <thead>
                   <tr className="bg-[#f8fafc] text-[var(--text-secondary)] text-xs uppercase">
                     <SortableHeader label="Kode" sortKey="kode" currentSort={sortBy} currentDir={sortDir} onSort={toggleSort} />

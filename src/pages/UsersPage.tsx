@@ -154,7 +154,7 @@ export function UsersPage() {
 
       <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="data-table text-sm">
             <thead>
               <tr className="bg-[#f8fafc] text-[var(--text-secondary)] text-xs uppercase">
                 <SortableHeader label="Username" sortKey="username" currentSort={sortBy} currentDir={sortDir} onSort={toggleSort} />

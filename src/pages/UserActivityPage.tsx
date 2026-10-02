@@ -376,7 +376,7 @@ export function UserActivityPage() {
             <section ref={tableRef} className="xl:col-span-2 bg-[var(--bg-card)] border border-[var(--border)] rounded-lg overflow-hidden scroll-mt-4">
               <h3 className="font-semibold text-[var(--text-primary)] px-4 pt-4 pb-3">Rekap per user</h3>
               <div className="overflow-x-auto">
-                <table className="w-full text-sm">
+                <table className="data-table text-sm">
                   <thead>
                     <tr className="text-left text-[11px] uppercase tracking-wide text-[var(--text-secondary)] border-y border-[var(--border)] bg-[#f8fafc]">
                       <th className="px-4 py-2 font-medium">User</th>

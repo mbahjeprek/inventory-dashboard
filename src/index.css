@@ -80,3 +80,13 @@ body {
     font-size: 16px !important;
   }
 }
+
+/* Data tables size their columns to what is in them instead of stretching over the page: the table
+   and its card are as wide as the content (up to the page width, past it they scroll sideways). */
+.data-table {
+  width: auto;
+}
+div:has(> .overflow-x-auto > .data-table) {
+  width: fit-content;
+  max-width: 100%;
+}

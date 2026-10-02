@@ -265,7 +265,7 @@ export function InventoryOliPage({ estate }: { estate: string }) {
 
       <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg overflow-hidden">
         <div ref={tableScrollRef} className="overflow-x-auto">
-          <table className="grid-table w-full text-sm">
+          <table className="grid-table data-table text-sm">
             <thead>
               <tr className="text-left text-xs uppercase">
                 <th className="px-4 py-2.5 whitespace-nowrap">Periode</th>
