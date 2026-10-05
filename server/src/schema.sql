@@ -516,3 +516,8 @@ ALTER TABLE bbm_log
   ALTER COLUMN pinjam TYPE DOUBLE PRECISION,
   ALTER COLUMN pemakaian TYPE DOUBLE PRECISION,
   ALTER COLUMN saldo_stock TYPE DOUBLE PRECISION;
+
+-- Kemasan obat: the pack it comes in (STRIP / BOX) and how many `satuan` (tablet/biji) one holds.
+-- Stock is still kept in `satuan`; the forms convert (Stock In per strip, opname strip + biji lepas).
+ALTER TABLE obat ADD COLUMN IF NOT EXISTS kemasan TEXT NOT NULL DEFAULT '';
+ALTER TABLE obat ADD COLUMN IF NOT EXISTS isi_kemasan INTEGER NOT NULL DEFAULT 0;

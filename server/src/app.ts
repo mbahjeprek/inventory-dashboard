@@ -2797,9 +2797,13 @@ app.delete("/api/pupuk/:id", requireSuperuser, async (req, res) => {
 });
 
 // ---- Master obat (medicines/medical supplies for the clinics) ----
-const OBAT_FIELDS = ["kode", "nama", "kategori", "jenis", "deskripsi", "satuan"] as const;
-const obatPayload = (body: any) =>
-  Object.fromEntries(OBAT_FIELDS.map((f) => [f, String(body[f] ?? "").replace(/\s+/g, " ").trim()])) as Record<(typeof OBAT_FIELDS)[number], string>;
+const OBAT_FIELDS = ["kode", "nama", "kategori", "jenis", "deskripsi", "satuan", "kemasan"] as const;
+// kemasan + isi_kemasan: the pack the obat comes in (STRIP isi 10) - stock stays in `satuan` (biji),
+// the forms convert (Stock In per strip, opname strip utuh + biji lepas). isi 0 = no pack.
+const obatPayload = (body: any) => ({
+  ...(Object.fromEntries(OBAT_FIELDS.map((f) => [f, String(body[f] ?? "").replace(/\s+/g, " ").trim()])) as Record<(typeof OBAT_FIELDS)[number], string>),
+  isi_kemasan: Math.max(0, Math.floor(Number(body.isi_kemasan) || 0)),
+});
 
 app.get("/api/obat/options", requireSuperuser, async (_req, res) => {
   const kategori = await queryMany<{ v: string }>("SELECT DISTINCT kategori v FROM obat WHERE kategori <> '' ORDER BY 1");
@@ -2836,7 +2840,8 @@ app.post("/api/obat", requireSuperuser, async (req, res) => {
   if (!o.kode || !o.nama) return res.status(400).json({ error: "Kode dan nama wajib diisi" });
   try {
     const row = await queryOne<{ id: number }>(
-      `INSERT INTO obat (kode, nama, kategori, jenis, deskripsi, satuan) VALUES (@kode, @nama, @kategori, @jenis, @deskripsi, @satuan) RETURNING id`,
+      `INSERT INTO obat (kode, nama, kategori, jenis, deskripsi, satuan, kemasan, isi_kemasan)
+       VALUES (@kode, @nama, @kategori, @jenis, @deskripsi, @satuan, @kemasan, @isi_kemasan) RETURNING id`,
       o
     );
     await logActivity(req, { module: "KLINIK", estate: null, aksi: "Tambah Obat", objek: `${o.kode} - ${o.nama}`, detail: `Kategori: ${o.kategori || "-"}; Satuan: ${o.satuan || "-"}` });
@@ -2854,7 +2859,7 @@ app.put("/api/obat/:id", requireSuperuser, async (req, res) => {
   if (!o.kode || !o.nama) return res.status(400).json({ error: "Kode dan nama wajib diisi" });
   try {
     await execute(
-      "UPDATE obat SET kode = @kode, nama = @nama, kategori = @kategori, jenis = @jenis, deskripsi = @deskripsi, satuan = @satuan WHERE id = @id",
+      "UPDATE obat SET kode = @kode, nama = @nama, kategori = @kategori, jenis = @jenis, deskripsi = @deskripsi, satuan = @satuan, kemasan = @kemasan, isi_kemasan = @isi_kemasan WHERE id = @id",
       { ...o, id: req.params.id }
     );
   } catch (e: any) {
@@ -2866,7 +2871,7 @@ app.put("/api/obat/:id", requireSuperuser, async (req, res) => {
     estate: null,
     aksi: "Edit Obat",
     objek: `${o.kode} - ${o.nama}`,
-    detail: describeChanges(existing, o, { kode: "Kode", nama: "Nama", kategori: "Kategori", jenis: "Jenis", deskripsi: "Deskripsi", satuan: "Satuan" }),
+    detail: describeChanges(existing, o, { kode: "Kode", nama: "Nama", kategori: "Kategori", jenis: "Jenis", deskripsi: "Deskripsi", satuan: "Satuan", kemasan: "Kemasan", isi_kemasan: "Isi per kemasan" }),
   });
   res.json({ success: true });
 });
@@ -3091,7 +3096,7 @@ app.get("/api/klinik-stock", async (req, res) => {
   const limit = Math.min(parseInt(pageSize) || 50, 500);
   const offset = (Math.max(parseInt(page) || 1, 1) - 1) * limit;
   const data = await queryMany(
-    `SELECT ks.id, o.id obat_id, o.kode, o.nama, o.kategori, o.jenis, o.deskripsi, o.satuan, ks.buffer_stock, ks.stock_tersedia,
+    `SELECT ks.id, o.id obat_id, o.kode, o.nama, o.kategori, o.jenis, o.deskripsi, o.satuan, o.kemasan, o.isi_kemasan, ks.buffer_stock, ks.stock_tersedia,
             ks.expired_date, ks.catatan,
             CASE WHEN ks.stock_tersedia > 0 THEN 'AMAN' ELSE 'BUFFER STOCK' END AS keterangan,
             COALESCE((SELECT json_agg(json_build_object('id', b.id, 'expired_date', b.expired_date, 'qty', b.qty)
@@ -3117,7 +3122,7 @@ app.get("/api/klinik-stock/pick", async (req, res) => {
   const limit = Math.min(parseInt(pageSize) || 50, 500);
   const offset = (Math.max(parseInt(page) || 1, 1) - 1) * limit;
   const data = await queryMany(
-    `SELECT o.id, o.kode, o.nama, o.satuan, COALESCE(ks.buffer_stock, 0) buffer_stock, COALESCE(ks.stock_tersedia, 0) stock_tersedia,
+    `SELECT o.id, o.kode, o.nama, o.satuan, o.kemasan, o.isi_kemasan, COALESCE(ks.buffer_stock, 0) buffer_stock, COALESCE(ks.stock_tersedia, 0) stock_tersedia,
             CASE WHEN COALESCE(ks.stock_tersedia, 0) > 0 THEN 'AMAN' ELSE 'BUFFER STOCK' END AS keterangan
      ${joinSql} ORDER BY o.kode LIMIT @limit OFFSET @offset`,
     { ...params, limit, offset }
@@ -4283,7 +4288,13 @@ app.post("/api/stock-opname", async (req, res) => {
 app.get("/api/stock-opname/:id", async (req, res) => {
   const o = await loadOpname(req, res, "view");
   if (!o) return;
-  const lines = await queryMany("SELECT * FROM opname_line WHERE opname_id = @id ORDER BY ditambahkan, id", { id: o.id });
+  // Klinik lines carry the obat's pack, so a count can be typed as strip utuh + biji lepas.
+  const lines = await queryMany(
+    `SELECT l.*, COALESCE(ob.kemasan, '') kemasan, COALESCE(ob.isi_kemasan, 0) isi_kemasan
+     FROM opname_line l LEFT JOIN obat ob ON @klinik AND ob.kode = l.kode
+     WHERE l.opname_id = @id ORDER BY l.ditambahkan, l.id`,
+    { id: o.id, klinik: o.module === "KLINIK" }
+  );
   res.json({ opname: o, lines });
 });
 

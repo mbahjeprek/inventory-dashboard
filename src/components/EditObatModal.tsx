@@ -27,6 +27,8 @@ export function EditObatModal({
     jenis: obat?.jenis ?? "",
     deskripsi: obat?.deskripsi ?? "",
     satuan: obat?.satuan ?? "",
+    kemasan: obat?.kemasan ?? "",
+    isi_kemasan: obat?.isi_kemasan ? String(obat.isi_kemasan) : "",
   });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
@@ -47,7 +49,13 @@ export function EditObatModal({
     setSubmitting(true);
     setError("");
     try {
-      const payload = { ...form, satuan: form.satuan.trim().toUpperCase() };
+      const isi = parseInt(form.isi_kemasan) || 0;
+      if (form.isi_kemasan.trim() && isi <= 0) {
+        setError("Isi per kemasan harus bilangan bulat > 0");
+        setSubmitting(false);
+        return;
+      }
+      const payload = { ...form, satuan: form.satuan.trim().toUpperCase(), kemasan: form.kemasan.trim().toUpperCase(), isi_kemasan: isi };
       if (isEdit) await api.updateObat(obat.id, payload);
       else await api.createObat(payload);
       onSuccess();
@@ -138,6 +146,29 @@ export function EditObatModal({
                 ))}
               </datalist>
             </div>
+          </div>
+
+          {/* Stock stays in the satuan; the pack only converts in the forms (Stock In per strip,
+              opname strip utuh + biji lepas). */}
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label className="text-xs text-[var(--text-secondary)] mb-1 block">Kemasan</label>
+              <input value={form.kemasan} onChange={set("kemasan")} list="obat-kemasan" placeholder="cth. STRIP" className={inputCls} />
+              <datalist id="obat-kemasan">
+                {["STRIP", "BLISTER", "BOX", "BOTOL"].map((k) => (
+                  <option key={k} value={k} />
+                ))}
+              </datalist>
+            </div>
+            <div>
+              <label className="text-xs text-[var(--text-secondary)] mb-1 block">Isi per kemasan</label>
+              <input type="number" min={1} step={1} value={form.isi_kemasan} onChange={set("isi_kemasan")} placeholder="cth. 10" className={inputCls} />
+            </div>
+            <p className="text-[11px] text-[var(--text-muted)] self-end pb-1">
+              {parseInt(form.isi_kemasan) > 1
+                ? `1 ${(form.kemasan || "kemasan").toUpperCase()} = ${parseInt(form.isi_kemasan)} ${(form.satuan || "satuan").toUpperCase()}. Stok tetap dihitung per ${(form.satuan || "satuan").toLowerCase()}.`
+                : "Kosongkan kalau obat tidak dikemas (stok per satuan saja)."}
+            </p>
           </div>
 
           <div>

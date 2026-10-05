@@ -1,12 +1,16 @@
 import { useEffect, useState } from "react";
 import { Search, ChevronLeft, ChevronRight, ArrowUp, ArrowDown, ArrowUpDown, Filter, Pencil, Plus, Trash2 } from "lucide-react";
 import { api, type Obat } from "../lib/api";
+import { isiOf, kemasanName } from "../lib/kemasan";
 import { EditObatModal } from "../components/EditObatModal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { ExportButtons } from "../components/ExportButtons";
 import { ActivityLogButton } from "../components/ActivityLogButton";
 import { fetchAllRows, type TableReport } from "../lib/printTable";
 import { useDragScroll } from "../hooks/useDragScroll";
+
+// "STRIP isi 10" - or "-" for an obat without a pack.
+const kemasanLabel = (o: Obat) => (isiOf(o) ? `${kemasanName(o)} isi ${o.isi_kemasan}` : "-");
 
 type SortKey = "kode" | "nama" | "kategori" | "jenis";
 
@@ -171,8 +175,9 @@ export function MasterObatPage() {
         { label: "Jenis/Kelompok" },
         { label: "Deskripsi / Kegunaan" },
         { label: "Satuan" },
+        { label: "Kemasan" },
       ],
-      rows: all.map((o, n) => [n + 1, o.kode, o.nama, o.kategori, o.jenis, o.deskripsi, o.satuan]),
+      rows: all.map((o, n) => [n + 1, o.kode, o.nama, o.kategori, o.jenis, o.deskripsi, o.satuan, kemasanLabel(o)]),
     };
   };
 
@@ -240,19 +245,20 @@ export function MasterObatPage() {
                     setPage(1);
                   }}
                 />
+                <th className="px-4 py-2.5 text-left">Kemasan</th>
                 <th className="px-4 py-2.5 text-right">Aksi</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={8} className="px-4 py-8 text-center text-[var(--text-muted)]">
+                  <td colSpan={9} className="px-4 py-8 text-center text-[var(--text-muted)]">
                     Memuat...
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-4 py-8 text-center text-[var(--text-muted)]">
+                  <td colSpan={9} className="px-4 py-8 text-center text-[var(--text-muted)]">
                     Tidak ada obat
                   </td>
                 </tr>
@@ -266,6 +272,7 @@ export function MasterObatPage() {
                     <td className="px-4 py-2.5 text-[var(--text-secondary)]">{o.jenis || "-"}</td>
                     <td className="col-grow px-4 py-2.5 text-xs text-[var(--text-secondary)]">{o.deskripsi || "-"}</td>
                     <td className="px-4 py-2.5 text-[var(--text-secondary)]">{o.satuan}</td>
+                    <td className="px-4 py-2.5 text-[var(--text-secondary)] whitespace-nowrap">{kemasanLabel(o)}</td>
                     <td className="px-4 py-2.5 text-right">
                       <div className="inline-flex gap-1.5">
                         <button

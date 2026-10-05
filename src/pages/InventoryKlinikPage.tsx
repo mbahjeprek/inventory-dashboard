@@ -27,6 +27,7 @@ import { ConfirmDialog } from "../components/ConfirmDialog";
 import { EditKlinikStockModal } from "../components/EditKlinikStockModal";
 import { ItemPickerModal } from "../components/ItemPickerModal";
 import { TransactionModal, type TransactionPreset } from "../components/TransactionModal";
+import { kemasanText } from "../lib/kemasan";
 import { useDragScroll } from "../hooks/useDragScroll";
 import { useAuth } from "../context/AuthContext";
 import { can } from "../lib/access";
@@ -435,6 +436,9 @@ export function InventoryKlinikPage({ klinik }: { klinik: string }) {
                             title={habis ? "Stock habis" : menipis ? `Di bawah buffer (${item.buffer_stock})` : ""}
                           >
                             {item.stock_tersedia.toLocaleString("id-ID")}
+                            {kemasanText(item.stock_tersedia, item) && (
+                              <div className="text-[11px] font-normal text-[var(--text-muted)] whitespace-nowrap">{kemasanText(item.stock_tersedia, item)}</div>
+                            )}
                           </td>
                           <td className="px-4 py-2.5 whitespace-nowrap">
                             {/* One line per batch (nearest expiry first) with its quantity; a single

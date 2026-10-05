@@ -72,7 +72,8 @@ export type Item = {
 
 // What the Pilih Barang list and the transaction form need; filled from items (Nilam) or from a
 // gudang's own stock (KNS/WJA/Zamrud/Firus, via /api/gudang-stock/pick).
-export type PickerItem = Pick<Item, "id" | "kode" | "nama" | "satuan" | "buffer_stock" | "stock_tersedia" | "keterangan">;
+// Klinik rows also carry the obat's kemasan.
+export type PickerItem = Pick<Item, "id" | "kode" | "nama" | "satuan" | "buffer_stock" | "stock_tersedia" | "keterangan"> & Partial<Pick<Obat, "kemasan" | "isi_kemasan">>;
 
 // Where a Stock In/Out/Koreksi goes when it isn't Nilam's gudang (which uses items directly).
 export type StockScope = { kind: "gudang" | "klinik"; name: string };
@@ -107,6 +108,9 @@ export type Obat = {
   jenis: string;
   deskripsi: string;
   satuan: string;
+  // Pack it comes in (STRIP) and how many `satuan` one holds (0 = none), see src/lib/kemasan.ts.
+  kemasan: string;
+  isi_kemasan: number;
 };
 
 export type KlinikStockItem = {
@@ -118,6 +122,8 @@ export type KlinikStockItem = {
   jenis: string;
   deskripsi: string;
   satuan: string;
+  kemasan: string;
+  isi_kemasan: number;
   buffer_stock: number;
   stock_tersedia: number;
   expired_date: string | null;
@@ -434,6 +440,9 @@ export type OpnameLine = {
   stok_fisik: number | null;
   keterangan: string;
   ditambahkan: boolean;
+  // Klinik: the obat's pack (isi 0 = none), so the count can be typed as strip utuh + biji lepas.
+  kemasan: string;
+  isi_kemasan: number;
 };
 
 export type TopKeluar = { rows: TopKeluarRow[]; totalQty: number; totalTrx: number };

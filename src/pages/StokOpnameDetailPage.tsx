@@ -31,12 +31,14 @@ import { ItemPickerModal } from "../components/ItemPickerModal";
 import type { TableReport } from "../lib/printTable";
 import { OPNAME_MODULE_LABEL, OPNAME_STATUS, expLabel, fmtQty, opnameModule, opnameWhole, round3, when } from "../lib/opname";
 import { tanggalWaktu } from "../lib/datetime";
+import { isiOf, kemasanName, kemasanText, split } from "../lib/kemasan";
 
 const PAGE_SIZE = 50;
 type Filter = "" | "dihitung" | "belum" | "selisih" | "sesuai";
 // What the counter typed, kept as text until saved (so "1," or "" can be typed freely).
-// exp: klinik batch expiry as found, only once changed ('' = none).
-type Edit = { fisik: string; ket: string; exp?: string };
+// exp: klinik batch expiry as found, only once changed ('' = none). pak / lepas: an obat with a
+// kemasan is counted as strips utuh + biji lepas, `fisik` is their total.
+type Edit = { fisik: string; ket: string; exp?: string; pak?: string; lepas?: string };
 
 // Indonesian number format, as shown everywhere else: "." groups thousands, "," is the decimal
 // separator ("47.600" = 47600, "2,5" = 2.5).
@@ -188,6 +190,21 @@ export function StokOpnameDetailPage() {
     }));
   };
 
+  // Kemasan count: what's in the two boxes (typed, or the saved count split up), and setting them.
+  const pakLepas = (l: OpnameLine) => {
+    const e = edits[l.id];
+    if (e?.pak !== undefined) return { pak: e.pak, lepas: e.lepas ?? "" };
+    const f = fisikOf(l);
+    if (f === null) return { pak: "", lepas: "" };
+    const { pak, lepas } = split(f, isiOf(l));
+    return { pak: String(pak), lepas: toInput(lepas) };
+  };
+  const setPakLepas = (l: OpnameLine, pak: string, lepas: string) => {
+    const p = parseQty(pak), b = parseQty(lepas);
+    const fisik = p === null && b === null ? "" : p === undefined || b === undefined ? "x" : toInput(round3((p ?? 0) * isiOf(l) + (b ?? 0)));
+    setEdit(l, { pak, lepas, fisik });
+  };
+
   const save = async (): Promise<boolean> => {
     if (!dirty) return true;
     if (invalidIds.length) {
@@ -262,8 +279,8 @@ export function StokOpnameDetailPage() {
   const nextOnEnter = (l: OpnameLine, field: "fisik" | "ket") => (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key !== "Enter") return;
     e.preventDefault();
-    const v = parseQty(e.currentTarget.value);
-    if (field === "fisik" && typeof v === "number" && round3(v - l.stok_sistem) !== 0) {
+    const v = field === "fisik" ? fisikOf(l) : null;
+    if (typeof v === "number" && round3(v - l.stok_sistem) !== 0) {
       document.querySelector<HTMLInputElement>(`input[data-ket="${l.id}"]`)?.focus();
       return;
     }
@@ -661,9 +678,51 @@ export function StokOpnameDetailPage() {
                         </td>
                       )}
                       <td className="px-4 py-2 text-[var(--text-secondary)] whitespace-nowrap">{l.satuan || "-"}</td>
-                      <td className="px-4 py-2 text-right">{fmtQty(l.stok_sistem)}</td>
                       <td className="px-4 py-2 text-right">
-                        {editableLine(l) ? (
+                        {fmtQty(l.stok_sistem)}
+                        {kemasanText(l.stok_sistem, l) && <div className="text-[11px] text-[var(--text-muted)] whitespace-nowrap">{kemasanText(l.stok_sistem, l)}</div>}
+                      </td>
+                      <td className="px-4 py-2 text-right">
+                        {editableLine(l) && isiOf(l) ? (
+                          <div className="inline-flex items-center gap-1 whitespace-nowrap text-xs text-[var(--text-secondary)]">
+                            <input
+                              data-fisik={l.id}
+                              inputMode="numeric"
+                              value={pakLepas(l).pak}
+                              onChange={(ev) => setPakLepas(l, ev.target.value, pakLepas(l).lepas)}
+                              onKeyDown={(ev) => {
+                                if (ev.key !== "Enter") return;
+                                ev.preventDefault();
+                                document.querySelector<HTMLInputElement>(`input[data-lepas="${l.id}"]`)?.focus();
+                              }}
+                              placeholder="-"
+                              aria-label={`${kemasanName(l)} utuh ${l.nama}`}
+                              className={`w-14 text-right text-sm rounded-md border px-2 py-1 ${invalid ? "border-[var(--accent-red)] bg-[var(--accent-red-bg)]" : "border-[var(--border)]"}`}
+                            />
+                            {kemasanName(l)} +
+                            <input
+                              data-lepas={l.id}
+                              inputMode="numeric"
+                              value={pakLepas(l).lepas}
+                              onChange={(ev) => setPakLepas(l, pakLepas(l).pak, ev.target.value)}
+                              onKeyDown={nextOnEnter(l, "fisik")}
+                              placeholder="-"
+                              aria-label={`${l.satuan} lepas ${l.nama}`}
+                              className={`w-14 text-right text-sm rounded-md border px-2 py-1 ${invalid ? "border-[var(--accent-red)] bg-[var(--accent-red-bg)]" : "border-[var(--border)]"}`}
+                            />
+                            <span title={`1 ${kemasanName(l)} = ${isiOf(l)} ${l.satuan}`}>= {fisikOf(l) === null ? "-" : fmtQty(fisikOf(l)!)}</span>
+                            <button
+                              onClick={() => {
+                                const { pak, lepas } = split(l.stok_sistem, isiOf(l));
+                                setEdit(l, { fisik: toInput(l.stok_sistem), pak: String(pak), lepas: toInput(lepas) });
+                              }}
+                              title="Sesuai sistem"
+                              className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--accent-green)] hover:bg-[var(--accent-green-bg)]"
+                            >
+                              <Check size={14} />
+                            </button>
+                          </div>
+                        ) : editableLine(l) ? (
                           <div className="inline-flex items-center gap-1">
                             <input
                               data-fisik={l.id}

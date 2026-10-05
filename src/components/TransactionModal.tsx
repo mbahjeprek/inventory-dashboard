@@ -6,6 +6,7 @@ import { EvidenceInput, useEvidenceEnabled } from "./EvidenceInput";
 import { useAuth } from "../context/AuthContext";
 import { can } from "../lib/access";
 import { TransferShortcut } from "./TransferShortcut";
+import { isiOf, kemasanName, kemasanText, split } from "../lib/kemasan";
 
 // Gudang Nilam supplies every estate (a Stok Keluar to another estate becomes Stok Masuk in that
 // estate's gudang); the other gudang only supply their own estate and its sub-estates.
@@ -53,8 +54,20 @@ export function TransactionModal({
     if (wanted && canInput) return wanted;
     return canInput ? "IN" : "KOREKSI";
   });
-  const [qty, setQty] = useState(preset?.qty && preset.qty > 0 ? preset.qty : 1);
+  const [qtyTyped, setQty] = useState(preset?.qty && preset.qty > 0 ? preset.qty : 1);
   const [actualQty, setActualQty] = useState(0);
+  // Klinik obat with a pack (STRIP isi 10): Stock In / Out can be typed per pack (Stock In starts
+  // that way, obat arrives in strips; Stock Out per biji, what a patient gets), Koreksi as
+  // packs + loose pieces. Stock itself stays in the satuan.
+  const isi = isKlinik ? isiOf(item) : 0;
+  const pakName = kemasanName(item);
+  const [perPak, setPerPak] = useState(false);
+  const qty = isi && perPak ? qtyTyped * isi : qtyTyped;
+  const [korPak, setKorPak] = useState("");
+  const [korLepas, setKorLepas] = useState("");
+  useEffect(() => {
+    setPerPak(!!isi && mode === "IN");
+  }, [mode, isi]);
   const [note, setNote] = useState(preset?.note ?? "");
   // Foto bukti, required for Stock In / Out (not for Koreksi).
   const [evidenceId, setEvidenceId] = useState<string | null>(null);
@@ -94,9 +107,20 @@ export function TransactionModal({
   // Koreksi starts from the current count: the whole stock, or for Klinik the chosen batch.
   const korBase = isKlinik ? korBatchQty : item.stock_tersedia;
   useEffect(() => {
-    if (mode === "KOREKSI") setActualQty(korBase);
+    if (mode !== "KOREKSI") return;
+    setActualQty(korBase);
+    if (isi) {
+      const { pak, lepas } = split(korBase, isi);
+      setKorPak(String(pak));
+      setKorLepas(String(lepas));
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, korBase]);
+  const setKor = (pak: string, lepas: string) => {
+    setKorPak(pak);
+    setKorLepas(lepas);
+    setActualQty((parseInt(pak) || 0) * isi + (parseInt(lepas) || 0));
+  };
 
   // Gudang KNS/WJA/Zamrud/Firus take decimal qty (e.g. 2,5 KG); Nilam and Klinik whole numbers.
   const decimal = scope?.kind === "gudang";
@@ -161,7 +185,8 @@ export function TransactionModal({
           obat_kode: item.kode,
           type: mode,
           qty,
-          note,
+          // The pack count stays readable in the history: "... (10 STRIP isi 10)".
+          note: isi && perPak ? `${note} (${qtyTyped} ${pakName} isi ${isi})` : note,
           penerima: receiver,
           tujuan: mode === "OUT" && buang ? "DIBUANG" : undefined,
           expired_date: mode === "IN" ? expIn || undefined : batchOut === FEFO ? undefined : batchOut,
@@ -197,6 +222,9 @@ export function TransactionModal({
             <span className="text-xs text-[var(--text-secondary)]">Stock Tersedia</span>
             <span className="text-lg font-semibold text-[var(--text-primary)]">
               {item.stock_tersedia.toLocaleString("id-ID")} {item.satuan}
+              {kemasanText(item.stock_tersedia, item) && (
+                <span className="block text-[11px] font-normal text-right text-[var(--text-muted)]">{kemasanText(item.stock_tersedia, item)}</span>
+              )}
             </span>
           </div>
           <div className="flex items-center justify-between">
@@ -350,14 +378,32 @@ export function TransactionModal({
               <label className="text-xs text-[var(--text-secondary)] mb-1 block">
                 Stok Aktual Hasil Hitung Fisik ({item.satuan})
               </label>
-              <input
-                type="number"
-                min={0}
-                value={actualQty}
-                step={decimal ? "any" : 1}
-                onChange={(e) => setActualQty(parseQty(e.target.value))}
-                className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-2"
-              />
+              {isi ? (
+                <>
+                  <div className="grid grid-cols-2 gap-2">
+                    <label className="flex items-center gap-1.5 text-xs text-[var(--text-secondary)]">
+                      <input type="number" min={0} step={1} value={korPak} onChange={(e) => setKor(e.target.value, korLepas)} className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-2" />
+                      <span className="whitespace-nowrap">{pakName} utuh</span>
+                    </label>
+                    <label className="flex items-center gap-1.5 text-xs text-[var(--text-secondary)]">
+                      <input type="number" min={0} step={1} value={korLepas} onChange={(e) => setKor(korPak, e.target.value)} className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-2" />
+                      <span className="whitespace-nowrap">{item.satuan.toLowerCase()} lepas</span>
+                    </label>
+                  </div>
+                  <p className="text-xs mt-1.5 text-[var(--text-secondary)]">
+                    = <b>{actualQty.toLocaleString("id-ID")} {item.satuan}</b> (1 {pakName} = {isi})
+                  </p>
+                </>
+              ) : (
+                <input
+                  type="number"
+                  min={0}
+                  value={actualQty}
+                  step={decimal ? "any" : 1}
+                  onChange={(e) => setActualQty(parseQty(e.target.value))}
+                  className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-2"
+                />
+              )}
               <p
                 className={`text-xs mt-1.5 font-medium ${
                   selisih === 0
@@ -376,15 +422,33 @@ export function TransactionModal({
             </div>
           ) : (
             <div>
-              <label className="text-xs text-[var(--text-secondary)] mb-1 block">Jumlah ({item.satuan})</label>
-              <input
-                type="number"
-                min={1}
-                value={qty}
-                step={decimal ? "any" : 1}
-                onChange={(e) => setQty(parseQty(e.target.value))}
-                className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-2"
-              />
+              <label className="text-xs text-[var(--text-secondary)] mb-1 block">Jumlah ({isi && perPak ? pakName : item.satuan})</label>
+              <div className="flex gap-2">
+                <input
+                  type="number"
+                  min={1}
+                  value={qtyTyped}
+                  step={decimal ? "any" : 1}
+                  onChange={(e) => setQty(parseQty(e.target.value))}
+                  className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-2"
+                />
+                {!!isi && (
+                  <select
+                    value={perPak ? "pak" : "satuan"}
+                    onChange={(e) => setPerPak(e.target.value === "pak")}
+                    aria-label="Satuan jumlah"
+                    className="text-sm rounded-md border border-[var(--border)] px-2 py-2"
+                  >
+                    <option value="pak">{pakName}</option>
+                    <option value="satuan">{item.satuan}</option>
+                  </select>
+                )}
+              </div>
+              {!!isi && perPak && (
+                <p className="text-xs mt-1.5 text-[var(--text-secondary)]">
+                  = <b>{qty.toLocaleString("id-ID")} {item.satuan}</b> ({qtyTyped} {pakName} × {isi})
+                </p>
+              )}
             </div>
           )}
 
