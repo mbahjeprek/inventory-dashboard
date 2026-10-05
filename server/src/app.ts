@@ -2651,7 +2651,7 @@ app.get("/api/pupuk", async (req, res) => {
   const limit = Math.min(parseInt(q.pageSize) || 50, 500);
   const offset = (Math.max(parseInt(q.page) || 1, 1) - 1) * limit;
   const data = await queryMany(
-    `SELECT * FROM pupuk_log ${where} ORDER BY tanggal_iso DESC, id DESC LIMIT @limit OFFSET @offset`,
+    `SELECT *, (SELECT p.jenis FROM pinjaman p WHERE p.id = pupuk_log.pinjaman_id) AS pinjaman_jenis FROM pupuk_log ${where} ORDER BY tanggal_iso DESC, id DESC LIMIT @limit OFFSET @offset`,
     { ...params, limit, offset }
   );
   res.json({ data, total: totals.c, keluarSum: totals.keluar, diterimaSum: totals.diterima, page: parseInt(q.page) || 1, pageSize: limit });
@@ -3713,7 +3713,7 @@ app.get("/api/bbm", async (req, res) => {
   // last refuel). Computed over the whole table before filtering, so the previous reading is found
   // even when it falls outside the current page/filter. hm_terakhir is free text like "4373.7 h".
   const data = await queryMany(
-    `SELECT b.*, CASE WHEN h.cur >= h.prev THEN (h.cur - h.prev)::float8 END AS total_hm
+    `SELECT b.*, (SELECT p.jenis FROM pinjaman p WHERE p.id = b.pinjaman_id) AS pinjaman_jenis, CASE WHEN h.cur >= h.prev THEN (h.cur - h.prev)::float8 END AS total_hm
      FROM bbm_log b
      LEFT JOIN (
        SELECT id, cur, LAG(cur) OVER (PARTITION BY kode_kendaraan ORDER BY tanggal_iso, id) AS prev
@@ -4723,7 +4723,7 @@ app.get("/api/oli", async (req, res) => {
   ))!;
   const limit = Math.min(parseInt(q.pageSize) || 50, 500);
   const offset = (Math.max(parseInt(q.page) || 1, 1) - 1) * limit;
-  const data = await queryMany(`SELECT * FROM oli_log ${where} ORDER BY tanggal_iso DESC, id DESC LIMIT @limit OFFSET @offset`, {
+  const data = await queryMany(`SELECT *, (SELECT p.jenis FROM pinjaman p WHERE p.id = oli_log.pinjaman_id) AS pinjaman_jenis FROM oli_log ${where} ORDER BY tanggal_iso DESC, id DESC LIMIT @limit OFFSET @offset`, {
     ...params,
     limit,
     offset,

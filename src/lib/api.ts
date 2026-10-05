@@ -267,6 +267,8 @@ export type BbmRecord = {
   stock_awal: number | null;
   diterima: number | null;
   pinjam: number | null;
+  // Row booked by a Pinjaman / Transfer: its jenis ("PINJAM" | "TRANSFER"), null otherwise.
+  pinjaman_jenis?: string | null;
   pinjaman_id?: number | null;
   pemakaian: number | null;
   evidence_id?: string | null;
@@ -293,6 +295,8 @@ export type PupukRecord = {
   diterima: number | null;
   // Pinjaman antar estate: + borrowed in / return received, - lent out / returned.
   pinjam: number | null;
+  // Row booked by a Pinjaman / Transfer: its jenis ("PINJAM" | "TRANSFER"), null otherwise.
+  pinjaman_jenis?: string | null;
   pinjaman_id: number | null;
   evidence_id: string | null;
   saldo_stock: number | null;
@@ -314,6 +318,8 @@ export type OliRecord = {
   diterima: number | null;
   pemakaian: number | null;
   pinjam: number | null;
+  // Row booked by a Pinjaman / Transfer: its jenis ("PINJAM" | "TRANSFER"), null otherwise.
+  pinjaman_jenis?: string | null;
   pinjaman_id: number | null;
   evidence_id: string | null;
   saldo_stock: number | null;

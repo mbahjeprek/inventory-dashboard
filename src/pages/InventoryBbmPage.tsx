@@ -392,10 +392,10 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
                     <td className="px-4 py-2.5 whitespace-nowrap text-[var(--text-secondary)]">{tanggalWaktu(r.tanggal_iso, r.created_at, r.tanggal)}</td>
                     <td className="px-4 py-2.5 text-xs text-[var(--text-secondary)]">{r.no_spb || "-"}</td>
                     <td className="px-4 py-2.5 text-right font-medium text-[var(--accent-green)]">
-                      {r.diterima ? r.diterima.toLocaleString("id-ID") : (r.pinjam ?? 0) > 0 ? <>{r.pinjam!.toLocaleString("id-ID")}<span className="ml-1 text-[10px] font-normal text-[var(--text-muted)]">pinjam</span></> : "-"}
+                      {r.diterima ? r.diterima.toLocaleString("id-ID") : (r.pinjam ?? 0) > 0 ? <>{r.pinjam!.toLocaleString("id-ID")}<span className="ml-1 text-[10px] font-normal text-[var(--text-muted)]">{r.pinjaman_jenis === "TRANSFER" ? "transfer" : "pinjam"}</span></> : "-"}
                     </td>
                     <td className="px-4 py-2.5 text-right font-medium text-[var(--accent-red)]">
-                      {r.pemakaian ? r.pemakaian.toLocaleString("id-ID") : (r.pinjam ?? 0) < 0 ? <>{(-r.pinjam!).toLocaleString("id-ID")}<span className="ml-1 text-[10px] font-normal text-[var(--text-muted)]">pinjam</span></> : "-"}
+                      {r.pemakaian ? r.pemakaian.toLocaleString("id-ID") : (r.pinjam ?? 0) < 0 ? <>{(-r.pinjam!).toLocaleString("id-ID")}<span className="ml-1 text-[10px] font-normal text-[var(--text-muted)]">{r.pinjaman_jenis === "TRANSFER" ? "transfer" : "pinjam"}</span></> : "-"}
                     </td>
                     <td className="px-4 py-2.5 text-right text-[var(--text-primary)]">
                       {r.saldo_stock !== null ? r.saldo_stock.toLocaleString("id-ID") : "-"}

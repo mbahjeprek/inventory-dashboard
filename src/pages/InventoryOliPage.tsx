@@ -301,8 +301,8 @@ export function InventoryOliPage({ estate }: { estate: string }) {
                     <td className="px-4 py-2.5 whitespace-nowrap text-[var(--text-secondary)]">{tanggalWaktu(r.tanggal_iso, r.created_at, r.tanggal)}</td>
                     <td className="px-4 py-2.5 whitespace-nowrap text-xs">{r.jenis_oli}</td>
                     <td className="px-4 py-2.5 text-xs text-[var(--text-secondary)]">{r.no_embrace || "-"}</td>
-                    <td className="px-4 py-2.5 text-right font-medium text-[var(--accent-green)]">{r.diterima ? ltr(r.diterima) : (r.pinjam ?? 0) > 0 ? <>{ltr(r.pinjam)}<span className="ml-1 text-[10px] font-normal text-[var(--text-muted)]">pinjam</span></> : "-"}</td>
-                    <td className="px-4 py-2.5 text-right font-medium text-[var(--accent-red)]">{r.pemakaian ? ltr(r.pemakaian) : (r.pinjam ?? 0) < 0 ? <>{ltr(-r.pinjam!)}<span className="ml-1 text-[10px] font-normal text-[var(--text-muted)]">pinjam</span></> : "-"}</td>
+                    <td className="px-4 py-2.5 text-right font-medium text-[var(--accent-green)]">{r.diterima ? ltr(r.diterima) : (r.pinjam ?? 0) > 0 ? <>{ltr(r.pinjam)}<span className="ml-1 text-[10px] font-normal text-[var(--text-muted)]">{r.pinjaman_jenis === "TRANSFER" ? "transfer" : "pinjam"}</span></> : "-"}</td>
+                    <td className="px-4 py-2.5 text-right font-medium text-[var(--accent-red)]">{r.pemakaian ? ltr(r.pemakaian) : (r.pinjam ?? 0) < 0 ? <>{ltr(-r.pinjam!)}<span className="ml-1 text-[10px] font-normal text-[var(--text-muted)]">{r.pinjaman_jenis === "TRANSFER" ? "transfer" : "pinjam"}</span></> : "-"}</td>
                     <td className={`px-4 py-2.5 text-right ${(r.saldo_stock ?? 0) < 0 ? "text-[var(--accent-red)]" : "text-[var(--text-primary)]"}`}>
                       {r.saldo_stock !== null ? fmt(r.saldo_stock) : "-"}
                     </td>
