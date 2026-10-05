@@ -3,6 +3,7 @@ import { Plus, Trash2, X } from "lucide-react";
 import { api, errorText, type KlinikStockItem } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { can } from "../lib/access";
+import { isiOf, kemasanName, kemasanText, split } from "../lib/kemasan";
 
 // Buffer, note and the stock per expiry date of one clinic stock row. The rows are simply what is on
 // the shelf: fixing a wrong date, splitting a batch that turned out to have several dates or merging
@@ -21,7 +22,18 @@ export function EditKlinikStockModal({
 }) {
   const [bufferStock, setBufferStock] = useState(item.buffer_stock);
   const [catatan, setCatatan] = useState(item.catatan ?? "");
-  const [rows, setRows] = useState(() => item.batches.map((b) => ({ exp: b.expired_date, qty: b.qty })));
+  // An obat with a kemasan (Master Obat: STRIP isi 10) is typed as strip utuh + biji lepas per row;
+  // pak / lepas are what's in those boxes, qty their total in the satuan.
+  const isi = isiOf(item);
+  const pakName = kemasanName(item);
+  type Row = { exp: string; qty: number; pak?: string; lepas?: string };
+  const [rows, setRows] = useState<Row[]>(() =>
+    item.batches.map((b) => {
+      if (!isi) return { exp: b.expired_date, qty: b.qty };
+      const { pak, lepas } = split(b.qty, isi);
+      return { exp: b.expired_date, qty: b.qty, pak: String(pak), lepas: String(lepas) };
+    })
+  );
   const [alasan, setAlasan] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
@@ -33,7 +45,8 @@ export function EditKlinikStockModal({
   const key = (list: { exp: string; qty: number }[]) =>
     list.filter((r) => r.qty > 0).map((r) => `${r.exp}:${r.qty}`).sort().join(",");
   const batchesChanged = key(rows) !== key(item.batches.map((b) => ({ exp: b.expired_date, qty: b.qty })));
-  const setRow = (i: number, patch: Partial<{ exp: string; qty: number }>) => setRows((cur) => cur.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+  const setRow = (i: number, patch: Partial<Row>) => setRows((cur) => cur.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+  const setPakLepas = (i: number, pak: string, lepas: string) => setRow(i, { pak, lepas, qty: (parseInt(pak) || 0) * isi + (parseInt(lepas) || 0) });
 
   const submit = async () => {
     setError("");
@@ -87,7 +100,7 @@ export function EditKlinikStockModal({
             <div className="border border-[var(--border)] rounded-md">
               <div className="flex items-center gap-2 px-3 py-1.5 text-[11px] text-[var(--text-muted)] border-b border-[var(--border)] bg-[#f8fafc]">
                 <span className="flex-1">Tanggal expired</span>
-                <span className="w-20">Jumlah</span>
+                <span className={isi ? "w-[150px]" : "w-20"}>{isi ? `${pakName} utuh + ${item.satuan.toLowerCase()} lepas` : "Jumlah"}</span>
                 <span className="w-[30px]" />
               </div>
               <div className="divide-y divide-[var(--border)]">
@@ -99,14 +112,38 @@ export function EditKlinikStockModal({
                       onChange={(e) => setRow(i, { exp: e.target.value })}
                       className="flex-1 min-w-0 text-sm rounded-md border border-[var(--border)] px-2 py-1.5"
                     />
-                    <input
-                      type="number"
-                      min={0}
-                      value={r.qty || ""}
-                      placeholder="0"
-                      onChange={(e) => setRow(i, { qty: parseInt(e.target.value) || 0 })}
-                      className="w-20 text-sm rounded-md border border-[var(--border)] px-2 py-1.5"
-                    />
+                    {isi ? (
+                      <div className="w-[150px] flex items-center gap-1 text-xs text-[var(--text-secondary)]">
+                        <input
+                          type="number"
+                          min={0}
+                          value={r.pak ?? ""}
+                          placeholder="0"
+                          onChange={(e) => setPakLepas(i, e.target.value, r.lepas ?? "")}
+                          aria-label={`${pakName} utuh`}
+                          className="w-14 text-sm rounded-md border border-[var(--border)] px-2 py-1.5"
+                        />
+                        +
+                        <input
+                          type="number"
+                          min={0}
+                          value={r.lepas ?? ""}
+                          placeholder="0"
+                          onChange={(e) => setPakLepas(i, r.pak ?? "", e.target.value)}
+                          aria-label={`${item.satuan} lepas`}
+                          className="w-14 text-sm rounded-md border border-[var(--border)] px-2 py-1.5"
+                        />
+                      </div>
+                    ) : (
+                      <input
+                        type="number"
+                        min={0}
+                        value={r.qty || ""}
+                        placeholder="0"
+                        onChange={(e) => setRow(i, { qty: parseInt(e.target.value) || 0 })}
+                        className="w-20 text-sm rounded-md border border-[var(--border)] px-2 py-1.5"
+                      />
+                    )}
                     <button
                       type="button"
                       onClick={() => setRows((cur) => cur.filter((_, j) => j !== i))}
@@ -121,18 +158,22 @@ export function EditKlinikStockModal({
               <div className="flex items-center justify-between gap-2 px-3 py-2 border-t border-[var(--border)]">
                 <button
                   type="button"
-                  onClick={() => setRows((cur) => [...cur, { exp: "", qty: 0 }])}
+                  onClick={() => setRows((cur) => [...cur, isi ? { exp: "", qty: 0, pak: "", lepas: "" } : { exp: "", qty: 0 }])}
                   className="inline-flex items-center gap-1 text-xs font-medium text-[var(--accent-blue)] hover:underline"
                 >
                   <Plus size={14} /> Tambah tanggal expired
                 </button>
                 <span className="text-sm">
                   Total <b>{total.toLocaleString("id-ID")}</b> {item.satuan}
+                  {kemasanText(total, item) && <span className="text-[11px] text-[var(--text-muted)]"> ({kemasanText(total, item)})</span>}
                 </span>
               </div>
             </div>
             <p className="text-[11px] text-[var(--text-muted)] mt-1">
               Isi sesuai barang di rak. Tanggal dikosongkan untuk barang tanpa expired.
+              {isi
+                ? ` 1 ${pakName} = ${isi} ${item.satuan}.`
+                : " Untuk mengisi per strip + biji, atur Kemasan dan Isi per kemasan obat ini di Master Obat."}
             </p>
           </div>
 
