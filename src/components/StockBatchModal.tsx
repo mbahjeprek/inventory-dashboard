@@ -46,7 +46,20 @@ export function StockBatchModal({ scope, onClose, onSuccess }: { scope?: StockSc
   }, []);
 
   const byKode = useMemo(() => new Map(items.map((i) => [i.kode.toUpperCase(), i])), [items]);
-  const itemOf = (c: Cells) => byKode.get((c.barang ?? "").trim().toUpperCase());
+  // The full name typed instead of picking from the list counts too ("Ibuprofen 400 mg"), when only
+  // one barang / obat has that name.
+  const byNama = useMemo(() => {
+    const m = new Map<string, PickerItem | null>();
+    for (const i of items) {
+      const k = i.nama.trim().replace(/\s+/g, " ").toUpperCase();
+      m.set(k, m.has(k) ? null : i);
+    }
+    return m;
+  }, [items]);
+  const itemOf = (c: Cells) => {
+    const v = (c.barang ?? "").trim().replace(/\s+/g, " ").toUpperCase();
+    return byKode.get(v) ?? byNama.get(v) ?? undefined;
+  };
   const masuk = (c: Cells) => c.tipe === "IN";
   const buang = (c: Cells) => c.tipe === "BUANG";
   const tujuanOptions = nilam ? NILAM_TUJUAN : (GUDANG_TUJUAN[estate] ?? [estate]);
@@ -108,7 +121,7 @@ export function StockBatchModal({ scope, onClose, onSuccess }: { scope?: StockSc
   const run = (rows: Cells[]) =>
     runningStock(rows, {
       start: (k) => byKode.get(k)?.stock_tersedia ?? 0,
-      keyOf: (c) => (itemOf(c) ? (c.barang ?? "").trim().toUpperCase() : ""),
+      keyOf: (c) => itemOf(c)?.kode.toUpperCase() ?? "",
       delta: (c) => (parseNum(c.jumlah) > 0 ? (masuk(c) ? 1 : -1) * parseNum(c.jumlah) : 0),
       blank,
     });
