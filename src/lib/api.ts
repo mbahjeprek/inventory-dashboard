@@ -451,6 +451,56 @@ export type OpnameLine = {
   isi_kemasan: number;
 };
 
+// Laporan Harian Klinik (KPI) - visits read from each clinic's Daily Report sheet.
+export type LaporanCount = { label: string; n: number };
+export type LaporanKlinikSummary = {
+  totals: { total: number; hari: number; kecelakaan: number; istirahat: number; hari_istirahat: number; rujukan: number; mcu: number; pasien: number };
+  jenis: LaporanCount[];
+  status: LaporanCount[];
+  divisi: LaporanCount[];
+  kelamin: LaporanCount[];
+  diagnosis: LaporanCount[];
+  provider: LaporanCount[];
+  obat: (LaporanCount & { kode: string; satuan: string; qty: number })[];
+  perHari: { tanggal: string; n: number; kecelakaan: number }[];
+  kecelakaanList: {
+    tanggal_iso: string;
+    klinik: string;
+    nama_pasien: string;
+    jabatan: string;
+    divisi: string;
+    diagnosis: string;
+    istirahat: boolean;
+    hari_istirahat: number;
+    rujukan: boolean;
+    provider: string;
+    detail_kejadian: string;
+  }[];
+  sumber: { klinik: string; sheet_url: string; synced_at: string | null; synced_rows: number | null; synced_by: string | null }[];
+};
+export type Kunjungan = {
+  id: number;
+  klinik: string;
+  no: number | null;
+  tanggal_iso: string;
+  jenis_kunjungan: string;
+  nama_pasien: string;
+  jenis_kelamin: string;
+  usia: number | null;
+  status_pasien: string;
+  penanggung: string;
+  jabatan: string;
+  divisi: string;
+  diagnosis: string;
+  kecelakaan_kerja: boolean;
+  istirahat: boolean;
+  hari_istirahat: number;
+  rujukan: boolean;
+  provider: string;
+  detail_kejadian: string;
+  obat: string;
+};
+
 export type TopKeluar = { rows: TopKeluarRow[]; totalQty: number; totalTrx: number };
 
 // Keeps the status in the message ("API error 409") for the callers that check it, plus the
@@ -595,6 +645,13 @@ export const api = {
       `/api/klinik-stock?${qs}`
     );
   },
+
+  laporanKlinikSummary: (params: { klinik: string; dateFrom: string; dateTo: string }) =>
+    req<LaporanKlinikSummary>(`/api/klinik-laporan/summary?${new URLSearchParams(params)}`),
+  laporanKlinikKunjungan: (params: Record<string, string | number>) =>
+    req<{ data: Kunjungan[]; total: number; page: number; pageSize: number }>(`/api/klinik-laporan/kunjungan?${new URLSearchParams(params as any)}`),
+  syncLaporanKlinik: (payload: { klinik: string; url?: string }) =>
+    req<{ success: boolean; rows: number; skipped: number; last: string }>("/api/klinik-laporan/sync", { method: "POST", body: JSON.stringify(payload) }),
 
   klinikPickItems: (params: Record<string, string | number>) => {
     const qs = new URLSearchParams(params as any).toString();

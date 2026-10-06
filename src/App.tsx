@@ -21,6 +21,7 @@ import { MasterOliPage } from "./pages/MasterOliPage";
 import { UserActivityPage } from "./pages/UserActivityPage";
 import { StokOpnamePage } from "./pages/StokOpnamePage";
 import { PinjamanPage } from "./pages/PinjamanPage";
+import { LaporanKlinikPage } from "./pages/LaporanKlinikPage";
 import { StokOpnameDetailPage } from "./pages/StokOpnameDetailPage";
 
 function App() {
@@ -223,6 +224,14 @@ function App() {
                 element={
                   <RequirePageAccess>
                     <UsersPage />
+                  </RequirePageAccess>
+                }
+              />
+              <Route
+                path="/laporan-klinik"
+                element={
+                  <RequirePageAccess>
+                    <LaporanKlinikPage />
                   </RequirePageAccess>
                 }
               />

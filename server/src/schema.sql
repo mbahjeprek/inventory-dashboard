@@ -521,3 +521,50 @@ ALTER TABLE bbm_log
 -- Stock is still kept in `satuan`; the forms convert (Stock In per strip, opname strip + biji lepas).
 ALTER TABLE obat ADD COLUMN IF NOT EXISTS kemasan TEXT NOT NULL DEFAULT '';
 ALTER TABLE obat ADD COLUMN IF NOT EXISTS isi_kemasan INTEGER NOT NULL DEFAULT 0;
+
+-- Laporan Harian Klinik (KPI): one row per patient visit, read from each clinic's Daily Report
+-- Google Sheet (server/src/klinikLaporan.ts). Report only - the obat given here do not move stock
+-- (Stock Out stays on the Inventory Klinik page). A sync replaces that clinic's rows.
+CREATE TABLE IF NOT EXISTS klinik_kunjungan (
+  id SERIAL PRIMARY KEY,
+  klinik TEXT NOT NULL,
+  no INTEGER,
+  tanggal_iso TEXT NOT NULL,
+  jenis_kunjungan TEXT NOT NULL DEFAULT '',
+  nik TEXT NOT NULL DEFAULT '',
+  nama_pasien TEXT NOT NULL,
+  jenis_kelamin TEXT NOT NULL DEFAULT '',
+  tanggal_lahir_iso TEXT,
+  usia INTEGER,
+  status_pasien TEXT NOT NULL DEFAULT '',
+  penanggung TEXT NOT NULL DEFAULT '',
+  jabatan TEXT NOT NULL DEFAULT '',
+  divisi TEXT NOT NULL DEFAULT '',
+  tempat_tinggal TEXT NOT NULL DEFAULT '',
+  asal_pasien TEXT NOT NULL DEFAULT '',
+  diagnosis TEXT NOT NULL DEFAULT '',
+  kecelakaan_kerja BOOLEAN NOT NULL DEFAULT false,
+  istirahat BOOLEAN NOT NULL DEFAULT false,
+  hari_istirahat INTEGER NOT NULL DEFAULT 0,
+  rujukan BOOLEAN NOT NULL DEFAULT false,
+  provider TEXT NOT NULL DEFAULT '',
+  detail_kejadian TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_kunjungan_klinik_tgl ON klinik_kunjungan(klinik, tanggal_iso);
+CREATE TABLE IF NOT EXISTS klinik_kunjungan_obat (
+  id SERIAL PRIMARY KEY,
+  kunjungan_id INTEGER NOT NULL REFERENCES klinik_kunjungan(id) ON DELETE CASCADE,
+  obat_kode TEXT NOT NULL DEFAULT '',
+  nama_obat TEXT NOT NULL DEFAULT '',
+  qty DOUBLE PRECISION,
+  satuan TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_kunjungan_obat ON klinik_kunjungan_obat(kunjungan_id);
+-- Where each clinic's Daily Report lives, and the last sync.
+CREATE TABLE IF NOT EXISTS klinik_laporan_sumber (
+  klinik TEXT PRIMARY KEY,
+  sheet_url TEXT NOT NULL,
+  synced_at TIMESTAMPTZ,
+  synced_rows INTEGER,
+  synced_by TEXT
+);

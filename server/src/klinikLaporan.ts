@@ -1,0 +1,154 @@
+// Laporan Harian Klinik: reads a clinic's "Daily Report" Google Sheet (one row per patient visit, up
+// to 8 obat per row) into klinik_kunjungan / klinik_kunjungan_obat. Pure parsing here; the routes in
+// app.ts fetch the sheet and store the result.
+import { parse } from "csv-parse/sync";
+
+export type KunjunganObat = { obat_kode: string; nama_obat: string; qty: number | null; satuan: string };
+export type Kunjungan = {
+  no: number;
+  tanggal_iso: string;
+  jenis_kunjungan: string;
+  nik: string;
+  nama_pasien: string;
+  jenis_kelamin: string;
+  tanggal_lahir_iso: string | null;
+  usia: number | null;
+  status_pasien: string;
+  penanggung: string;
+  jabatan: string;
+  divisi: string;
+  tempat_tinggal: string;
+  asal_pasien: string;
+  diagnosis: string;
+  kecelakaan_kerja: boolean;
+  istirahat: boolean;
+  hari_istirahat: number;
+  rujukan: boolean;
+  provider: string;
+  detail_kejadian: string;
+  obat: KunjunganObat[];
+};
+
+const MONTHS: Record<string, number> = {
+  jan: 1, feb: 2, mar: 3, apr: 4, mei: 5, may: 5, jun: 6, jul: 7, agu: 8, agt: 8, aug: 8, sep: 9, okt: 10, oct: 10, nov: 11, des: 12, dec: 12,
+};
+const clean = (v: string | undefined) => (v ?? "").replace(/\s+/g, " ").trim();
+const yes = (v: string | undefined) => /^y/i.test(clean(v));
+
+// "01 Jan 26" / "1 Januari 2026" -> [y, m, d]; two-digit years read as 20yy (or 19yy when that would
+// be in the future, for birth dates).
+function dmy(raw: string, futureOk: boolean): [number, number, number] | null {
+  const m = clean(raw).match(/^(\d{1,2})[ -/]([A-Za-z]+)[ -/](\d{2}|\d{4})$/);
+  if (!m) return null;
+  const mo = MONTHS[m[2].slice(0, 3).toLowerCase()];
+  if (!mo) return null;
+  let y = Number(m[3]);
+  if (y < 100) {
+    const now = new Date().getFullYear() % 100;
+    y += !futureOk && y > now ? 1900 : 2000;
+  }
+  return [y, mo, Number(m[1])];
+}
+const isoOf = ([y, m, d]: [number, number, number]) => `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+
+// "DIvisi A" / "Dividi C" / "divisi b" -> "Divisi A"; "Umu" -> "Umum".
+function divisiOf(v: string) {
+  const s = clean(v);
+  const d = s.match(/^d[a-z]*\s*([abc])$/i);
+  if (d) return `Divisi ${d[1].toUpperCase()}`;
+  if (/^umu/i.test(s)) return "Umum";
+  return s;
+}
+
+export function parseDailyReport(csv: string): { rows: Kunjungan[]; skipped: number; tahun: number | null } {
+  const grid: string[][] = parse(csv, { relax_column_count: true });
+  const headerAt = grid.findIndex((r) => clean(r[0]).toLowerCase() === "no" && r.some((c) => clean(c).toLowerCase() === "tanggal"));
+  if (headerAt < 0) throw new Error("Header tabel (No, Periode, Tanggal, ...) tidak ditemukan di sheet");
+  const header = grid[headerAt].map((h) => clean(h).toLowerCase());
+  const col = (re: RegExp) => header.findIndex((h) => re.test(h));
+  const c = {
+    tanggal: col(/^tanggal$/),
+    jenis: col(/^jenis kunjungan/),
+    nik: col(/^nik$/),
+    nama: col(/^nama pasien/),
+    jk: col(/^jenis kelamin/),
+    lahir: col(/^tanggal lahir/),
+    usia: col(/^usia/),
+    status: col(/^status pasien/),
+    penanggung: col(/menanggung/),
+    jabatan: col(/^jabatan/),
+    divisi: col(/^divisi/),
+    tinggal: col(/^tempat tinggal/),
+    asal: col(/^asal pasien/),
+    diagnosis: col(/^diagnosis/),
+    kk: col(/^kecelakaan kerja/),
+    istirahat: col(/^istirahat$/),
+    hari: col(/hari istirahat/),
+    rujukan: col(/^rujukan/),
+    provider: col(/^provider/),
+    detail: col(/^detail kejadian/),
+  };
+  if (c.tanggal < 0 || c.nama < 0) throw new Error("Kolom Tanggal / Nama Pasien tidak ditemukan");
+  const obatCols = header.flatMap((h, i) => (h === "kode obat" ? [i] : []));
+  // "Tahun : 2026" in the title rows fixes a mistyped year on a row ("02 Jan 25" in a 2026 report).
+  const tahunCell = grid.slice(0, headerAt).flat().map(clean).find((v) => /tahun\s*:\s*\d{4}/i.test(v));
+  const tahun = tahunCell ? Number(tahunCell.match(/(\d{4})/)![1]) : null;
+  const get = (r: string[], i: number) => (i < 0 ? "" : clean(r[i]));
+
+  const rows: Kunjungan[] = [];
+  let skipped = 0;
+  for (const r of grid.slice(headerAt + 1)) {
+    if (!/^\d+$/.test(clean(r[0])) && !get(r, c.nama)) continue;
+    const t = dmy(get(r, c.tanggal), true);
+    if (!t || !get(r, c.nama)) {
+      if (get(r, c.nama) || get(r, c.tanggal)) skipped++;
+      continue;
+    }
+    if (tahun && t[0] !== tahun) t[0] = tahun;
+    const lahir = dmy(get(r, c.lahir), false);
+    const usia = parseInt(get(r, c.usia));
+    const obat: KunjunganObat[] = [];
+    for (const i of obatCols) {
+      const kode = clean(r[i]).toUpperCase(), nama = clean(r[i + 1]), qtyRaw = clean(r[i + 2]), satuan = clean(r[i + 3]).toUpperCase();
+      if (!kode && !nama && !qtyRaw) continue;
+      const q = parseFloat(qtyRaw.replace(",", "."));
+      obat.push({ obat_kode: kode, nama_obat: nama, qty: Number.isFinite(q) ? q : null, satuan });
+    }
+    rows.push({
+      no: Number(clean(r[0])) || rows.length + 1,
+      tanggal_iso: isoOf(t),
+      jenis_kunjungan: get(r, c.jenis),
+      nik: get(r, c.nik),
+      nama_pasien: get(r, c.nama),
+      jenis_kelamin: get(r, c.jk).toUpperCase().slice(0, 1),
+      tanggal_lahir_iso: lahir ? isoOf(lahir) : null,
+      usia: Number.isFinite(usia) ? usia : null,
+      status_pasien: get(r, c.status),
+      penanggung: get(r, c.penanggung),
+      jabatan: get(r, c.jabatan),
+      divisi: divisiOf(get(r, c.divisi)),
+      tempat_tinggal: get(r, c.tinggal),
+      asal_pasien: get(r, c.asal),
+      diagnosis: get(r, c.diagnosis),
+      kecelakaan_kerja: yes(r[c.kk]),
+      istirahat: yes(r[c.istirahat]),
+      hari_istirahat: parseInt(get(r, c.hari)) || (yes(r[c.istirahat]) ? 1 : 0),
+      rujukan: yes(r[c.rujukan]),
+      provider: get(r, c.provider),
+      detail_kejadian: get(r, c.detail),
+      obat,
+    });
+  }
+  return { rows, skipped, tahun };
+}
+
+// A sheet link (…/spreadsheets/d/<id>/edit?gid=<gid>) -> its CSV export URL.
+export function sheetCsvUrl(url: string): string | null {
+  const id = url.match(/\/spreadsheets\/d\/([A-Za-z0-9_-]+)/)?.[1];
+  if (!id) return null;
+  const gid = url.match(/[#&?]gid=(\d+)/)?.[1] ?? "0";
+  return `https://docs.google.com/spreadsheets/d/${id}/export?format=csv&gid=${gid}`;
+}
+
+// Grouping key for free-typed labels: "Oil Pamthom" / "Oilpamthom" / "oil pamthom " are one.
+export const labelKey = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");

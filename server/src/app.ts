@@ -4,6 +4,7 @@ import nodePath from "path";
 import cookieParser from "cookie-parser";
 import type { PoolClient } from "pg";
 import { queryMany, queryOne, execute, withTransaction } from "./db.js";
+import { labelKey, parseDailyReport, sheetCsvUrl } from "./klinikLaporan.js";
 import { COOKIE_NAME, hashPassword, verifyPassword, signSession, verifySession, ESTATES, ALL_PERMS, MODULE_PERMS, parseList, type SessionUser } from "./auth.js";
 
 export const app = express();
@@ -164,6 +165,8 @@ function requiredPerms(req: express.Request): Need {
   if (is(/^\/pupuk(\/|$)/)) return [`pupuk.${act}`];
   if (is(/^\/oli(\/|$)/)) return [`oli.${act}`];
   if (is(/^\/klinik-stock(\/|$)/)) return [`klinik.${act}`];
+  // Laporan Harian Klinik: Lihat for the dashboard, Input for syncing the sheet (estate checked in the route).
+  if (is(/^\/klinik-laporan(\/|$)/)) return [`klinik.${act}`];
   if (is(/^\/top-keluar$/)) return [q.source === "klinik" ? "klinik.view" : "gudang.view"];
   if (is(/^\/activity-log$/)) return ACTIVITY_PERM[q.module] ? [`${ACTIVITY_PERM[q.module]}.view`] : "super";
   if (is(/^\/obat(\/|$)/)) return ["master.obat"];
@@ -3045,6 +3048,195 @@ async function klinikMoveTx(client: PoolClient, req: express.Request, m: KlinikM
   );
   await syncKlinikStock(client, m.klinik, m.obat);
 }
+
+// ---- Laporan Harian Klinik (KPI), see schema.sql klinik_kunjungan and klinikLaporan.ts ----
+// The clinics a report covers: one (`klinik`) or every clinic the account may open.
+function laporanKliniks(req: express.Request, res: express.Response, klinik: string): string[] | null {
+  if (klinik && !KLINIK_OPTIONS.includes(klinik)) {
+    res.status(400).json({ error: "Klinik tidak valid" });
+    return null;
+  }
+  const list = KLINIK_OPTIONS.filter((k) => (!klinik || k === klinik) && estateAllowed(req.user!, k));
+  if (!list.length) {
+    res.status(403).json({ error: "Akses ditolak" });
+    return null;
+  }
+  return list;
+}
+function laporanRange(q: Record<string, string>) {
+  const from = ISO_DATE.test(q.dateFrom ?? "") ? q.dateFrom : "0000-01-01";
+  const to = ISO_DATE.test(q.dateTo ?? "") ? q.dateTo : "9999-12-31";
+  return { from, to };
+}
+// Free-typed labels (diagnosis, provider, nama obat) grouped by labelKey, shown with their most
+// used spelling.
+function groupLabels<T extends { label: string; n: number }>(rows: T[], add: (into: T, r: T) => void = () => {}) {
+  const by = new Map<string, { spell: Map<string, number>; acc: T }>();
+  for (const r of rows) {
+    const k = labelKey(r.label) || r.label;
+    const g = by.get(k);
+    if (!g) by.set(k, { spell: new Map([[r.label, r.n]]), acc: { ...r } });
+    else {
+      g.spell.set(r.label, (g.spell.get(r.label) ?? 0) + r.n);
+      g.acc.n += r.n;
+      add(g.acc, r);
+    }
+  }
+  return [...by.values()]
+    .map((g) => ({ ...g.acc, label: [...g.spell].sort((a, b) => b[1] - a[1])[0][0] }))
+    .sort((a, b) => b.n - a.n || a.label.localeCompare(b.label));
+}
+
+app.get("/api/klinik-laporan/summary", async (req, res) => {
+  const q = req.query as Record<string, string>;
+  const kliniks = laporanKliniks(req, res, q.klinik ?? "");
+  if (!kliniks) return;
+  const { from, to } = laporanRange(q);
+  const p = { kliniks, from, to };
+  const W = "klinik = ANY(@kliniks) AND tanggal_iso BETWEEN @from AND @to";
+  const totals = await queryOne<any>(
+    `SELECT COUNT(*)::int total, COUNT(DISTINCT tanggal_iso)::int hari,
+       COUNT(*) FILTER (WHERE kecelakaan_kerja)::int kecelakaan, COUNT(*) FILTER (WHERE istirahat)::int istirahat,
+       COALESCE(SUM(hari_istirahat) FILTER (WHERE istirahat), 0)::int hari_istirahat, COUNT(*) FILTER (WHERE rujukan)::int rujukan,
+       COUNT(*) FILTER (WHERE jenis_kunjungan ILIKE 'mcu%')::int mcu,
+       COUNT(DISTINCT lower(nama_pasien) || '|' || COALESCE(tanggal_lahir_iso, ''))::int pasien
+     FROM klinik_kunjungan WHERE ${W}`,
+    p
+  );
+  const count = (col: string, extra = "") =>
+    queryMany<{ label: string; n: number }>(`SELECT ${col} AS label, COUNT(*)::int n FROM klinik_kunjungan WHERE ${W} ${extra} GROUP BY 1 ORDER BY 2 DESC, 1`, p);
+  const [jenis, status, divisi, kelamin, diagnosisRaw, providerRaw, perHari] = await Promise.all([
+    count("NULLIF(jenis_kunjungan, '')"),
+    count("NULLIF(status_pasien, '')"),
+    count("COALESCE(NULLIF(divisi, ''), '(tidak diisi)')"),
+    count("NULLIF(jenis_kelamin, '')"),
+    count("NULLIF(diagnosis, '')"),
+    count("COALESCE(NULLIF(provider, ''), '(tidak diisi)')", "AND rujukan"),
+    queryMany<{ tanggal: string; n: number; kecelakaan: number }>(
+      `SELECT tanggal_iso tanggal, COUNT(*)::int n, COUNT(*) FILTER (WHERE kecelakaan_kerja)::int kecelakaan
+       FROM klinik_kunjungan WHERE ${W} GROUP BY 1 ORDER BY 1`,
+      p
+    ),
+  ]);
+  const obatRaw = await queryMany<{ label: string; kode: string; satuan: string; n: number; qty: number }>(
+    `SELECT COALESCE(NULLIF(o.nama_obat, ''), o.obat_kode) label, mode() WITHIN GROUP (ORDER BY o.obat_kode) kode, mode() WITHIN GROUP (ORDER BY o.satuan) satuan,
+       COUNT(DISTINCT o.kunjungan_id)::int n, COALESCE(SUM(o.qty), 0)::float8 qty
+     FROM klinik_kunjungan_obat o JOIN klinik_kunjungan k ON k.id = o.kunjungan_id
+     WHERE k.klinik = ANY(@kliniks) AND k.tanggal_iso BETWEEN @from AND @to AND COALESCE(NULLIF(o.nama_obat, ''), o.obat_kode) <> ''
+     GROUP BY 1`,
+    p
+  );
+  const kecelakaanList = await queryMany(
+    `SELECT tanggal_iso, klinik, nama_pasien, jabatan, divisi, diagnosis, istirahat, hari_istirahat, rujukan, provider, detail_kejadian
+     FROM klinik_kunjungan WHERE ${W} AND kecelakaan_kerja ORDER BY tanggal_iso DESC, id DESC LIMIT 200`,
+    p
+  );
+  const sumber = await queryMany(`SELECT klinik, sheet_url, synced_at, synced_rows, synced_by FROM klinik_laporan_sumber WHERE klinik = ANY(@kliniks)`, p);
+  res.json({
+    totals,
+    jenis: jenis.filter((r) => r.label),
+    status: status.filter((r) => r.label),
+    divisi,
+    kelamin: kelamin.filter((r) => r.label),
+    diagnosis: groupLabels(diagnosisRaw.filter((r) => r.label)),
+    provider: groupLabels(providerRaw),
+    obat: groupLabels(obatRaw, (into, r) => (into.qty += r.qty)).slice(0, 30),
+    perHari,
+    kecelakaanList,
+    sumber,
+  });
+});
+
+app.get("/api/klinik-laporan/kunjungan", async (req, res) => {
+  const q = req.query as Record<string, string>;
+  const kliniks = laporanKliniks(req, res, q.klinik ?? "");
+  if (!kliniks) return;
+  const { from, to } = laporanRange(q);
+  const conditions = ["k.klinik = ANY(@kliniks)", "k.tanggal_iso BETWEEN @from AND @to"];
+  const params: any = { kliniks, from, to };
+  wordSearch(q.search ?? "", ["k.nama_pasien", "k.diagnosis", "k.divisi", "k.jabatan", "k.status_pasien", "k.jenis_kunjungan", "k.provider", "k.penanggung"], conditions, params);
+  if (q.flag === "kecelakaan") conditions.push("k.kecelakaan_kerja");
+  if (q.flag === "istirahat") conditions.push("k.istirahat");
+  if (q.flag === "rujukan") conditions.push("k.rujukan");
+  if (q.flag === "mcu") conditions.push("k.jenis_kunjungan ILIKE 'mcu%'");
+  const where = conditions.join(" AND ");
+  const total = (await queryOne<{ c: number }>(`SELECT COUNT(*)::int c FROM klinik_kunjungan k WHERE ${where}`, params))!.c;
+  const limit = Math.min(parseInt(q.pageSize) || 50, 500);
+  const offset = (Math.max(parseInt(q.page) || 1, 1) - 1) * limit;
+  const data = await queryMany(
+    `SELECT k.*, COALESCE((SELECT string_agg(trim(o.nama_obat || ' ' || COALESCE(o.qty::text, '') || ' ' || o.satuan), ', ' ORDER BY o.id)
+                           FROM klinik_kunjungan_obat o WHERE o.kunjungan_id = k.id), '') AS obat
+     FROM klinik_kunjungan k WHERE ${where} ORDER BY k.tanggal_iso DESC, k.no DESC, k.id DESC LIMIT @limit OFFSET @offset`,
+    { ...params, limit, offset }
+  );
+  res.json({ data, total, page: parseInt(q.page) || 1, pageSize: limit });
+});
+
+// Re-reads a clinic's Daily Report sheet and replaces its visits. `url` (optional) changes the sheet;
+// it must be shared "Anyone with the link".
+app.post("/api/klinik-laporan/sync", async (req, res) => {
+  const klinik = String(req.body?.klinik ?? "");
+  if (!checkKlinik(req, res, klinik)) return;
+  const saved = await queryOne<{ sheet_url: string }>("SELECT sheet_url FROM klinik_laporan_sumber WHERE klinik = @klinik", { klinik });
+  const url = String(req.body?.url ?? "").trim() || saved?.sheet_url || "";
+  const csvUrl = sheetCsvUrl(url);
+  if (!csvUrl) return res.status(400).json({ error: "Link Google Sheet tidak valid" });
+  let csv: string;
+  try {
+    const r = await fetch(csvUrl, { redirect: "follow" });
+    if (!r.ok || !(r.headers.get("content-type") ?? "").includes("text/csv"))
+      return res.status(400).json({ error: "Sheet tidak bisa dibaca. Pastikan dibagikan ke 'Siapa saja yang memiliki link' (Viewer)." });
+    csv = await r.text();
+  } catch {
+    return res.status(502).json({ error: "Gagal mengambil Google Sheet" });
+  }
+  let parsed: ReturnType<typeof parseDailyReport>;
+  try {
+    parsed = parseDailyReport(csv);
+  } catch (e: any) {
+    return res.status(400).json({ error: e.message });
+  }
+  const { rows, skipped } = parsed;
+  if (!rows.length) return res.status(400).json({ error: "Tidak ada baris kunjungan di sheet" });
+  await withTransaction(async (c) => {
+    await execute("DELETE FROM klinik_kunjungan WHERE klinik = @klinik", { klinik }, c);
+    // Ids first, so the obat rows can point at their visit in one statement.
+    const ids = (await queryMany<{ id: number }>("SELECT nextval('klinik_kunjungan_id_seq')::int id FROM generate_series(1, @n)", { n: rows.length }, c)).map((r) => r.id);
+    const cols = Object.keys(rows[0]).filter((k) => k !== "obat");
+    const types: Record<string, string> = { no: "int", usia: "int", hari_istirahat: "int", kecelakaan_kerja: "boolean", istirahat: "boolean", rujukan: "boolean" };
+    await execute(
+      `INSERT INTO klinik_kunjungan (id, klinik, ${cols.join(", ")})
+       SELECT x.id, @klinik, ${cols.map((k) => `x.${k}`).join(", ")}
+       FROM json_to_recordset(@rows::json) AS x(id int, ${cols.map((k) => `${k} ${types[k] ?? "text"}`).join(", ")})`,
+      { klinik, rows: JSON.stringify(rows.map(({ obat: _obat, ...r }, i) => ({ ...r, id: ids[i] }))) },
+      c
+    );
+    const obat = rows.flatMap((r, i) => r.obat.map((o) => ({ ...o, kunjungan_id: ids[i] })));
+    if (obat.length)
+      await execute(
+        `INSERT INTO klinik_kunjungan_obat (kunjungan_id, obat_kode, nama_obat, qty, satuan)
+         SELECT x.kunjungan_id, x.obat_kode, x.nama_obat, x.qty, x.satuan
+         FROM json_to_recordset(@rows::json) AS x(kunjungan_id int, obat_kode text, nama_obat text, qty float8, satuan text)`,
+        { rows: JSON.stringify(obat) },
+        c
+      );
+    await execute(
+      `INSERT INTO klinik_laporan_sumber (klinik, sheet_url, synced_at, synced_rows, synced_by) VALUES (@klinik, @url, now(), @n, @by)
+       ON CONFLICT (klinik) DO UPDATE SET sheet_url = EXCLUDED.sheet_url, synced_at = now(), synced_rows = EXCLUDED.synced_rows, synced_by = EXCLUDED.synced_by`,
+      { klinik, url, n: rows.length, by: req.user!.nama || req.user!.username },
+      c
+    );
+  });
+  const last = rows.reduce((m, r) => (r.tanggal_iso > m ? r.tanggal_iso : m), "");
+  await logActivity(req, {
+    module: "KLINIK",
+    estate: klinik,
+    aksi: "Sinkron Laporan Harian",
+    objek: "Daily Report (Google Sheet)",
+    detail: `${rows.length} kunjungan s/d ${last}${skipped ? `; ${skipped} baris dilewati (tanggal / nama tidak terbaca)` : ""}`,
+  });
+  res.json({ success: true, rows: rows.length, skipped, last });
+});
 
 app.get("/api/klinik-stock/summary", async (req, res) => {
   const { klinik = "" } = req.query as Record<string, string>;
