@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { Plus, Trash2, X } from "lucide-react";
 import { api, errorText, type Kunjungan, type KunjunganInput, type KunjunganObat, type KunjunganOptions } from "../lib/api";
 import { KaryawanAutocomplete } from "./KaryawanAutocomplete";
+import { PasienAutocomplete } from "./PasienAutocomplete";
 import { EvidenceInput, EvidenceLink } from "./EvidenceInput";
 import { JENIS_KUNJUNGAN, MAX_TERAPI, STATUS_PASIEN, hariOf, kodeTglOf, periodeOf, usiaOf } from "../lib/kunjungan";
 
@@ -14,6 +15,7 @@ const blankObat = (): KunjunganObat => ({ obat_kode: "", nama_obat: "", qty: nul
 
 function blank(tanggal: string): KunjunganInput {
   return {
+    pasien_id: null,
     tanggal_iso: tanggal,
     jenis_kunjungan: "Rawat Jalan",
     nama_pasien: "",
@@ -201,7 +203,27 @@ export function KunjunganModal({ klinik, kunjungan, onClose, onSaved }: { klinik
 
           <Section title="Data Identitas">
             <Field label="Nama Pasien" span={2}>
-              <KaryawanAutocomplete estate={klinik} value={f.nama_pasien} onChange={(v) => set("nama_pasien", v)} placeholder="ketik nama pasien" />
+              <PasienAutocomplete
+                estate={klinik}
+                value={f.nama_pasien}
+                pasienId={f.pasien_id}
+                onType={(v) => setF((c) => ({ ...c, nama_pasien: v, pasien_id: null }))}
+                onPick={(p) =>
+                  setF((c) => ({
+                    ...c,
+                    pasien_id: p.id,
+                    nama_pasien: p.nama,
+                    jenis_kelamin: p.jenis_kelamin || c.jenis_kelamin,
+                    tanggal_lahir_iso: p.tanggal_lahir_iso ?? c.tanggal_lahir_iso,
+                    status_pasien: p.status_pasien || c.status_pasien,
+                    penanggung: p.penanggung,
+                    jabatan: p.jabatan,
+                    divisi: p.divisi,
+                    tempat_tinggal: p.tempat_tinggal,
+                    asal_pasien: p.asal_pasien,
+                  }))
+                }
+              />
             </Field>
             <Field label="Jenis Kelamin L/P">
               <Toggle value={f.jenis_kelamin} options={[{ v: "L", label: "L" }, { v: "P", label: "P" }]} onChange={(v) => set("jenis_kelamin", v)} />

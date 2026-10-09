@@ -5,6 +5,7 @@ import cookieParser from "cookie-parser";
 import type { PoolClient } from "pg";
 import { queryMany, queryOne, execute, withTransaction } from "./db.js";
 import { canonProvider, labelKey, splitDiagnosis } from "./klinikLaporan.js";
+import { namaKey, namaMirip, sameTahun } from "./pasien.js";
 import { COOKIE_NAME, hashPassword, verifyPassword, signSession, verifySession, ESTATES, ALL_PERMS, MODULE_PERMS, parseList, type SessionUser } from "./auth.js";
 
 export const app = express();
@@ -167,6 +168,8 @@ function requiredPerms(req: express.Request): Need {
   if (is(/^\/klinik-stock(\/|$)/)) return [`klinik.${act}`];
   // Klinik > Laporan Harian: Lihat / Input / Edit / Hapus kunjungan (estate checked in the route).
   if (is(/^\/klinik-laporan(\/|$)/)) return [`klinik.${act}`];
+  // Master Pasien: the patients of the account's clinics (estate checked in the route).
+  if (is(/^\/pasien(\/|$)/)) return [`klinik.${act}`];
   if (is(/^\/top-keluar$/)) return [q.source === "klinik" ? "klinik.view" : "gudang.view"];
   if (is(/^\/activity-log$/)) return ACTIVITY_PERM[q.module] ? [`${ACTIVITY_PERM[q.module]}.view`] : "super";
   if (is(/^\/obat(\/|$)/)) return ["master.obat"];
@@ -3261,6 +3264,145 @@ const kunjunganDetail = (d: Record<string, any>, obat: { nama_obat: string; qty:
     .filter(Boolean)
     .join("; ");
 
+// ---- Master Pasien (klinik_pasien): the patients of each estate's clinic, see pasien.ts ----
+const PASIEN_FIELDS = ["nama", "jenis_kelamin", "tanggal_lahir_iso", "status_pasien", "penanggung", "jabatan", "divisi", "tempat_tinggal", "asal_pasien", "catatan"] as const;
+const PASIEN_LABELS: Record<string, string> = {
+  nama: "Nama", jenis_kelamin: "L/P", tanggal_lahir_iso: "Tanggal Lahir", status_pasien: "Status", penanggung: "Yang Menanggung", jabatan: "Jabatan",
+  divisi: "Divisi", tempat_tinggal: "Tempat Tinggal", asal_pasien: "Asal Pasien", catatan: "Catatan",
+};
+const NAMA_KEY_SQL = (col: string) => `regexp_replace(lower(${col}), '[^a-z]', '', 'g')`;
+function pasienPayload(b: any): { data?: Record<string, any>; error?: string } {
+  const t = (v: unknown) => String(v ?? "").replace(/\s+/g, " ").trim();
+  const data: Record<string, any> = Object.fromEntries(PASIEN_FIELDS.map((f) => [f, t(b[f])]));
+  if (!data.nama) return { error: "Nama pasien wajib diisi" };
+  data.jenis_kelamin = data.jenis_kelamin.toUpperCase();
+  if (data.jenis_kelamin && !["L", "P"].includes(data.jenis_kelamin)) return { error: "Jenis kelamin tidak valid" };
+  if (data.status_pasien && !STATUS_PASIEN.includes(data.status_pasien)) return { error: "Status pasien tidak valid" };
+  data.tanggal_lahir_iso = data.tanggal_lahir_iso || null;
+  if (data.tanggal_lahir_iso && !ISO_DATE.test(data.tanggal_lahir_iso)) return { error: "Tanggal lahir tidak valid" };
+  return { data };
+}
+const PASIEN_STATS = `(SELECT COUNT(*)::int FROM klinik_kunjungan k WHERE k.pasien_id = p.id) AS kunjungan,
+  (SELECT MIN(tanggal_iso) FROM klinik_kunjungan k WHERE k.pasien_id = p.id) AS kunjungan_pertama,
+  (SELECT MAX(tanggal_iso) FROM klinik_kunjungan k WHERE k.pasien_id = p.id) AS kunjungan_terakhir`;
+
+app.get("/api/pasien", async (req, res) => {
+  const q = req.query as Record<string, string>;
+  const estates = laporanKliniks(req, res, q.estate ?? "");
+  if (!estates) return;
+  const conditions = ["p.estate = ANY(@estates)"];
+  const params: any = { estates };
+  wordSearch(q.search ?? "", ["p.nama", "p.penanggung", "p.jabatan", "p.divisi", "p.tempat_tinggal", "p.asal_pasien"], conditions, params);
+  if (STATUS_PASIEN.includes(q.status)) {
+    conditions.push("p.status_pasien = @status");
+    params.status = q.status;
+  }
+  const where = conditions.join(" AND ");
+  const sorts: Record<string, string> = { nama: "lower(p.nama)", estate: "p.estate", kunjungan: "kunjungan", kunjungan_terakhir: "kunjungan_terakhir", tanggal_lahir_iso: "p.tanggal_lahir_iso" };
+  const sortCol = sorts[q.sortBy] ?? "lower(p.nama)";
+  const dir = q.sortDir === "desc" ? "DESC" : "ASC";
+  const total = (await queryOne<{ c: number }>(`SELECT COUNT(*)::int c FROM klinik_pasien p WHERE ${where}`, params))!.c;
+  const limit = Math.min(parseInt(q.pageSize) || 50, 500);
+  const offset = (Math.max(parseInt(q.page) || 1, 1) - 1) * limit;
+  const data = await queryMany(
+    `SELECT * FROM (SELECT p.*, ${PASIEN_STATS} FROM klinik_pasien p WHERE ${where}) p ORDER BY ${sortCol} ${dir} NULLS LAST, lower(p.nama), p.id LIMIT @limit OFFSET @offset`,
+    { ...params, limit, offset }
+  );
+  res.json({ data, total, page: parseInt(q.page) || 1, pageSize: limit });
+});
+
+// For Input Kunjungan's Nama Pasien: the estate's patients matching what was typed.
+app.get("/api/pasien/pick", async (req, res) => {
+  const { estate = "", search = "" } = req.query as Record<string, string>;
+  if (!checkKlinik(req, res, estate)) return;
+  const words = search.trim().split(/\s+/).filter(Boolean).slice(0, 5);
+  const params: any = { estate };
+  const conds = words.map((w, i) => ((params[`w${i}`] = `%${w}%`), `p.nama ILIKE @w${i}`));
+  const data = await queryMany(
+    `SELECT p.*, ${PASIEN_STATS} FROM klinik_pasien p WHERE p.estate = @estate ${conds.length ? `AND ${conds.join(" AND ")}` : ""}
+     ORDER BY (lower(p.nama) LIKE lower(@starts)) DESC, kunjungan DESC, lower(p.nama) LIMIT 10`,
+    { ...params, starts: `${search.trim()}%` }
+  );
+  res.json(data);
+});
+
+app.post("/api/pasien", async (req, res) => {
+  const estate = String(req.body?.estate ?? "");
+  if (!checkKlinik(req, res, estate)) return;
+  const p = pasienPayload(req.body ?? {});
+  if (p.error) return res.status(400).json({ error: p.error });
+  const row = await queryOne<{ id: number }>(
+    `INSERT INTO klinik_pasien (estate, ${PASIEN_FIELDS.join(", ")}) VALUES (@estate, ${PASIEN_FIELDS.map((f) => `@${f}`).join(", ")}) RETURNING id`,
+    { ...p.data, estate }
+  );
+  await logActivity(req, { module: "KLINIK", estate, aksi: "Tambah Pasien", objek: p.data!.nama, detail: [p.data!.status_pasien, p.data!.divisi].filter(Boolean).join("; ") });
+  res.json({ success: true, id: row!.id });
+});
+
+app.put("/api/pasien/:id", async (req, res) => {
+  const existing = await queryOne<any>("SELECT * FROM klinik_pasien WHERE id = @id", { id: req.params.id });
+  if (!existing) return res.status(404).json({ error: "Pasien tidak ditemukan" });
+  if (!estateAllowed(req.user!, existing.estate)) return res.status(403).json({ error: "Akses ditolak" });
+  const p = pasienPayload(req.body ?? {});
+  if (p.error) return res.status(400).json({ error: p.error });
+  await execute(`UPDATE klinik_pasien SET ${PASIEN_FIELDS.map((f) => `${f} = @${f}`).join(", ")}, updated_at = now() WHERE id = @id`, { ...p.data, id: existing.id });
+  await logActivity(req, { module: "KLINIK", estate: existing.estate, aksi: "Edit Pasien", objek: p.data!.nama, detail: describeChanges(existing, p.data!, PASIEN_LABELS) });
+  res.json({ success: true });
+});
+
+// A patient with visits stays (the visits are the report); only one entered by mistake goes.
+app.delete("/api/pasien/:id", async (req, res) => {
+  const existing = await queryOne<any>(`SELECT p.*, ${PASIEN_STATS} FROM klinik_pasien p WHERE id = @id`, { id: req.params.id });
+  if (!existing) return res.status(404).json({ error: "Pasien tidak ditemukan" });
+  if (!estateAllowed(req.user!, existing.estate)) return res.status(403).json({ error: "Akses ditolak" });
+  if (existing.kunjungan > 0) return res.status(400).json({ error: `Pasien ini punya ${existing.kunjungan} kunjungan, tidak bisa dihapus` });
+  await execute("DELETE FROM klinik_pasien WHERE id = @id", { id: existing.id });
+  await logActivity(req, { module: "KLINIK", estate: existing.estate, aksi: "Hapus Pasien", objek: existing.nama });
+  res.json({ success: true });
+});
+
+// The patient of a saved visit: the one picked in the form, else the estate's patient with that name
+// (birth year within a year) or born that day with a similar name, else a new one. Their details follow the latest visit.
+async function resolvePasien(c: PoolClient, estate: string, d: Record<string, any>, pickedId: unknown): Promise<number> {
+  let id: number | null = null;
+  if (Number.isInteger(Number(pickedId)) && Number(pickedId) > 0) {
+    id = (await queryOne<{ id: number }>("SELECT id FROM klinik_pasien WHERE id = @id AND estate = @estate", { id: Number(pickedId), estate }, c))?.id ?? null;
+  }
+  if (!id) {
+    const same = await queryMany<{ id: number; tanggal_lahir_iso: string | null }>(
+      `SELECT p.id, p.tanggal_lahir_iso FROM klinik_pasien p WHERE p.estate = @estate AND ${NAMA_KEY_SQL("p.nama")} = @key
+       ORDER BY (SELECT COUNT(*) FROM klinik_kunjungan k WHERE k.pasien_id = p.id) DESC`,
+      { estate, key: namaKey(d.nama_pasien) },
+      c
+    );
+    id = same.find((p) => sameTahun(p.tanggal_lahir_iso, d.tanggal_lahir_iso))?.id ?? null;
+  }
+  // The same person typed with another spelling: born the same day, same L/P, a similar name.
+  if (!id && d.tanggal_lahir_iso) {
+    const born = await queryMany<{ id: number; nama: string }>(
+      "SELECT id, nama FROM klinik_pasien WHERE estate = @estate AND tanggal_lahir_iso = @lahir AND jenis_kelamin = @jk",
+      { estate, lahir: d.tanggal_lahir_iso, jk: d.jenis_kelamin },
+      c
+    );
+    id = born.find((p) => namaMirip(p.nama, d.nama_pasien))?.id ?? null;
+  }
+  const fields = { jenis_kelamin: d.jenis_kelamin, status_pasien: d.status_pasien, penanggung: d.penanggung, jabatan: d.jabatan, divisi: d.divisi, tempat_tinggal: d.tempat_tinggal, asal_pasien: d.asal_pasien };
+  if (!id) {
+    return (await queryOne<{ id: number }>(
+      `INSERT INTO klinik_pasien (estate, nama, tanggal_lahir_iso, ${Object.keys(fields).join(", ")}) VALUES (@estate, @nama, @lahir, ${Object.keys(fields).map((k) => `@${k}`).join(", ")}) RETURNING id`,
+      { ...fields, estate, nama: d.nama_pasien, lahir: d.tanggal_lahir_iso },
+      c
+    ))!.id;
+  }
+  await execute(
+    `UPDATE klinik_pasien SET ${Object.keys(fields).map((k) => `${k} = COALESCE(NULLIF(@${k}, ''), ${k})`).join(", ")},
+       tanggal_lahir_iso = COALESCE(@lahir, tanggal_lahir_iso), updated_at = now() WHERE id = @id`,
+    { ...fields, lahir: d.tanggal_lahir_iso, id },
+    c
+  );
+  return id;
+}
+
 app.post("/api/klinik-laporan/kunjungan", async (req, res) => {
   const klinik = String(req.body?.klinik ?? "");
   if (!checkKlinik(req, res, klinik)) return;
@@ -3271,10 +3413,11 @@ app.post("/api/klinik-laporan/kunjungan", async (req, res) => {
   const evidenceId = req.body?.evidence_id ? await claimEvidence(req, res) : null;
   if (evidenceId === undefined) return;
   const id = await withTransaction(async (c) => {
+    const pasienId = await resolvePasien(c, klinik, p.data!, req.body?.pasien_id);
     const row = await queryOne<{ id: number }>(
-      `INSERT INTO klinik_kunjungan (klinik, sumber, evidence_id, created_by, ${KUNJUNGAN_COLS.join(", ")})
-       VALUES (@klinik, 'APP', @evidenceId::uuid, @by, ${KUNJUNGAN_COLS.map((k) => `@${k}`).join(", ")}) RETURNING id`,
-      { ...p.data, klinik, evidenceId, by: req.user!.nama || req.user!.username },
+      `INSERT INTO klinik_kunjungan (klinik, sumber, evidence_id, created_by, pasien_id, ${KUNJUNGAN_COLS.join(", ")})
+       VALUES (@klinik, 'APP', @evidenceId::uuid, @by, @pasienId, ${KUNJUNGAN_COLS.map((k) => `@${k}`).join(", ")}) RETURNING id`,
+      { ...p.data, klinik, evidenceId, pasienId, by: req.user!.nama || req.user!.username },
       c
     );
     await saveKunjunganObat(c, row!.id, p.obat!);
@@ -3293,9 +3436,10 @@ app.put("/api/klinik-laporan/kunjungan/:id", async (req, res) => {
   const newEvidence = await checkEditEvidence(req, res, existing.evidence_id);
   if (newEvidence === undefined) return;
   await withTransaction(async (c) => {
+    const pasienId = await resolvePasien(c, existing.klinik, p.data!, req.body?.pasien_id ?? existing.pasien_id);
     await execute(
-      `UPDATE klinik_kunjungan SET ${KUNJUNGAN_COLS.map((k) => `${k} = @${k}`).join(", ")}, updated_at = now() WHERE id = @id`,
-      { ...p.data, id: existing.id },
+      `UPDATE klinik_kunjungan SET ${KUNJUNGAN_COLS.map((k) => `${k} = @${k}`).join(", ")}, pasien_id = @pasienId, updated_at = now() WHERE id = @id`,
+      { ...p.data, id: existing.id, pasienId },
       c
     );
     await saveKunjunganObat(c, existing.id, p.obat!);

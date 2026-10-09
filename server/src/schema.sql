@@ -576,3 +576,26 @@ ALTER TABLE klinik_kunjungan ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEF
 ALTER TABLE klinik_kunjungan ADD COLUMN IF NOT EXISTS created_by TEXT NOT NULL DEFAULT '';
 ALTER TABLE klinik_kunjungan ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ;
 ALTER TABLE klinik_kunjungan_obat ADD COLUMN IF NOT EXISTS urut INTEGER NOT NULL DEFAULT 0;
+
+-- Master Pasien: the patients of each estate's clinic (not the karyawan list - family members and
+-- outsiders are patients too). Built once from the Daily Report visits (buildPasien.ts); a visit
+-- entered for a new name adds its patient. klinik_kunjungan.pasien_id = whose visit it was.
+CREATE TABLE IF NOT EXISTS klinik_pasien (
+  id SERIAL PRIMARY KEY,
+  estate TEXT NOT NULL,
+  nama TEXT NOT NULL,
+  jenis_kelamin TEXT NOT NULL DEFAULT '',
+  tanggal_lahir_iso TEXT,
+  status_pasien TEXT NOT NULL DEFAULT '',
+  penanggung TEXT NOT NULL DEFAULT '',
+  jabatan TEXT NOT NULL DEFAULT '',
+  divisi TEXT NOT NULL DEFAULT '',
+  tempat_tinggal TEXT NOT NULL DEFAULT '',
+  asal_pasien TEXT NOT NULL DEFAULT '',
+  catatan TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_pasien_estate_nama ON klinik_pasien(estate, lower(nama));
+ALTER TABLE klinik_kunjungan ADD COLUMN IF NOT EXISTS pasien_id INTEGER REFERENCES klinik_pasien(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_kunjungan_pasien ON klinik_kunjungan(pasien_id);

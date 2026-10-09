@@ -125,12 +125,16 @@ const hasOpnameAccess = (user: AuthUser | null) => MODULES.some((m) => can(user,
 // Pinjaman antar estate: seen with any module's Lihat, recorded with that module's Input.
 export const PINJAMAN_PATH = "/pinjaman";
 
+// Master Pasien: the patients of the account's clinics, with Klinik Lihat (Input / Edit / Hapus to change).
+export const PASIEN_PATH = "/master-pasien";
+
 // Whether a non-inventory page (sidebar / router) may be opened.
 export function pageAllowed(user: AuthUser | null, path: string): boolean {
   if (!user) return false;
   if (user.role === "superuser") return true;
   if (path === OPNAME_PATH || path.startsWith(`${OPNAME_PATH}/`)) return hasOpnameAccess(user);
   if (path === PINJAMAN_PATH) return MODULES.some((m) => canModule(user, m));
+  if (path === PASIEN_PATH) return canModule(user, "KLINIK");
   return !!PAGE_PERMS[path] && can(user, PAGE_PERMS[path]);
 }
 

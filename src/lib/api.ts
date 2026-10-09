@@ -480,6 +480,8 @@ export type LaporanKlinikSummary = {
 // One patient visit (Klinik > Laporan Harian), the columns of the Daily Report sheet. nomor = No.
 export type KunjunganObat = { obat_kode: string; nama_obat: string; qty: number | null; satuan: string };
 export type KunjunganInput = {
+  // The Master Pasien entry picked for Nama Pasien (null = matched / added by name on save).
+  pasien_id?: number | null;
   tanggal_iso: string;
   jenis_kunjungan: string;
   nama_pasien: string;
@@ -510,6 +512,26 @@ export type Kunjungan = KunjunganInput & {
   created_at: string | null;
   created_by: string;
 };
+// Master Pasien: one patient of an estate's clinic, with their visit count.
+export type Pasien = {
+  id: number;
+  estate: string;
+  nama: string;
+  jenis_kelamin: string;
+  tanggal_lahir_iso: string | null;
+  status_pasien: string;
+  penanggung: string;
+  jabatan: string;
+  divisi: string;
+  tempat_tinggal: string;
+  asal_pasien: string;
+  catatan: string;
+  kunjungan: number;
+  kunjungan_pertama: string | null;
+  kunjungan_terakhir: string | null;
+};
+export type PasienInput = Omit<Pasien, "id" | "estate" | "kunjungan" | "kunjungan_pertama" | "kunjungan_terakhir">;
+
 export type KunjunganOptions = {
   jabatan: string[];
   divisi: string[];
@@ -672,6 +694,12 @@ export const api = {
     req<{ data: Kunjungan[]; total: number; page: number; pageSize: number }>(`/api/klinik-laporan/kunjungan?${new URLSearchParams(params as any)}`),
   laporanKlinikTotals: (params: { klinik: string; dateFrom: string; dateTo: string }) =>
     req<Pick<LaporanKlinikSummary, "totals">>(`/api/klinik-laporan/summary?${new URLSearchParams({ ...params, lite: "1" })}`),
+  pasien: (params: Record<string, string | number>) =>
+    req<{ data: Pasien[]; total: number; page: number; pageSize: number }>(`/api/pasien?${new URLSearchParams(params as any)}`),
+  pasienPick: (estate: string, search: string) => req<Pasien[]>(`/api/pasien/pick?${new URLSearchParams({ estate, search })}`),
+  createPasien: (payload: PasienInput & { estate: string }) => req<{ success: boolean; id: number }>("/api/pasien", { method: "POST", body: JSON.stringify(payload) }),
+  updatePasien: (id: number, payload: PasienInput) => req<{ success: boolean }>(`/api/pasien/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
+  deletePasien: (id: number) => req<{ success: boolean }>(`/api/pasien/${id}`, { method: "DELETE" }),
   kunjunganOptions: (klinik: string) => req<KunjunganOptions>(`/api/klinik-laporan/options?${new URLSearchParams({ klinik })}`),
   createKunjungan: (payload: KunjunganInput & { klinik: string; evidence_id?: string | null }) =>
     req<{ success: boolean; id: number }>("/api/klinik-laporan/kunjungan", { method: "POST", body: JSON.stringify(payload) }),

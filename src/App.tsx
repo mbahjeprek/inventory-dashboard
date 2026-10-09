@@ -21,6 +21,7 @@ import { MasterOliPage } from "./pages/MasterOliPage";
 import { UserActivityPage } from "./pages/UserActivityPage";
 import { StokOpnamePage } from "./pages/StokOpnamePage";
 import { PinjamanPage } from "./pages/PinjamanPage";
+import { MasterPasienPage } from "./pages/MasterPasienPage";
 import { StokOpnameDetailPage } from "./pages/StokOpnameDetailPage";
 
 function App() {
@@ -228,6 +229,14 @@ function App() {
               />
               {/* Laporan Harian Klinik lives in each estate's Klinik page now. */}
               <Route path="/laporan-klinik" element={<Navigate to="/inventory-klinik?tab=laporan" replace />} />
+              <Route
+                path="/master-pasien"
+                element={
+                  <RequirePageAccess>
+                    <MasterPasienPage />
+                  </RequirePageAccess>
+                }
+              />
               <Route
                 path="/pinjaman"
                 element={

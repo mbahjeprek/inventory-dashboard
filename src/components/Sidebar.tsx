@@ -19,6 +19,7 @@ import {
   ClipboardCheck,
   Droplet,
   ArrowLeftRight,
+  Contact,
   MapPin,
   Check,
 } from "lucide-react";
@@ -26,7 +27,7 @@ import { useAuth } from "../context/AuthContext";
 import { useEstateFilter } from "../hooks/useEstateFilter";
 import { useOpenPinjaman } from "../hooks/useOpenPinjaman";
 import { ChangePasswordModal } from "./ChangePasswordModal";
-import { canModule, pageAllowed, userEstates, OPNAME_PATH, PINJAMAN_PATH, type Module } from "../lib/access";
+import { canModule, pageAllowed, userEstates, OPNAME_PATH, PINJAMAN_PATH, PASIEN_PATH, type Module } from "../lib/access";
 
 type NavItem = { to: string; label: string; icon: typeof Package };
 type NavSection = { title?: string; collapsible?: boolean; items: NavItem[] };
@@ -78,6 +79,7 @@ const navSections: NavSection[] = [
     items: [
       { to: "/master-barang", label: "Barang", icon: Package },
       { to: "/master-obat", label: "Obat", icon: Pill },
+      { to: PASIEN_PATH, label: "Pasien", icon: Contact },
       { to: "/master-oli", label: "Oli", icon: Droplet },
       { to: "/karyawan", label: "Karyawan", icon: Users },
       { to: "/alat-berat", label: "Alat Berat", icon: Truck },
