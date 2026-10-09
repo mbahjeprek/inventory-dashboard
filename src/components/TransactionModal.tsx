@@ -6,6 +6,7 @@ import { EvidenceInput, useEvidenceEnabled } from "./EvidenceInput";
 import { useAuth } from "../context/AuthContext";
 import { can } from "../lib/access";
 import { TransferShortcut } from "./TransferShortcut";
+import { localToday } from "./BatchGrid";
 import { isiOf, kemasanName, kemasanText, split } from "../lib/kemasan";
 
 // Gudang Nilam supplies every estate (a Stok Keluar to another estate becomes Stok Masuk in that
@@ -69,6 +70,8 @@ export function TransactionModal({
     setPerPak(!!isi && mode === "IN");
   }, [mode, isi]);
   const [note, setNote] = useState(preset?.note ?? "");
+  // The day it happened, for a movement entered later (the server keeps when it was typed).
+  const [tanggal, setTanggal] = useState(localToday());
   // Foto bukti, required for Stock In / Out (not for Koreksi).
   const [evidenceId, setEvidenceId] = useState<string | null>(null);
   const evidenceOn = useEvidenceEnabled();
@@ -147,6 +150,10 @@ export function TransactionModal({
       setError(`Wajib diisi: ${missing.join(", ")}`);
       return;
     }
+    if (!tanggal || tanggal > localToday()) {
+      setError("Tanggal tidak boleh kosong atau lewat dari hari ini");
+      return;
+    }
 
     if (mode === "KOREKSI") {
       if (actualQty < 0) {
@@ -156,9 +163,9 @@ export function TransactionModal({
       setSubmitting(true);
       try {
         if (scope?.kind === "klinik")
-          await api.klinikStockCorrection({ klinik: scope.name, obat_kode: item.kode, actual_qty: actualQty, note, expired_date: korExp });
-        else if (scope?.kind === "gudang") await api.gudangStockCorrection({ gudang: scope.name, item_kode: item.kode, actual_qty: actualQty, note });
-        else await api.stockCorrection({ item_id: item.id, actual_qty: actualQty, note });
+          await api.klinikStockCorrection({ klinik: scope.name, obat_kode: item.kode, actual_qty: actualQty, note, expired_date: korExp, tanggal_iso: tanggal });
+        else if (scope?.kind === "gudang") await api.gudangStockCorrection({ gudang: scope.name, item_kode: item.kode, actual_qty: actualQty, note, tanggal_iso: tanggal });
+        else await api.stockCorrection({ item_id: item.id, actual_qty: actualQty, note, tanggal_iso: tanggal });
         onSuccess();
       } catch (e) {
         setError(errorText(e, "Gagal menyimpan koreksi stok"));
@@ -180,6 +187,7 @@ export function TransactionModal({
     try {
       if (scope?.kind === "klinik")
         await api.createKlinikTransaction({
+          tanggal_iso: tanggal,
           evidence_id: evidenceId ?? "",
           klinik: scope.name,
           obat_kode: item.kode,
@@ -192,8 +200,8 @@ export function TransactionModal({
           expired_date: mode === "IN" ? expIn || undefined : batchOut === FEFO ? undefined : batchOut,
         });
       else if (scope?.kind === "gudang")
-        await api.createGudangTransaction({ evidence_id: evidenceId ?? "", gudang: scope.name, item_kode: item.kode, tujuan, type: mode, qty, note, penerima });
-      else await api.createTransaction({ evidence_id: evidenceId ?? "", item_id: item.id, tujuan, type: mode, qty, note, penerima });
+        await api.createGudangTransaction({ tanggal_iso: tanggal, evidence_id: evidenceId ?? "", gudang: scope.name, item_kode: item.kode, tujuan, type: mode, qty, note, penerima });
+      else await api.createTransaction({ tanggal_iso: tanggal, evidence_id: evidenceId ?? "", item_id: item.id, tujuan, type: mode, qty, note, penerima });
       onSuccess();
     } catch (e) {
       setError(errorText(e, "Gagal menyimpan transaksi", true));
@@ -278,6 +286,14 @@ export function TransactionModal({
               >
                 <ClipboardCheck size={13} /> Koreksi
               </button>
+            )}
+          </div>
+
+          <div>
+            <label className="text-xs text-[var(--text-secondary)] mb-1 block">Tanggal</label>
+            <input type="date" value={tanggal} max={localToday()} onChange={(e) => setTanggal(e.target.value)} className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-2" />
+            {tanggal && tanggal < localToday() && (
+              <p className="text-[11px] text-[var(--accent-amber)] mt-1">Transaksi tanggal lalu - tercatat di tanggal ini, waktu input tetap disimpan.</p>
             )}
           </div>
 

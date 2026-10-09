@@ -3,7 +3,7 @@ import fs from "fs/promises";
 import nodePath from "path";
 import cookieParser from "cookie-parser";
 import type { PoolClient } from "pg";
-import { queryMany, queryOne, execute, withTransaction } from "./db.js";
+import { queryMany, queryOne, execute, withTransaction, txTime } from "./db.js";
 import { canonProvider, labelKey, splitDiagnosis } from "./klinikLaporan.js";
 import { namaKey, namaMirip, sameTahun } from "./pasien.js";
 import { COOKIE_NAME, hashPassword, verifyPassword, signSession, verifySession, ESTATES, ALL_PERMS, MODULE_PERMS, parseList, type SessionUser } from "./auth.js";
@@ -408,7 +408,8 @@ async function mirrorTransaction(
   note: string | null,
   penerima: string
 ): Promise<{ source: "stock_in_log" | "stock_out_log"; id: number }> {
-  const iso = jakartaToday();
+  // The movement's own day when it is entered later (txTime), else today.
+  const iso = txTime.getStore()?.slice(0, 10) ?? jakartaToday();
   const display = isoToDisplay(iso);
 
   if (type === "IN") {
@@ -825,6 +826,39 @@ app.get("/api/gudang-stock", async (req, res) => {
   );
 
   res.json({ data, total: Number(total), page: parseInt(page), pageSize: limit });
+});
+
+// Tanggal of a Stock In / Out / Koreksi of barang & obat (single, Input Banyak, Koreksi): a movement
+// entered later than it happened takes that day (with the current time) as its time, through txTime
+// in db.ts. Not after today, and not before the last approved stok opname of that estate's gudang /
+// klinik - what the opname counted already includes it.
+const BACKDATE: Record<string, { module: "GUDANG" | "KLINIK"; estate: (b: any) => string }> = {
+  "/api/transactions": { module: "GUDANG", estate: () => "NILAM" },
+  "/api/transactions/batch": { module: "GUDANG", estate: () => "NILAM" },
+  "/api/stock-correction": { module: "GUDANG", estate: () => "NILAM" },
+  "/api/gudang-stock/transactions": { module: "GUDANG", estate: (b) => b.gudang },
+  "/api/gudang-stock/transactions/batch": { module: "GUDANG", estate: (b) => b.gudang },
+  "/api/gudang-stock/correction": { module: "GUDANG", estate: (b) => b.gudang },
+  "/api/klinik-stock/transactions": { module: "KLINIK", estate: (b) => b.klinik },
+  "/api/klinik-stock/transactions/batch": { module: "KLINIK", estate: (b) => b.klinik },
+  "/api/klinik-stock/correction": { module: "KLINIK", estate: (b) => b.klinik },
+};
+app.use(async (req, res, next) => {
+  const route = req.method === "POST" ? BACKDATE[req.path] : undefined;
+  const tanggal = route ? String(req.body?.tanggal_iso ?? "") : "";
+  if (!route || !tanggal) return next();
+  const today = jakartaToday();
+  if (!ISO_DATE.test(tanggal)) return res.status(400).json({ error: "Tanggal tidak valid" });
+  if (tanggal > today) return res.status(400).json({ error: "Tanggal tidak boleh lewat dari hari ini" });
+  if (tanggal === today) return next();
+  const opname = await queryOne<{ tanggal: string }>(
+    "SELECT tanggal FROM opname WHERE module = @module AND estate = @estate AND status = 'APPROVED' ORDER BY tanggal DESC LIMIT 1",
+    { module: route.module, estate: String(route.estate(req.body) ?? "") }
+  );
+  if (opname && tanggal < opname.tanggal)
+    return res.status(400).json({ error: `Tanggal tidak boleh sebelum stok opname terakhir (${opname.tanggal.split("-").reverse().join("/")}) - hasil hitung opname sudah mencakupnya` });
+  const time = new Date().toLocaleTimeString("en-GB", { timeZone: "Asia/Jakarta", hour12: false });
+  txTime.run(`${tanggal}T${time}+07:00`, () => next());
 });
 
 app.post("/api/gudang-stock", async (req, res) => {
@@ -3869,7 +3903,7 @@ for (const lr of LEDGER_ROUTES) {
     const limit = Math.min(parseInt(pageSize) || 50, 500);
     const offset = (Math.max(parseInt(page) || 1, 1) - 1) * limit;
     const data = await queryMany(
-      `SELECT t.id, t.created_at, t.type, t.qty, t.tujuan, t.penerima, t.note, t.is_correction, t.evidence_id, t.pinjaman_id,
+      `SELECT t.id, t.created_at, t.input_at, t.type, t.qty, t.tujuan, t.penerima, t.note, t.is_correction, t.evidence_id, t.pinjaman_id,
               ${l === GUDANG_LEDGER ? "t.transfer_from_id IS NOT NULL" : "false"} AS is_transfer,
               ${l === KLINIK_LEDGER ? "t.alloc" : "NULL"} AS alloc,
               m.kode, m.nama, m.satuan, COALESCE(u.nama, u.username, '') AS input_oleh

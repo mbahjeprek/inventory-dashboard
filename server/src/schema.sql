@@ -599,3 +599,18 @@ CREATE TABLE IF NOT EXISTS klinik_pasien (
 CREATE INDEX IF NOT EXISTS idx_pasien_estate_nama ON klinik_pasien(estate, lower(nama));
 ALTER TABLE klinik_kunjungan ADD COLUMN IF NOT EXISTS pasien_id INTEGER REFERENCES klinik_pasien(id) ON DELETE SET NULL;
 CREATE INDEX IF NOT EXISTS idx_kunjungan_pasien ON klinik_kunjungan(pasien_id);
+
+-- Tanggal on Stock In / Out / Koreksi of barang & obat: a movement entered later than it happened
+-- keeps its own date. The app sets app.tx_time for the transaction (db.ts txTime) and created_at
+-- takes it; input_at = when it was typed (NULL on older rows = created_at).
+DO $$
+DECLARE t text;
+BEGIN
+  FOREACH t IN ARRAY ARRAY['transactions', 'gudang_stock_tx', 'klinik_stock_tx', 'stock_in_log', 'stock_out_log'] LOOP
+    EXECUTE format('ALTER TABLE %I ALTER COLUMN created_at SET DEFAULT COALESCE(NULLIF(current_setting(''app.tx_time'', true), '''')::timestamptz, now())', t);
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = t AND column_name = 'input_at') THEN
+      EXECUTE format('ALTER TABLE %I ADD COLUMN input_at TIMESTAMPTZ', t);
+      EXECUTE format('ALTER TABLE %I ALTER COLUMN input_at SET DEFAULT now()', t);
+    END IF;
+  END LOOP;
+END $$;

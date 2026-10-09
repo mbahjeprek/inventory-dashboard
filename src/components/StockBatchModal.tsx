@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, GUDANG_TUJUAN, type PickerItem, type StockScope } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
-import { BatchGrid, fmtNum, isBlankIn, parseNum, runningStock, type Cells, type GridCol } from "./BatchGrid";
+import { BatchGrid, HeaderField, fmtNum, headerInputCls, isBlankIn, localToday, parseNum, runningStock, type Cells, type GridCol } from "./BatchGrid";
 
 // Input Banyak for Gudang (Nilam without a scope, KNS / WJA / Zamrud / Firus with one) and Klinik:
 // one row per barang / obat, the stock of each running down its rows (see BatchGrid). The same rules
@@ -36,6 +36,8 @@ export function StockBatchModal({ scope, onClose, onSuccess }: { scope?: StockSc
   const whole = klinik || nilam;
   const [items, setItems] = useState<PickerItem[]>([]);
   const [loading, setLoading] = useState(true);
+  // One day for every row: today, or the day they happened when entered later.
+  const [tanggal, setTanggal] = useState(localToday());
 
   useEffect(() => {
     allItems(scope)
@@ -147,6 +149,7 @@ export function StockBatchModal({ scope, onClose, onSuccess }: { scope?: StockSc
     const base = (c: Cells) => ({ qty: parseNum(c.jumlah), note: c.note.trim() });
     if (klinik) {
       const res = await api.createKlinikBatch({
+        tanggal_iso: tanggal,
         evidence_id: evidenceId,
         klinik: estate,
         rows: rows.map((c) => ({
@@ -168,8 +171,8 @@ export function StockBatchModal({ scope, onClose, onSuccess }: { scope?: StockSc
       penerima: c.penerima.trim(),
     }));
     const res = nilam
-      ? await api.createNilamBatch({ evidence_id: evidenceId, rows: gudangRows })
-      : await api.createGudangBatch({ evidence_id: evidenceId, gudang: estate, rows: gudangRows });
+      ? await api.createNilamBatch({ tanggal_iso: tanggal, evidence_id: evidenceId, rows: gudangRows })
+      : await api.createGudangBatch({ tanggal_iso: tanggal, evidence_id: evidenceId, gudang: estate, rows: gudangRows });
     return res.count;
   };
 
@@ -178,6 +181,16 @@ export function StockBatchModal({ scope, onClose, onSuccess }: { scope?: StockSc
       title={klinik ? `Input Banyak Klinik - ${estate}` : `Input Banyak Gudang - ${estate}`}
       subtitle={klinik ? "Stock In / Stock Out obat & alat medis sekaligus" : "Stock In / Stock Out barang sekaligus"}
       draftKey={`batch:${scope?.kind ?? "nilam"}:${estate}`}
+      extra={{ tanggal }}
+      onRestoreExtra={(x) => {
+        const t = (x as { tanggal?: string } | null)?.tanggal;
+        if (t && t <= localToday()) setTanggal(t);
+      }}
+      header={
+        <HeaderField label="Tanggal">
+          <input type="date" value={tanggal} max={localToday()} onChange={(e) => setTanggal(e.target.value)} className={headerInputCls} />
+        </HeaderField>
+      }
       columns={columns}
       blankRow={blankRow}
       problem={problem}

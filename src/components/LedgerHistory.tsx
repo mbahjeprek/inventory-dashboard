@@ -14,6 +14,9 @@ import { loanTag } from "../lib/opname";
 
 const formatWaktu = (iso: string) =>
   new Date(iso).toLocaleString("id-ID", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+// "input 09/10/2026 14.25" for a movement typed on a later day than it happened (Tanggal in the form).
+const inputNote = (r: { created_at: string; input_at?: string | null }) =>
+  r.input_at && new Date(r.input_at).toDateString() !== new Date(r.created_at).toDateString() ? `input ${formatWaktu(r.input_at)}` : "";
 
 // Stock In or Stock Out tab of a gudang (KNS/WJA/Zamrud/Firus) or klinik page: every movement of
 // that location across all items. `refreshKey` changes after a new transaction so the list reloads.
@@ -92,7 +95,7 @@ export function LedgerHistory({ scope, type, refreshKey }: { scope: StockScope; 
         { label: "Diinput Oleh" },
       ],
       rows: all.map((r) => [
-        formatWaktu(r.created_at),
+        [formatWaktu(r.created_at), inputNote(r) && `(${inputNote(r)})`].filter(Boolean).join(" "),
         r.kode,
         r.nama,
         r.qty,
@@ -205,7 +208,10 @@ export function LedgerHistory({ scope, type, refreshKey }: { scope: StockScope; 
               ) : (
                 rows.map((r) => (
                   <tr key={r.id}>
-                    <td className="px-4 py-2.5 whitespace-nowrap text-[var(--text-secondary)]">{formatWaktu(r.created_at)}</td>
+                    <td className="px-4 py-2.5 whitespace-nowrap text-[var(--text-secondary)]">
+                      {formatWaktu(r.created_at)}
+                      {inputNote(r) && <div className="text-[11px] text-[var(--text-muted)]">{inputNote(r)}</div>}
+                    </td>
                     <td className="px-4 py-2.5 font-mono text-xs whitespace-nowrap text-[var(--text-secondary)]">{r.kode}</td>
                     <td className="col-grow px-4 py-2.5">{r.nama}</td>
                     <td className={`px-4 py-2.5 text-right font-medium whitespace-nowrap ${isOut ? "text-[var(--accent-red)]" : "text-[var(--accent-green)]"}`}>

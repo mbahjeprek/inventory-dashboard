@@ -93,6 +93,8 @@ export type LedgerTx = {
   // Stok Masuk booked automatically by a Stok Keluar from another gudang; changed only from there.
   is_transfer: boolean;
   pinjaman_id?: number | null;
+  // When it was typed, if later than created_at (the day it happened); null on older rows.
+  input_at?: string | null;
   evidence_id?: string | null;
   kode: string;
   nama: string;
@@ -624,6 +626,8 @@ export const api = {
   itemMovements: (id: number) => req<{ data: Movement[] }>(`/api/items/${id}/movements`),
 
   createTransaction: (payload: {
+    // The day it happened when entered later (default today), see BACKDATE in app.ts.
+    tanggal_iso?: string;
     // Foto bukti (uploadEvidence) - required by the server.
     evidence_id: string;
     item_id: number;
@@ -638,7 +642,7 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
-  stockCorrection: (payload: { item_id: number; actual_qty: number; note?: string }) =>
+  stockCorrection: (payload: { tanggal_iso?: string; item_id: number; actual_qty: number; note?: string }) =>
     req<{ success: boolean; delta: number }>("/api/stock-correction", {
       method: "POST",
       body: JSON.stringify(payload),
@@ -650,6 +654,8 @@ export const api = {
   },
 
   createGudangTransaction: (payload: {
+    // The day it happened when entered later (default today), see BACKDATE in app.ts.
+    tanggal_iso?: string;
     // Foto bukti (uploadEvidence) - required by the server.
     evidence_id: string;
     gudang: string;
@@ -661,7 +667,7 @@ export const api = {
     note?: string;
   }) => req<{ success: boolean }>("/api/gudang-stock/transactions", { method: "POST", body: JSON.stringify(payload) }),
 
-  gudangStockCorrection: (payload: { gudang: string; item_kode: string; actual_qty: number; note?: string }) =>
+  gudangStockCorrection: (payload: { tanggal_iso?: string; gudang: string; item_kode: string; actual_qty: number; note?: string }) =>
     req<{ success: boolean; delta: number }>("/api/gudang-stock/correction", { method: "POST", body: JSON.stringify(payload) }),
 
   obatOptions: () => req<{ kategori: string[]; satuan: string[]; jenis: { kategori: string; jenis: string }[] }>("/api/obat/options"),
@@ -713,6 +719,8 @@ export const api = {
   },
 
   createKlinikTransaction: (payload: {
+    // The day it happened when entered later (default today), see BACKDATE in app.ts.
+    tanggal_iso?: string;
     // Foto bukti (uploadEvidence) - required by the server.
     evidence_id: string;
     klinik: string;
@@ -733,7 +741,7 @@ export const api = {
   updateKlinikBatch: (id: number, expired_date: string, qty?: number) =>
     req<{ success: boolean }>(`/api/klinik-stock/batch/${id}`, { method: "PUT", body: JSON.stringify({ expired_date, qty }) }),
 
-  klinikStockCorrection: (payload: { klinik: string; obat_kode: string; actual_qty: number; note?: string; expired_date?: string }) =>
+  klinikStockCorrection: (payload: { tanggal_iso?: string; klinik: string; obat_kode: string; actual_qty: number; note?: string; expired_date?: string }) =>
     req<{ success: boolean; delta: number }>("/api/klinik-stock/correction", { method: "POST", body: JSON.stringify(payload) }),
 
   // The full expiry breakdown of a clinic stock row; a changed total is booked as Koreksi (needs note).
@@ -974,14 +982,18 @@ export const api = {
   }) => req<{ success: boolean; id: number; saldo_stock: number }>("/api/bbm", { method: "POST", body: JSON.stringify(payload) }),
 
   // Input Banyak (all rows or none; a refused row comes back as ApiError.data.row, 0-based).
-  createNilamBatch: (payload: { evidence_id: string; rows: { item_kode: string; type: "IN" | "OUT"; qty: number; tujuan: string; penerima: string; note: string }[] }) =>
+  createNilamBatch: (payload: { tanggal_iso?: string; evidence_id: string; rows: { item_kode: string; type: "IN" | "OUT"; qty: number; tujuan: string; penerima: string; note: string }[] }) =>
     req<{ success: boolean; count: number }>("/api/transactions/batch", { method: "POST", body: JSON.stringify(payload) }),
   createGudangBatch: (payload: {
+    // The day it happened when entered later (default today), see BACKDATE in app.ts.
+    tanggal_iso?: string;
     evidence_id: string;
     gudang: string;
     rows: { item_kode: string; type: "IN" | "OUT"; qty: number; tujuan: string; penerima: string; note: string }[];
   }) => req<{ success: boolean; count: number }>("/api/gudang-stock/transactions/batch", { method: "POST", body: JSON.stringify(payload) }),
   createKlinikBatch: (payload: {
+    // The day it happened when entered later (default today), see BACKDATE in app.ts.
+    tanggal_iso?: string;
     evidence_id: string;
     klinik: string;
     rows: { obat_kode: string; type: "IN" | "OUT"; qty: number; expired_date: string; buang: boolean; penerima: string; note: string }[];

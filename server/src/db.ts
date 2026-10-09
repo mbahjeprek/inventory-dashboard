@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { Pool, type PoolClient } from "pg";
 
 const connectionString = process.env.DATABASE_URL;
@@ -65,10 +66,17 @@ export async function execute(
   return { rowCount: result.rowCount ?? 0, rows: result.rows };
 }
 
+// The moment a stock movement happened, when it is entered later (a Stock In / Out / Koreksi with a
+// past Tanggal, see app.ts): every row a transaction writes then takes it as created_at, through the
+// column defaults that read app.tx_time (schema.sql); input_at keeps when it was typed.
+export const txTime = new AsyncLocalStorage<string>();
+
 export async function withTransaction<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    const at = txTime.getStore();
+    if (at) await client.query("SELECT set_config('app.tx_time', $1, true)", [at]);
     const result = await fn(client);
     await client.query("COMMIT");
     return result;
