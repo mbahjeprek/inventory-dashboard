@@ -35,13 +35,15 @@ const MONTHS: Record<string, number> = {
 const clean = (v: string | undefined) => (v ?? "").replace(/\s+/g, " ").trim();
 const yes = (v: string | undefined) => /^y/i.test(clean(v));
 
-// "01 Jan 26" / "1 Januari 2026" -> [y, m, d]; two-digit years read as 20yy (or 19yy when that would
-// be in the future, for birth dates).
+// "01 Jan 26" / "1 Januari 2026" / "31-01-2026" / "07-05- 26" / "19--01-2004" -> [y, m, d]; two-digit
+// years read as 20yy (or 19yy when that would be in the future, for birth dates).
 function dmy(raw: string, futureOk: boolean): [number, number, number] | null {
-  const m = clean(raw).match(/^(\d{1,2})[ -/]([A-Za-z]+)[ -/](\d{2}|\d{4})$/);
+  const m = clean(raw)
+    .replace(/\s*([-/.])[\s\-/.]*/g, "$1")
+    .match(/^(\d{1,2})[ \-/.]([A-Za-z]+|\d{1,2})[ \-/.](\d{2}|\d{4})$/);
   if (!m) return null;
-  const mo = MONTHS[m[2].slice(0, 3).toLowerCase()];
-  if (!mo) return null;
+  const mo = /^\d+$/.test(m[2]) ? Number(m[2]) : MONTHS[m[2].slice(0, 3).toLowerCase()];
+  if (!mo || mo > 12 || Number(m[1]) < 1 || Number(m[1]) > 31) return null;
   let y = Number(m[3]);
   if (y < 100) {
     const now = new Date().getFullYear() % 100;
@@ -85,12 +87,14 @@ export function parseDailyReport(csv: string): { rows: Kunjungan[]; skipped: num
     istirahat: col(/^istirahat$/),
     hari: col(/hari istirahat/),
     rujukan: col(/^rujukan/),
-    provider: col(/^provider/),
+    provider: -1,
     detail: col(/^detail kejadian/),
   };
   if (c.tanggal < 0 || c.nama < 0) throw new Error("Kolom Tanggal / Nama Pasien tidak ditemukan");
   // Obat groups: "Terapi N, Qty N, Satuan", with a "Kode Obat" column before it in some sheets (Nilam).
-  const obatCols = header.flatMap((h, i) => (/^terapi \d+$/.test(h) ? [{ kode: header[i - 1] === "kode obat" ? i - 1 : -1, nama: i }] : []));
+  // Found by their "Qty N" column, since a Terapi header can be mistyped (Firus: "Provider, Qty 1").
+  const obatCols = header.flatMap((h, i) => (/^qty \d+$/.test(h) && i > 0 ? [{ kode: header[i - 2] === "kode obat" ? i - 2 : -1, nama: i - 1 }] : []));
+  const providerCol = header.findIndex((h, i) => /^provider/.test(h) && !obatCols.some((g) => g.nama === i));
   // "Tahun : 2026" / "Januari Tahun 2026" in the title rows fixes a mistyped year on a row ("02 Jan 25"
   // in a 2026 report).
   const tahunCell = grid.slice(0, headerAt).flat().map(clean).find((v) => /tahun\s*:?\s*\d{4}/i.test(v));
@@ -136,7 +140,7 @@ export function parseDailyReport(csv: string): { rows: Kunjungan[]; skipped: num
       istirahat: yes(r[c.istirahat]),
       hari_istirahat: parseInt(get(r, c.hari)) || (yes(r[c.istirahat]) ? 1 : 0),
       rujukan: yes(r[c.rujukan]),
-      provider: canonProvider(get(r, c.provider)),
+      provider: canonProvider(get(r, providerCol)),
       detail_kejadian: get(r, c.detail),
       obat,
     });
@@ -183,8 +187,11 @@ export function canonProvider(s: string): string {
 // HPHT, UK : 33 minggu) count as Antenatal Care. Fragments that are only numbers are not a diagnosis.
 const BY_KEY: Record<string, string> = {
   mcu: "MCU", medicalcheckup: "MCU", checkup: "MCU", calonkaryawan: "MCU",
-  oilpamthom: "Oil Palm Thorn", oilpamathom: "Oil Palm Thorn", oilpalnmthorn: "Oil Palm Thorn", oilpalmthorn: "Oil Palm Thorn",
+  oilpamthom: "Oil Palm Thorn", oilphamthorn: "Oil Palm Thorn", oilpamathom: "Oil Palm Thorn", oilpalnmthorn: "Oil Palm Thorn", oilpalmthorn: "Oil Palm Thorn",
   vartigo: "Vertigo", vertigo: "Vertigo",
+  obsfebrisr: "Obs Febris", vomidtus: "Vomitus", lspa: "Ispa", urti: "Ispa", miyalgia: "Myalgia", pilpitis: "Pulpitis", pupitis: "Pulpitis",
+  peneumonia: "Pneumonia", absen: "Abses", hipertensiht: "Hipertensi", colikabdomen: "Kolik Abdomen", kolikabdomen: "Kolik Abdomen", sembelit: "Konstipasi",
+  gout: "Gout", goutarthritis: "Gout", goutarthtritis: "Gout", goutartrhitis: "Gout", goutakut: "Gout", cephalgi: "Cephalgia", cephalgia: "Cephalgia",
   cepalgia: "Cephalgia", cepalgi: "Cephalgia", cepalagia: "Cephalgia", cheaplgia: "Cephalgia", chelagia: "Cephalgia", chepalgia: "Cephalgia", pusing: "Cephalgia",
   lbp: "Low Back Pain", lowbackpain: "Low Back Pain", sakitpinggang: "Low Back Pain",
   herpeszooter: "Herpes Zoster", herpezzooter: "Herpes Zoster", herpeszoster: "Herpes Zoster",
@@ -206,9 +213,9 @@ const BY_PREFIX: [RegExp, string][] = [
   [/^(gv\b|gv\.|ganti verban)/i, "Ganti Verban (GV)"],
   [/^pos(t)? ?op/i, "Post Op"],
   [/^(up|aff) h(e)?a?cting/i, "Aff Hecting"],
-  [/^vulnus lacer/i, "Vulnus Laceratum"],
-  [/^vulnus punct/i, "Vulnus Punctum"],
-  [/^vulnu[as] e(k?s|ks)c?k?[oe]?r/i, "Vulnus Ekskoriatum"],
+  [/^vulnus la[cs]er/i, "Vulnus Laceratum"],
+  [/^vulnus pu[n]?ct/i, "Vulnus Punctum"],
+  [/^vulnu[as] e(k?s|ks|x)c?k?[oe]?r/i, "Vulnus Ekskoriatum"],
   [/^abses\b/i, "Abses"],
   [/^iritasi mata/i, "Iritasi Mata"],
   [/^chest pain/i, "Chest Pain"],
