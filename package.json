@@ -18,6 +18,7 @@
     "import:karyawan": "tsx server/src/importKaryawan.ts",
     "import:alat-berat": "tsx server/src/importAlatBerat.ts",
     "import:bbm": "tsx server/src/importBbm.ts",
+    "import:klinik-laporan": "tsx server/src/importKlinikLaporan.ts",
     "user:create": "tsx server/src/manageUsers.ts create",
     "user:list": "tsx server/src/manageUsers.ts list",
     "user:delete": "tsx server/src/manageUsers.ts delete"

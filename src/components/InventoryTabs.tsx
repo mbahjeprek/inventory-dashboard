@@ -1,19 +1,21 @@
 import { useSearchParams } from "react-router-dom";
-import { Boxes, ArrowDownCircle, ArrowUpCircle } from "lucide-react";
+import { Boxes, ArrowDownCircle, ArrowUpCircle, HeartPulse } from "lucide-react";
 
-export type InventoryTab = "stok" | "in" | "out";
+// laporan = Laporan Harian pasien, only on the Klinik pages.
+export type InventoryTab = "stok" | "in" | "out" | "laporan";
 
 const TABS: { key: InventoryTab; label: string; icon: typeof Boxes }[] = [
   { key: "stok", label: "Stok", icon: Boxes },
   { key: "in", label: "Stock In", icon: ArrowDownCircle },
   { key: "out", label: "Stock Out", icon: ArrowUpCircle },
+  { key: "laporan", label: "Laporan Harian", icon: HeartPulse },
 ];
 
 // The active tab lives in the URL (?tab=in / ?tab=out) so a tab can be linked and survives a reload.
 export function useInventoryTab(): [InventoryTab, (t: InventoryTab) => void] {
   const [params, setParams] = useSearchParams();
   const raw = params.get("tab");
-  const tab: InventoryTab = raw === "in" || raw === "out" ? raw : "stok";
+  const tab: InventoryTab = raw === "in" || raw === "out" || raw === "laporan" ? raw : "stok";
   const setTab = (t: InventoryTab) =>
     setParams(
       (cur) => {
@@ -28,10 +30,10 @@ export function useInventoryTab(): [InventoryTab, (t: InventoryTab) => void] {
 }
 
 // Stok · Stock In · Stock Out switcher shown under an inventory page's title.
-export function InventoryTabs({ value, onChange }: { value: InventoryTab; onChange: (t: InventoryTab) => void }) {
+export function InventoryTabs({ value, onChange, laporan = false }: { value: InventoryTab; onChange: (t: InventoryTab) => void; laporan?: boolean }) {
   return (
     <div className="flex gap-1 border-b border-[var(--border)]" role="tablist">
-      {TABS.map(({ key, label, icon: Icon }) => {
+      {TABS.filter((t) => laporan || t.key !== "laporan").map(({ key, label, icon: Icon }) => {
         const active = value === key;
         return (
           <button

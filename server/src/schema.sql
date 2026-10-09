@@ -568,3 +568,11 @@ CREATE TABLE IF NOT EXISTS klinik_laporan_sumber (
   synced_rows INTEGER,
   synced_by TEXT
 );
+-- Kunjungan are now entered in the app (Klinik > Laporan Harian); the rows read from the Daily Report
+-- sheets once at go-live keep sumber = 'SHEET'. Foto = the visit's evidence photo (optional).
+ALTER TABLE klinik_kunjungan ADD COLUMN IF NOT EXISTS sumber TEXT NOT NULL DEFAULT 'APP';
+ALTER TABLE klinik_kunjungan ADD COLUMN IF NOT EXISTS evidence_id UUID;
+ALTER TABLE klinik_kunjungan ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now();
+ALTER TABLE klinik_kunjungan ADD COLUMN IF NOT EXISTS created_by TEXT NOT NULL DEFAULT '';
+ALTER TABLE klinik_kunjungan ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ;
+ALTER TABLE klinik_kunjungan_obat ADD COLUMN IF NOT EXISTS urut INTEGER NOT NULL DEFAULT 0;

@@ -32,6 +32,7 @@ import { useDragScroll } from "../hooks/useDragScroll";
 import { useAuth } from "../context/AuthContext";
 import { can } from "../lib/access";
 import { InventoryTabs, useInventoryTab } from "../components/InventoryTabs";
+import { KlinikLaporanTab } from "../components/KlinikLaporanTab";
 import { LedgerHistory } from "../components/LedgerHistory";
 import { StockBatchModal } from "../components/StockBatchModal";
 
@@ -280,12 +281,14 @@ export function InventoryKlinikPage({ klinik }: { klinik: string }) {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold text-[var(--text-primary)]">Inventory Klinik - {klinik}</h1>
-          <p className="text-sm text-[var(--text-secondary)]">{total.toLocaleString("id-ID")} item obat & alat medis</p>
+          <p className="text-sm text-[var(--text-secondary)]">
+            {tab === "laporan" ? "Laporan harian pasien klinik" : `${total.toLocaleString("id-ID")} item obat & alat medis`}
+          </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <ActivityLogButton module="KLINIK" estate={klinik} />
           {tab === "stok" && <ExportButtons total={total} buildReport={buildReport} fileName={`inventory-klinik-${klinik.toLowerCase()}`} />}
-          {canInput && (
+          {canInput && tab !== "laporan" && (
             <button
               onClick={() => setShowBatch(true)}
               title="Banyak transaksi sekaligus"
@@ -294,7 +297,7 @@ export function InventoryKlinikPage({ klinik }: { klinik: string }) {
               <ListPlus size={16} /> Input Banyak
             </button>
           )}
-          {canTx && (<button
+          {canTx && tab !== "laporan" && (<button
             onClick={() => setShowPicker(true)}
             className="inline-flex items-center gap-1.5 text-sm px-3.5 py-2 rounded-md border border-[var(--accent-blue-border)] text-[var(--accent-blue)] hover:bg-[var(--accent-blue-bg)]"
           >
@@ -303,9 +306,11 @@ export function InventoryKlinikPage({ klinik }: { klinik: string }) {
         </div>
       </div>
 
-      <InventoryTabs value={tab} onChange={setTab} />
+      <InventoryTabs value={tab} onChange={setTab} laporan />
 
-      {tab !== "stok" ? (
+      {tab === "laporan" ? (
+        <KlinikLaporanTab key={klinik} klinik={klinik} />
+      ) : tab !== "stok" ? (
         <LedgerHistory scope={{ kind: "klinik", name: klinik }} type={tab === "in" ? "IN" : "OUT"} refreshKey={historyKey} />
       ) : (
         <>

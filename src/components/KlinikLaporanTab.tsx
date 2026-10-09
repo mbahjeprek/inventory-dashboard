@@ -1,19 +1,22 @@
 import { useEffect, useMemo, useState } from "react";
-import { Activity, AlertTriangle, BedDouble, ChevronLeft, ChevronRight, ClipboardList, ExternalLink, Hospital, RefreshCw, Search, Stethoscope, X } from "lucide-react";
+import { AlertTriangle, BedDouble, ChevronLeft, ChevronRight, ClipboardList, Hospital, LayoutDashboard, Pencil, Plus, Search, Stethoscope, Table2, Trash2 } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { api, errorText, ESTATES, type Kunjungan, type LaporanCount, type LaporanKlinikSummary } from "../lib/api";
+import { api, errorText, type Kunjungan, type LaporanCount, type LaporanKlinikSummary } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
-import { can, userEstates } from "../lib/access";
-import { StatCard } from "../components/StatCard";
-import { ExportButtons } from "../components/ExportButtons";
+import { can } from "../lib/access";
+import { StatCard } from "./StatCard";
+import { ExportButtons } from "./ExportButtons";
+import { ConfirmDialog } from "./ConfirmDialog";
+import { EvidenceLink } from "./EvidenceInput";
+import { KunjunganModal } from "./KunjunganModal";
 import { fetchAllRows, type TableReport } from "../lib/printTable";
-import { tanggalWaktu } from "../lib/datetime";
+import { MAX_TERAPI, hariOf, kodeTglOf, periodeOf, tglSheet, yaTidak } from "../lib/kunjungan";
 
 const PAGE_SIZE = 50;
-const LABEL: Record<string, string> = { NILAM: "Nilam", KNS: "KNS", WJA: "WJA", ZAMRUD: "Zamrud", FIRUS: "Firus" };
 const BULAN = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
 type Flag = "" | "kecelakaan" | "istirahat" | "rujukan" | "mcu";
 const FLAG_LABEL: Record<Exclude<Flag, "">, string> = { kecelakaan: "Kecelakaan kerja", istirahat: "Surat sakit", rujukan: "Rujukan", mcu: "MCU" };
+type View = "data" | "ringkasan";
 
 // Local (Jakarta) dates as YYYY-MM-DD.
 const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -26,7 +29,8 @@ const pct = (n: number, of: number) => (of ? `${fmt((n / of) * 100)}%` : "0%");
 
 function presets() {
   const now = new Date();
-  const y = now.getFullYear(), m = now.getMonth();
+  const y = now.getFullYear(),
+    m = now.getMonth();
   const today = isoLocal(now);
   return [
     { key: "hari", label: "Hari ini", from: today, to: today },
@@ -73,46 +77,49 @@ function Panel({ title, children, right }: { title: string; children: React.Reac
 
 // Laporan Harian Klinik: the KPI dashboard over each clinic's Daily Report sheet (visits, diagnoses,
 // kecelakaan kerja, surat sakit, rujukan, obat given) plus the visit list.
-export function LaporanKlinikPage() {
+
+// Klinik > Laporan Harian of one clinic: the patient visits (entered here, the columns of the Daily
+// Report sheet) and their KPI summary, for one period.
+export function KlinikLaporanTab({ klinik }: { klinik: string }) {
   const { user } = useAuth();
-  const kliniks = ESTATES.filter((e) => userEstates(user).includes(e));
-  const canSync = can(user, "klinik.input");
-  const isSuper = user?.role === "superuser";
+  const canInput = can(user, "klinik.input");
+  const canEdit = can(user, "klinik.edit");
+  const canDelete = can(user, "klinik.delete");
   const P = useMemo(presets, []);
-  const [klinik, setKlinik] = useState<string>(kliniks.length === 1 ? kliniks[0] : "NILAM");
+  const [view, setView] = useState<View>("data");
   const [preset, setPreset] = useState("bulan");
   const [dateFrom, setDateFrom] = useState(P[2].from);
   const [dateTo, setDateTo] = useState(P[2].to);
   const [summary, setSummary] = useState<LaporanKlinikSummary | null>(null);
   const [loadError, setLoadError] = useState("");
   const [allDiagnosis, setAllDiagnosis] = useState(false);
-  // Visit list
   const [rows, setRows] = useState<Kunjungan[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const [flag, setFlag] = useState<Flag>("");
-  // Sync
-  const [syncing, setSyncing] = useState(false);
-  const [syncMsg, setSyncMsg] = useState<{ ok: boolean; text: string } | null>(null);
-  const [editUrl, setEditUrl] = useState<string | null>(null);
+  const [editing, setEditing] = useState<Kunjungan | null | "new">(null);
+  const [deleting, setDeleting] = useState<Kunjungan | null>(null);
+  const [actionError, setActionError] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
 
   const range = { klinik, dateFrom, dateTo };
   useEffect(() => {
+    if (view !== "ringkasan") return;
     setLoadError("");
     api
       .laporanKlinikSummary(range)
       .then(setSummary)
       .catch((e) => {
         setSummary(null);
-        setLoadError(errorText(e, "Gagal memuat laporan"));
+        setLoadError(errorText(e, "Gagal memuat ringkasan"));
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [klinik, dateFrom, dateTo, reloadKey]);
+  }, [view, klinik, dateFrom, dateTo, reloadKey]);
 
   const listQuery = (p: number, ps: number) => ({ ...range, search, flag, page: p, pageSize: ps });
   useEffect(() => {
+    if (view !== "data") return;
     const t = setTimeout(() => {
       api
         .laporanKlinikKunjungan(listQuery(page, PAGE_SIZE))
@@ -127,7 +134,7 @@ export function LaporanKlinikPage() {
     }, 250);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [klinik, dateFrom, dateTo, search, flag, page, reloadKey]);
+  }, [view, klinik, dateFrom, dateTo, search, flag, page, reloadKey]);
   useEffect(() => setPage(1), [klinik, dateFrom, dateTo, search, flag]);
 
   const pickPreset = (key: string) => {
@@ -137,19 +144,25 @@ export function LaporanKlinikPage() {
     setDateTo(p.to);
   };
 
-  const sumber = summary?.sumber.find((s) => s.klinik === klinik);
-  const sync = async (url?: string) => {
-    setSyncing(true);
-    setSyncMsg(null);
+  // A KPI card opens its visits in Data Kunjungan.
+  const flagCard = (f: Exclude<Flag, "">) => ({
+    onClick: () => {
+      setFlag(f);
+      setView("data");
+    },
+    title: `Lihat daftar ${FLAG_LABEL[f].toLowerCase()}`,
+  });
+
+  const remove = async () => {
+    if (!deleting) return;
+    setActionError("");
     try {
-      const r = await api.syncLaporanKlinik({ klinik, url });
-      setSyncMsg({ ok: true, text: `${fmt(r.rows)} kunjungan terbaca, data s/d ${tgl(r.last)}${r.skipped ? ` · ${r.skipped} baris dilewati` : ""}` });
-      setEditUrl(null);
+      await api.deleteKunjungan(deleting.id);
       setReloadKey((k) => k + 1);
     } catch (e) {
-      setSyncMsg({ ok: false, text: errorText(e, "Gagal sinkron") });
+      setActionError(errorText(e, "Gagal menghapus kunjungan"));
     } finally {
-      setSyncing(false);
+      setDeleting(null);
     }
   };
 
@@ -182,81 +195,100 @@ export function LaporanKlinikPage() {
   }, [summary, dateFrom, dateTo]);
 
   const t = summary?.totals;
-  const klinikName = klinik ? `Klinik ${LABEL[klinik]}` : "Semua Klinik";
   const periodText = `${tgl(dateFrom)} - ${tgl(dateTo)}`;
 
+  // Excel / Cetak: the Daily Report sheet's columns, in its order, oldest visit first.
   const buildReport = async (): Promise<TableReport> => {
-    const all = await fetchAllRows((p, ps) => api.laporanKlinikKunjungan(listQuery(p, ps)));
+    const all = (await fetchAllRows((p, ps) => api.laporanKlinikKunjungan(listQuery(p, ps)))).reverse();
+    const terapiCols = Array.from({ length: MAX_TERAPI }, (_, i) => [{ label: `Terapi ${i + 1}` }, { label: `Qty ${i + 1}`, align: "right" as const }, { label: "Satuan" }]).flat();
     return {
-      title: `Laporan Harian Pasien - ${klinikName}`,
+      title: `Laporan Harian Pasien Klinik - Estate ${klinik}`,
       subtitle: [`Periode: ${periodText}`, ...(flag ? [`Filter: ${FLAG_LABEL[flag]}`] : []), ...(search ? [`Cari: "${search}"`] : [])],
       landscape: true,
       columns: [
         { label: "No", align: "right" },
+        { label: "Periode" },
         { label: "Tanggal", nowrap: true },
+        { label: "Kode tgl" },
+        { label: "Hari" },
         { label: "Jenis Kunjungan" },
         { label: "Nama Pasien" },
-        { label: "L/P" },
+        { label: "Jenis Kelamin L/P" },
+        { label: "Tanggal Lahir", nowrap: true },
         { label: "Usia", align: "right" },
-        { label: "Status" },
+        { label: "Status Pasien" },
+        { label: "Nama Yang Menanggung" },
         { label: "Jabatan" },
         { label: "Divisi" },
+        { label: "Tempat Tinggal" },
+        { label: "Asal Pasien Non PT AKSS" },
         { label: "Diagnosis" },
-        { label: "Kecelakaan Kerja" },
-        { label: "Istirahat (hari)", align: "right" },
+        { label: "Kecelakaan Kerja Y/N" },
+        { label: "Istirahat" },
+        { label: "Jumlah Hari Istirahat", align: "right" },
         { label: "Rujukan" },
-        { label: "Obat" },
+        { label: "Provider" },
+        ...terapiCols,
+        { label: "Foto" },
+        { label: "Detail Kejadian" },
       ],
-      rows: all.map((k, i) => [
-        i + 1,
-        tgl(k.tanggal_iso),
+      rows: all.map((k) => [
+        k.nomor,
+        periodeOf(k.tanggal_iso),
+        tglSheet(k.tanggal_iso),
+        kodeTglOf(k.tanggal_iso),
+        hariOf(k.tanggal_iso),
         k.jenis_kunjungan,
         k.nama_pasien,
         k.jenis_kelamin,
+        tglSheet(k.tanggal_lahir_iso),
         k.usia,
         k.status_pasien,
+        k.penanggung,
         k.jabatan,
         k.divisi,
+        k.tempat_tinggal,
+        k.asal_pasien,
         k.diagnosis,
-        k.kecelakaan_kerja ? "Ya" : "Tidak",
+        yaTidak(k.kecelakaan_kerja),
+        yaTidak(k.istirahat),
         k.istirahat ? k.hari_istirahat : "",
-        k.rujukan ? k.provider || "Ya" : "",
-        k.obat,
+        yaTidak(k.rujukan),
+        k.provider,
+        ...Array.from({ length: MAX_TERAPI }, (_, i) => {
+          const o = k.obat[i];
+          return o ? [o.nama_obat, o.qty, o.satuan] : ["", "", ""];
+        }).flat(),
+        k.evidence_id ? "Ada" : "",
+        k.detail_kejadian,
       ]),
     };
   };
 
   const totalPages = Math.max(Math.ceil(total / PAGE_SIZE), 1);
-  const flagCard = (f: Exclude<Flag, "">) => ({ onClick: () => setFlag(flag === f ? "" : f), active: flag === f, title: flag === f ? "Tampilkan semua kunjungan" : `Lihat daftar ${FLAG_LABEL[f].toLowerCase()}` });
+  const tab = (v: View, label: string, Icon: typeof Table2) => (
+    <button
+      onClick={() => setView(v)}
+      className={`inline-flex items-center gap-1.5 text-sm px-3.5 py-2 ${view === v ? "bg-[var(--accent-blue)] text-white" : "text-[var(--text-secondary)] hover:bg-[#f1f5f9]"}`}
+    >
+      <Icon size={15} /> {label}
+    </button>
+  );
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-semibold text-[var(--text-primary)]">Laporan Harian Klinik</h1>
-          <p className="text-sm text-[var(--text-secondary)]">KPI klinik dari Daily Report pasien · {klinikName} · {periodText}</p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <ExportButtons total={total} buildReport={buildReport} fileName={`laporan-harian-klinik-${(klinik || "semua").toLowerCase()}`} />
-        </div>
-      </div>
-
-      {/* Filters: one row above everything they affect. */}
+      {/* One row: what to see, which period, and the actions. */}
       <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg p-3 flex flex-wrap items-center gap-2">
-        <select value={klinik} onChange={(e) => setKlinik(e.target.value)} className="text-sm rounded-md border border-[var(--border)] px-3 py-2 bg-[var(--bg-card)]" aria-label="Klinik">
-          {kliniks.length > 1 && <option value="">Semua klinik</option>}
-          {kliniks.map((k) => (
-            <option key={k} value={k}>
-              Klinik {LABEL[k]}
-            </option>
-          ))}
-        </select>
+        <div className="inline-flex rounded-md border border-[var(--border)] overflow-hidden" role="tablist">
+          {tab("data", "Data Kunjungan", Table2)}
+          {tab("ringkasan", "Ringkasan KPI", LayoutDashboard)}
+        </div>
         <div className="inline-flex flex-wrap rounded-md border border-[var(--border)] overflow-hidden" role="group" aria-label="Periode">
           {P.map((p) => (
             <button
               key={p.key}
               onClick={() => pickPreset(p.key)}
-              className={`text-xs px-3 py-2 border-r last:border-r-0 border-[var(--border)] ${preset === p.key ? "bg-[var(--accent-blue)] text-white" : "text-[var(--text-secondary)] hover:bg-[#f1f5f9]"}`}
+              className={`text-xs px-3 py-2 border-r last:border-r-0 border-[var(--border)] ${preset === p.key ? "bg-[var(--accent-blue-bg)] text-[var(--accent-blue)] font-medium" : "text-[var(--text-secondary)] hover:bg-[#f1f5f9]"}`}
             >
               {p.label}
             </button>
@@ -285,60 +317,21 @@ export function LaporanKlinikPage() {
             aria-label="Sampai tanggal"
           />
         </div>
+        <div className="flex flex-wrap gap-2 ml-auto">
+          {view === "data" && <ExportButtons total={total} buildReport={buildReport} fileName={`laporan-harian-klinik-${klinik.toLowerCase()}`} />}
+          {canInput && (
+            <button onClick={() => setEditing("new")} className="inline-flex items-center gap-1.5 text-sm px-3.5 py-2 rounded-md font-medium bg-[var(--accent-blue)] text-white hover:opacity-90">
+              <Plus size={16} /> Input Kunjungan
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* Where the data comes from, and refreshing it. */}
-      {klinik && (
-        <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg p-3 text-xs flex flex-wrap items-center gap-x-4 gap-y-2">
-          <span className="text-[var(--text-secondary)]">
-            Sumber: Google Sheet Daily Report{" "}
-            {sumber ? (
-              <>
-                <a href={sumber.sheet_url} target="_blank" rel="noreferrer" className="text-[var(--accent-blue)] hover:underline inline-flex items-center gap-0.5">
-                  buka <ExternalLink size={11} />
-                </a>
-                {" · "}terakhir sinkron {sumber.synced_at ? tanggalWaktu(null, sumber.synced_at) : "-"}
-                {sumber.synced_by ? ` oleh ${sumber.synced_by}` : ""} ({fmt(sumber.synced_rows ?? 0)} kunjungan)
-              </>
-            ) : (
-              <b className="text-[var(--accent-amber)]">belum diatur untuk Klinik {LABEL[klinik]}</b>
-            )}
-          </span>
-          {editUrl !== null ? (
-            <span className="flex flex-1 min-w-[16rem] gap-1.5">
-              <input
-                value={editUrl}
-                onChange={(e) => setEditUrl(e.target.value)}
-                placeholder="https://docs.google.com/spreadsheets/d/.../edit?gid=..."
-                className="flex-1 min-w-0 text-xs rounded-md border border-[var(--border)] px-2 py-1.5"
-              />
-              <button onClick={() => sync(editUrl)} disabled={syncing || !editUrl.trim()} className="px-3 rounded-md bg-[var(--accent-blue)] text-white disabled:opacity-50">
-                Simpan & sinkron
-              </button>
-              <button onClick={() => setEditUrl(null)} className="px-2 rounded-md border border-[var(--border)] text-[var(--text-muted)]" title="Batal">
-                <X size={13} />
-              </button>
-            </span>
-          ) : (
-            <span className="flex gap-1.5">
-              {canSync && sumber && (
-                <button onClick={() => sync()} disabled={syncing} className="inline-flex items-center gap-1 px-3 py-1.5 rounded-md border border-[var(--accent-blue-border)] text-[var(--accent-blue)] hover:bg-[var(--accent-blue-bg)] disabled:opacity-50">
-                  <RefreshCw size={13} className={syncing ? "animate-spin" : ""} /> {syncing ? "Menyinkron..." : "Sinkron sekarang"}
-                </button>
-              )}
-              {(isSuper || (canSync && !sumber)) && (
-                <button onClick={() => setEditUrl(sumber?.sheet_url ?? "")} className="px-3 py-1.5 rounded-md border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[#f1f5f9]">
-                  {sumber ? "Ganti link" : "Atur link sheet"}
-                </button>
-              )}
-            </span>
-          )}
-          {syncMsg && <span className={syncMsg.ok ? "text-[var(--accent-green)]" : "text-[var(--accent-red)]"}>{syncMsg.text}</span>}
-        </div>
-      )}
-
       {loadError && <p className="text-sm text-[var(--accent-red)]">{loadError}</p>}
+      {actionError && <p className="text-sm text-[var(--accent-red)]">{actionError}</p>}
 
+      {view === "ringkasan" ? (
+        <>
       {t && (
         <>
           <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
@@ -489,7 +482,6 @@ export function LaporanKlinikPage() {
                         </span>
                         <span className="text-[var(--text-muted)]">
                           {tgl(k.tanggal_iso)}
-                          {!klinik && ` · ${LABEL[k.klinik]}`}
                         </span>
                       </div>
                       <div className="text-[var(--text-secondary)]">
@@ -508,101 +500,161 @@ export function LaporanKlinikPage() {
           </div>
         </>
       )}
-
-      {/* Visit list */}
-      <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg overflow-hidden">
-        <div className="p-3 flex flex-wrap items-center gap-2 border-b border-[var(--border)]">
-          <h3 className="text-sm font-semibold text-[var(--text-primary)] mr-2 inline-flex items-center gap-1.5">
-            <Activity size={15} className="text-[var(--accent-blue)]" /> Daftar kunjungan
-          </h3>
-          <div className="relative flex-1 min-w-[12rem] max-w-md">
-            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Cari nama pasien, diagnosis, divisi, jabatan..."
-              className="w-full text-sm rounded-md border border-[var(--border)] pl-8 pr-3 py-1.5"
-            />
+        </>
+      ) : (
+        <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg overflow-hidden">
+          <div className="p-3 flex flex-wrap items-center gap-2 border-b border-[var(--border)]">
+            <div className="relative flex-1 min-w-[12rem] max-w-md">
+              <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Cari nama pasien, diagnosis, divisi, jabatan..."
+                className="w-full text-sm rounded-md border border-[var(--border)] pl-8 pr-3 py-1.5"
+              />
+            </div>
+            <select value={flag} onChange={(e) => setFlag(e.target.value as Flag)} className="text-sm rounded-md border border-[var(--border)] px-2 py-1.5" aria-label="Filter">
+              <option value="">Semua kunjungan</option>
+              {(Object.keys(FLAG_LABEL) as Exclude<Flag, "">[]).map((k) => (
+                <option key={k} value={k}>
+                  {FLAG_LABEL[k]}
+                </option>
+              ))}
+            </select>
+            <span className="text-xs text-[var(--text-muted)] ml-auto">
+              {fmt(total)} kunjungan · {periodText}
+            </span>
           </div>
-          {flag && (
-            <button onClick={() => setFlag("")} className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full bg-[var(--accent-blue-bg)] text-[var(--accent-blue)] border border-[var(--accent-blue-border)]">
-              {FLAG_LABEL[flag]} <X size={12} />
-            </button>
-          )}
-          <span className="text-xs text-[var(--text-muted)] ml-auto">{fmt(total)} kunjungan</span>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="grid-table data-table text-sm">
-            <thead>
-              <tr className="bg-[#f8fafc] text-[var(--text-secondary)] text-xs uppercase">
-                <th className="px-3 py-2.5 text-left">Tanggal</th>
-                {!klinik && <th className="px-3 py-2.5 text-left">Klinik</th>}
-                <th className="px-3 py-2.5 text-left">Pasien</th>
-                <th className="px-3 py-2.5 text-left">Status</th>
-                <th className="px-3 py-2.5 text-left">Divisi / Jabatan</th>
-                <th className="px-3 py-2.5 text-left">Kunjungan</th>
-                <th className="px-3 py-2.5 text-left">Diagnosis</th>
-                <th className="px-3 py-2.5 text-left">Keterangan</th>
-                <th className="px-3 py-2.5 text-left">Obat</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.length === 0 ? (
-                <tr>
-                  <td colSpan={9} className="px-4 py-8 text-center text-[var(--text-muted)]">
-                    Tidak ada kunjungan
-                  </td>
+          <div className="overflow-x-auto">
+            <table className="grid-table data-table text-sm">
+              <thead>
+                <tr className="bg-[#f8fafc] text-[var(--text-secondary)] text-xs uppercase">
+                  <th className="px-3 py-2.5 text-right">No</th>
+                  <th className="px-3 py-2.5 text-left">Tanggal</th>
+                  <th className="px-3 py-2.5 text-left">Jenis Kunjungan</th>
+                  <th className="px-3 py-2.5 text-left">Pasien</th>
+                  <th className="px-3 py-2.5 text-left">Status</th>
+                  <th className="px-3 py-2.5 text-left">Jabatan / Divisi</th>
+                  <th className="px-3 py-2.5 text-left">Tempat Tinggal / Asal</th>
+                  <th className="px-3 py-2.5 text-left">Diagnosis</th>
+                  <th className="px-3 py-2.5 text-left">Medis</th>
+                  <th className="px-3 py-2.5 text-left">Terapi</th>
+                  <th className="px-3 py-2.5 text-left">Dokumentasi</th>
+                  {(canEdit || canDelete) && <th className="px-3 py-2.5 text-right">Aksi</th>}
                 </tr>
-              ) : (
-                rows.map((k) => (
-                  <tr key={k.id} className="border-t border-[var(--border)] hover:bg-[#f8fafc] align-top">
-                    <td className="px-3 py-2 whitespace-nowrap">{tgl(k.tanggal_iso)}</td>
-                    {!klinik && <td className="px-3 py-2">{LABEL[k.klinik]}</td>}
-                    <td className="px-3 py-2 whitespace-nowrap">
-                      {k.nama_pasien}
-                      <div className="text-[11px] text-[var(--text-muted)]">
-                        {[k.jenis_kelamin, k.usia !== null && `${k.usia} th`].filter(Boolean).join(" · ")}
-                      </div>
+              </thead>
+              <tbody>
+                {rows.length === 0 ? (
+                  <tr>
+                    <td colSpan={12} className="px-4 py-8 text-center text-[var(--text-muted)]">
+                      Belum ada kunjungan di periode ini
                     </td>
-                    <td className="px-3 py-2 text-[var(--text-secondary)]">
-                      {k.status_pasien}
-                      {k.penanggung && <div className="text-[11px] text-[var(--text-muted)]">dari {k.penanggung}</div>}
-                    </td>
-                    <td className="px-3 py-2 text-[var(--text-secondary)]">
-                      {k.divisi || "-"}
-                      {k.jabatan && <div className="text-[11px] text-[var(--text-muted)]">{k.jabatan}</div>}
-                    </td>
-                    <td className="px-3 py-2 text-[var(--text-secondary)] whitespace-nowrap">{k.jenis_kunjungan}</td>
-                    <td className="px-3 py-2">{k.diagnosis || "-"}</td>
-                    <td className="px-3 py-2 text-xs">
-                      <div className="flex flex-wrap gap-1">
-                        {k.kecelakaan_kerja && <span className="px-1.5 py-0.5 rounded bg-[var(--accent-red-bg)] text-[var(--accent-red)]">Kecelakaan kerja</span>}
-                        {k.istirahat && <span className="px-1.5 py-0.5 rounded bg-[var(--accent-amber-bg)] text-[var(--accent-amber)]">Istirahat {k.hari_istirahat} hr</span>}
-                        {k.rujukan && <span className="px-1.5 py-0.5 rounded bg-[var(--accent-blue-bg)] text-[var(--accent-blue)]">Rujuk{k.provider ? `: ${k.provider}` : ""}</span>}
-                      </div>
-                      {k.detail_kejadian && <div className="text-[11px] text-[var(--text-muted)] mt-0.5">{k.detail_kejadian}</div>}
-                    </td>
-                    <td className="col-grow px-3 py-2 text-xs text-[var(--text-secondary)]">{k.obat || "-"}</td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-        <div className="flex items-center justify-between px-4 py-3 border-t border-[var(--border)] text-sm text-[var(--text-secondary)]">
-          <span>
-            Halaman {page} dari {totalPages}
-          </span>
-          <div className="flex gap-2">
-            <button disabled={page <= 1} onClick={() => setPage((p) => p - 1)} className="p-1.5 rounded-md border border-[var(--border)] disabled:opacity-40" aria-label="Halaman sebelumnya">
-              <ChevronLeft size={16} />
-            </button>
-            <button disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)} className="p-1.5 rounded-md border border-[var(--border)] disabled:opacity-40" aria-label="Halaman berikutnya">
-              <ChevronRight size={16} />
-            </button>
+                ) : (
+                  rows.map((k) => (
+                    <tr key={k.id} className="border-t border-[var(--border)] hover:bg-[#f8fafc] align-top">
+                      <td className="px-3 py-2 text-right text-[var(--text-muted)]">{k.nomor}</td>
+                      <td className="px-3 py-2 whitespace-nowrap">
+                        {tgl(k.tanggal_iso)}
+                        <div className="text-[11px] text-[var(--text-muted)]">
+                          {hariOf(k.tanggal_iso)} · {periodeOf(k.tanggal_iso)}
+                        </div>
+                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap text-[var(--text-secondary)]">{k.jenis_kunjungan}</td>
+                      <td className="px-3 py-2 whitespace-nowrap">
+                        {k.nama_pasien}
+                        <div className="text-[11px] text-[var(--text-muted)]">
+                          {[k.jenis_kelamin, k.usia !== null && `${k.usia} th`, k.tanggal_lahir_iso && `lahir ${tglSheet(k.tanggal_lahir_iso)}`].filter(Boolean).join(" · ")}
+                        </div>
+                      </td>
+                      <td className="px-3 py-2 text-[var(--text-secondary)]">
+                        {k.status_pasien}
+                        {k.penanggung && <div className="text-[11px] text-[var(--text-muted)]">ditanggung {k.penanggung}</div>}
+                      </td>
+                      <td className="px-3 py-2 text-[var(--text-secondary)]">
+                        {k.jabatan || "-"}
+                        {k.divisi && <div className="text-[11px] text-[var(--text-muted)]">{k.divisi}</div>}
+                      </td>
+                      <td className="px-3 py-2 text-[var(--text-secondary)]">
+                        {k.tempat_tinggal || "-"}
+                        {k.asal_pasien && <div className="text-[11px] text-[var(--text-muted)]">{k.asal_pasien}</div>}
+                      </td>
+                      <td className="col-grow px-3 py-2">{k.diagnosis || "-"}</td>
+                      <td className="px-3 py-2 text-xs">
+                        <div className="flex flex-wrap gap-1">
+                          {k.kecelakaan_kerja && <span className="px-1.5 py-0.5 rounded bg-[var(--accent-red-bg)] text-[var(--accent-red)]">Kecelakaan kerja</span>}
+                          {k.istirahat && <span className="px-1.5 py-0.5 rounded bg-[var(--accent-amber-bg)] text-[var(--accent-amber)]">Istirahat {k.hari_istirahat} hr</span>}
+                          {k.rujukan && <span className="px-1.5 py-0.5 rounded bg-[var(--accent-blue-bg)] text-[var(--accent-blue)]">Rujuk{k.provider ? `: ${k.provider}` : ""}</span>}
+                          {!k.kecelakaan_kerja && !k.istirahat && !k.rujukan && <span className="text-[var(--text-muted)]">-</span>}
+                        </div>
+                      </td>
+                      <td className="col-grow px-3 py-2 text-xs text-[var(--text-secondary)]">
+                        {k.obat.length
+                          ? k.obat.map((o, i) => (
+                              <div key={i}>
+                                {o.nama_obat}
+                                {o.qty !== null && <span className="text-[var(--text-muted)]"> {fmt(o.qty)} {o.satuan}</span>}
+                              </div>
+                            ))
+                          : "-"}
+                      </td>
+                      <td className="px-3 py-2 text-xs text-[var(--text-secondary)]">
+                        {k.evidence_id && <EvidenceLink id={k.evidence_id} />}
+                        {k.detail_kejadian && <div className="text-[11px] text-[var(--text-muted)] max-w-[16rem]">{k.detail_kejadian}</div>}
+                        {!k.evidence_id && !k.detail_kejadian && "-"}
+                      </td>
+                      {(canEdit || canDelete) && (
+                        <td className="px-3 py-2 text-right">
+                          <div className="inline-flex gap-1.5">
+                            {canEdit && (
+                              <button onClick={() => setEditing(k)} title="Edit kunjungan" className="p-1.5 rounded-md border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[#f1f5f9]">
+                                <Pencil size={14} />
+                              </button>
+                            )}
+                            {canDelete && (
+                              <button
+                                onClick={() => setDeleting(k)}
+                                title="Hapus kunjungan"
+                                className="p-1.5 rounded-md border border-[var(--accent-red-border)] text-[var(--accent-red)] hover:bg-[var(--accent-red-bg)]"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      )}
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+          <div className="flex items-center justify-between px-4 py-3 border-t border-[var(--border)] text-sm text-[var(--text-secondary)]">
+            <span>
+              Halaman {page} dari {totalPages}
+            </span>
+            <div className="flex gap-2">
+              <button disabled={page <= 1} onClick={() => setPage((p) => p - 1)} className="p-1.5 rounded-md border border-[var(--border)] disabled:opacity-40" aria-label="Halaman sebelumnya">
+                <ChevronLeft size={16} />
+              </button>
+              <button disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)} className="p-1.5 rounded-md border border-[var(--border)] disabled:opacity-40" aria-label="Halaman berikutnya">
+                <ChevronRight size={16} />
+              </button>
+            </div>
           </div>
         </div>
-      </div>
+      )}
+
+      {editing && <KunjunganModal klinik={klinik} kunjungan={editing === "new" ? null : editing} onClose={() => setEditing(null)} onSaved={() => setReloadKey((k) => k + 1)} />}
+      {deleting && (
+        <ConfirmDialog
+          title="Hapus kunjungan?"
+          message={`${deleting.nama_pasien} · ${tgl(deleting.tanggal_iso)}${deleting.diagnosis ? ` · ${deleting.diagnosis}` : ""}. Data kunjungan ini dihapus dari laporan.`}
+          confirmLabel="Ya, Hapus"
+          onConfirm={remove}
+          onCancel={() => setDeleting(null)}
+        />
+      )}
     </div>
   );
 }

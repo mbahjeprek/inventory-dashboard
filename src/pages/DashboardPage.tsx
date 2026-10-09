@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { Package, Fuel, Sprout, Stethoscope, Droplet, AlertTriangle, XCircle, CalendarClock, ChevronRight, History, CheckCircle2 } from "lucide-react";
-import { api, type ActivityLog, type BbmSummary, type KlinikSummary, type OliSummary, type PupukSummary } from "../lib/api";
+import { Package, Fuel, Sprout, Stethoscope, Droplet, AlertTriangle, XCircle, CalendarClock, ChevronRight, History, CheckCircle2, HeartPulse } from "lucide-react";
+import { api, type ActivityLog, type BbmSummary, type KlinikSummary, type LaporanKlinikSummary, type OliSummary, type PupukSummary } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { useEstateFilter } from "../hooks/useEstateFilter";
 import { canModule, MODULES, userEstates, type Module } from "../lib/access";
@@ -97,7 +97,15 @@ function EmptyCard({ text }: { text: string }) {
   );
 }
 
-type EstateData = { gudang?: GudangStat | null; bbm?: BbmSummary | null; pupuk?: PupukSummary | null; klinik?: KlinikSummary | null; oli?: OliSummary | null };
+type EstateData = {
+  gudang?: GudangStat | null;
+  bbm?: BbmSummary | null;
+  pupuk?: PupukSummary | null;
+  klinik?: KlinikSummary | null;
+  oli?: OliSummary | null;
+  // Klinik > Laporan Harian, this month.
+  pasien?: LaporanKlinikSummary["totals"] | null;
+};
 
 // The inventory cards of one estate, side by side.
 // An admin limited to some modules only gets those cards.
@@ -113,7 +121,7 @@ function EstateRow({ e, d, monthLabel }: { e: EstateInfo; d: EstateData; monthLa
   const oliJenis = d.oli ? Array.from(new Set([...d.oli.saldoTerakhir.map((x) => x.jenis_oli), ...d.oli.perJenis.map((x) => x.jenis_oli)])).sort() : [];
 
   return (
-    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5">
+    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
       {can("GUDANG") && (
       <Panel to={e.gudang} title="Gudang" icon={<Package size={16} className="text-[var(--accent-blue)]" />}>
         {loading(d.gudang) ? (
@@ -233,6 +241,26 @@ function EstateRow({ e, d, monthLabel }: { e: EstateInfo; d: EstateData; monthLa
               <StatusCount kind="habis" count={d.klinik!.outOfStock} />
               <StatusCount kind="expired" count={d.klinik!.expiring} />
             </div>
+          </>
+        )}
+      </Panel>
+      )}
+
+      {can("KLINIK") && (
+      <Panel to={`${e.klinik}?tab=laporan`} title="Pasien Klinik" icon={<HeartPulse size={16} className="text-[var(--accent-red)]" />}>
+        {loading(d.pasien) ? (
+          <Muted>Memuat...</Muted>
+        ) : failed(d.pasien) ? (
+          <Muted>Gagal memuat data</Muted>
+        ) : (
+          <>
+            <div className="grid grid-cols-2 gap-3">
+              <Figure label="Kunjungan" value={fmt(d.pasien!.total)} suffix="pasien" />
+              <Figure label="Kecelakaan kerja" value={fmt(d.pasien!.kecelakaan)} tone={d.pasien!.kecelakaan ? "red" : undefined} />
+              <Figure label="Surat sakit" value={fmt(d.pasien!.istirahat)} suffix={`${fmt(d.pasien!.hari_istirahat)} hari`} />
+              <Figure label="Rujukan" value={fmt(d.pasien!.rujukan)} />
+            </div>
+            <div className="text-[11px] text-[var(--text-muted)] mt-3">Laporan harian {monthLabel}</div>
           </>
         )}
       </Panel>
@@ -460,6 +488,8 @@ export function DashboardPage() {
       if (canModule(user, "BBM")) api.bbmSummary(estate, monthRange).then((s) => put(estate, "bbm", s)).catch(() => put(estate, "bbm", null));
       if (canModule(user, "PUPUK")) api.pupukSummary(estate, monthRange).then((s) => put(estate, "pupuk", s)).catch(() => put(estate, "pupuk", null));
       if (canModule(user, "KLINIK")) api.klinikSummary(estate).then((s) => put(estate, "klinik", s)).catch(() => put(estate, "klinik", null));
+      if (canModule(user, "KLINIK"))
+        api.laporanKlinikTotals({ klinik: estate, ...monthRange }).then((s) => put(estate, "pasien", s.totals)).catch(() => put(estate, "pasien", null));
       if (canModule(user, "OLI")) api.oliSummary(estate, monthRange).then((s) => put(estate, "oli", s)).catch(() => put(estate, "oli", null));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

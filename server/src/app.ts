@@ -4,7 +4,7 @@ import nodePath from "path";
 import cookieParser from "cookie-parser";
 import type { PoolClient } from "pg";
 import { queryMany, queryOne, execute, withTransaction } from "./db.js";
-import { canonProvider, labelKey, parseDailyReport, sheetCsvUrl, splitDiagnosis } from "./klinikLaporan.js";
+import { canonProvider, labelKey, splitDiagnosis } from "./klinikLaporan.js";
 import { COOKIE_NAME, hashPassword, verifyPassword, signSession, verifySession, ESTATES, ALL_PERMS, MODULE_PERMS, parseList, type SessionUser } from "./auth.js";
 
 export const app = express();
@@ -165,7 +165,7 @@ function requiredPerms(req: express.Request): Need {
   if (is(/^\/pupuk(\/|$)/)) return [`pupuk.${act}`];
   if (is(/^\/oli(\/|$)/)) return [`oli.${act}`];
   if (is(/^\/klinik-stock(\/|$)/)) return [`klinik.${act}`];
-  // Laporan Harian Klinik: Lihat for the dashboard, Input for syncing the sheet (estate checked in the route).
+  // Klinik > Laporan Harian: Lihat / Input / Edit / Hapus kunjungan (estate checked in the route).
   if (is(/^\/klinik-laporan(\/|$)/)) return [`klinik.${act}`];
   if (is(/^\/top-keluar$/)) return [q.source === "klinik" ? "klinik.view" : "gudang.view"];
   if (is(/^\/activity-log$/)) return ACTIVITY_PERM[q.module] ? [`${ACTIVITY_PERM[q.module]}.view`] : "super";
@@ -3103,6 +3103,8 @@ app.get("/api/klinik-laporan/summary", async (req, res) => {
      FROM klinik_kunjungan WHERE ${W}`,
     p
   );
+  // The main dashboard only needs the totals of each clinic.
+  if (q.lite) return res.json({ totals });
   const count = (col: string, extra = "") =>
     queryMany<{ label: string; n: number }>(`SELECT ${col} AS label, COUNT(*)::int n FROM klinik_kunjungan WHERE ${W} ${extra} GROUP BY 1 ORDER BY 2 DESC, 1`, p);
   const [jenis, status, divisi, kelamin, diagnosisRaw, providerRaw, perHari] = await Promise.all([
@@ -3131,7 +3133,6 @@ app.get("/api/klinik-laporan/summary", async (req, res) => {
      FROM klinik_kunjungan WHERE ${W} AND kecelakaan_kerja ORDER BY tanggal_iso DESC, id DESC LIMIT 200`,
     p
   );
-  const sumber = await queryMany(`SELECT klinik, sheet_url, synced_at, synced_rows, synced_by FROM klinik_laporan_sumber WHERE klinik = ANY(@kliniks)`, p);
   res.json({
     totals,
     jenis: jenis.filter((r) => r.label),
@@ -3143,7 +3144,6 @@ app.get("/api/klinik-laporan/summary", async (req, res) => {
     obat: groupLabels(obatRaw, (into, r) => (into.qty += r.qty)).slice(0, 30),
     perHari,
     kecelakaanList,
-    sumber,
   });
 });
 
@@ -3164,78 +3164,202 @@ app.get("/api/klinik-laporan/kunjungan", async (req, res) => {
   const limit = Math.min(parseInt(q.pageSize) || 50, 500);
   const offset = (Math.max(parseInt(q.page) || 1, 1) - 1) * limit;
   const data = await queryMany(
-    `SELECT k.*, COALESCE((SELECT string_agg(trim(o.nama_obat || ' ' || COALESCE(o.qty::text, '') || ' ' || o.satuan), ', ' ORDER BY o.id)
-                           FROM klinik_kunjungan_obat o WHERE o.kunjungan_id = k.id), '') AS obat
-     FROM klinik_kunjungan k WHERE ${where} ORDER BY k.tanggal_iso DESC, k.no DESC, k.id DESC LIMIT @limit OFFSET @offset`,
+    // No = the visit's number in its clinic and year, by date, as the sheet numbers its rows.
+    `SELECT k.*, COALESCE((SELECT json_agg(json_build_object('obat_kode', o.obat_kode, 'nama_obat', o.nama_obat, 'qty', o.qty, 'satuan', o.satuan) ORDER BY o.urut, o.id)
+                           FROM klinik_kunjungan_obat o WHERE o.kunjungan_id = k.id), '[]') AS obat
+     FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY klinik, left(tanggal_iso, 4) ORDER BY tanggal_iso, id)::int AS nomor FROM klinik_kunjungan) k
+     WHERE ${where} ORDER BY k.tanggal_iso DESC, k.id DESC LIMIT @limit OFFSET @offset`,
     { ...params, limit, offset }
   );
   res.json({ data, total, page: parseInt(q.page) || 1, pageSize: limit });
 });
 
-// Re-reads a clinic's Daily Report sheet and replaces its visits. `url` (optional) changes the sheet;
-// it must be shared "Anyone with the link".
-app.post("/api/klinik-laporan/sync", async (req, res) => {
+// Klinik > Laporan Harian: one patient visit, the same columns as the Daily Report sheet. No,
+// Periode, Kode tgl, Hari and Usia follow from the dates; the obat given (Terapi 1-8) are report only
+// and do not move stock.
+const JENIS_KUNJUNGAN = ["Rawat Jalan", "MCU", "Kontrol", "Rawat Inap"];
+const STATUS_PASIEN = ["Pekerja", "Istri", "Anak", "Lainnya"];
+function kunjunganPayload(b: any): { data?: Record<string, any>; obat?: { obat_kode: string; nama_obat: string; qty: number | null; satuan: string }[]; error?: string } {
+  const t = (v: unknown) => String(v ?? "").replace(/\s+/g, " ").trim();
+  const tanggal_iso = t(b.tanggal_iso);
+  if (!ISO_DATE.test(tanggal_iso)) return { error: "Tanggal tidak valid" };
+  const nama_pasien = t(b.nama_pasien);
+  if (!nama_pasien) return { error: "Nama pasien wajib diisi" };
+  const jenis_kunjungan = t(b.jenis_kunjungan);
+  if (!JENIS_KUNJUNGAN.includes(jenis_kunjungan)) return { error: "Jenis kunjungan wajib dipilih" };
+  const jenis_kelamin = t(b.jenis_kelamin).toUpperCase();
+  if (!["L", "P"].includes(jenis_kelamin)) return { error: "Jenis kelamin wajib dipilih" };
+  const status_pasien = t(b.status_pasien);
+  if (!STATUS_PASIEN.includes(status_pasien)) return { error: "Status pasien wajib dipilih" };
+  const tanggal_lahir_iso = t(b.tanggal_lahir_iso) || null;
+  if (tanggal_lahir_iso && (!ISO_DATE.test(tanggal_lahir_iso) || tanggal_lahir_iso > tanggal_iso)) return { error: "Tanggal lahir tidak valid" };
+  const usia = b.usia === "" || b.usia === null || b.usia === undefined ? null : Number(b.usia);
+  if (usia !== null && (!Number.isInteger(usia) || usia < 0 || usia > 120)) return { error: "Usia tidak valid" };
+  const istirahat = !!b.istirahat;
+  const hari_istirahat = istirahat ? Number(b.hari_istirahat) : 0;
+  if (istirahat && (!Number.isInteger(hari_istirahat) || hari_istirahat < 1)) return { error: "Jumlah hari istirahat wajib diisi" };
+  const rujukan = !!b.rujukan;
+  const obatIn = Array.isArray(b.obat) ? b.obat : [];
+  if (obatIn.length > 8) return { error: "Terapi paling banyak 8" };
+  const obat = [];
+  for (const o of obatIn) {
+    const nama_obat = t(o?.nama_obat);
+    const qtyRaw = t(o?.qty).replace(",", ".");
+    if (!nama_obat && !qtyRaw) continue;
+    if (!nama_obat) return { error: "Nama terapi wajib diisi untuk setiap jumlah" };
+    const qty = qtyRaw === "" ? null : Number(qtyRaw);
+    if (qty !== null && !(qty > 0)) return { error: `Qty ${nama_obat} tidak valid` };
+    obat.push({ obat_kode: t(o?.obat_kode).toUpperCase(), nama_obat, qty, satuan: t(o?.satuan).toUpperCase() });
+  }
+  return {
+    data: {
+      tanggal_iso,
+      jenis_kunjungan,
+      nama_pasien,
+      jenis_kelamin,
+      tanggal_lahir_iso,
+      usia,
+      status_pasien,
+      penanggung: t(b.penanggung),
+      jabatan: t(b.jabatan),
+      divisi: t(b.divisi),
+      tempat_tinggal: t(b.tempat_tinggal),
+      asal_pasien: t(b.asal_pasien),
+      diagnosis: t(b.diagnosis),
+      kecelakaan_kerja: !!b.kecelakaan_kerja,
+      istirahat,
+      hari_istirahat,
+      rujukan,
+      provider: rujukan ? canonProvider(t(b.provider)) : "",
+      detail_kejadian: String(b.detail_kejadian ?? "").trim(),
+    },
+    obat,
+  };
+}
+const KUNJUNGAN_COLS = ["tanggal_iso", "jenis_kunjungan", "nama_pasien", "jenis_kelamin", "tanggal_lahir_iso", "usia", "status_pasien", "penanggung", "jabatan", "divisi", "tempat_tinggal", "asal_pasien", "diagnosis", "kecelakaan_kerja", "istirahat", "hari_istirahat", "rujukan", "provider", "detail_kejadian"];
+async function saveKunjunganObat(c: PoolClient, id: number, obat: NonNullable<ReturnType<typeof kunjunganPayload>["obat"]>) {
+  await execute("DELETE FROM klinik_kunjungan_obat WHERE kunjungan_id = @id", { id }, c);
+  if (obat.length)
+    await execute(
+      `INSERT INTO klinik_kunjungan_obat (kunjungan_id, urut, obat_kode, nama_obat, qty, satuan)
+       SELECT @id, x.urut, x.obat_kode, x.nama_obat, x.qty, x.satuan
+       FROM json_to_recordset(@rows::json) AS x(urut int, obat_kode text, nama_obat text, qty float8, satuan text)`,
+      { id, rows: JSON.stringify(obat.map((o, i) => ({ ...o, urut: i + 1 }))) },
+      c
+    );
+}
+const kunjunganObjek = (d: Record<string, any>) => `${d.nama_pasien} · ${d.tanggal_iso.split("-").reverse().join("/")}`;
+const kunjunganDetail = (d: Record<string, any>, obat: { nama_obat: string; qty: number | null; satuan: string }[]) =>
+  [
+    d.jenis_kunjungan,
+    d.diagnosis && `Diagnosis: ${d.diagnosis}`,
+    d.kecelakaan_kerja && "Kecelakaan kerja",
+    d.istirahat && `Istirahat ${d.hari_istirahat} hari`,
+    d.rujukan && `Rujukan${d.provider ? `: ${d.provider}` : ""}`,
+    obat.length && `Terapi: ${obat.map((o) => `${o.nama_obat} ${o.qty ?? ""} ${o.satuan}`.trim()).join(", ")}`,
+  ]
+    .filter(Boolean)
+    .join("; ");
+
+app.post("/api/klinik-laporan/kunjungan", async (req, res) => {
   const klinik = String(req.body?.klinik ?? "");
   if (!checkKlinik(req, res, klinik)) return;
-  const saved = await queryOne<{ sheet_url: string }>("SELECT sheet_url FROM klinik_laporan_sumber WHERE klinik = @klinik", { klinik });
-  const url = String(req.body?.url ?? "").trim() || saved?.sheet_url || "";
-  const csvUrl = sheetCsvUrl(url);
-  if (!csvUrl) return res.status(400).json({ error: "Link Google Sheet tidak valid" });
-  let csv: string;
-  try {
-    const r = await fetch(csvUrl, { redirect: "follow" });
-    if (!r.ok || !(r.headers.get("content-type") ?? "").includes("text/csv"))
-      return res.status(400).json({ error: "Sheet tidak bisa dibaca. Pastikan dibagikan ke 'Siapa saja yang memiliki link' (Viewer)." });
-    csv = await r.text();
-  } catch {
-    return res.status(502).json({ error: "Gagal mengambil Google Sheet" });
-  }
-  let parsed: ReturnType<typeof parseDailyReport>;
-  try {
-    parsed = parseDailyReport(csv);
-  } catch (e: any) {
-    return res.status(400).json({ error: e.message });
-  }
-  const { rows, skipped } = parsed;
-  if (!rows.length) return res.status(400).json({ error: "Tidak ada baris kunjungan di sheet" });
-  await withTransaction(async (c) => {
-    await execute("DELETE FROM klinik_kunjungan WHERE klinik = @klinik", { klinik }, c);
-    // Ids first, so the obat rows can point at their visit in one statement.
-    const ids = (await queryMany<{ id: number }>("SELECT nextval('klinik_kunjungan_id_seq')::int id FROM generate_series(1, @n)", { n: rows.length }, c)).map((r) => r.id);
-    const cols = Object.keys(rows[0]).filter((k) => k !== "obat");
-    const types: Record<string, string> = { no: "int", usia: "int", hari_istirahat: "int", kecelakaan_kerja: "boolean", istirahat: "boolean", rujukan: "boolean" };
-    await execute(
-      `INSERT INTO klinik_kunjungan (id, klinik, ${cols.join(", ")})
-       SELECT x.id, @klinik, ${cols.map((k) => `x.${k}`).join(", ")}
-       FROM json_to_recordset(@rows::json) AS x(id int, ${cols.map((k) => `${k} ${types[k] ?? "text"}`).join(", ")})`,
-      { klinik, rows: JSON.stringify(rows.map(({ obat: _obat, ...r }, i) => ({ ...r, id: ids[i] }))) },
+  const p = kunjunganPayload(req.body ?? {});
+  if (p.error) return res.status(400).json({ error: p.error });
+  // Foto is optional here (the sheet's Foto column is mostly empty); when sent it is claimed like a
+  // transaction's.
+  const evidenceId = req.body?.evidence_id ? await claimEvidence(req, res) : null;
+  if (evidenceId === undefined) return;
+  const id = await withTransaction(async (c) => {
+    const row = await queryOne<{ id: number }>(
+      `INSERT INTO klinik_kunjungan (klinik, sumber, evidence_id, created_by, ${KUNJUNGAN_COLS.join(", ")})
+       VALUES (@klinik, 'APP', @evidenceId::uuid, @by, ${KUNJUNGAN_COLS.map((k) => `@${k}`).join(", ")}) RETURNING id`,
+      { ...p.data, klinik, evidenceId, by: req.user!.nama || req.user!.username },
       c
     );
-    const obat = rows.flatMap((r, i) => r.obat.map((o) => ({ ...o, kunjungan_id: ids[i] })));
-    if (obat.length)
-      await execute(
-        `INSERT INTO klinik_kunjungan_obat (kunjungan_id, obat_kode, nama_obat, qty, satuan)
-         SELECT x.kunjungan_id, x.obat_kode, x.nama_obat, x.qty, x.satuan
-         FROM json_to_recordset(@rows::json) AS x(kunjungan_id int, obat_kode text, nama_obat text, qty float8, satuan text)`,
-        { rows: JSON.stringify(obat) },
-        c
-      );
-    await execute(
-      `INSERT INTO klinik_laporan_sumber (klinik, sheet_url, synced_at, synced_rows, synced_by) VALUES (@klinik, @url, now(), @n, @by)
-       ON CONFLICT (klinik) DO UPDATE SET sheet_url = EXCLUDED.sheet_url, synced_at = now(), synced_rows = EXCLUDED.synced_rows, synced_by = EXCLUDED.synced_by`,
-      { klinik, url, n: rows.length, by: req.user!.nama || req.user!.username },
-      c
-    );
+    await saveKunjunganObat(c, row!.id, p.obat!);
+    return row!.id;
   });
-  const last = rows.reduce((m, r) => (r.tanggal_iso > m ? r.tanggal_iso : m), "");
+  await logActivity(req, { module: "KLINIK", estate: klinik, aksi: "Input Kunjungan", objek: kunjunganObjek(p.data!), detail: kunjunganDetail(p.data!, p.obat!) });
+  res.json({ success: true, id });
+});
+
+app.put("/api/klinik-laporan/kunjungan/:id", async (req, res) => {
+  const existing = await queryOne<any>("SELECT * FROM klinik_kunjungan WHERE id = @id", { id: req.params.id });
+  if (!existing) return res.status(404).json({ error: "Kunjungan tidak ditemukan" });
+  if (!estateAllowed(req.user!, existing.klinik)) return res.status(403).json({ error: "Akses ditolak" });
+  const p = kunjunganPayload(req.body ?? {});
+  if (p.error) return res.status(400).json({ error: p.error });
+  const newEvidence = await checkEditEvidence(req, res, existing.evidence_id);
+  if (newEvidence === undefined) return;
+  await withTransaction(async (c) => {
+    await execute(
+      `UPDATE klinik_kunjungan SET ${KUNJUNGAN_COLS.map((k) => `${k} = @${k}`).join(", ")}, updated_at = now() WHERE id = @id`,
+      { ...p.data, id: existing.id },
+      c
+    );
+    await saveKunjunganObat(c, existing.id, p.obat!);
+  });
+  await useEditEvidence(newEvidence, [{ table: "klinik_kunjungan", where: "id = @id", params: { id: existing.id } }]);
+  const labels: Record<string, string> = {
+    tanggal_iso: "Tanggal", jenis_kunjungan: "Jenis Kunjungan", nama_pasien: "Nama", jenis_kelamin: "L/P", tanggal_lahir_iso: "Tanggal Lahir", usia: "Usia",
+    status_pasien: "Status", penanggung: "Yang Menanggung", jabatan: "Jabatan", divisi: "Divisi", tempat_tinggal: "Tempat Tinggal", asal_pasien: "Asal Pasien",
+    diagnosis: "Diagnosis", kecelakaan_kerja: "Kecelakaan Kerja", istirahat: "Istirahat", hari_istirahat: "Hari Istirahat", rujukan: "Rujukan", provider: "Provider", detail_kejadian: "Detail Kejadian",
+  };
   await logActivity(req, {
     module: "KLINIK",
-    estate: klinik,
-    aksi: "Sinkron Laporan Harian",
-    objek: "Daily Report (Google Sheet)",
-    detail: `${rows.length} kunjungan s/d ${last}${skipped ? `; ${skipped} baris dilewati (tanggal / nama tidak terbaca)` : ""}`,
+    estate: existing.klinik,
+    aksi: "Edit Kunjungan",
+    objek: kunjunganObjek(p.data!),
+    detail: [describeChanges(existing, p.data!, labels), newEvidence && "Foto diganti"].filter(Boolean).join("; "),
   });
-  res.json({ success: true, rows: rows.length, skipped, last });
+  res.json({ success: true });
+});
+
+app.delete("/api/klinik-laporan/kunjungan/:id", async (req, res) => {
+  const existing = await queryOne<any>("SELECT * FROM klinik_kunjungan WHERE id = @id", { id: req.params.id });
+  if (!existing) return res.status(404).json({ error: "Kunjungan tidak ditemukan" });
+  if (!estateAllowed(req.user!, existing.klinik)) return res.status(403).json({ error: "Akses ditolak" });
+  await execute("DELETE FROM klinik_kunjungan WHERE id = @id", { id: existing.id });
+  await releaseEvidence(existing.evidence_id);
+  await logActivity(req, { module: "KLINIK", estate: existing.klinik, aksi: "Hapus Kunjungan", objek: kunjunganObjek(existing), detail: existing.diagnosis || "" });
+  res.json({ success: true });
+});
+
+// Suggestions for the form: what was typed before at this clinic (jabatan, tempat tinggal, ...), the
+// standard diagnosis / provider names, and the master obat with its satuan.
+app.get("/api/klinik-laporan/options", async (req, res) => {
+  const klinik = String((req.query as any).klinik ?? "");
+  if (!checkKlinik(req, res, klinik)) return;
+  const distinct = (col: string) =>
+    queryMany<{ v: string }>(`SELECT ${col} v FROM klinik_kunjungan WHERE klinik = @klinik AND ${col} <> '' GROUP BY 1 ORDER BY COUNT(*) DESC, 1 LIMIT 200`, { klinik }).then((r) =>
+      r.map((x) => x.v)
+    );
+  const [jabatan, divisi, tempat_tinggal, asal_pasien, diagnosisRaw, providerRaw, satuanRaw] = await Promise.all([
+    distinct("jabatan"),
+    distinct("divisi"),
+    distinct("tempat_tinggal"),
+    distinct("asal_pasien"),
+    queryMany<{ label: string; n: number }>("SELECT diagnosis label, COUNT(*)::int n FROM klinik_kunjungan WHERE diagnosis <> '' GROUP BY 1", {}),
+    queryMany<{ label: string; n: number }>("SELECT provider label, COUNT(*)::int n FROM klinik_kunjungan WHERE provider <> '' GROUP BY 1", {}),
+    queryMany<{ v: string }>("SELECT upper(satuan) v FROM klinik_kunjungan_obat WHERE satuan <> '' GROUP BY 1 ORDER BY COUNT(*) DESC LIMIT 30", {}),
+  ]);
+  const obat = await queryMany<{ kode: string; nama: string; satuan: string; stok: number | null }>(
+    `SELECT o.kode, o.nama, o.satuan, ks.stock_tersedia::float8 stok FROM obat o
+     LEFT JOIN klinik_stock ks ON ks.obat_kode = o.kode AND ks.klinik = @klinik ORDER BY o.nama`,
+    { klinik }
+  );
+  const uniq = (l: string[]) => [...new Set(l)];
+  res.json({
+    jabatan,
+    divisi: uniq(["Divisi A", "Divisi B", "Divisi C", "Umum", ...divisi]),
+    tempat_tinggal,
+    asal_pasien,
+    diagnosis: groupLabels(diagnosisRaw.flatMap((r) => splitDiagnosis(r.label).map((label) => ({ label, n: r.n })))).map((r) => r.label),
+    provider: groupLabels(providerRaw.map((r) => ({ ...r, label: canonProvider(r.label) || r.label }))).map((r) => r.label),
+    satuan: uniq([...obat.map((o) => (o.satuan ?? "").toUpperCase()).filter(Boolean), ...satuanRaw.map((r) => r.v)]),
+    obat,
+  });
 });
 
 app.get("/api/klinik-stock/summary", async (req, res) => {
@@ -6183,7 +6307,7 @@ app.get("/api/evidence/:id", async (req, res) => {
 // photo storage isn't set up on this server (SUPABASE_URL / SUPABASE_SERVICE_KEY), so no photo is
 // asked and transactions keep working until it is.
 // Every table whose rows keep a foto bukti (schema.sql evidence_id columns).
-const EVIDENCE_HOLDERS = ["transactions", "stock_in_log", "stock_out_log", "gudang_stock_tx", "klinik_stock_tx", "bbm_log", "pupuk_log", "oli_log", "pinjaman", "pinjaman_kembali"];
+const EVIDENCE_HOLDERS = ["transactions", "stock_in_log", "stock_out_log", "gudang_stock_tx", "klinik_stock_tx", "bbm_log", "pupuk_log", "oli_log", "pinjaman", "pinjaman_kembali", "klinik_kunjungan"];
 
 async function claimEvidence(req: express.Request, res: express.Response): Promise<string | null | undefined> {
   if (!evidenceEnabled()) return null;

@@ -476,21 +476,22 @@ export type LaporanKlinikSummary = {
     provider: string;
     detail_kejadian: string;
   }[];
-  sumber: { klinik: string; sheet_url: string; synced_at: string | null; synced_rows: number | null; synced_by: string | null }[];
 };
-export type Kunjungan = {
-  id: number;
-  klinik: string;
-  no: number | null;
+// One patient visit (Klinik > Laporan Harian), the columns of the Daily Report sheet. nomor = No.
+export type KunjunganObat = { obat_kode: string; nama_obat: string; qty: number | null; satuan: string };
+export type KunjunganInput = {
   tanggal_iso: string;
   jenis_kunjungan: string;
   nama_pasien: string;
   jenis_kelamin: string;
+  tanggal_lahir_iso: string | null;
   usia: number | null;
   status_pasien: string;
   penanggung: string;
   jabatan: string;
   divisi: string;
+  tempat_tinggal: string;
+  asal_pasien: string;
   diagnosis: string;
   kecelakaan_kerja: boolean;
   istirahat: boolean;
@@ -498,7 +499,26 @@ export type Kunjungan = {
   rujukan: boolean;
   provider: string;
   detail_kejadian: string;
-  obat: string;
+  obat: KunjunganObat[];
+};
+export type Kunjungan = KunjunganInput & {
+  id: number;
+  klinik: string;
+  nomor: number;
+  sumber: "APP" | "SHEET";
+  evidence_id: string | null;
+  created_at: string | null;
+  created_by: string;
+};
+export type KunjunganOptions = {
+  jabatan: string[];
+  divisi: string[];
+  tempat_tinggal: string[];
+  asal_pasien: string[];
+  diagnosis: string[];
+  provider: string[];
+  satuan: string[];
+  obat: { kode: string; nama: string; satuan: string; stok: number | null }[];
 };
 
 export type TopKeluar = { rows: TopKeluarRow[]; totalQty: number; totalTrx: number };
@@ -650,8 +670,14 @@ export const api = {
     req<LaporanKlinikSummary>(`/api/klinik-laporan/summary?${new URLSearchParams(params)}`),
   laporanKlinikKunjungan: (params: Record<string, string | number>) =>
     req<{ data: Kunjungan[]; total: number; page: number; pageSize: number }>(`/api/klinik-laporan/kunjungan?${new URLSearchParams(params as any)}`),
-  syncLaporanKlinik: (payload: { klinik: string; url?: string }) =>
-    req<{ success: boolean; rows: number; skipped: number; last: string }>("/api/klinik-laporan/sync", { method: "POST", body: JSON.stringify(payload) }),
+  laporanKlinikTotals: (params: { klinik: string; dateFrom: string; dateTo: string }) =>
+    req<Pick<LaporanKlinikSummary, "totals">>(`/api/klinik-laporan/summary?${new URLSearchParams({ ...params, lite: "1" })}`),
+  kunjunganOptions: (klinik: string) => req<KunjunganOptions>(`/api/klinik-laporan/options?${new URLSearchParams({ klinik })}`),
+  createKunjungan: (payload: KunjunganInput & { klinik: string; evidence_id?: string | null }) =>
+    req<{ success: boolean; id: number }>("/api/klinik-laporan/kunjungan", { method: "POST", body: JSON.stringify(payload) }),
+  updateKunjungan: (id: number, payload: KunjunganInput & { evidence_id?: string | null }) =>
+    req<{ success: boolean }>(`/api/klinik-laporan/kunjungan/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
+  deleteKunjungan: (id: number) => req<{ success: boolean }>(`/api/klinik-laporan/kunjungan/${id}`, { method: "DELETE" }),
 
   klinikPickItems: (params: Record<string, string | number>) => {
     const qs = new URLSearchParams(params as any).toString();
