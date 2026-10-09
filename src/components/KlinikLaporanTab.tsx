@@ -9,7 +9,7 @@ import { ExportButtons } from "./ExportButtons";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { EvidenceLink } from "./EvidenceInput";
 import { KunjunganModal } from "./KunjunganModal";
-import { fetchAllRows, type TableReport } from "../lib/printTable";
+import { fetchAllRows, type ReportSection, type SectionReport, type TableReport } from "../lib/printTable";
 import { MAX_TERAPI, hariOf, kodeTglOf, periodeOf, tglSheet, yaTidak } from "../lib/kunjungan";
 
 const PAGE_SIZE = 50;
@@ -265,6 +265,83 @@ export function KlinikLaporanTab({ klinik }: { klinik: string }) {
     };
   };
 
+  // Cetak / Excel of Ringkasan KPI: the same figures and lists as on screen, in the same order.
+  const buildKpiReport = async (): Promise<SectionReport> => {
+    if (!summary || !t) throw new Error("Ringkasan belum dimuat");
+    const counts = (heading: string, label: string, rows: LaporanCount[], of: number): ReportSection => ({
+      heading,
+      columns: [{ label: "No", align: "right" }, { label }, { label: "Jumlah", align: "right" }, { label: "%", align: "right" }],
+      rows: rows.map((r, i) => [i + 1, r.label, r.n, pct(r.n, of)]),
+    });
+    const diagnosis = allDiagnosis ? summary.diagnosis : summary.diagnosis.slice(0, 10);
+    return {
+      title: `Ringkasan KPI Klinik - Estate ${klinik}`,
+      subtitle: [`Periode: ${periodText}`],
+      sections: [
+        {
+          heading: "Ringkasan",
+          columns: [{ label: "Indikator" }, { label: "Jumlah", align: "right" }, { label: "Keterangan" }],
+          rows: [
+            ["Total Kunjungan", t.total, t.hari ? `${fmt(t.total / t.hari)} / hari buka · ${fmt(t.pasien)} pasien` : "-"],
+            ["Kecelakaan Kerja", t.kecelakaan, `${pct(t.kecelakaan, t.total)} dari kunjungan`],
+            ["Surat Sakit", t.istirahat, `${fmt(t.hari_istirahat)} hari istirahat`],
+            ["Rujukan", t.rujukan, `${pct(t.rujukan, t.total)} dari kunjungan`],
+            ["MCU", t.mcu, `${pct(t.mcu, t.total)} dari kunjungan`],
+          ],
+        },
+        {
+          heading: trend.perBulan ? "Kunjungan per bulan" : "Kunjungan per hari",
+          columns: [{ label: trend.perBulan ? "Bulan" : "Tanggal", nowrap: true }, { label: "Kunjungan", align: "right" }, { label: "Kecelakaan Kerja", align: "right" }],
+          rows: trend.data.map((d) => [trend.perBulan ? d.label : tgl(d.key), d.n, d.kecelakaan]),
+        },
+        counts(
+          allDiagnosis || summary.diagnosis.length <= 10 ? "Penyakit terbanyak" : `Penyakit terbanyak (10 teratas dari ${summary.diagnosis.length})`,
+          "Penyakit",
+          diagnosis,
+          t.total
+        ),
+        counts("Pasien berdasarkan status", "Status Pasien", summary.status, t.total),
+        counts("Jenis kunjungan", "Jenis Kunjungan", summary.jenis, t.total),
+        counts(
+          "Jenis kelamin",
+          "Jenis Kelamin",
+          summary.kelamin.map((r) => ({ ...r, label: r.label === "L" ? "Laki-laki" : r.label === "P" ? "Perempuan" : r.label })),
+          t.total
+        ),
+        counts("Kunjungan per divisi", "Divisi", summary.divisi, t.total),
+        counts("Rujukan per provider", "Provider", summary.provider, t.rujukan),
+        {
+          heading: "Obat terbanyak diberikan",
+          columns: [{ label: "No", align: "right" }, { label: "Obat / Alat" }, { label: "Pasien", align: "right" }, { label: "Jumlah", align: "right" }, { label: "Satuan" }],
+          rows: summary.obat.map((o, i) => [i + 1, o.label, o.n, o.qty, o.satuan]),
+        },
+        {
+          heading: `Kecelakaan kerja (${fmt(t.kecelakaan)})`,
+          columns: [
+            { label: "Tanggal", nowrap: true },
+            { label: "Nama Pasien" },
+            { label: "Jabatan" },
+            { label: "Divisi" },
+            { label: "Diagnosis" },
+            { label: "Istirahat (hari)", align: "right" },
+            { label: "Rujukan" },
+            { label: "Detail Kejadian" },
+          ],
+          rows: summary.kecelakaanList.map((k) => [
+            tgl(k.tanggal_iso),
+            k.nama_pasien,
+            k.jabatan,
+            k.divisi,
+            k.diagnosis,
+            k.istirahat ? k.hari_istirahat : "",
+            k.rujukan ? k.provider || "Ya" : "",
+            k.detail_kejadian,
+          ]),
+        },
+      ],
+    };
+  };
+
   const totalPages = Math.max(Math.ceil(total / PAGE_SIZE), 1);
   const tab = (v: View, label: string, Icon: typeof Table2) => (
     <button
@@ -319,6 +396,7 @@ export function KlinikLaporanTab({ klinik }: { klinik: string }) {
         </div>
         <div className="flex flex-wrap gap-2 ml-auto">
           {view === "data" && <ExportButtons total={total} buildReport={buildReport} fileName={`laporan-harian-klinik-${klinik.toLowerCase()}`} />}
+          {view === "ringkasan" && summary && <ExportButtons total={0} buildReport={buildKpiReport} fileName={`ringkasan-kpi-klinik-${klinik.toLowerCase()}`} />}
           {canInput && (
             <button onClick={() => setEditing("new")} className="inline-flex items-center gap-1.5 text-sm px-3.5 py-2 rounded-md font-medium bg-[var(--accent-blue)] text-white hover:opacity-90">
               <Plus size={16} /> Input Kunjungan

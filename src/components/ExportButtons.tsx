@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Printer, FileSpreadsheet } from "lucide-react";
-import { confirmLargePrint, exportExcel, printTable, type TableReport } from "../lib/printTable";
+import { confirmLargePrint, exportExcel, printTable, type AnyReport } from "../lib/printTable";
 
 // Cetak + Excel buttons for an inventory page. Both run off the same report so the printout and
 // the spreadsheet always match each other and the on-screen table.
@@ -10,7 +10,7 @@ export function ExportButtons({
   fileName,
 }: {
   total: number;
-  buildReport: () => Promise<TableReport>;
+  buildReport: () => Promise<AnyReport>;
   fileName: string;
 }) {
   const [busy, setBusy] = useState<"" | "print" | "excel">("");
