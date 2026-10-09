@@ -4,7 +4,7 @@ import nodePath from "path";
 import cookieParser from "cookie-parser";
 import type { PoolClient } from "pg";
 import { queryMany, queryOne, execute, withTransaction } from "./db.js";
-import { labelKey, parseDailyReport, sheetCsvUrl, splitDiagnosis } from "./klinikLaporan.js";
+import { canonProvider, labelKey, parseDailyReport, sheetCsvUrl, splitDiagnosis } from "./klinikLaporan.js";
 import { COOKIE_NAME, hashPassword, verifyPassword, signSession, verifySession, ESTATES, ALL_PERMS, MODULE_PERMS, parseList, type SessionUser } from "./auth.js";
 
 export const app = express();
@@ -3139,7 +3139,7 @@ app.get("/api/klinik-laporan/summary", async (req, res) => {
     divisi,
     kelamin: kelamin.filter((r) => r.label),
     diagnosis: groupLabels(diagnosisRaw.filter((r) => r.label).flatMap((r) => splitDiagnosis(r.label).map((label) => ({ label, n: r.n })))),
-    provider: groupLabels(providerRaw),
+    provider: groupLabels(providerRaw.map((r) => ({ ...r, label: canonProvider(r.label) || r.label }))),
     obat: groupLabels(obatRaw, (into, r) => (into.qty += r.qty)).slice(0, 30),
     perHari,
     kecelakaanList,

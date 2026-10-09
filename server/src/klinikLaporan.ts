@@ -136,7 +136,7 @@ export function parseDailyReport(csv: string): { rows: Kunjungan[]; skipped: num
       istirahat: yes(r[c.istirahat]),
       hari_istirahat: parseInt(get(r, c.hari)) || (yes(r[c.istirahat]) ? 1 : 0),
       rujukan: yes(r[c.rujukan]),
-      provider: get(r, c.provider),
+      provider: canonProvider(get(r, c.provider)),
       detail_kejadian: get(r, c.detail),
       obat,
     });
@@ -152,8 +152,80 @@ export function sheetCsvUrl(url: string): string | null {
   return `https://docs.google.com/spreadsheets/d/${id}/export?format=csv&gid=${gid}`;
 }
 
-// One cell can hold several diagnoses ("Febris, Influenza, Bronchitis", "Vartigo/ANC"): each counts.
-export const splitDiagnosis = (s: string) => s.split(/\s*[,;/+]\s*/).map((x) => x.trim()).filter(Boolean);
+// One cell can hold several diagnoses ("Febris, Influenza, Bronchitis", "Vartigo/ANC"): each counts
+// once per visit, under its standard name (canonDiagnosis). A "/" between digits is part of a date.
+export const splitDiagnosis = (s: string) => [
+  ...new Set(
+    s
+      .split(/\s*(?:[,;+]|(?<!\d)\/|\/(?!\d))\s*/)
+      .map(canonDiagnosis)
+      .filter((x): x is string => !!x)
+  ),
+];
+
+// The same place typed differently ("Tidung Pala", "Tideng Pale", "Tipal") -> one name.
+const PROVIDERS: [RegExp, string][] = [
+  [/wisnu/i, "dr. Wisnu"],
+  [/sesayap/i, "Puskesmas Sesayap Hilir"],
+  [/tid[eu]ng|^tipal$/i, "Puskesmas Tideng Pale"],
+  [/a?k?h?mad|b?e?rahim/i, "RSUD Akhmad Berahim"],
+  [/malinau/i, "RSUD Malinau"],
+];
+export function canonProvider(s: string): string {
+  const t = s.replace(/\s+/g, " ").trim();
+  if (!t) return "";
+  return PROVIDERS.find(([re]) => re.test(t))?.[1] ?? t;
+}
+
+// Standard name of one diagnosis: typos and synonyms of the same condition become one ("Vartigo" ->
+// Vertigo, "Oil Pamthom" -> Oil Palm Thorn, "Medical Check Up" -> MCU), the day count after a wound
+// check ("H - 3") and the body part after a few conditions are dropped, and pregnancy notes (G1P0A0,
+// HPHT, UK : 33 minggu) count as Antenatal Care. Fragments that are only numbers are not a diagnosis.
+const BY_KEY: Record<string, string> = {
+  mcu: "MCU", medicalcheckup: "MCU", checkup: "MCU", calonkaryawan: "MCU",
+  oilpamthom: "Oil Palm Thorn", oilpamathom: "Oil Palm Thorn", oilpalnmthorn: "Oil Palm Thorn", oilpalmthorn: "Oil Palm Thorn",
+  vartigo: "Vertigo", vertigo: "Vertigo",
+  cepalgia: "Cephalgia", cepalgi: "Cephalgia", cepalagia: "Cephalgia", cheaplgia: "Cephalgia", chelagia: "Cephalgia", chepalgia: "Cephalgia", pusing: "Cephalgia",
+  lbp: "Low Back Pain", lowbackpain: "Low Back Pain", sakitpinggang: "Low Back Pain",
+  herpeszooter: "Herpes Zoster", herpezzooter: "Herpes Zoster", herpeszoster: "Herpes Zoster",
+  insectsting: "Insect Sting", inscetsting: "Insect Sting", insictsting: "Insect Sting", waspsting: "Insect Sting", hymenopersting: "Insect Sting", tersengattawon: "Insect Sting",
+  faragitis: "Faringitis", faringitis: "Faringitis",
+  konstivasi: "Konstipasi", konjuntivitis: "Konjungtivitis",
+  variccella: "Varicella", varisella: "Varicella",
+  gaut: "Gout", gatritis: "Gastritis", dermatitris: "Dermatitis", dermatits: "Dermatitis", influensa: "Influenza",
+  ambien: "Hemoroid", ambiyen: "Hemoroid", hemoroid: "Hemoroid",
+  amenrhea: "Amenorhea", dismenorhea: "Dismenore", disminore: "Dismenore", insonia: "Insomnia",
+  hiperkolesterol: "Hiperkolesterolemia", hipercholesterol: "Hiperkolesterolemia", hiperkolesterolemia: "Hiperkolesterolemia", kolestrol: "Hiperkolesterolemia",
+  ht: "Hipertensi", hipertensi: "Hipertensi", tb: "TBC", tbc: "TBC", susptb: "Susp. TBC", sinkop: "Sinkop", sinkope: "Sinkop",
+  anc: "Antenatal Care", antenatalcare: "Antenatal Care", anteanatcare: "Antenatal Care",
+  abdominal: "Abdominal Pain", abdominalpain: "Abdominal Pain", rightabdominalpain: "Abdominal Pain",
+  upimplant: "Aff Implan", affimplan: "Aff Implan", susphervers: "Susp. Herpes", suspherves: "Susp. Herpes", suspherpes: "Susp. Herpes",
+};
+const BY_PREFIX: [RegExp, string][] = [
+  [/^(g\d+p\d+a\d+|gravida|gestasi|hpht|hpl|uk\b|uk ?:)/i, "Antenatal Care"],
+  [/^(gv\b|gv\.|ganti verban)/i, "Ganti Verban (GV)"],
+  [/^pos(t)? ?op/i, "Post Op"],
+  [/^(up|aff) h(e)?a?cting/i, "Aff Hecting"],
+  [/^vulnus lacer/i, "Vulnus Laceratum"],
+  [/^vulnus punct/i, "Vulnus Punctum"],
+  [/^vulnu[as] e(k?s|ks)c?k?[oe]?r/i, "Vulnus Ekskoriatum"],
+  [/^abses\b/i, "Abses"],
+  [/^iritasi mata/i, "Iritasi Mata"],
+  [/^chest pain/i, "Chest Pain"],
+  [/^otitis media/i, "Otitis Media Eksterna"],
+  [/^mimisan/i, "Epistaksis (Mimisan)"],
+  [/^tersengat tawon/i, "Insect Sting"],
+  [/^dermatitis\b/i, "Dermatitis"],
+];
+export function canonDiagnosis(raw: string): string | null {
+  const t = raw.replace(/\s+/g, " ").replace(/\s+H\s*-\s*\d+\s*$/i, "").trim();
+  if (!t || /^[\d\s:.\-?]+$/.test(t)) return null;
+  const key = labelKey(t);
+  if (BY_KEY[key]) return BY_KEY[key];
+  for (const [re, name] of BY_PREFIX) if (re.test(t)) return name;
+  // Plain words keep their spelling, with the first letter up ("ispa" -> "Ispa", "FEBRIS" -> "Febris").
+  return t === t.toUpperCase() && t.length > 4 ? t[0] + t.slice(1).toLowerCase() : t[0].toUpperCase() + t.slice(1);
+}
 
 // Grouping key for free-typed labels: "Oil Pamthom" / "Oilpamthom" / "oil pamthom " are one.
 export const labelKey = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
