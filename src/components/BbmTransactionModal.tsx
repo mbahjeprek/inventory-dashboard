@@ -77,7 +77,7 @@ export function BbmTransactionModal({
     const keluar = tipe === "PEMAKAIAN";
     const kirim = keluar && !!ke && lokasi === PEMASOK;
     const missing = [
-      keluar && !kirim && !estate && "Estate / Sub-lokasi",
+      keluar && !kirim && lokasi !== PEMASOK && !estate && "Estate / Sub-lokasi",
       keluar && !kirim && !kodeKendaraan.trim() && "Kode Kendaraan",
       keluar && !kirim && !isGenset && !hmTerakhir.trim() && "HM/KM Terakhir",
       !kirim && !noSpb.trim() && "No. SPB",
@@ -118,7 +118,8 @@ export function BbmTransactionModal({
         jumlah,
         keterangan,
         no_spb: noSpb,
-        estate: tipe === "DITERIMA" ? lokasi : estate,
+        // Nilam asks only the Tujuan: what stays there is used by Nilam.
+        estate: tipe === "DITERIMA" || lokasi === PEMASOK ? lokasi : estate,
         kode_kendaraan: keluar ? kodeKendaraan : "",
         hm_terakhir: keluar && !isGenset ? hmTerakhir : "",
       });
@@ -248,7 +249,7 @@ export function BbmTransactionModal({
           </div>
 
           {/* Only one choice (Zamrud, Firus): nothing to ask, it's filled in above. */}
-          {tipe === "PEMAKAIAN" && !ke && estateOptions.length > 1 && (
+          {tipe === "PEMAKAIAN" && lokasi !== PEMASOK && estateOptions.length > 1 && (
             <div>
               <label className="text-xs text-[var(--text-secondary)] mb-1 block">Dipakai oleh (Estate / Sub-lokasi)</label>
               <select

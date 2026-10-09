@@ -70,15 +70,20 @@ export function BbmBatchModal({
     },
     { key: "jumlah", label: "Jumlah (LTR)", width: 90, type: "number", align: "right" },
     { key: "hm", label: "HM / KM", width: 110, placeholder: "cth. 4373.7 h", copy: false, off: (c) => (masuk(c) || kirim(c) ? "-" : genset(c) && "genset") },
-    {
-      key: "estate",
-      label: "Estate",
-      width: 120,
-      type: "select",
-      carry: true,
-      options: [{ value: "", label: "-- Pilih --" }, ...estateOptions.map((e) => ({ value: e }))],
-      off: (c) => (masuk(c) && lokasi) || (kirim(c) && "-"),
-    },
+    // Nilam has the Tujuan column instead: what stays there is used by Nilam.
+    ...(supplier
+      ? []
+      : [
+          {
+            key: "estate",
+            label: "Estate",
+            width: 120,
+            type: "select" as const,
+            carry: true,
+            options: [{ value: "", label: "-- Pilih --" }, ...estateOptions.map((e) => ({ value: e }))],
+            off: (c: Cells) => masuk(c) && lokasi,
+          },
+        ]),
     { key: "spb", label: "No. SPB", width: 90, carry: true },
     { key: "ket", label: "Keterangan", width: 220, placeholder: (c) => (masuk(c) ? "cth. Kiriman dari ..." : "cth. Genset 02 B") },
   ];
@@ -102,7 +107,7 @@ export function BbmBatchModal({
       !(parseNum(c.jumlah) > 0) && "Jumlah",
       pakai && !c.kendaraan.trim() && "Kendaraan",
       pakai && !genset(c) && !c.hm.trim() && "HM/KM",
-      pakai && (!c.estate || (estateOptions.length > 0 && !estateOptions.includes(c.estate))) && "Estate",
+      pakai && !supplier && (!c.estate || (estateOptions.length > 0 && !estateOptions.includes(c.estate))) && "Estate",
       !kirim(c) && !c.spb.trim() && "No. SPB",
       !c.ket.trim() && "Keterangan",
     ].filter(Boolean);
@@ -178,7 +183,7 @@ export function BbmBatchModal({
           rows: rows.map((c) => ({
             tipe: masuk(c) ? "DITERIMA" : "PEMAKAIAN",
             jumlah: parseNum(c.jumlah),
-            estate: masuk(c) || kirim(c) ? lokasi : c.estate,
+            estate: masuk(c) || supplier ? lokasi : c.estate,
             no_spb: c.spb.trim(),
             keterangan: kirim(c) && c.spb.trim() ? `SPB ${c.spb.trim()}: ${c.ket.trim()}` : c.ket.trim(),
             kode_kendaraan: masuk(c) || kirim(c) ? "" : c.kendaraan.trim(),
