@@ -4,7 +4,8 @@ import { X } from "lucide-react";
 import { api, errorText, type BbmSummary } from "../lib/api";
 import { AlatAutocomplete, type AlatOption } from "./AlatAutocomplete";
 import { EvidenceInput, useEvidenceEnabled } from "./EvidenceInput";
-import { TransferShortcut } from "./TransferShortcut";
+import { KirimTujuan, TransferShortcut } from "./TransferShortcut";
+import { PEMASOK, kirimKe } from "../lib/kirim";
 
 const JENIS_OPTIONS = ["SOLAR", "BENSIN"] as const;
 // BBM storage sites (see BBM_LOKASI_OPTIONS in server/src/app.ts). Sub-locations like AKSS/UKM are
@@ -41,6 +42,8 @@ export function BbmTransactionModal({
   const [jumlah, setJumlah] = useState(1);
   const [keterangan, setKeterangan] = useState("");
   const [noSpb, setNoSpb] = useState("");
+  // Nilam's Stock Out into another estate's tank: booked as a Transfer.
+  const [ke, setKe] = useState("");
   const [estate, setEstate] = useState("");
   const [estateOptions, setEstateOptions] = useState<string[]>([]);
   const [kodeKendaraan, setKodeKendaraan] = useState("");
@@ -72,11 +75,12 @@ export function BbmTransactionModal({
     setError("");
     // Every field is required; vehicle and HM/KM only apply to fuel that goes out.
     const keluar = tipe === "PEMAKAIAN";
+    const kirim = keluar && !!ke && lokasi === PEMASOK;
     const missing = [
-      keluar && !estate && "Estate / Sub-lokasi",
-      keluar && !kodeKendaraan.trim() && "Kode Kendaraan",
-      keluar && !isGenset && !hmTerakhir.trim() && "HM/KM Terakhir",
-      !noSpb.trim() && "No. SPB",
+      keluar && !kirim && !estate && "Estate / Sub-lokasi",
+      keluar && !kirim && !kodeKendaraan.trim() && "Kode Kendaraan",
+      keluar && !kirim && !isGenset && !hmTerakhir.trim() && "HM/KM Terakhir",
+      !kirim && !noSpb.trim() && "No. SPB",
       !keterangan.trim() && "Keterangan",
       evidenceOn && !evidenceId && "Foto Bukti",
     ].filter(Boolean);
@@ -99,6 +103,12 @@ export function BbmTransactionModal({
     }
     setSubmitting(true);
     try {
+      if (kirim) {
+        const spb = noSpb.trim() ? `SPB ${noSpb.trim()}: ` : "";
+        await kirimKe({ module: "BBM", dari: lokasi, ke, kode: jenisBbm, qty: jumlah, note: `${spb}${keterangan}`, tanggal_iso: tanggal, evidence_id: evidenceId });
+        onSuccess();
+        return;
+      }
       await api.createBbmTransaction({
         evidence_id: evidenceId ?? "",
         jenis_bbm: jenisBbm,
@@ -207,7 +217,12 @@ export function BbmTransactionModal({
             </button>
           </div>
 
-          {tipe === "PEMAKAIAN" && <TransferShortcut module="BBM" dari={lokasi} kode={jenisBbm} qty={jumlah} note={keterangan} onDone={onSuccess} />}
+          {tipe === "PEMAKAIAN" &&
+            (lokasi === PEMASOK ? (
+              <KirimTujuan dari={lokasi} value={ke} onChange={setKe} />
+            ) : (
+              <TransferShortcut module="BBM" dari={lokasi} kode={jenisBbm} qty={jumlah} note={keterangan} onDone={onSuccess} />
+            ))}
 
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -233,7 +248,7 @@ export function BbmTransactionModal({
           </div>
 
           {/* Only one choice (Zamrud, Firus): nothing to ask, it's filled in above. */}
-          {tipe === "PEMAKAIAN" && estateOptions.length > 1 && (
+          {tipe === "PEMAKAIAN" && !ke && estateOptions.length > 1 && (
             <div>
               <label className="text-xs text-[var(--text-secondary)] mb-1 block">Dipakai oleh (Estate / Sub-lokasi)</label>
               <select
@@ -251,7 +266,7 @@ export function BbmTransactionModal({
             </div>
           )}
 
-          {tipe === "PEMAKAIAN" && (
+          {tipe === "PEMAKAIAN" && !ke && (
           <div className={isGenset ? "" : "grid grid-cols-2 gap-3"}>
             <div>
               <label className="text-xs text-[var(--text-secondary)] mb-1 block">Kode Kendaraan</label>

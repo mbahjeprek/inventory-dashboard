@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, GUDANG_TUJUAN, type PickerItem, type StockScope } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
+import { PEMASOK, tujuanColumn } from "../lib/kirim";
 import { BatchGrid, HeaderField, fmtNum, headerInputCls, isBlankIn, localToday, parseNum, runningStock, type Cells, type GridCol } from "./BatchGrid";
 
 // Input Banyak for Gudang (Nilam without a scope, KNS / WJA / Zamrud / Firus with one) and Klinik:
@@ -64,6 +65,9 @@ export function StockBatchModal({ scope, onClose, onSuccess }: { scope?: StockSc
   };
   const masuk = (c: Cells) => c.tipe === "IN";
   const buang = (c: Cells) => c.tipe === "BUANG";
+  // Klinik Nilam's Stock Out with a Tujuan: sent into that clinic's stock (a Transfer, batches FEFO).
+  const supplier = klinik && estate === PEMASOK;
+  const kirim = (c: Cells) => supplier && c.tipe === "OUT" && !!c.ke;
   const tujuanOptions = nilam ? NILAM_TUJUAN : (GUDANG_TUJUAN[estate] ?? [estate]);
   const unit = (c: Cells) => itemOf(c)?.satuan ?? "";
 
@@ -80,6 +84,7 @@ export function StockBatchModal({ scope, onClose, onSuccess }: { scope?: StockSc
       ],
       tone: (c) => (masuk(c) ? "text-[var(--accent-green)]" : buang(c) ? "text-[var(--accent-amber)]" : "text-[var(--accent-red)]"),
     },
+    ...(supplier ? [tujuanColumn(estate, (c) => c.tipe === "OUT")] : []),
     {
       key: "barang",
       label: klinik ? "Kode Obat / Alat" : "Kode Barang",
@@ -113,12 +118,12 @@ export function StockBatchModal({ scope, onClose, onSuccess }: { scope?: StockSc
       carry: !klinik,
       suggest: (q) => api.karyawanPick(estate, q).then((l) => l.map((k) => k.nama)),
       placeholder: (c) => (masuk(c) ? "diterima oleh" : "nama penerima"),
-      off: (c) => (klinik && masuk(c) ? (user?.nama ?? "") : klinik && buang(c) && "-"),
+      off: (c) => (klinik && masuk(c) ? (user?.nama ?? "") : klinik && (buang(c) || kirim(c)) && "-"),
     },
     { key: "note", label: "Catatan", width: 220, placeholder: (c) => (masuk(c) ? "cth. Penerimaan dari supplier" : "cth. Untuk perbaikan ...") },
   ];
   const blank = isBlankIn(columns);
-  const blankRow: Cells = { tipe: "OUT", barang: "", jumlah: "", exp: "", tujuan: nilam ? "" : tujuanOptions.length === 1 ? tujuanOptions[0] : "", penerima: "", note: "" };
+  const blankRow: Cells = { tipe: "OUT", ke: "", barang: "", jumlah: "", exp: "", tujuan: nilam ? "" : tujuanOptions.length === 1 ? tujuanOptions[0] : "", penerima: "", note: "" };
 
   const run = (rows: Cells[]) =>
     runningStock(rows, {
@@ -135,7 +140,7 @@ export function StockBatchModal({ scope, onClose, onSuccess }: { scope?: StockSc
       !itemOf(c) && (klinik ? "Obat (pilih dari daftar)" : "Barang (pilih dari daftar)"),
       !(n > 0) && "Jumlah",
       !klinik && keluar && !c.tujuan && "Tujuan",
-      !(klinik && (masuk(c) || buang(c))) && !c.penerima.trim() && (klinik ? "Pasien / Penerima" : masuk(c) ? "Diterima oleh" : "Penerima"),
+      !(klinik && (masuk(c) || buang(c) || kirim(c))) && !c.penerima.trim() && (klinik ? "Pasien / Penerima" : masuk(c) ? "Diterima oleh" : "Penerima"),
       !c.note.trim() && "Catatan",
     ].filter(Boolean);
     if (missing.length) return `Wajib diisi: ${missing.join(", ")}`;
@@ -158,7 +163,8 @@ export function StockBatchModal({ scope, onClose, onSuccess }: { scope?: StockSc
           type: masuk(c) ? "IN" : "OUT",
           expired_date: masuk(c) ? c.exp : "",
           buang: buang(c),
-          penerima: masuk(c) ? (user?.nama ?? "") : buang(c) ? "" : c.penerima.trim(),
+          penerima: masuk(c) ? (user?.nama ?? "") : buang(c) || kirim(c) ? "" : c.penerima.trim(),
+          ke: kirim(c) ? c.ke : "",
         })),
       });
       return res.count;

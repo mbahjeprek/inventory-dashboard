@@ -5,7 +5,8 @@ import { KaryawanAutocomplete } from "./KaryawanAutocomplete";
 import { EvidenceInput, useEvidenceEnabled } from "./EvidenceInput";
 import { useAuth } from "../context/AuthContext";
 import { can } from "../lib/access";
-import { TransferShortcut } from "./TransferShortcut";
+import { KirimTujuan, TransferShortcut } from "./TransferShortcut";
+import { PEMASOK, kirimKe } from "../lib/kirim";
 import { localToday } from "./BatchGrid";
 import { isiOf, kemasanName, kemasanText, split } from "../lib/kemasan";
 
@@ -72,6 +73,8 @@ export function TransactionModal({
   const [note, setNote] = useState(preset?.note ?? "");
   // The day it happened, for a movement entered later (the server keeps when it was typed).
   const [tanggal, setTanggal] = useState(localToday());
+  // Klinik Nilam's Stock Out into another clinic's stock: booked as a Transfer (batches taken FEFO).
+  const [ke, setKe] = useState("");
   // Foto bukti, required for Stock In / Out (not for Koreksi).
   const [evidenceId, setEvidenceId] = useState<string | null>(null);
   const evidenceOn = useEvidenceEnabled();
@@ -82,6 +85,7 @@ export function TransactionModal({
   const [expIn, setExpIn] = useState("");
   const [batchOut, setBatchOut] = useState(preset?.batchOut ?? FEFO);
   const [buang, setBuang] = useState(!!preset?.buang);
+  const kirim = isKlinik && scope.name === PEMASOK && mode === "OUT" && !buang && !!ke;
   const [batchKor, setBatchKor] = useState(NEW_BATCH);
   const [newExp, setNewExp] = useState("");
 
@@ -139,7 +143,7 @@ export function TransactionModal({
   // without one), and nobody receives obat that is thrown away.
   const missing = [
     mode === "OUT" && !isKlinik && !tujuan && "Tujuan / Konsumen",
-    mode !== "KOREKSI" && !(mode === "OUT" && buang) && !receiver.trim() && (mode === "OUT" ? (isKlinik ? "Pasien / Penerima" : "Penerima / Pengambil") : "Diterima Oleh"),
+    mode !== "KOREKSI" && !(mode === "OUT" && buang) && !kirim && !receiver.trim() && (mode === "OUT" ? (isKlinik ? "Pasien / Penerima" : "Penerima / Pengambil") : "Diterima Oleh"),
     !note.trim() && "Catatan",
     mode !== "KOREKSI" && evidenceOn && !evidenceId && "Foto Bukti",
   ].filter(Boolean);
@@ -185,7 +189,9 @@ export function TransactionModal({
     }
     setSubmitting(true);
     try {
-      if (scope?.kind === "klinik")
+      if (kirim)
+        await kirimKe({ module: "KLINIK", dari: scope!.name, ke, kode: item.kode, qty, note, tanggal_iso: tanggal, evidence_id: evidenceId });
+      else if (scope?.kind === "klinik")
         await api.createKlinikTransaction({
           tanggal_iso: tanggal,
           evidence_id: evidenceId ?? "",
@@ -298,7 +304,11 @@ export function TransactionModal({
           </div>
 
           {mode === "OUT" && scope && !buang && (
-            <TransferShortcut module={isKlinik ? "KLINIK" : "GUDANG"} dari={scope.name} kode={item.kode} qty={qty} note={note} onDone={onSuccess} />
+            isKlinik && scope.name === PEMASOK ? (
+              <KirimTujuan dari={scope.name} value={ke} onChange={setKe} />
+            ) : (
+              <TransferShortcut module={isKlinik ? "KLINIK" : "GUDANG"} dari={scope.name} kode={item.kode} qty={qty} note={note} onDone={onSuccess} />
+            )
           )}
 
           {mode === "OUT" && !isKlinik && (
@@ -334,7 +344,7 @@ export function TransactionModal({
             </div>
           )}
 
-          {isKlinik && mode === "OUT" && (
+          {isKlinik && mode === "OUT" && !kirim && (
             <div className="space-y-2">
               <div>
                 <label className="text-xs text-[var(--text-secondary)] mb-1 block">Ambil dari batch</label>
@@ -376,7 +386,7 @@ export function TransactionModal({
           )}
 
           {/* Obat expired yang dibuang has no one receiving it. */}
-          {mode !== "KOREKSI" && !(mode === "OUT" && buang) && (
+          {mode !== "KOREKSI" && !(mode === "OUT" && buang) && !kirim && (
             <div>
               <label className="text-xs text-[var(--text-secondary)] mb-1 block">
                 {mode === "OUT" ? (isKlinik ? "Pasien / Penerima" : "Penerima / Pengambil") : "Diterima Oleh"}

@@ -2,7 +2,8 @@ import { useState } from "react";
 import { X } from "lucide-react";
 import { api, errorText, type PupukSummary } from "../lib/api";
 import { EvidenceInput, useEvidenceEnabled } from "./EvidenceInput";
-import { TransferShortcut } from "./TransferShortcut";
+import { KirimTujuan, TransferShortcut } from "./TransferShortcut";
+import { PEMASOK, kirimKe } from "../lib/kirim";
 
 const todayIso = () => {
   const d = new Date();
@@ -39,6 +40,8 @@ export function PupukTransactionModal({
   const [ha, setHa] = useState("");
   const [pokok, setPokok] = useState("");
   const [keterangan, setKeterangan] = useState("");
+  // Nilam's pupuk keluar into another estate's stock: booked as a Transfer.
+  const [ke, setKe] = useState("");
   const [evidenceId, setEvidenceId] = useState<string | null>(null);
   const evidenceOn = useEvidenceEnabled();
   const [submitting, setSubmitting] = useState(false);
@@ -52,7 +55,8 @@ export function PupukTransactionModal({
     if (jumlah <= 0) return setError("Jumlah harus lebih dari 0");
     // Every field shown is required. Pupuk masuk only needs the keterangan; divisi, blok, HA and
     // pokok describe where it was applied.
-    const keluar = tipe === "KELUAR";
+    const kirim = tipe === "KELUAR" && !!ke && estate === PEMASOK;
+    const keluar = tipe === "KELUAR" && !kirim;
     const missing = [
       keluar && !divisi && "Divisi",
       keluar && !blok.trim() && "Blok",
@@ -64,6 +68,11 @@ export function PupukTransactionModal({
     if (missing.length) return setError(`Wajib diisi: ${missing.join(", ")}`);
     setSubmitting(true);
     try {
+      if (kirim) {
+        await kirimKe({ module: "PUPUK", dari: estate, ke, kode: jenis, qty: jumlah, note: keterangan, tanggal_iso: tanggal, evidence_id: evidenceId });
+        onSuccess();
+        return;
+      }
       await api.createPupuk({
         evidence_id: evidenceId ?? "",
         estate,
@@ -157,7 +166,12 @@ export function PupukTransactionModal({
             </button>
           </div>
 
-          {tipe === "KELUAR" && <TransferShortcut module="PUPUK" dari={estate} kode={jenis} qty={jumlah} note={keterangan} onDone={onSuccess} />}
+          {tipe === "KELUAR" &&
+            (estate === PEMASOK ? (
+              <KirimTujuan dari={estate} value={ke} onChange={setKe} />
+            ) : (
+              <TransferShortcut module="PUPUK" dari={estate} kode={jenis} qty={jumlah} note={keterangan} onDone={onSuccess} />
+            ))}
 
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -170,7 +184,7 @@ export function PupukTransactionModal({
             </div>
           </div>
 
-          {tipe === "KELUAR" && (
+          {tipe === "KELUAR" && !ke && (
             <>
               <div className="grid grid-cols-2 gap-3">
                 <div>

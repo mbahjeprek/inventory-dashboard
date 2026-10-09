@@ -2,7 +2,8 @@ import { useState } from "react";
 import { X } from "lucide-react";
 import { api, errorText, type OliSummary } from "../lib/api";
 import { EvidenceInput, useEvidenceEnabled } from "./EvidenceInput";
-import { TransferShortcut } from "./TransferShortcut";
+import { KirimTujuan, TransferShortcut } from "./TransferShortcut";
+import { PEMASOK, kirimKe } from "../lib/kirim";
 
 const todayIso = () => {
   const d = new Date();
@@ -34,6 +35,8 @@ export function OliTransactionModal({
   const [jumlah, setJumlah] = useState(0);
   const [noEmbrace, setNoEmbrace] = useState("");
   const [keterangan, setKeterangan] = useState("");
+  // Nilam's oli out into another estate's stock: booked as a Transfer.
+  const [ke, setKe] = useState("");
   const [evidenceId, setEvidenceId] = useState<string | null>(null);
   const evidenceOn = useEvidenceEnabled();
   const [submitting, setSubmitting] = useState(false);
@@ -45,14 +48,21 @@ export function OliTransactionModal({
   const submit = async () => {
     setError("");
     if (jumlah <= 0) return setError("Jumlah harus lebih dari 0");
+    const kirim = tipe === "PEMAKAIAN" && !!ke && estate === PEMASOK;
     const missing = [
-      !noEmbrace.trim() && "No. BPB",
+      !kirim && !noEmbrace.trim() && "No. BPB",
       !keterangan.trim() && (tipe === "PEMAKAIAN" ? "Unit / Keterangan" : "Keterangan"),
       evidenceOn && !evidenceId && "Foto Bukti",
     ].filter(Boolean);
     if (missing.length) return setError(`Wajib diisi: ${missing.join(", ")}`);
     setSubmitting(true);
     try {
+      if (kirim) {
+        const bpb = noEmbrace.trim() ? `BPB ${noEmbrace.trim()}: ` : "";
+        await kirimKe({ module: "OLI", dari: estate, ke, kode: jenis, qty: jumlah, note: `${bpb}${keterangan}`, tanggal_iso: tanggal, evidence_id: evidenceId });
+        onSuccess();
+        return;
+      }
       await api.createOli({ evidence_id: evidenceId ?? "", estate, jenis_oli: jenis, tanggal_iso: tanggal, tipe, jumlah, no_embrace: noEmbrace, keterangan });
       onSuccess();
     } catch (e) {
@@ -119,7 +129,12 @@ export function OliTransactionModal({
             {tipeBtn("PEMAKAIAN", "Stock Out", "bg-[var(--accent-red-bg)] text-[var(--accent-red)] border-[var(--accent-red-border)]")}
           </div>
 
-          {tipe === "PEMAKAIAN" && <TransferShortcut module="OLI" dari={estate} kode={jenis} qty={jumlah} note={keterangan} onDone={onSuccess} />}
+          {tipe === "PEMAKAIAN" &&
+            (estate === PEMASOK ? (
+              <KirimTujuan dari={estate} value={ke} onChange={setKe} />
+            ) : (
+              <TransferShortcut module="OLI" dari={estate} kode={jenis} qty={jumlah} note={keterangan} onDone={onSuccess} />
+            ))}
 
           <div className="grid grid-cols-2 gap-3">
             <div>

@@ -2422,7 +2422,8 @@ app.post("/api/bbm/batch", async (req, res) => {
   if (!rows.length) return res.status(400).json({ error: "Belum ada baris yang diisi" });
   if (rows.length > BBM_BATCH_MAX) return res.status(400).json({ error: `Maksimal ${BBM_BATCH_MAX} baris sekali simpan` });
 
-  type BatchRow = { tipe: "DITERIMA" | "PEMAKAIAN"; jumlah: number; estate: string; no_spb: string; keterangan: string; kode_kendaraan: string; hm_terakhir: string };
+  // ke / item: a Stok Keluar sent into another estate's stock, booked as a Transfer.
+  type BatchRow = { tipe: "DITERIMA" | "PEMAKAIAN"; jumlah: number; estate: string; no_spb: string; keterangan: string; kode_kendaraan: string; hm_terakhir: string; ke: string; item?: LoanItem };
   const clean: BatchRow[] = [];
   for (const [i, r] of rows.entries()) {
     const refuseRow = (error: string) => res.status(400).json({ error: `Baris ${i + 1}: ${error}`, row: i });
@@ -2435,7 +2436,16 @@ app.post("/api/bbm/batch", async (req, res) => {
     if (!estate) return refuseRow("estate / sub-lokasi wajib dipilih");
     const salahJenis = wrongJenisBbm(jenis_bbm, r?.keterangan);
     if (salahJenis) return refuseRow(salahJenis);
+    const ke = keluar ? String(r?.ke ?? "").trim() : "";
+    let item: LoanItem | undefined;
+    if (ke) {
+      const t = await batchTransferItem(req, "BBM", lokasi, ke, jenis_bbm, jumlah);
+      if (typeof t === "string") return refuseRow(t);
+      item = t;
+    }
     clean.push({
+      ke,
+      item,
       tipe,
       jumlah: round3(jumlah),
       estate,
@@ -2450,6 +2460,7 @@ app.post("/api/bbm/batch", async (req, res) => {
 
   const { tanggal, periode } = isoToIndoDate(tanggal_iso);
   let booked: { row: BatchRow; before: number; after: number }[];
+  const transfers: LoanRow[] = [];
   try {
     booked = await withTransaction(async (client) => {
       await execute("SELECT pg_advisory_xact_lock(hashtext(@key))", { key: `bbm:${jenis_bbm}:${lokasi}` }, client);
@@ -2462,6 +2473,11 @@ app.post("/api/bbm/batch", async (req, res) => {
         if (row.tipe === "PEMAKAIAN" && row.jumlah > stock) throw new BatchRowError(i, `Baris ${i + 1}: stok tinggal ${round3(stock).toLocaleString("id-ID")} LTR`);
         saldo = round3(row.tipe === "DITERIMA" ? before + row.jumlah : before - row.jumlah);
         stock = round3(row.tipe === "DITERIMA" ? stock + row.jumlah : stock - row.jumlah);
+        if (row.ke) {
+          const alasan = row.keterangan || `Kirim ke ${row.ke}`;
+          transfers.push(await bookLoan(client, req, { module: "BBM", dari: lokasi, ke: row.ke, item: row.item!, qty: row.jumlah, alasan, tanggal: tanggal_iso, evidenceId, transfer: true }));
+          continue;
+        }
         await execute(
           `INSERT INTO bbm_log
             (jenis_bbm, lokasi, estate, periode, tanggal, tanggal_iso, no_spb, diterima, pemakaian, saldo_stock, keterangan, kode_kendaraan, hm_terakhir, evidence_id)
@@ -2488,9 +2504,11 @@ app.post("/api/bbm/batch", async (req, res) => {
   } catch (e) {
     await releaseEvidence(evidenceId);
     if (e instanceof BatchRowError) return res.status(400).json({ error: e.message, row: e.row });
+    if (e instanceof StockError) return res.status(400).json({ error: e.message });
     throw e;
   }
 
+  for (const l of transfers) await logLoan(req, l, "Transfer Baru", transferLogDetail(l));
   await logActivities(
     req,
     booked.map(({ row, before, after }) => ({
@@ -2505,13 +2523,14 @@ app.post("/api/bbm/batch", async (req, res) => {
         row.kode_kendaraan && `Kendaraan: ${row.kode_kendaraan}`,
         row.hm_terakhir && `HM: ${row.hm_terakhir}`,
         row.keterangan && `Keterangan: ${row.keterangan}`,
-        `Input Banyak (${booked.length} baris)`,
+        `Input Banyak (${booked.length + transfers.length} baris)`,
       ]
         .filter(Boolean)
         .join("; "),
     }))
   );
-  res.json({ success: true, count: booked.length, saldo_stock: booked[booked.length - 1].after });
+  const count = booked.length + transfers.length;
+  res.json({ success: true, count, saldo_stock: (await latestSaldoRow("BBM", lokasi, jenis_bbm))?.saldo_stock ?? 0 });
 });
 class BatchRowError extends Error {
   row: number;
@@ -5587,7 +5606,7 @@ app.post("/api/klinik-stock/transactions/batch", async (req, res) => {
   const obat = new Map(
     (await queryMany<any>("SELECT kode, nama FROM obat WHERE kode = ANY(@kodes::text[])", { kodes: rows.map((r) => String(r?.obat_kode ?? "")) })).map((o) => [o.kode, o])
   );
-  type R = { obat: any; type: "IN" | "OUT"; qty: number; exp?: string; buang: boolean; penerima: string; note: string };
+  type R = { obat: any; type: "IN" | "OUT"; qty: number; exp?: string; buang: boolean; penerima: string; note: string; ke: string; item?: LoanItem };
   const clean: R[] = [];
   for (const [i, r] of rows.entries()) {
     const o = obat.get(String(r?.obat_kode ?? ""));
@@ -5597,14 +5616,27 @@ app.post("/api/klinik-stock/transactions/batch", async (req, res) => {
     if (!Number.isInteger(r?.qty) || r.qty <= 0) return refuseRow(res, i, "jumlah harus bilangan bulat lebih dari 0");
     if (exp && !ISO_DATE.test(exp)) return refuseRow(res, i, "tanggal expired tidak valid");
     const buang = r.type === "OUT" && r.buang === true;
-    clean.push({ obat: o, type: r.type, qty: r.qty, exp: r.type === "IN" ? exp : undefined, buang, penerima: buang ? "" : String(r?.penerima ?? "").trim(), note: String(r?.note ?? "").trim() });
+    const ke = r.type === "OUT" && !buang ? String(r?.ke ?? "").trim() : "";
+    let item: LoanItem | undefined;
+    if (ke) {
+      const t = await batchTransferItem(req, "KLINIK", klinik, ke, o.kode, r.qty);
+      if (typeof t === "string") return refuseRow(res, i, t);
+      item = t;
+    }
+    clean.push({ obat: o, type: r.type, qty: r.qty, exp: r.type === "IN" ? exp : undefined, buang, penerima: buang ? "" : String(r?.penerima ?? "").trim(), note: String(r?.note ?? "").trim(), ke, item });
   }
   const evidenceId = await claimEvidence(req, res);
   if (evidenceId === undefined) return;
 
+  const transfers: LoanRow[] = [];
   const ok = await bookBatch(res, evidenceId, async (client, at) => {
     for (const [i, r] of clean.entries()) {
       at(i);
+      if (r.ke) {
+        const alasan = r.note || `Kirim ke Klinik ${r.ke}`;
+        transfers.push(await bookLoan(client, req, { module: "KLINIK", dari: klinik, ke: r.ke, item: r.item!, qty: r.qty, alasan, tanggal: txTime.getStore()?.slice(0, 10) ?? jakartaToday(), evidenceId, transfer: true }));
+        continue;
+      }
       await klinikMoveTx(client, req, {
         klinik,
         obat: r.obat.kode,
@@ -5620,9 +5652,10 @@ app.post("/api/klinik-stock/transactions/batch", async (req, res) => {
     }
   });
   if (!ok) return;
+  for (const l of transfers) await logLoan(req, l, "Transfer Baru", transferLogDetail(l));
   await logActivities(
     req,
-    clean.map((r) => ({
+    clean.filter((r) => !r.ke).map((r) => ({
       module: "KLINIK" as const,
       estate: klinik,
       aksi: r.type === "IN" ? "Stok Masuk" : r.buang ? "Buang Obat Expired" : "Stok Keluar",
@@ -5643,7 +5676,7 @@ app.post("/api/pupuk/batch", async (req, res) => {
   if (!ISO_DATE.test(tanggal_iso || "")) return res.status(400).json({ error: "Tanggal tidak valid" });
   const rows = batchInput(req, res);
   if (!rows) return;
-  type R = { jenis: string; tipe: "MASUK" | "KELUAR"; qty: number; divisi: string; blok: string; ha: number | null; pokok: number | null; keterangan: string };
+  type R = { jenis: string; tipe: "MASUK" | "KELUAR"; qty: number; divisi: string; blok: string; ha: number | null; pokok: number | null; keterangan: string; ke: string; item?: LoanItem };
   const clean: R[] = [];
   for (const [i, r] of rows.entries()) {
     const jenis = String(r?.jenis_pupuk ?? "").trim().toUpperCase();
@@ -5655,7 +5688,16 @@ app.post("/api/pupuk/batch", async (req, res) => {
     const ha = keluar ? optNum(r?.ha) : null;
     const pokok = keluar ? optNum(r?.pokok) : null;
     if ((ha !== null && !Number.isFinite(ha)) || (pokok !== null && !Number.isFinite(pokok))) return refuseRow(res, i, "HA / pokok harus angka");
+    const ke = keluar ? String(r?.ke ?? "").trim() : "";
+    let item: LoanItem | undefined;
+    if (ke) {
+      const t = await batchTransferItem(req, "PUPUK", estate, ke, jenis, qty);
+      if (typeof t === "string") return refuseRow(res, i, t);
+      item = t;
+    }
     clean.push({
+      ke,
+      item,
       jenis,
       tipe: r.tipe,
       qty: round3(qty),
@@ -5673,15 +5715,22 @@ app.post("/api/pupuk/batch", async (req, res) => {
   const tanggal = `${d}/${m}/${y}`;
   const periode = `${INDO_MONTHS[Number(m) - 1]} ${y}`;
   const saldo: { before: number; after: number }[] = [];
-  const ok = await bookBatch(res, evidenceId, async (client) => {
+  const transfers: LoanRow[] = [];
+  const ok = await bookBatch(res, evidenceId, async (client, at) => {
     await execute("SELECT pg_advisory_xact_lock(hashtext(@key))", { key: `pupuk:${estate}` }, client);
     const run = new Map<string, number>();
-    for (const r of clean) {
+    for (const [i, r] of clean.entries()) {
+      at(i);
       if (!run.has(r.jenis)) run.set(r.jenis, await saldoAsOf("PUPUK", estate, r.jenis, tanggal_iso, client));
       const before = run.get(r.jenis)!;
       const after = round3(r.tipe === "MASUK" ? before + r.qty : before - r.qty);
       run.set(r.jenis, after);
       saldo.push({ before, after });
+      if (r.ke) {
+        const alasan = r.keterangan || `Kirim ke ${r.ke}`;
+        transfers.push(await bookLoan(client, req, { module: "PUPUK", dari: estate, ke: r.ke, item: r.item!, qty: r.qty, alasan, tanggal: tanggal_iso, evidenceId, transfer: true }));
+        continue;
+      }
       await execute(
         `INSERT INTO pupuk_log (estate, jenis_pupuk, periode, tanggal, tanggal_iso, divisi, no_embrace, kode_barang, keluar, diterima, saldo_stock, keterangan, blok, ha, pokok, evidence_id)
          VALUES (@estate, @jenis, @periode, @tanggal, @tanggal_iso, @divisi, '', '', @keluar, @diterima, @after, @keterangan, @blok, @ha, @pokok, @evidenceId::uuid)`,
@@ -5692,9 +5741,10 @@ app.post("/api/pupuk/batch", async (req, res) => {
     for (const jenis of run.keys()) await rechainSaldo("PUPUK", estate, jenis, tanggal_iso, client);
   });
   if (!ok) return;
+  for (const l of transfers) await logLoan(req, l, "Transfer Baru", transferLogDetail(l));
   await logActivities(
     req,
-    clean.map((r, i) => ({
+    clean.flatMap((r, i) => (r.ke ? [] : [{ r, i }])).map(({ r, i }) => ({
       module: "PUPUK" as const,
       estate,
       aksi: r.tipe === "MASUK" ? "Stok Masuk" : "Stok Keluar",
@@ -5714,7 +5764,7 @@ app.post("/api/oli/batch", async (req, res) => {
   const rows = batchInput(req, res);
   if (!rows) return;
   const known = new Set((await queryMany<{ nama: string }>("SELECT nama FROM master_oli")).map((o) => o.nama));
-  type R = { jenis: string; tipe: "MASUK" | "PEMAKAIAN"; qty: number; no_embrace: string; keterangan: string };
+  type R = { jenis: string; tipe: "MASUK" | "PEMAKAIAN"; qty: number; no_embrace: string; keterangan: string; ke: string; item?: LoanItem };
   const clean: R[] = [];
   for (const [i, r] of rows.entries()) {
     const jenis = String(r?.jenis_oli ?? "").trim().toUpperCase();
@@ -5722,22 +5772,36 @@ app.post("/api/oli/batch", async (req, res) => {
     if (!known.has(jenis)) return refuseRow(res, i, `jenis oli ${jenis || "-"} belum ada di Master Data Oli`);
     if (!["MASUK", "PEMAKAIAN"].includes(r?.tipe)) return refuseRow(res, i, "tipe transaksi tidak valid");
     if (!Number.isFinite(qty) || qty <= 0) return refuseRow(res, i, "jumlah harus lebih dari 0");
-    clean.push({ jenis, tipe: r.tipe, qty: round3(qty), no_embrace: String(r?.no_embrace ?? "").trim(), keterangan: String(r?.keterangan ?? "").trim() || (r.tipe === "MASUK" ? "OLI MASUK" : "") });
+    const ke = r.tipe === "PEMAKAIAN" ? String(r?.ke ?? "").trim() : "";
+    let item: LoanItem | undefined;
+    if (ke) {
+      const t = await batchTransferItem(req, "OLI", estate, ke, jenis, qty);
+      if (typeof t === "string") return refuseRow(res, i, t);
+      item = t;
+    }
+    clean.push({ ke, item, jenis, tipe: r.tipe, qty: round3(qty), no_embrace: String(r?.no_embrace ?? "").trim(), keterangan: String(r?.keterangan ?? "").trim() || (r.tipe === "MASUK" ? "OLI MASUK" : "") });
   }
   const evidenceId = await claimEvidence(req, res);
   if (evidenceId === undefined) return;
 
   const { tanggal, periode } = oliDate(tanggal_iso);
   const saldo: { before: number; after: number }[] = [];
-  const ok = await bookBatch(res, evidenceId, async (client) => {
+  const transfers: LoanRow[] = [];
+  const ok = await bookBatch(res, evidenceId, async (client, at) => {
     await execute("SELECT pg_advisory_xact_lock(hashtext(@key))", { key: `oli:${estate}` }, client);
     const run = new Map<string, number>();
-    for (const r of clean) {
+    for (const [i, r] of clean.entries()) {
+      at(i);
       if (!run.has(r.jenis)) run.set(r.jenis, await saldoAsOf("OLI", estate, r.jenis, tanggal_iso, client));
       const before = run.get(r.jenis)!;
       const after = round3(r.tipe === "MASUK" ? before + r.qty : before - r.qty);
       run.set(r.jenis, after);
       saldo.push({ before, after });
+      if (r.ke) {
+        const alasan = r.keterangan || `Kirim ke ${r.ke}`;
+        transfers.push(await bookLoan(client, req, { module: "OLI", dari: estate, ke: r.ke, item: r.item!, qty: r.qty, alasan, tanggal: tanggal_iso, evidenceId, transfer: true }));
+        continue;
+      }
       await execute(
         `INSERT INTO oli_log (estate, jenis_oli, periode, tanggal, tanggal_iso, no_embrace, diterima, pemakaian, saldo_stock, keterangan, evidence_id)
          VALUES (@estate, @jenis, @periode, @tanggal, @tanggal_iso, @no_embrace, @diterima, @pemakaian, @after, @keterangan, @evidenceId::uuid)`,
@@ -5748,9 +5812,10 @@ app.post("/api/oli/batch", async (req, res) => {
     for (const jenis of run.keys()) await rechainSaldo("OLI", estate, jenis, tanggal_iso, client);
   });
   if (!ok) return;
+  for (const l of transfers) await logLoan(req, l, "Transfer Baru", transferLogDetail(l));
   await logActivities(
     req,
-    clean.map((r, i) => ({
+    clean.flatMap((r, i) => (r.ke ? [] : [{ r, i }])).map(({ r, i }) => ({
       module: "OLI" as const,
       estate,
       aksi: r.tipe === "MASUK" ? "Stok Masuk" : "Stok Keluar",
@@ -5790,8 +5855,8 @@ type LoanRow = {
 const loanLabel = (l: Pick<LoanRow, "id" | "jenis">) => `${l.jenis === "TRANSFER" ? "Transfer" : "Pinjaman"} #${l.id}`;
 const loanPerm = (m: LoanModule, a: "view" | "input") => `${m.toLowerCase()}.${a}`;
 const canLoan = (user: SessionUser, m: LoanModule, a: "view" | "input") => user.role === "superuser" || user.perms.includes(loanPerm(m, a));
-// Nilam's gudang (items), Klinik and BBM count whole units; the other gudang, pupuk and oli decimals.
-const loanWhole = (m: LoanModule, a: string, b: string) => m === "KLINIK" || m === "BBM" || (m === "GUDANG" && (a === "NILAM" || b === "NILAM"));
+// Nilam's gudang (items) and Klinik count whole units; the other gudang, BBM, pupuk and oli decimals.
+const loanWhole = (m: LoanModule, a: string, b: string) => m === "KLINIK" || (m === "GUDANG" && (a === "NILAM" || b === "NILAM"));
 const jakartaToday = () => new Date(Date.now() + 7 * 3600_000).toISOString().slice(0, 10);
 
 type LoanItem = { kode: string; nama: string; satuan: string; stok: number };
@@ -5972,6 +6037,57 @@ async function loanTransfer(
   await loanMove(client, req, { ...base, estate: to, type: "IN", note: inNote, alloc });
 }
 
+// One Pinjaman / Transfer: its row, the lender's Stok Keluar and the borrower's Stok Masuk.
+async function bookLoan(
+  client: PoolClient,
+  req: express.Request,
+  b: { module: LoanModule; dari: string; ke: string; item: LoanItem; qty: number; alasan: string; tanggal: string; evidenceId: string | null; transfer: boolean }
+): Promise<LoanRow> {
+  const l = (await queryOne<LoanRow>(
+    `INSERT INTO pinjaman (module, kode, nama, satuan, dari_estate, ke_estate, qty, alasan, tanggal_iso, user_id, evidence_id, jenis, status)
+     VALUES (@module, @kode, @nama, @satuan, @dari, @ke, @qty, @alasan, @tanggal, @uid, @ev::uuid, @jenis, @status) RETURNING *`,
+    {
+      module: b.module,
+      kode: b.item.kode,
+      nama: b.item.nama,
+      satuan: b.item.satuan,
+      dari: b.dari,
+      ke: b.ke,
+      qty: round3(b.qty),
+      alasan: b.alasan,
+      tanggal: b.tanggal,
+      uid: req.user!.id,
+      ev: b.evidenceId,
+      jenis: b.transfer ? "TRANSFER" : "PINJAM",
+      status: b.transfer ? "TRANSFER" : "DIPINJAM",
+    },
+    client
+  ))!;
+  await loanTransfer(
+    client,
+    req,
+    l,
+    b.dari,
+    b.ke,
+    l.qty,
+    b.transfer ? `Transfer ke ${b.ke} (Transfer #${l.id}): ${b.alasan}` : `Dipinjamkan ke ${b.ke} (Pinjaman #${l.id}): ${b.alasan}`,
+    b.transfer ? `Transfer dari ${b.dari} (Transfer #${l.id}): ${b.alasan}` : `Pinjam dari ${b.dari} (Pinjaman #${l.id}): ${b.alasan}`,
+    b.evidenceId,
+    b.transfer ? b.tanggal : undefined
+  );
+  return l;
+}
+
+// Input Banyak from Nilam: a Stok Keluar row with a Tujuan (another estate) is booked as a Transfer,
+// so that estate's stock goes up at once. Checks the row's Tujuan; the item, or an error for the row.
+async function batchTransferItem(req: express.Request, m: LoanModule, dari: string, ke: string, kode: string, qty: number): Promise<LoanItem | string> {
+  if (!(ESTATES as readonly string[]).includes(ke) || ke === dari) return "tujuan tidak valid";
+  if (!canLoan(req.user!, m, "input")) return "akun ini tidak bisa mencatat transfer";
+  if (loanWhole(m, dari, ke) && !Number.isInteger(qty)) return "jumlah transfer harus bilangan bulat";
+  return (await loanItem(m, dari, kode)) ?? "barang tidak ditemukan di master data";
+}
+const transferLogDetail = (l: LoanRow) => `${l.dari_estate} mengirim ${fmtLoanQty(l.qty, l.satuan)} ke ${l.ke_estate} (${l.tanggal_iso}); Keterangan: ${l.alasan}; Input Banyak`;
+
 // Logged in both estates' activity log.
 async function logLoan(req: express.Request, l: LoanRow, aksi: string, detail: string) {
   const objek = loanObjek(l);
@@ -6080,41 +6196,7 @@ app.post("/api/pinjaman", async (req, res) => {
 
   let loan: LoanRow;
   try {
-    loan = await withTransaction(async (client) => {
-      const l = (await queryOne<LoanRow>(
-        `INSERT INTO pinjaman (module, kode, nama, satuan, dari_estate, ke_estate, qty, alasan, tanggal_iso, user_id, evidence_id, jenis, status)
-         VALUES (@module, @kode, @nama, @satuan, @dari, @ke, @qty, @alasan, @tanggal, @uid, @ev::uuid, @jenis, @status) RETURNING *`,
-        {
-          module: m,
-          kode: item.kode,
-          nama: item.nama,
-          satuan: item.satuan,
-          dari,
-          ke,
-          qty: round3(qty),
-          alasan,
-          tanggal,
-          uid: u.id,
-          ev: evidenceId,
-          jenis: transfer ? "TRANSFER" : "PINJAM",
-          status: transfer ? "TRANSFER" : "DIPINJAM",
-        },
-        client
-      ))!;
-      await loanTransfer(
-        client,
-        req,
-        l,
-        dari,
-        ke,
-        l.qty,
-        transfer ? `Transfer ke ${ke} (Transfer #${l.id}): ${alasan}` : `Dipinjamkan ke ${ke} (Pinjaman #${l.id}): ${alasan}`,
-        transfer ? `Transfer dari ${dari} (Transfer #${l.id}): ${alasan}` : `Pinjam dari ${dari} (Pinjaman #${l.id}): ${alasan}`,
-        evidenceId,
-        transfer ? tanggal : undefined
-      );
-      return l;
-    });
+    loan = await withTransaction((client) => bookLoan(client, req, { module: m, dari, ke, item, qty, alasan, tanggal, evidenceId, transfer }));
   } catch (e) {
     await releaseEvidence(evidenceId);
     if (e instanceof StockError) return res.status(400).json({ error: e.message });

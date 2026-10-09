@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { wrongJenis } from "../lib/bbmJenis";
 import { api, type BbmSummary } from "../lib/api";
 import type { AlatOption } from "./AlatAutocomplete";
+import { PEMASOK, tujuanColumn } from "../lib/kirim";
 import { BatchGrid, HeaderField, fmtNum, headerInputCls, isBlankIn, localToday, parseNum, runningStock, type Cells, type GridCol } from "./BatchGrid";
 
 // Input Banyak BBM: the day's usage of one lokasi, one row per vehicle / genset (see BatchGrid).
@@ -38,6 +39,9 @@ export function BbmBatchModal({
   const alatOf = (c: Cells) => alatByKode.get((c.kendaraan ?? "").trim().toUpperCase());
   const masuk = (c: Cells) => c.tipe === "DITERIMA";
   const genset = (c: Cells) => /genset/i.test(c.kendaraan ?? "") || alatOf(c)?.jenis_unit === "GENSET";
+  // Nilam's Stock Out with a Tujuan: sent into that estate's tank (a Transfer), no vehicle / HM / SPB.
+  const supplier = lokasi === PEMASOK;
+  const kirim = (c: Cells) => supplier && !masuk(c) && !!c.ke;
 
   const columns: GridCol[] = [
     {
@@ -51,20 +55,21 @@ export function BbmBatchModal({
       ],
       tone: (c) => (masuk(c) ? "text-[var(--accent-green)]" : "text-[var(--accent-red)]"),
     },
+    ...(supplier ? [tujuanColumn(lokasi, (c) => !masuk(c))] : []),
     {
       key: "kendaraan",
       label: "Kendaraan / Alat",
       width: 150,
       options: alat.map((a) => ({ value: a.kode, label: [a.jenis_unit, a.nama].filter(Boolean).join(" · ") })),
       placeholder: "cth. MPN02",
-      off: (c) => masuk(c) && "-",
+      off: (c) => (masuk(c) || kirim(c)) && "-",
       hint: (c) => {
         const a = alatOf(c);
         return a ? [a.jenis_unit, a.nama].filter(Boolean).join(" · ") : undefined;
       },
     },
     { key: "jumlah", label: "Jumlah (LTR)", width: 90, type: "number", align: "right" },
-    { key: "hm", label: "HM / KM", width: 110, placeholder: "cth. 4373.7 h", copy: false, off: (c) => (masuk(c) ? "-" : genset(c) && "genset") },
+    { key: "hm", label: "HM / KM", width: 110, placeholder: "cth. 4373.7 h", copy: false, off: (c) => (masuk(c) || kirim(c) ? "-" : genset(c) && "genset") },
     {
       key: "estate",
       label: "Estate",
@@ -72,13 +77,13 @@ export function BbmBatchModal({
       type: "select",
       carry: true,
       options: [{ value: "", label: "-- Pilih --" }, ...estateOptions.map((e) => ({ value: e }))],
-      off: (c) => masuk(c) && lokasi,
+      off: (c) => (masuk(c) && lokasi) || (kirim(c) && "-"),
     },
     { key: "spb", label: "No. SPB", width: 90, carry: true },
     { key: "ket", label: "Keterangan", width: 220, placeholder: (c) => (masuk(c) ? "cth. Kiriman dari ..." : "cth. Genset 02 B") },
   ];
   const blank = isBlankIn(columns);
-  const blankRow: Cells = { tipe: "PEMAKAIAN", kendaraan: "", jumlah: "", hm: "", estate: lokasi, spb: "", ket: "" };
+  const blankRow: Cells = { tipe: "PEMAKAIAN", ke: "", kendaraan: "", jumlah: "", hm: "", estate: lokasi, spb: "", ket: "" };
 
   const saldoAwal = summary?.saldoTerakhir.find((s) => s.jenis_bbm === jenis && s.lokasi === lokasi)?.saldo_stock ?? 0;
   const run = (rows: Cells[]) =>
@@ -92,12 +97,13 @@ export function BbmBatchModal({
   // Same required fields as the single Transaksi form.
   const problem = (c: Cells, i: number, rows: Cells[]) => {
     const keluar = !masuk(c);
+    const pakai = keluar && !kirim(c);
     const missing = [
       !(parseNum(c.jumlah) > 0) && "Jumlah",
-      keluar && !c.kendaraan.trim() && "Kendaraan",
-      keluar && !genset(c) && !c.hm.trim() && "HM/KM",
-      keluar && (!c.estate || (estateOptions.length > 0 && !estateOptions.includes(c.estate))) && "Estate",
-      !c.spb.trim() && "No. SPB",
+      pakai && !c.kendaraan.trim() && "Kendaraan",
+      pakai && !genset(c) && !c.hm.trim() && "HM/KM",
+      pakai && (!c.estate || (estateOptions.length > 0 && !estateOptions.includes(c.estate))) && "Estate",
+      !kirim(c) && !c.spb.trim() && "No. SPB",
       !c.ket.trim() && "Keterangan",
     ].filter(Boolean);
     if (missing.length) return `Wajib diisi: ${missing.join(", ")}`;
@@ -172,11 +178,12 @@ export function BbmBatchModal({
           rows: rows.map((c) => ({
             tipe: masuk(c) ? "DITERIMA" : "PEMAKAIAN",
             jumlah: parseNum(c.jumlah),
-            estate: masuk(c) ? lokasi : c.estate,
+            estate: masuk(c) || kirim(c) ? lokasi : c.estate,
             no_spb: c.spb.trim(),
-            keterangan: c.ket.trim(),
-            kode_kendaraan: masuk(c) ? "" : c.kendaraan.trim(),
-            hm_terakhir: masuk(c) || genset(c) ? "" : c.hm.trim(),
+            keterangan: kirim(c) && c.spb.trim() ? `SPB ${c.spb.trim()}: ${c.ket.trim()}` : c.ket.trim(),
+            kode_kendaraan: masuk(c) || kirim(c) ? "" : c.kendaraan.trim(),
+            hm_terakhir: masuk(c) || kirim(c) || genset(c) ? "" : c.hm.trim(),
+            ke: kirim(c) ? c.ke : "",
           })),
         });
         return res.count;

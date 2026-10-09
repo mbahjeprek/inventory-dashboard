@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { api, type OliSummary, type PupukSummary } from "../lib/api";
+import { PEMASOK, tujuanColumn } from "../lib/kirim";
 import { BatchGrid, HeaderField, fmtNum, headerInputCls, isBlankIn, localToday, parseNum, runningStock, type Cells, type GridCol } from "./BatchGrid";
 
 // Input Banyak for the saldo inventories of one estate: pupuk and oli, one row per application /
@@ -38,7 +39,10 @@ export function PupukBatchModal({
 }) {
   const { tanggal, field, restore } = useTanggal();
   const masuk = (c: Cells) => c.tipe === "MASUK";
-  const offMasuk = (c: Cells) => masuk(c) && "-";
+  // Nilam's keluar with a Tujuan: sent into that estate's stock (a Transfer), no divisi / blok.
+  const supplier = estate === PEMASOK;
+  const kirim = (c: Cells) => supplier && !masuk(c) && !!c.ke;
+  const offMasuk = (c: Cells) => (masuk(c) || kirim(c)) && "-";
   const columns: GridCol[] = [
     {
       key: "tipe",
@@ -51,6 +55,7 @@ export function PupukBatchModal({
       ],
       tone: (c) => (masuk(c) ? "text-[var(--accent-green)]" : "text-[var(--accent-red)]"),
     },
+    ...(supplier ? [tujuanColumn(estate, (c) => !masuk(c))] : []),
     { key: "jenis", label: "Jenis Pupuk", width: 150, type: "select", carry: true, options: jenisOptions.map((j) => ({ value: j })) },
     { key: "jumlah", label: "Jumlah (KG)", width: 95, type: "number", align: "right" },
     {
@@ -74,7 +79,7 @@ export function PupukBatchModal({
 
   // Same required fields as the single form.
   const problem = (c: Cells) => {
-    const keluar = !masuk(c);
+    const keluar = !masuk(c) && !kirim(c);
     const missing = [
       !c.jenis && "Jenis",
       !(parseNum(c.jumlah) > 0) && "Jumlah",
@@ -98,7 +103,7 @@ export function PupukBatchModal({
       onRestoreExtra={restore}
       header={field}
       columns={columns}
-      blankRow={{ tipe: "KELUAR", jenis: jenisOptions[0] ?? "", jumlah: "", divisi: "", blok: "", ha: "", pokok: "", ket: "" }}
+      blankRow={{ tipe: "KELUAR", ke: "", jenis: jenisOptions[0] ?? "", jumlah: "", divisi: "", blok: "", ha: "", pokok: "", ket: "" }}
       problem={problem}
       saldo={(rows) => run(rows).map((s) => s && { text: fmtNum(s.after), bad: s.after < 0 })}
       summary={(rows) => (
@@ -113,10 +118,11 @@ export function PupukBatchModal({
           estate,
           tanggal_iso: tanggal,
           rows: rows.map((c) => {
-            const keluar = !masuk(c);
+            const keluar = !masuk(c) && !kirim(c);
             return {
+              ke: kirim(c) ? c.ke : "",
               jenis_pupuk: c.jenis,
-              tipe: keluar ? "KELUAR" : "MASUK",
+              tipe: masuk(c) ? "MASUK" : "KELUAR",
               jumlah: parseNum(c.jumlah),
               divisi: keluar ? c.divisi : "",
               blok: keluar ? c.blok.trim().toUpperCase().replace(/\./g, "") : "",
@@ -149,6 +155,9 @@ export function OliBatchModal({
 }) {
   const { tanggal, field, restore } = useTanggal();
   const masuk = (c: Cells) => c.tipe === "MASUK";
+  // Nilam's pemakaian with a Tujuan: sent into that estate's stock (a Transfer), no BPB needed.
+  const supplier = estate === PEMASOK;
+  const kirim = (c: Cells) => supplier && !masuk(c) && !!c.ke;
   const columns: GridCol[] = [
     {
       key: "tipe",
@@ -161,6 +170,7 @@ export function OliBatchModal({
       ],
       tone: (c) => (masuk(c) ? "text-[var(--accent-green)]" : "text-[var(--accent-red)]"),
     },
+    ...(supplier ? [tujuanColumn(estate, (c) => !masuk(c))] : []),
     { key: "jenis", label: "Jenis Oli", width: 150, type: "select", carry: true, options: jenisOptions.map((j) => ({ value: j })) },
     { key: "jumlah", label: "Jumlah (LTR)", width: 95, type: "number", align: "right" },
     { key: "bpb", label: "No. BPB", width: 110, carry: true },
@@ -175,7 +185,7 @@ export function OliBatchModal({
     const missing = [
       !c.jenis && "Jenis",
       !(parseNum(c.jumlah) > 0) && "Jumlah",
-      !c.bpb.trim() && "No. BPB",
+      !kirim(c) && !c.bpb.trim() && "No. BPB",
       !c.ket.trim() && (masuk(c) ? "Keterangan" : "Unit / Keterangan"),
     ].filter(Boolean);
     return missing.length ? `Wajib diisi: ${missing.join(", ")}` : "";
@@ -190,7 +200,7 @@ export function OliBatchModal({
       onRestoreExtra={restore}
       header={field}
       columns={columns}
-      blankRow={{ tipe: "PEMAKAIAN", jenis: jenisOptions[0] ?? "", jumlah: "", bpb: "", ket: "" }}
+      blankRow={{ tipe: "PEMAKAIAN", ke: "", jenis: jenisOptions[0] ?? "", jumlah: "", bpb: "", ket: "" }}
       problem={problem}
       saldo={(rows) => run(rows).map((s) => s && { text: fmtNum(s.after), bad: s.after < 0 })}
       summary={(rows) => (
@@ -209,7 +219,8 @@ export function OliBatchModal({
             tipe: masuk(c) ? "MASUK" : "PEMAKAIAN",
             jumlah: parseNum(c.jumlah),
             no_embrace: c.bpb.trim(),
-            keterangan: c.ket.trim(),
+            keterangan: kirim(c) && c.bpb.trim() ? `BPB ${c.bpb.trim()}: ${c.ket.trim()}` : c.ket.trim(),
+            ke: kirim(c) ? c.ke : "",
           })),
         });
         return res.count;
