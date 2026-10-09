@@ -3,7 +3,6 @@ import { Plus, Trash2, X } from "lucide-react";
 import { api, errorText, type Kunjungan, type KunjunganInput, type KunjunganObat, type KunjunganOptions } from "../lib/api";
 import { KaryawanAutocomplete } from "./KaryawanAutocomplete";
 import { PasienAutocomplete } from "./PasienAutocomplete";
-import { EvidenceInput, EvidenceLink } from "./EvidenceInput";
 import { JENIS_KUNJUNGAN, MAX_TERAPI, STATUS_PASIEN, hariOf, kodeTglOf, periodeOf, usiaOf } from "../lib/kunjungan";
 
 const inputCls = "w-full text-sm rounded-md border border-[var(--border)] px-3 py-2 bg-[var(--bg-card)] disabled:bg-[#f8fafc] disabled:text-[var(--text-muted)]";
@@ -90,7 +89,6 @@ export function KunjunganModal({ klinik, kunjungan, onClose, onSaved }: { klinik
     return { ...kunjungan, obat };
   });
   const [opts, setOpts] = useState<KunjunganOptions | null>(null);
-  const [evidenceId, setEvidenceId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [savedCount, setSavedCount] = useState(0);
@@ -123,12 +121,11 @@ export function KunjunganModal({ klinik, kunjungan, onClose, onSaved }: { klinik
     const payload = { ...f, usia, hari_istirahat: f.istirahat ? f.hari_istirahat : 0, provider: f.rujukan ? f.provider : "", obat: f.obat.filter((o) => o.nama_obat.trim() || o.qty) };
     setSaving(true);
     try {
-      if (isEdit) await api.updateKunjungan(kunjungan.id, { ...payload, evidence_id: evidenceId });
-      else await api.createKunjungan({ ...payload, klinik, evidence_id: evidenceId });
+      if (isEdit) await api.updateKunjungan(kunjungan.id, payload);
+      else await api.createKunjungan({ ...payload, klinik });
       if (again) {
         // Next patient of the same day.
         setF(blank(f.tanggal_iso));
-        setEvidenceId(null);
         setSavedCount((n) => n + 1);
         onSaved();
         document.getElementById("kunjungan-form")?.scrollTo({ top: 0 });
@@ -366,12 +363,6 @@ export function KunjunganModal({ klinik, kunjungan, onClose, onSaved }: { klinik
 
           <fieldset className="border border-[var(--border)] rounded-lg p-3 sm:p-4 space-y-3">
             <legend className="px-1.5 text-xs font-semibold uppercase tracking-wide text-[var(--accent-blue)]">Dokumentasi</legend>
-            {isEdit && kunjungan.evidence_id && !evidenceId && (
-              <div className="text-xs text-[var(--text-secondary)]">
-                Foto tersimpan: <EvidenceLink id={kunjungan.evidence_id} /> · upload di bawah untuk mengganti
-              </div>
-            )}
-            <EvidenceInput value={evidenceId} onChange={setEvidenceId} label="Foto (opsional)" />
             <Field label="Detail Kejadian" span={4}>
               <textarea value={f.detail_kejadian} onChange={(e) => set("detail_kejadian", e.target.value)} rows={2} placeholder="cth. kronologi kecelakaan kerja" className={inputCls} />
             </Field>

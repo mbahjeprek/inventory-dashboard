@@ -229,7 +229,6 @@ export function KlinikLaporanTab({ klinik }: { klinik: string }) {
         { label: "Rujukan" },
         { label: "Provider" },
         ...terapiCols,
-        { label: "Foto" },
         { label: "Detail Kejadian" },
       ],
       rows: all.map((k) => [
@@ -259,7 +258,6 @@ export function KlinikLaporanTab({ klinik }: { klinik: string }) {
           const o = k.obat[i];
           return o ? [o.nama_obat, o.qty, o.satuan] : ["", "", ""];
         }).flat(),
-        k.evidence_id ? "Ada" : "",
         k.detail_kejadian,
       ]),
     };
