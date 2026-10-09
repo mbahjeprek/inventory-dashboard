@@ -51,10 +51,10 @@ function dmy(raw: string, futureOk: boolean): [number, number, number] | null {
 }
 const isoOf = ([y, m, d]: [number, number, number]) => `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
 
-// "DIvisi A" / "Dividi C" / "divisi b" -> "Divisi A"; "Umu" -> "Umum".
+// "DIvisi A" / "Dividi C" / "divisi b" / "B" -> "Divisi A" / "Divisi B"; "Umu" -> "Umum".
 function divisiOf(v: string) {
   const s = clean(v);
-  const d = s.match(/^d[a-z]*\s*([abc])$/i);
+  const d = s.match(/^(?:d[a-z]*\s*)?([abc])$/i);
   if (d) return `Divisi ${d[1].toUpperCase()}`;
   if (/^umu/i.test(s)) return "Umum";
   return s;
@@ -89,9 +89,11 @@ export function parseDailyReport(csv: string): { rows: Kunjungan[]; skipped: num
     detail: col(/^detail kejadian/),
   };
   if (c.tanggal < 0 || c.nama < 0) throw new Error("Kolom Tanggal / Nama Pasien tidak ditemukan");
-  const obatCols = header.flatMap((h, i) => (h === "kode obat" ? [i] : []));
-  // "Tahun : 2026" in the title rows fixes a mistyped year on a row ("02 Jan 25" in a 2026 report).
-  const tahunCell = grid.slice(0, headerAt).flat().map(clean).find((v) => /tahun\s*:\s*\d{4}/i.test(v));
+  // Obat groups: "Terapi N, Qty N, Satuan", with a "Kode Obat" column before it in some sheets (Nilam).
+  const obatCols = header.flatMap((h, i) => (/^terapi \d+$/.test(h) ? [{ kode: header[i - 1] === "kode obat" ? i - 1 : -1, nama: i }] : []));
+  // "Tahun : 2026" / "Januari Tahun 2026" in the title rows fixes a mistyped year on a row ("02 Jan 25"
+  // in a 2026 report).
+  const tahunCell = grid.slice(0, headerAt).flat().map(clean).find((v) => /tahun\s*:?\s*\d{4}/i.test(v));
   const tahun = tahunCell ? Number(tahunCell.match(/(\d{4})/)![1]) : null;
   const get = (r: string[], i: number) => (i < 0 ? "" : clean(r[i]));
 
@@ -108,8 +110,8 @@ export function parseDailyReport(csv: string): { rows: Kunjungan[]; skipped: num
     const lahir = dmy(get(r, c.lahir), false);
     const usia = parseInt(get(r, c.usia));
     const obat: KunjunganObat[] = [];
-    for (const i of obatCols) {
-      const kode = clean(r[i]).toUpperCase(), nama = clean(r[i + 1]), qtyRaw = clean(r[i + 2]), satuan = clean(r[i + 3]).toUpperCase();
+    for (const g of obatCols) {
+      const kode = g.kode < 0 ? "" : clean(r[g.kode]).toUpperCase(), nama = clean(r[g.nama]), qtyRaw = clean(r[g.nama + 1]), satuan = clean(r[g.nama + 2]).toUpperCase();
       if (!kode && !nama && !qtyRaw) continue;
       const q = parseFloat(qtyRaw.replace(",", "."));
       obat.push({ obat_kode: kode, nama_obat: nama, qty: Number.isFinite(q) ? q : null, satuan });
@@ -149,6 +151,9 @@ export function sheetCsvUrl(url: string): string | null {
   const gid = url.match(/[#&?]gid=(\d+)/)?.[1] ?? "0";
   return `https://docs.google.com/spreadsheets/d/${id}/export?format=csv&gid=${gid}`;
 }
+
+// One cell can hold several diagnoses ("Febris, Influenza, Bronchitis", "Vartigo/ANC"): each counts.
+export const splitDiagnosis = (s: string) => s.split(/\s*[,;/+]\s*/).map((x) => x.trim()).filter(Boolean);
 
 // Grouping key for free-typed labels: "Oil Pamthom" / "Oilpamthom" / "oil pamthom " are one.
 export const labelKey = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
