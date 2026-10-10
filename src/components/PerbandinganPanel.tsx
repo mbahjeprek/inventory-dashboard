@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Bar, BarChart, CartesianGrid, Cell, LabelList, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { BarChart3, X } from "lucide-react";
 import { api, type OpnameModule, type Perbandingan } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { canModule } from "../lib/access";
+import { chartOf, type ReportPart } from "../lib/printTable";
 
 type EstateLink = { estate: string; label: string };
 type Period = "bulan" | "3bulan" | "6bulan" | "tahun" | "custom";
@@ -166,7 +167,8 @@ function BarangPicker({ module, value, onChange }: { module: OpnameModule; value
 
 // Dashboard "Perbandingan": how much each estate on screen used in a period, as bars per estate,
 // a trend line per estate and a table with the change against the period before.
-export function PerbandinganPanel({ estates }: { estates: EstateLink[] }) {
+// onExport gets a function that builds the Cetak / Excel part of what the panel shows right now.
+export function PerbandinganPanel({ estates, onExport }: { estates: EstateLink[]; onExport?: (build: (() => ReportPart) | null) => void }) {
   const { user } = useAuth();
   const sources = SOURCES.filter((s) => canModule(user, s.module));
   const [sourceKey, setSourceKey] = useState(() => {
@@ -184,6 +186,15 @@ export function PerbandinganPanel({ estates }: { estates: EstateLink[] }) {
   const [barang, setBarang] = useState<Barang | null>(null);
   const [data, setData] = useState<Perbandingan | null>(null);
   const [error, setError] = useState(false);
+  const barRef = useRef<HTMLDivElement>(null);
+  const trendRef = useRef<HTMLDivElement>(null);
+  const buildRef = useRef<() => ReportPart>(() => ({ sections: [] }));
+  useEffect(() => {
+    if (!onExport) return;
+    onExport(() => buildRef.current());
+    return () => onExport(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const range = periodRange(period, { from: custom.dateFrom, to: custom.dateTo });
   const codes = estates.map((e) => e.estate);
@@ -242,6 +253,68 @@ export function PerbandinganPanel({ estates }: { estates: EstateLink[] }) {
         : barang
           ? `keluar ${barang.nama} (${unit})`
           : `pemakaian ${source.label.toLowerCase()} (${unit})`;
+  const dmy = (iso: string) => iso.split("-").reverse().join("/");
+  const changeText = (value: number, before: number) => {
+    if (!before) return value ? "baru" : "-";
+    const change = ((value - before) / before) * 100;
+    return `${change > 0 ? "▲ " : change < 0 ? "▼ " : ""}${Math.abs(change) > 999 ? ">999" : fmt(Math.abs(change))}%`;
+  };
+
+  // Cetak / Excel: the filters, then the bars + table and the trend, as on screen.
+  buildRef.current = () => {
+    const subtitle = [
+      estates.length >= 2 ? `${estates.map((e) => e.label).join(" · ")} · ${what}` : "Pilih minimal 2 estate",
+      `Periode: ${PERIODS.find((p) => p.key === period)?.label} · ${dmy(range.dateFrom)} s/d ${dmy(range.dateTo)}`,
+    ];
+    const message =
+      estates.length < 2
+        ? "Pilih 2 estate atau lebih untuk membandingkan."
+        : error
+          ? "Gagal memuat data"
+          : data === null
+            ? "Memuat..."
+            : total === 0
+              ? "Tidak ada pemakaian pada periode ini"
+              : "";
+    if (message || !data) return { subtitle, sections: [{ heading: "", columns: [{ label: "Keterangan" }], rows: [[message]] }] };
+    const sections: ReportPart["sections"] = [
+      {
+        heading: "Total per estate",
+        chart: chartOf(barRef.current),
+        columns: [
+          { label: "Estate" },
+          { label: data.metric === "trx" ? "Transaksi" : `Jumlah (${unit})`, align: "right" },
+          { label: "% total", align: "right" },
+          { label: "vs periode lalu", align: "right" },
+          { label: "Periode lalu", align: "right" },
+        ],
+        rows: [
+          ...bars.map((r) => {
+            const before = data.prev.find((p) => p.estate === r.estate)?.value ?? 0;
+            return [r.label, r.value, `${fmt(r.share)}%`, changeText(r.value, before), before];
+          }),
+          ["Total", total, "100%", "", data.prev.reduce((s, r) => s + r.value, 0)],
+        ],
+        note:
+          `Periode lalu = ${dmy(data.prevFrom)} s/d ${dmy(data.prevTo)}. Koreksi stok, pinjaman antar estate dan kiriman Gudang Nilam ke gudang estate lain tidak dihitung.` +
+          (data.metric === "trx" ? " Satuan barang berbeda-beda, jadi tanpa barang dipilih yang dibandingkan jumlah transaksi keluar." : ""),
+      },
+    ];
+    if (trend.length >= 2) {
+      const per = data.bucket === "week" ? "minggu" : "bulan";
+      sections.push({
+        heading: `Tren per ${per}`,
+        chart: chartOf(
+          trendRef.current,
+          codes.map((c) => ({ label: labelOf(c), color: ESTATE_COLOR[c] }))
+        ),
+        columns: [{ label: data.bucket === "week" ? "Minggu" : "Bulan", nowrap: true }, ...codes.map((c) => ({ label: labelOf(c), align: "right" as const }))],
+        rows: trend.map((t) => [String(t.label), ...codes.map((c) => Number(t[c]))]),
+        note: openEnd ? `* ${per} berjalan, belum penuh` : undefined,
+      });
+    }
+    return { subtitle, sections };
+  };
 
   return (
     <section className="min-w-0 bg-[var(--bg-card)] border border-[var(--border)] rounded-lg p-4 space-y-4">
@@ -297,7 +370,7 @@ export function PerbandinganPanel({ estates }: { estates: EstateLink[] }) {
           <div className="grid gap-4 lg:grid-cols-2 items-start">
             <div className="min-w-0">
               <div className="text-xs font-medium text-[var(--text-secondary)] mb-1">Total per estate</div>
-              <div style={{ height: bars.length * 40 + 16 }}>
+              <div ref={barRef} style={{ height: bars.length * 40 + 16 }}>
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={bars} layout="vertical" margin={{ top: 0, right: 72, bottom: 0, left: 0 }} barCategoryGap={8}>
                     <XAxis type="number" hide />
@@ -398,7 +471,7 @@ export function PerbandinganPanel({ estates }: { estates: EstateLink[] }) {
                   ))}
                 </div>
               </div>
-              <div className="h-64">
+              <div ref={trendRef} className="h-64">
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={trend} margin={{ top: 8, right: 16, bottom: 0, left: 0 }}>
                     <CartesianGrid vertical={false} stroke="#e8edf3" />

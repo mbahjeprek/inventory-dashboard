@@ -7,6 +7,11 @@ import { useEstateFilter } from "../hooks/useEstateFilter";
 import { canModule, MODULES, userEstates, type Module } from "../lib/access";
 import { TopKeluarPanel } from "../components/TopKeluarPanel";
 import { PerbandinganPanel } from "../components/PerbandinganPanel";
+import { ExportButtons } from "../components/ExportButtons";
+import type { ReportPart, ReportSection, SectionReport } from "../lib/printTable";
+
+type ExportBuild = (() => ReportPart) | null;
+type User = ReturnType<typeof useAuth>["user"];
 
 type GudangStat = { totalItems: number; totalStock: number; lowStock: number; outOfStock: number };
 
@@ -269,12 +274,108 @@ function EstateRow({ e, d, monthLabel }: { e: EstateInfo; d: EstateData; monthLa
   );
 }
 
+// Cetak / Excel of one estate's cards (EstateRow): one row per figure, with the same states
+// (memuat / gagal / belum ada data) as the cards.
+function estateSection(e: EstateInfo, d: EstateData, user: User, heading: string): ReportSection {
+  const rows: ReportSection["rows"] = [];
+  const n = (v: number | string | undefined) => Number(v ?? 0);
+  // false = the card shows a message instead of figures (that message is the row).
+  const ready = (modul: string, v: unknown, empty: () => boolean, emptyText: string) => {
+    const msg = v === undefined ? "Memuat..." : v === null ? "Gagal memuat data" : empty() ? emptyText : "";
+    if (msg) rows.push([modul, msg, "", "", "", "", ""]);
+    return !msg;
+  };
+  const minus = (saldo: number) => (saldo < 0 ? "Saldo minus" : "");
+
+  if (canModule(user, "GUDANG") && ready("Gudang", d.gudang, () => n(d.gudang!.totalItems) === 0, "Belum ada barang di gudang")) {
+    const g = d.gudang!;
+    rows.push(
+      ["Gudang", "Item barang", n(g.totalItems), "item", "", "", ""],
+      ["Gudang", "Stock tersedia", n(g.totalStock), "", "", "", ""],
+      ["Gudang", "Stok menipis", n(g.lowStock), "item", "", "", ""],
+      ["Gudang", "Stok habis", n(g.outOfStock), "item", "", "", ""]
+    );
+  }
+  if (canModule(user, "BBM")) {
+    const saldo = (j: string) => n(d.bbm?.saldoTerakhir.find((x) => x.jenis_bbm === j && x.lokasi === e.estate)?.saldo_stock);
+    const flow = (j: string) => d.bbm?.perLokasi.find((x) => x.jenis_bbm === j && x.lokasi === e.estate);
+    if (ready("BBM", d.bbm, () => ["SOLAR", "BENSIN"].every((j) => !saldo(j) && !flow(j)), "Belum ada data BBM"))
+      for (const j of ["SOLAR", "BENSIN"])
+        rows.push(["BBM", j === "SOLAR" ? "Solar" : "Bensin", saldo(j), "LTR", n(flow(j)?.diterima), n(flow(j)?.pemakaian), minus(saldo(j))]);
+  }
+  if (canModule(user, "PUPUK")) {
+    const jenis = d.pupuk ? Array.from(new Set(d.pupuk.saldoTerakhir.map((x) => x.jenis_pupuk))) : [];
+    if (ready("Pupuk NPK", d.pupuk, () => jenis.length === 0, "Belum ada data pupuk"))
+      for (const j of jenis) {
+        const saldo = n(d.pupuk!.saldoTerakhir.find((x) => x.jenis_pupuk === j)?.saldo_stock);
+        const flow = d.pupuk!.perJenis.find((x) => x.jenis_pupuk === j);
+        rows.push(["Pupuk NPK", j.replace(/^PUPUK /, ""), saldo, "KG", n(flow?.diterima), n(flow?.keluar), minus(saldo)]);
+      }
+  }
+  if (canModule(user, "OLI")) {
+    const jenis = d.oli ? Array.from(new Set([...d.oli.saldoTerakhir.map((x) => x.jenis_oli), ...d.oli.perJenis.map((x) => x.jenis_oli)])).sort() : [];
+    if (ready("Oli", d.oli, () => jenis.length === 0, "Belum ada data oli"))
+      for (const j of jenis) {
+        const saldo = n(d.oli!.saldoTerakhir.find((x) => x.jenis_oli === j)?.saldo_stock);
+        const flow = d.oli!.perJenis.find((x) => x.jenis_oli === j);
+        rows.push(["Oli", j, saldo, "LTR", n(flow?.diterima), n(flow?.pemakaian), minus(saldo)]);
+      }
+  }
+  if (canModule(user, "KLINIK")) {
+    if (ready("Klinik", d.klinik, () => n(d.klinik!.totalItems) === 0, "Belum ada obat di klinik")) {
+      const k = d.klinik!;
+      rows.push(
+        ["Klinik", "Item obat", n(k.totalItems), "item", "", "", ""],
+        ["Klinik", "Total stock", n(k.totalStock), "", "", "", ""],
+        ["Klinik", "Stok menipis", n(k.lowStock), "item", "", "", ""],
+        ["Klinik", "Stok habis", n(k.outOfStock), "item", "", "", ""],
+        ["Klinik", "Expired / segera expired", n(k.expiring), "item", "", "", ""]
+      );
+    }
+    if (ready("Pasien Klinik", d.pasien, () => false, "")) {
+      const p = d.pasien!;
+      rows.push(
+        ["Pasien Klinik", "Kunjungan", n(p.total), "pasien", "", "", ""],
+        ["Pasien Klinik", "Kecelakaan kerja", n(p.kecelakaan), "", "", "", ""],
+        ["Pasien Klinik", "Surat sakit", n(p.istirahat), "", "", "", `${fmt(p.hari_istirahat)} hari`],
+        ["Pasien Klinik", "Rujukan", n(p.rujukan), "", "", "", ""]
+      );
+    }
+  }
+  return {
+    heading,
+    columns: [
+      { label: "Modul", nowrap: true },
+      { label: "Uraian" },
+      { label: "Saldo / Jumlah", align: "right" },
+      { label: "Satuan" },
+      { label: "Masuk", align: "right" },
+      { label: "Keluar / Pakai", align: "right" },
+      { label: "Keterangan" },
+    ],
+    rows,
+  };
+}
+
+// Registers a panel's Cetak / Excel builder with the Dashboard; the builder always reads the latest render.
+function useExport(onExport: ((b: ExportBuild) => void) | undefined) {
+  const buildRef = useRef<() => ReportPart>(() => ({ sections: [] }));
+  useEffect(() => {
+    if (!onExport) return;
+    onExport(() => buildRef.current());
+    return () => onExport(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return buildRef;
+}
+
 type AttentionGroup = { key: string; title: string; tone: "red" | "amber"; to: string; total: number; names: string[] };
 
 // Single-estate view: what needs action (stock habis/menipis, obat expired, negative pupuk saldo).
-function AttentionPanel({ e, d }: { e: EstateInfo; d: EstateData }) {
+function AttentionPanel({ e, d, onExport }: { e: EstateInfo; d: EstateData; onExport?: (b: ExportBuild) => void }) {
   const { user } = useAuth();
   const [groups, setGroups] = useState<AttentionGroup[] | null>(null);
+  const buildRef = useExport(onExport);
 
   useEffect(() => {
     let stale = false;
@@ -322,6 +423,28 @@ function AttentionPanel({ e, d }: { e: EstateInfo; d: EstateData }) {
 
   const negativePupuk = canModule(user, "PUPUK") ? (d.pupuk?.saldoTerakhir ?? []).filter((x) => Number(x.saldo_stock) < 0) : [];
   const negativeOli = canModule(user, "OLI") ? (d.oli?.saldoTerakhir ?? []).filter((x) => Number(x.saldo_stock) < 0) : [];
+
+  buildRef.current = () => {
+    const rows: ReportSection["rows"] =
+      groups === null
+        ? [["Memuat...", "", ""]]
+        : groups.length === 0 && negativePupuk.length === 0 && negativeOli.length === 0
+          ? [["Semua aman, tidak ada stok habis, menipis, atau obat expired.", "", ""]]
+          : [
+              ...groups.map((g) => [
+                g.title,
+                `${fmt(g.total)} item`,
+                g.names.join(" · ") + (g.total > g.names.length ? ` · +${fmt(g.total - g.names.length)} lainnya` : ""),
+              ]),
+              ...(negativePupuk.length
+                ? [["Pupuk NPK · saldo minus", "", negativePupuk.map((x) => `${x.jenis_pupuk.replace(/^PUPUK /, "")} ${fmt(x.saldo_stock)} KG`).join(" · ")]]
+                : []),
+              ...(negativeOli.length ? [["Oli · saldo minus", "", negativeOli.map((x) => `${x.jenis_oli} ${fmt(x.saldo_stock)} LTR`).join(" · ")]] : []),
+            ];
+    return {
+      sections: [{ heading: "Perlu Perhatian", columns: [{ label: "Perhatian" }, { label: "Jumlah", align: "right", nowrap: true }, { label: "Rincian" }], rows }],
+    };
+  };
 
   return (
     <section className="min-w-0 bg-[var(--bg-card)] border border-[var(--border)] rounded-lg p-4">
@@ -377,9 +500,10 @@ function AttentionPanel({ e, d }: { e: EstateInfo; d: EstateData }) {
 }
 
 // Single-estate view: the latest changes across Gudang, BBM, Pupuk, Oli and Klinik.
-function RecentActivity({ estate }: { estate: string }) {
+function RecentActivity({ estate, onExport }: { estate: string; onExport?: (b: ExportBuild) => void }) {
   const { user } = useAuth();
   const [rows, setRows] = useState<ActivityLog[] | null>(null);
+  const buildRef = useExport(onExport);
 
   useEffect(() => {
     let stale = false;
@@ -398,6 +522,21 @@ function RecentActivity({ estate }: { estate: string }) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [estate, user?.id]);
+
+  buildRef.current = () => ({
+    sections: [
+      {
+        heading: "Aktivitas Terbaru",
+        columns: [{ label: "Waktu", nowrap: true }, { label: "Modul" }, { label: "Aksi" }, { label: "Objek" }, { label: "Oleh" }, { label: "Detail" }],
+        rows:
+          rows === null
+            ? [["Memuat...", "", "", "", "", ""]]
+            : rows.length === 0
+              ? [["Belum ada aktivitas", "", "", "", "", ""]]
+              : rows.map((r) => [formatWaktu(r.created_at), MODULE_LABEL[r.module], r.aksi, r.objek, r.nama || r.username, r.detail]),
+      },
+    ],
+  });
 
   return (
     <section className="min-w-0 bg-[var(--bg-card)] border border-[var(--border)] rounded-lg p-4">
@@ -495,6 +634,34 @@ export function DashboardPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id, shownKey]);
 
+  // Cetak / Excel of the tab on screen. The panels with their own data (Top Barang Keluar,
+  // Perbandingan, Perlu Perhatian, Aktivitas Terbaru) register a builder here.
+  const parts = useRef<Record<string, ExportBuild>>({});
+  const register = (key: string) => (b: ExportBuild) => {
+    parts.current[key] = b;
+  };
+  const part = (key: string): ReportPart => parts.current[key]?.() ?? { sections: [] };
+  const buildReport = async (): Promise<SectionReport> => {
+    const title = `Dashboard${single && !multiEstate ? ` - Estate ${single.label}` : ""}`;
+    if (tab === "perbandingan") {
+      const p = part("perbandingan");
+      return { title: `${title} - Perbandingan Pemakaian Antar Estate`, subtitle: p.subtitle, sections: p.sections, landscape: true };
+    }
+    return {
+      title: `${title} - Ringkasan`,
+      subtitle: [
+        `Estate: ${shown.map((e) => e.label).join(", ")}`,
+        `Saldo & stok per ${now.toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" })} · masuk / keluar dan pasien klinik: ${monthLabel}`,
+      ],
+      sections: [
+        ...shown.map((e) => estateSection(e, data[e.estate] ?? {}, user, `Estate ${e.label}`)),
+        ...part("top").sections,
+        ...(single ? [...part("attention").sections, ...part("recent").sections] : []),
+      ],
+      landscape: true,
+    };
+  };
+
   const setPicked = (codes: string[]) => storePicked(ESTATES.filter((e) => codes.includes(e.estate)).map((e) => e.estate));
   const toggleEstate = (code: string) =>
     setPicked(picked.includes(code) ? picked.filter((c) => c !== code) : [...picked, code]);
@@ -516,16 +683,21 @@ export function DashboardPage() {
             {now.toLocaleDateString("id-ID", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
           </p>
         </div>
-        {multiEstate && anyModule && (
-          <div className="flex flex-wrap gap-2">
-            <button onClick={() => setPicked([])} className={chip(!picked.length)}>
-              Semua Estate
-            </button>
-            {allowedEstates.map((e) => (
-              <button key={e.estate} onClick={() => toggleEstate(e.estate)} className={chip(picked.includes(e.estate))}>
-                {e.label}
-              </button>
-            ))}
+        {anyModule && (
+          <div className="flex flex-wrap items-center gap-2">
+            {multiEstate && (
+              <>
+                <button onClick={() => setPicked([])} className={chip(!picked.length)}>
+                  Semua Estate
+                </button>
+                {allowedEstates.map((e) => (
+                  <button key={e.estate} onClick={() => toggleEstate(e.estate)} className={chip(picked.includes(e.estate))}>
+                    {e.label}
+                  </button>
+                ))}
+              </>
+            )}
+            <ExportButtons total={0} buildReport={buildReport} fileName={`dashboard-${tab}`} />
           </div>
         )}
       </div>
@@ -553,7 +725,7 @@ export function DashboardPage() {
         </div>
       )}
 
-      {tab === "perbandingan" && <PerbandinganPanel estates={shown} />}
+      {tab === "perbandingan" && <PerbandinganPanel estates={shown} onExport={register("perbandingan")} />}
 
       {!anyModule && (
         <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg p-4 text-sm text-[var(--text-secondary)]">
@@ -568,12 +740,12 @@ export function DashboardPage() {
         </section>
       ))}
 
-      {tab === "ringkasan" && anyModule && <TopKeluarPanel estates={shown} />}
+      {tab === "ringkasan" && anyModule && <TopKeluarPanel estates={shown} onExport={register("top")} />}
 
       {tab === "ringkasan" && anyModule && single && (
         <div className="grid gap-3 lg:grid-cols-2 items-start">
-          <AttentionPanel e={single} d={data[single.estate] ?? {}} />
-          <RecentActivity estate={single.estate} />
+          <AttentionPanel e={single} d={data[single.estate] ?? {}} onExport={register("attention")} />
+          <RecentActivity estate={single.estate} onExport={register("recent")} />
         </div>
       )}
     </div>

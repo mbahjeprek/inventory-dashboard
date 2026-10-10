@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Bar, BarChart, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { TrendingUp } from "lucide-react";
 import { api, type TopKeluar, type TopKeluarRow } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { canModule } from "../lib/access";
+import { chartOf, type ReportPart } from "../lib/printTable";
 
 type EstateLink = { estate: string; label: string; gudang: string; klinik: string };
 type Source = "gudang" | "klinik";
@@ -54,7 +55,8 @@ function Segmented<T extends string>({ value, options, onChange }: { value: T; o
 
 // Dashboard ranking of the items that went out most often (number of transactions) for the estates on
 // screen; total qty is shown alongside. Koreksi is not counted.
-export function TopKeluarPanel({ estates }: { estates: EstateLink[] }) {
+// onExport gets a function that builds the Cetak / Excel part of what the panel shows right now.
+export function TopKeluarPanel({ estates, onExport }: { estates: EstateLink[]; onExport?: (build: (() => ReportPart) | null) => void }) {
   const navigate = useNavigate();
   const { user } = useAuth();
   // An admin limited to some modules only ranks those (Gudang and/or Klinik).
@@ -68,6 +70,14 @@ export function TopKeluarPanel({ estates }: { estates: EstateLink[] }) {
   const [data, setData] = useState<TopKeluar | null>(null);
   const [error, setError] = useState(false);
   const [hover, setHover] = useState<number | null>(null);
+  const chartRef = useRef<HTMLDivElement>(null);
+  const buildRef = useRef<() => ReportPart>(() => ({ sections: [] }));
+  useEffect(() => {
+    if (!onExport) return;
+    onExport(() => buildRef.current());
+    return () => onExport(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const range = periodRange(period, { from: custom.dateFrom, to: custom.dateTo });
   const codes = estates.map((e) => e.estate);
@@ -101,6 +111,34 @@ export function TopKeluarPanel({ estates }: { estates: EstateLink[] }) {
   const scope = single ? `Estate ${single.label}` : estates.length === 0 ? "" : `${estates.length} estate`;
 
   if (!sources.length) return null;
+
+  // Cetak / Excel: the chart and the ranking table, as on screen.
+  const dmy = (iso: string) => iso.split("-").reverse().join("/");
+  buildRef.current = () => {
+    const heading =
+      `Top Barang Keluar - 10 ${source === "gudang" ? "barang gudang" : "obat klinik"} yang paling sering keluar` +
+      `${scope ? ` · ${scope}` : ""} · ${PERIODS.find((p) => p.key === period)?.label} (${dmy(range.dateFrom)} s/d ${dmy(range.dateTo)})`;
+    const message = error ? "Gagal memuat data" : data === null ? "Memuat..." : rows.length === 0 ? "Tidak ada barang keluar pada periode ini" : "";
+    if (message || !data) return { sections: [{ heading, columns: [{ label: "Keterangan" }], rows: [[message]] }] };
+    return {
+      sections: [
+        {
+          heading,
+          chart: chartOf(chartRef.current),
+          columns: [
+            { label: "#", align: "right" },
+            { label: "Barang" },
+            { label: "Kode", nowrap: true },
+            { label: "Transaksi (x)", align: "right" },
+            { label: "Qty", align: "right" },
+            { label: "Satuan" },
+          ],
+          rows: rows.map((r, i) => [i + 1, r.nama, r.kode, Number(r.trx), Number(r.qty), r.satuan]),
+          note: `Total periode ini: ${fmt(data.totalTrx)} transaksi keluar. Koreksi stok tidak dihitung.`,
+        },
+      ],
+    };
+  };
 
   return (
     <section className="min-w-0 bg-[var(--bg-card)] border border-[var(--border)] rounded-lg p-4 space-y-3">
@@ -151,7 +189,7 @@ export function TopKeluarPanel({ estates }: { estates: EstateLink[] }) {
         <div className="text-sm text-[var(--text-muted)]">Tidak ada barang keluar pada periode ini</div>
       ) : (
         <div className="grid gap-4 lg:grid-cols-5 items-start">
-          <div className="lg:col-span-3 min-w-0" style={{ height: rows.length * 30 + 24 }}>
+          <div ref={chartRef} className="lg:col-span-3 min-w-0" style={{ height: rows.length * 30 + 24 }}>
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={chartData} layout="vertical" margin={{ top: 0, right: 16, bottom: 0, left: 0 }} barCategoryGap={6}>
                 <XAxis type="number" tickFormatter={fmt} tick={{ fontSize: 11, fill: "#5b6b7c" }} axisLine={false} tickLine={false} />
