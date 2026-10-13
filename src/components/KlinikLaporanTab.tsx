@@ -372,6 +372,13 @@ export function KlinikLaporanTab({ klinik }: { klinik: string }) {
   const obatStok = (k: Kunjungan, o: Kunjungan["obat"][number]) => {
     if (k.sebelum_opname || o.master === undefined) return null;
     if (o.master && o.terpotong) return <span className="text-[10px] text-[var(--accent-green)]" title="Sudah tercatat di Stock Out klinik"> ✓ stok</span>;
+    if (o.master && o.qty === null)
+      return (
+        <span className="text-[10px] text-[var(--accent-red)]" title="Qty belum diisi, stok tidak bisa dipotong. Edit kunjungan dan isi qty-nya.">
+          {" "}
+          qty kosong
+        </span>
+      );
     return (
       <span className="text-[10px] text-[var(--accent-amber)]" title={o.master ? "Belum tercatat di Stock Out klinik" : "Nama tidak dari daftar obat, stok tidak terpotong"}>
         {" "}
