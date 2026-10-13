@@ -328,8 +328,8 @@ export function KunjunganModal({ klinik, kunjungan, onClose, onSaved }: { klinik
                     <div className="min-w-0">
                       <input value={o.nama_obat} onChange={(e) => pickObat(i, e.target.value)} list="kj-obat" placeholder={`Terapi ${i + 1}`} aria-label={`Terapi ${i + 1}`} className={inputCls} />
                       {m ? (
-                        <span className={`text-[11px] ${o.qty !== null && m.stok !== null && o.qty > m.stok ? "text-[var(--accent-red)]" : "text-[var(--text-muted)]"}`}>
-                          stok klinik {(m.stok ?? 0).toLocaleString("id-ID")} {m.satuan} · otomatis jadi Stock Out
+                        <span className={`text-[11px] ${o.qty !== null && o.qty > (m.stok ?? 0) ? "text-[var(--accent-red)]" : "text-[var(--text-muted)]"}`}>
+                          stok klinik {(m.stok ?? 0).toLocaleString("id-ID")} {m.satuan} · {o.qty !== null && o.qty > (m.stok ?? 0) ? "stok tidak cukup" : "otomatis jadi Stock Out"}
                         </span>
                       ) : (
                         o.nama_obat.trim() && <span className="text-[11px] text-[var(--accent-amber)]">bukan dari daftar obat - stok tidak terpotong</span>
