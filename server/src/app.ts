@@ -831,8 +831,9 @@ app.get("/api/gudang-stock", async (req, res) => {
 // Tanggal of a Stock In / Out / Koreksi of barang & obat (single, Input Banyak, Koreksi): a movement
 // entered later than it happened takes that day (with the current time) as its time, through txTime
 // in db.ts. Not after today, and not before the last approved stok opname of that estate's gudang /
-// klinik - what the opname counted already includes it.
-const BACKDATE: Record<string, { module: "GUDANG" | "KLINIK"; estate: (b: any) => string }> = {
+// klinik - what the opname counted already includes it. A Pinjaman / Transfer checks the opname of
+// both estates in its module.
+const BACKDATE: Record<string, { module: OpnameModule | ((b: any) => string); estate: (b: any) => string | string[] }> = {
   "/api/transactions": { module: "GUDANG", estate: () => "NILAM" },
   "/api/transactions/batch": { module: "GUDANG", estate: () => "NILAM" },
   "/api/stock-correction": { module: "GUDANG", estate: () => "NILAM" },
@@ -842,6 +843,8 @@ const BACKDATE: Record<string, { module: "GUDANG" | "KLINIK"; estate: (b: any) =
   "/api/klinik-stock/transactions": { module: "KLINIK", estate: (b) => b.klinik },
   "/api/klinik-stock/transactions/batch": { module: "KLINIK", estate: (b) => b.klinik },
   "/api/klinik-stock/correction": { module: "KLINIK", estate: (b) => b.klinik },
+  "/api/pinjaman": { module: (b) => b.module, estate: (b) => [b.dari, b.ke] },
+  "/api/pinjaman/batch": { module: (b) => b.module, estate: (b) => [b.dari, b.ke] },
 };
 app.use(async (req, res, next) => {
   const route = req.method === "POST" ? BACKDATE[req.path] : undefined;
@@ -851,12 +854,16 @@ app.use(async (req, res, next) => {
   if (!ISO_DATE.test(tanggal)) return res.status(400).json({ error: "Tanggal tidak valid" });
   if (tanggal > today) return res.status(400).json({ error: "Tanggal tidak boleh lewat dari hari ini" });
   if (tanggal === today) return next();
-  const opname = await queryOne<{ tanggal: string }>(
-    "SELECT tanggal FROM opname WHERE module = @module AND estate = @estate AND status = 'APPROVED' ORDER BY tanggal DESC LIMIT 1",
-    { module: route.module, estate: String(route.estate(req.body) ?? "") }
+  const module = typeof route.module === "function" ? String(route.module(req.body) ?? "") : route.module;
+  const estates = [route.estate(req.body)].flat().map((e) => String(e ?? ""));
+  const opname = await queryOne<{ tanggal: string; estate: string }>(
+    "SELECT tanggal, estate FROM opname WHERE module = @module AND estate = ANY(@estates::text[]) AND status = 'APPROVED' ORDER BY tanggal DESC LIMIT 1",
+    { module, estates }
   );
   if (opname && tanggal < opname.tanggal)
-    return res.status(400).json({ error: `Tanggal tidak boleh sebelum stok opname terakhir (${opname.tanggal.split("-").reverse().join("/")}) - hasil hitung opname sudah mencakupnya` });
+    return res.status(400).json({
+      error: `Tanggal tidak boleh sebelum stok opname terakhir${estates.length > 1 ? ` ${opname.estate}` : ""} (${opname.tanggal.split("-").reverse().join("/")}) - hasil hitung opname sudah mencakupnya`,
+    });
   const time = new Date().toLocaleTimeString("en-GB", { timeZone: "Asia/Jakarta", hour12: false });
   txTime.run(`${tanggal}T${time}+07:00`, () => next());
 });
@@ -6073,7 +6080,7 @@ async function bookLoan(
     b.transfer ? `Transfer ke ${b.ke} (Transfer #${l.id}): ${b.alasan}` : `Dipinjamkan ke ${b.ke} (Pinjaman #${l.id}): ${b.alasan}`,
     b.transfer ? `Transfer dari ${b.dari} (Transfer #${l.id}): ${b.alasan}` : `Pinjam dari ${b.dari} (Pinjaman #${l.id}): ${b.alasan}`,
     b.evidenceId,
-    b.transfer ? b.tanggal : undefined
+    b.tanggal
   );
   return l;
 }
@@ -6180,8 +6187,9 @@ app.post("/api/pinjaman", async (req, res) => {
   const m = module as LoanModule;
   const transfer = req.body.jenis === "TRANSFER";
   const word = transfer ? "Transfer" : "Pinjaman";
-  // A transfer may be dated back (BBM / pupuk / oli rows follow it); a loan is booked today.
-  const tanggal = transfer && ISO_DATE.test(String(req.body.tanggal_iso ?? "")) ? String(req.body.tanggal_iso) : jakartaToday();
+  // A loan / transfer entered later is dated back: BBM / pupuk / oli rows follow tanggal_iso, gudang /
+  // klinik movements take it through txTime (BACKDATE, which also checks the stok opname).
+  const tanggal = ISO_DATE.test(String(req.body.tanggal_iso ?? "")) ? String(req.body.tanggal_iso) : jakartaToday();
   if (tanggal > jakartaToday()) return res.status(400).json({ error: "Tanggal tidak boleh di masa depan" });
   if (!OPNAME_MODULES_LIST.includes(m)) return res.status(400).json({ error: "Modul tidak valid" });
   if (!(ESTATES as readonly string[]).includes(dari) || !(ESTATES as readonly string[]).includes(ke)) return res.status(400).json({ error: "Estate tidak valid" });
@@ -6210,7 +6218,7 @@ app.post("/api/pinjaman", async (req, res) => {
     transfer ? "Transfer Baru" : "Pinjaman Baru",
     transfer
       ? `${dari} mengirim ${fmtLoanQty(loan.qty, loan.satuan)} ke ${ke} (${tanggal}); Keterangan: ${alasan}`
-      : `${dari} meminjamkan ${fmtLoanQty(loan.qty, loan.satuan)} ke ${ke}; Alasan: ${alasan}`
+      : `${dari} meminjamkan ${fmtLoanQty(loan.qty, loan.satuan)} ke ${ke} (${tanggal}); Alasan: ${alasan}`
   );
   res.json({ success: true, id: loan.id });
 });
@@ -6243,7 +6251,8 @@ app.post("/api/pinjaman/batch", async (req, res) => {
   if (evidenceId === undefined) return;
 
   const loans: LoanRow[] = [];
-  const tanggal = jakartaToday();
+  const tanggal = ISO_DATE.test(String(req.body.tanggal_iso ?? "")) ? String(req.body.tanggal_iso) : jakartaToday();
+
   const ok = await bookBatch(res, evidenceId, async (client, at) => {
     for (const [i, r] of clean.entries()) {
       at(i);
@@ -6252,7 +6261,7 @@ app.post("/api/pinjaman/batch", async (req, res) => {
   });
   if (!ok) return;
   for (const l of loans)
-    await logLoan(req, l, "Pinjaman Baru", `${dari} meminjamkan ${fmtLoanQty(l.qty, l.satuan)} ke ${ke}; Alasan: ${l.alasan}; Input Banyak (${loans.length} baris)`);
+    await logLoan(req, l, "Pinjaman Baru", `${dari} meminjamkan ${fmtLoanQty(l.qty, l.satuan)} ke ${ke} (${tanggal}); Alasan: ${l.alasan}; Input Banyak (${loans.length} baris)`);
   res.json({ success: true, count: loans.length });
 });
 

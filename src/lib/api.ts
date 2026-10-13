@@ -1065,9 +1065,9 @@ export const api = {
   pinjamanBarang: (module: OpnameModule, estate: string, search: string, all = false) =>
     req<PinjamanBarang[]>(`/api/pinjaman/barang?${new URLSearchParams({ module, estate, search, ...(all ? { all: "1" } : {}) })}`),
   // Input Banyak: one Pinjaman per row, all saved or none (a refused row comes back as data.row).
-  createPinjamanBatch: (payload: { evidence_id: string; module: OpnameModule; dari: string; ke: string; rows: { kode: string; qty: number; alasan: string }[] }) =>
+  createPinjamanBatch: (payload: { tanggal_iso: string; evidence_id: string; module: OpnameModule; dari: string; ke: string; rows: { kode: string; qty: number; alasan: string }[] }) =>
     req<{ success: boolean; count: number }>("/api/pinjaman/batch", { method: "POST", body: JSON.stringify(payload) }),
-  // jenis TRANSFER: sent for good, may be dated back (tanggal_iso); a loan is booked today.
+  // jenis TRANSFER: sent for good. tanggal_iso: the day it happened when entered later (default today).
   evidenceMeta: (id: string) => req<{ rotation: number }>(`/api/evidence/${id}/meta`),
   saveEvidenceRotation: (id: string, rotation: number) =>
     req<{ success: boolean }>(`/api/evidence/${id}/rotation`, { method: "POST", body: JSON.stringify({ rotation }) }),

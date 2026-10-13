@@ -353,7 +353,8 @@ export function CreatePinjamanModal({
         kode: barang.kode,
         qty: n,
         alasan: alasan.trim(),
-        ...(transfer ? { jenis: "TRANSFER" as const, tanggal_iso: tanggal } : {}),
+        tanggal_iso: tanggal,
+        ...(transfer ? { jenis: "TRANSFER" as const } : {}),
       });
       onSuccess();
     } catch (e) {
@@ -469,15 +470,11 @@ export function CreatePinjamanModal({
         </div>
       </div>
 
-      {transfer && (
-        <div>
-          <label className={labelCls}>Tanggal</label>
-          <input type="date" value={tanggal} max={localToday()} onChange={(e) => setTanggal(e.target.value)} className={inputCls} />
-          {(module === "GUDANG" || module === "KLINIK") && (
-            <p className="text-[11px] text-[var(--text-muted)] mt-1">Riwayat Gudang / Klinik mencatat waktu input; tanggal ini berlaku untuk BBM, Pupuk dan Oli.</p>
-          )}
-        </div>
-      )}
+      <div>
+        <label className={labelCls}>{transfer ? "Tanggal" : "Tanggal pinjam"}</label>
+        <input type="date" value={tanggal} max={localToday()} onChange={(e) => setTanggal(e.target.value)} className={inputCls} />
+        <p className="text-[11px] text-[var(--text-muted)] mt-1">Hari ini, atau tanggal {transfer ? "barang dikirim" : "barang dipinjam"} kalau dicatat belakangan.</p>
+      </div>
 
       {barang && n > 0 && (
         <p className="text-xs rounded-md px-3 py-2 bg-[#f8fafc] text-[var(--text-secondary)]">

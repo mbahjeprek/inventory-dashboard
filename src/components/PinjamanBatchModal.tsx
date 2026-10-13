@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, type OpnameModule, type PinjamanBarang } from "../lib/api";
 import { OPNAME_MODULE_LABEL } from "../lib/opname";
-import { BatchGrid, HeaderField, fmtNum, headerInputCls, isBlankIn, parseNum, runningStock, type Cells, type GridCol } from "./BatchGrid";
+import { BatchGrid, HeaderField, fmtNum, headerInputCls, isBlankIn, localToday, parseNum, runningStock, type Cells, type GridCol } from "./BatchGrid";
 
 const ESTATES = ["NILAM", "KNS", "WJA", "ZAMRUD", "FIRUS"];
 // Nilam's gudang, Klinik and BBM are counted in whole units (as in the Catat Pinjaman form).
@@ -28,6 +28,8 @@ export function PinjamanBatchModal({
   const [ke, setKe] = useState(keOptions[0] ?? "");
   const [items, setItems] = useState<PinjamanBarang[]>([]);
   const [loading, setLoading] = useState(true);
+  // One day for every row: today, or the day they were lent when entered later.
+  const [tanggal, setTanggal] = useState(localToday());
 
   useEffect(() => {
     if (!keOptions.includes(ke)) setKe(keOptions[0] ?? "");
@@ -105,6 +107,7 @@ export function PinjamanBatchModal({
   const submit = async (rows: Cells[], evidenceId: string) => {
     if (!ke) throw new Error("Pilih estate peminjam");
     const res = await api.createPinjamanBatch({
+      tanggal_iso: tanggal,
       evidence_id: evidenceId,
       module,
       dari,
@@ -119,10 +122,11 @@ export function PinjamanBatchModal({
       title="Input Banyak Pinjaman"
       subtitle={`Banyak barang dipinjamkan ${dari} ke ${ke} sekaligus; tiap baris jadi satu pinjaman`}
       draftKey={`batch:pinjaman:${module}:${dari}`}
-      extra={{ ke }}
+      extra={{ ke, tanggal }}
       onRestoreExtra={(x) => {
-        const k = (x as { ke?: string } | null)?.ke;
-        if (k && k !== dari && ESTATES.includes(k)) setKe(k);
+        const d = x as { ke?: string; tanggal?: string } | null;
+        if (d?.ke && d.ke !== dari && ESTATES.includes(d.ke)) setKe(d.ke);
+        if (d?.tanggal && d.tanggal <= localToday()) setTanggal(d.tanggal);
       }}
       header={
         <>
@@ -134,6 +138,9 @@ export function PinjamanBatchModal({
                 </option>
               ))}
             </select>
+          </HeaderField>
+          <HeaderField label="Tanggal pinjam">
+            <input type="date" value={tanggal} max={localToday()} onChange={(e) => setTanggal(e.target.value)} className={headerInputCls} />
           </HeaderField>
           <HeaderField label="Dipinjamkan oleh">
             <select value={dari} onChange={(e) => setDari(e.target.value)} className={headerInputCls}>
