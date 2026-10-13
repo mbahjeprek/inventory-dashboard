@@ -732,6 +732,28 @@ export const api = {
       stok: { kode: string; stok: number }[];
       bulanData: string[];
     }>(`/api/klinik-laporan/konsumsi-obat?${new URLSearchParams({ ...params, obat: params.obat ?? "" })}`),
+  // Konsumsi Obat detail: the visits that got one obat (in one month, or the whole period).
+  konsumsiObatDetail: (params: { klinik: string; dateFrom: string; dateTo: string; obat: string; bulan?: string }) =>
+    req<{
+      data: {
+        id: number;
+        klinik: string;
+        tanggal_iso: string;
+        nama_pasien: string;
+        jenis_kelamin: string;
+        usia: number | null;
+        status_pasien: string;
+        jabatan: string;
+        divisi: string;
+        diagnosis: string;
+        jenis_kunjungan: string;
+        nama_obat: string;
+        qty: number | null;
+        satuan: string;
+        sebelum_opname: boolean;
+        terpotong: number | null;
+      }[];
+    }>(`/api/klinik-laporan/konsumsi-obat/detail?${new URLSearchParams({ ...params, bulan: params.bulan ?? "" })}`),
   // Superuser: typed terapi names of a clinic no master obat covers, and saving one as an alias of a master obat.
   obatBelumCocok: (klinik: string) =>
     req<{ opname: string; rows: { key: string; nama: string; satuan: string | null; baris: number; sejak_opname: number; terakhir: string }[] }>(

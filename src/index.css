@@ -112,3 +112,10 @@ body {
     white-space: normal;
   }
 }
+
+/* Charts: no focus box around the chart after a bar / point is clicked. */
+.recharts-wrapper:focus,
+.recharts-surface:focus,
+.recharts-wrapper *:focus {
+  outline: none;
+}

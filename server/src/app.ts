@@ -3812,6 +3812,29 @@ app.get("/api/klinik-laporan/konsumsi-obat", async (req, res) => {
   res.json({ rows, totals, stok, bulanData });
 });
 
+// Konsumsi Obat detail: who got one obat (in one month, YYYY-MM, or the whole period) - the visits
+// with their date, patient, diagnosis and qty, and whether it was cut from stock.
+app.get("/api/klinik-laporan/konsumsi-obat/detail", async (req, res) => {
+  const q = req.query as Record<string, string>;
+  const kliniks = laporanKliniks(req, res, q.klinik ?? "");
+  if (!kliniks) return;
+  const { from, to } = laporanRange(q);
+  const obat = String(q.obat ?? "");
+  const bulan = /^\d{4}-\d{2}$/.test(q.bulan ?? "") ? q.bulan : "";
+  if (!obat) return res.status(400).json({ error: "Pilih obat" });
+  const data = await queryMany(
+    `SELECT k.id, k.klinik, k.tanggal_iso, k.nama_pasien, k.jenis_kelamin, k.usia, k.status_pasien, k.jabatan, k.divisi, k.diagnosis,
+       k.jenis_kunjungan, o.nama_obat, o.qty::float8 AS qty, o.satuan,
+       k.tanggal_iso <= COALESCE((SELECT MAX(tanggal) FROM opname WHERE module = 'KLINIK' AND estate = k.klinik AND status = 'APPROVED'), '') AS sebelum_opname,
+       (SELECT SUM(CASE WHEN t.type = 'OUT' THEN t.qty ELSE -t.qty END) FROM klinik_stock_tx t WHERE t.kunjungan_id = k.id AND t.obat_kode = o.obat_kode)::float8 AS terpotong
+     FROM klinik_kunjungan k JOIN klinik_kunjungan_obat o ON o.kunjungan_id = k.id
+     WHERE k.klinik = ANY(@kliniks) AND k.tanggal_iso BETWEEN @from AND @to AND o.obat_kode = @obat ${bulan ? "AND left(k.tanggal_iso, 7) = @bulan" : ""}
+     ORDER BY k.tanggal_iso, k.id, o.urut`,
+    { kliniks, from, to, obat, bulan }
+  );
+  res.json({ data });
+});
+
 // Superuser: Cocokkan Nama Obat - the typed terapi names of a clinic that match no master obat, most
 // used first (the visits since the last opname are the ones that move stock once matched).
 app.get("/api/klinik-laporan/obat-belum-cocok", async (req, res) => {
