@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, BedDouble, ChevronLeft, ChevronRight, ClipboardList, Hospital, LayoutDashboard, Pencil, Plus, Search, Stethoscope, Table2, Trash2 } from "lucide-react";
+import { AlertTriangle, BedDouble, ChevronLeft, ChevronRight, ClipboardList, Hospital, LayoutDashboard, Pencil, Pill, Plus, Search, Stethoscope, Table2, Trash2 } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { api, errorText, type Kunjungan, type LaporanCount, type LaporanKlinikSummary } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
@@ -11,6 +11,7 @@ import { ConfirmDialog } from "./ConfirmDialog";
 import { EvidenceLink } from "./EvidenceInput";
 import { KunjunganModal } from "./KunjunganModal";
 import { CocokkanObatModal } from "./CocokkanObatModal";
+import { KonsumsiObatPanel } from "./KonsumsiObatPanel";
 import { fetchAllRows, type ReportSection, type SectionReport, type TableReport } from "../lib/printTable";
 import { MAX_TERAPI, hariOf, kodeTglOf, periodeOf, tglSheet, yaTidak } from "../lib/kunjungan";
 
@@ -18,7 +19,7 @@ const PAGE_SIZE = 50;
 const BULAN = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
 type Flag = "" | "kecelakaan" | "istirahat" | "rujukan" | "mcu";
 const FLAG_LABEL: Record<Exclude<Flag, "">, string> = { kecelakaan: "Kecelakaan kerja", istirahat: "Surat sakit", rujukan: "Rujukan", mcu: "MCU" };
-type View = "data" | "ringkasan";
+type View = "data" | "ringkasan" | "konsumsi";
 
 // Local (Jakarta) dates as YYYY-MM-DD.
 const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -412,7 +413,11 @@ export function KlinikLaporanTab({ klinik }: { klinik: string }) {
   const totalPages = Math.max(Math.ceil(total / PAGE_SIZE), 1);
   const tab = (v: View, label: string, Icon: typeof Table2) => (
     <button
-      onClick={() => setView(v)}
+      onClick={() => {
+        setView(v);
+        // Konsumsi Obat reads per month: a day / week / this month alone says little.
+        if (v === "konsumsi" && ["hari", "7", "bulan"].includes(preset)) pickPreset("tahun");
+      }}
       className={`inline-flex items-center gap-1.5 text-sm px-3.5 py-2 ${view === v ? "bg-[var(--accent-blue)] text-white" : "text-[var(--text-secondary)] hover:bg-[#f1f5f9]"}`}
     >
       <Icon size={15} /> {label}
@@ -426,6 +431,7 @@ export function KlinikLaporanTab({ klinik }: { klinik: string }) {
         <div className="inline-flex rounded-md border border-[var(--border)] overflow-hidden" role="tablist">
           {tab("data", "Data Kunjungan", Table2)}
           {tab("ringkasan", "Ringkasan KPI", LayoutDashboard)}
+          {tab("konsumsi", "Konsumsi Obat", Pill)}
         </div>
         <div className="inline-flex flex-wrap rounded-md border border-[var(--border)] overflow-hidden" role="group" aria-label="Periode">
           {P.map((p) => (
@@ -475,7 +481,9 @@ export function KlinikLaporanTab({ klinik }: { klinik: string }) {
       {loadError && <p className="text-sm text-[var(--accent-red)]">{loadError}</p>}
       {actionError && <p className="text-sm text-[var(--accent-red)]">{actionError}</p>}
 
-      {view === "ringkasan" ? (
+      {view === "konsumsi" ? (
+        <KonsumsiObatPanel klinik={klinik} dateFrom={dateFrom} dateTo={dateTo} periodText={periodText} />
+      ) : view === "ringkasan" ? (
         <>
       {t && (
         <>

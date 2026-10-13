@@ -724,6 +724,14 @@ export const api = {
   updateKunjungan: (id: number, payload: KunjunganInput & { evidence_id?: string | null }) =>
     req<{ success: boolean }>(`/api/klinik-laporan/kunjungan/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
   deleteKunjungan: (id: number) => req<{ success: boolean }>(`/api/klinik-laporan/kunjungan/${id}`, { method: "DELETE" }),
+  // Konsumsi Obat: qty / patients per master obat per month from the Laporan Harian terapi, and stock now.
+  konsumsiObat: (params: { klinik: string; dateFrom: string; dateTo: string; obat?: string }) =>
+    req<{
+      rows: { kode: string; nama: string; satuan: string; bulan: string; qty: number; pasien: number }[];
+      totals: { pasien: number; tanpa_master: number; tanpa_qty: number };
+      stok: { kode: string; stok: number }[];
+      bulanData: string[];
+    }>(`/api/klinik-laporan/konsumsi-obat?${new URLSearchParams({ ...params, obat: params.obat ?? "" })}`),
   // Superuser: typed terapi names of a clinic no master obat covers, and saving one as an alias of a master obat.
   obatBelumCocok: (klinik: string) =>
     req<{ opname: string; rows: { key: string; nama: string; satuan: string | null; baris: number; sejak_opname: number; terakhir: string }[] }>(

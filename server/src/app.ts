@@ -3773,6 +3773,45 @@ app.delete("/api/klinik-laporan/kunjungan/:id", async (req, res) => {
   res.json({ success: true });
 });
 
+// Konsumsi Obat: how much of each master obat the clinic gave per month (Laporan Harian terapi - it
+// goes back to January, Stock Out only to late September), to how many patients, and its stock now,
+// for ordering / buffer stock. obat = one kode, else every obat given in the period. Terapi typed by
+// hand that matches no master obat (Cocokkan Nama Obat) or has no qty isn't counted; the totals say how many.
+app.get("/api/klinik-laporan/konsumsi-obat", async (req, res) => {
+  const q = req.query as Record<string, string>;
+  const kliniks = laporanKliniks(req, res, q.klinik ?? "");
+  if (!kliniks) return;
+  const { from, to } = laporanRange(q);
+  const obat = String(q.obat ?? "");
+  const params = { kliniks, from, to, obat };
+  const scope = `k.klinik = ANY(@kliniks) AND k.tanggal_iso BETWEEN @from AND @to`;
+  const rows = await queryMany(
+    `SELECT o.obat_kode AS kode, m.nama, COALESCE(m.satuan, '') AS satuan, left(k.tanggal_iso, 7) AS bulan,
+       COALESCE(SUM(o.qty), 0)::float8 AS qty, COUNT(DISTINCT k.id)::int AS pasien
+     FROM klinik_kunjungan k JOIN klinik_kunjungan_obat o ON o.kunjungan_id = k.id JOIN obat m ON m.kode = o.obat_kode
+     WHERE ${scope} ${obat ? "AND o.obat_kode = @obat" : ""}
+     GROUP BY 1, 2, 3, 4 ORDER BY 2, 4`,
+    params
+  );
+  const totals = await queryOne<{ pasien: number; tanpa_master: number; tanpa_qty: number }>(
+    `SELECT COUNT(DISTINCT k.id) FILTER (WHERE m.kode IS NOT NULL ${obat ? "AND o.obat_kode = @obat" : ""})::int AS pasien,
+       COUNT(*) FILTER (WHERE m.kode IS NULL AND trim(o.nama_obat) NOT IN ('', '-'))::int AS tanpa_master,
+       COUNT(*) FILTER (WHERE m.kode IS NOT NULL AND o.qty IS NULL ${obat ? "AND o.obat_kode = @obat" : ""})::int AS tanpa_qty
+     FROM klinik_kunjungan k JOIN klinik_kunjungan_obat o ON o.kunjungan_id = k.id LEFT JOIN obat m ON m.kode = o.obat_kode
+     WHERE ${scope}`,
+    params
+  );
+  const stok = await queryMany<{ kode: string; stok: number }>(
+    "SELECT obat_kode AS kode, SUM(stock_tersedia)::float8 AS stok FROM klinik_stock WHERE klinik = ANY(@kliniks) GROUP BY 1",
+    { kliniks }
+  );
+  // Months that have any visit at all (so a month before the clinic's data starts isn't counted as 0).
+  const bulanData = (
+    await queryMany<{ b: string }>(`SELECT DISTINCT left(k.tanggal_iso, 7) AS b FROM klinik_kunjungan k WHERE ${scope} ORDER BY 1`, params)
+  ).map((r) => r.b);
+  res.json({ rows, totals, stok, bulanData });
+});
+
 // Superuser: Cocokkan Nama Obat - the typed terapi names of a clinic that match no master obat, most
 // used first (the visits since the last opname are the ones that move stock once matched).
 app.get("/api/klinik-laporan/obat-belum-cocok", async (req, res) => {
