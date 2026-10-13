@@ -3,6 +3,7 @@ import { AlertTriangle, BedDouble, ChevronLeft, ChevronRight, ClipboardList, Hos
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { api, errorText, type Kunjungan, type LaporanCount, type LaporanKlinikSummary } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
+import { useDragScroll } from "../hooks/useDragScroll";
 import { can } from "../lib/access";
 import { StatCard } from "./StatCard";
 import { ExportButtons } from "./ExportButtons";
@@ -85,6 +86,7 @@ export function KlinikLaporanTab({ klinik }: { klinik: string }) {
   const canInput = can(user, "klinik.input");
   const canEdit = can(user, "klinik.edit");
   const canDelete = can(user, "klinik.delete");
+  const tableScrollRef = useDragScroll<HTMLDivElement>();
   const P = useMemo(presets, []);
   const [view, setView] = useState<View>("data");
   const [preset, setPreset] = useState("bulan");
@@ -339,6 +341,33 @@ export function KlinikLaporanTab({ klinik }: { klinik: string }) {
       ],
     };
   };
+
+  const medisBadges = (k: Kunjungan) =>
+    !k.kecelakaan_kerja && !k.istirahat && !k.rujukan ? null : (
+      <div className="flex flex-wrap gap-1">
+        {k.kecelakaan_kerja && <span className="px-1.5 py-0.5 rounded bg-[var(--accent-red-bg)] text-[var(--accent-red)]">Kecelakaan kerja</span>}
+        {k.istirahat && <span className="px-1.5 py-0.5 rounded bg-[var(--accent-amber-bg)] text-[var(--accent-amber)]">Istirahat {k.hari_istirahat} hr</span>}
+        {k.rujukan && <span className="px-1.5 py-0.5 rounded bg-[var(--accent-blue-bg)] text-[var(--accent-blue)]">Rujuk{k.provider ? `: ${k.provider}` : ""}</span>}
+      </div>
+    );
+  const rowActions = (k: Kunjungan) => (
+    <div className="inline-flex gap-1.5">
+      {canEdit && (
+        <button onClick={() => setEditing(k)} title="Edit kunjungan" className="p-1.5 rounded-md border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[#f1f5f9]">
+          <Pencil size={14} />
+        </button>
+      )}
+      {canDelete && (
+        <button
+          onClick={() => setDeleting(k)}
+          title="Hapus kunjungan"
+          className="p-1.5 rounded-md border border-[var(--accent-red-border)] text-[var(--accent-red)] hover:bg-[var(--accent-red-bg)]"
+        >
+          <Trash2 size={14} />
+        </button>
+      )}
+    </div>
+  );
 
   const totalPages = Math.max(Math.ceil(total / PAGE_SIZE), 1);
   const tab = (v: View, label: string, Icon: typeof Table2) => (
@@ -601,7 +630,51 @@ export function KlinikLaporanTab({ klinik }: { klinik: string }) {
               {fmt(total)} kunjungan · {periodText}
             </span>
           </div>
-          <div className="overflow-x-auto">
+          <div className="md:hidden divide-y divide-[var(--border)]">
+            {rows.length === 0 ? (
+              <div className="px-4 py-8 text-center text-sm text-[var(--text-muted)]">Belum ada kunjungan di periode ini</div>
+            ) : (
+              rows.map((k) => (
+                <div key={k.id} className="px-4 py-3 space-y-1.5 text-sm even:bg-[#f7faf5]">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="font-medium text-[var(--text-primary)]">{k.nama_pasien}</div>
+                      <div className="text-[11px] text-[var(--text-muted)]">
+                        {[k.jenis_kelamin, k.usia !== null && `${k.usia} th`, k.status_pasien, k.penanggung && `ditanggung ${k.penanggung}`].filter(Boolean).join(" · ")}
+                      </div>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <div>{tgl(k.tanggal_iso)}</div>
+                      <div className="text-[11px] text-[var(--text-muted)]">
+                        No {k.nomor} · {k.jenis_kunjungan}
+                      </div>
+                    </div>
+                  </div>
+                  {(k.jabatan || k.divisi || k.tempat_tinggal || k.asal_pasien) && (
+                    <div className="text-xs text-[var(--text-secondary)]">{[k.jabatan, k.divisi, k.tempat_tinggal, k.asal_pasien].filter(Boolean).join(" · ")}</div>
+                  )}
+                  <div>
+                    <span className="text-[var(--text-muted)]">Diagnosis: </span>
+                    {k.diagnosis || "-"}
+                  </div>
+                  {medisBadges(k) && <div className="text-xs">{medisBadges(k)}</div>}
+                  {k.obat.length > 0 && (
+                    <div className="text-xs text-[var(--text-secondary)]">
+                      <span className="text-[var(--text-muted)]">Terapi: </span>
+                      {k.obat.map((o) => `${o.nama_obat}${o.qty !== null ? ` ${fmt(o.qty)} ${o.satuan}` : ""}`).join(" · ")}
+                    </div>
+                  )}
+                  {(k.evidence_id || k.detail_kejadian) && (
+                    <div className="text-xs text-[var(--text-secondary)]">
+                      {k.detail_kejadian} {k.evidence_id && <EvidenceLink id={k.evidence_id} />}
+                    </div>
+                  )}
+                  {(canEdit || canDelete) && <div className="flex justify-end">{rowActions(k)}</div>}
+                </div>
+              ))
+            )}
+          </div>
+          <div ref={tableScrollRef} className="hidden md:block overflow-x-auto">
             <table className="grid-table data-table text-sm">
               <thead>
                 <tr className="bg-[#f8fafc] text-[var(--text-secondary)] text-xs uppercase">
@@ -643,7 +716,7 @@ export function KlinikLaporanTab({ klinik }: { klinik: string }) {
                           {[k.jenis_kelamin, k.usia !== null && `${k.usia} th`, k.tanggal_lahir_iso && `lahir ${tglSheet(k.tanggal_lahir_iso)}`].filter(Boolean).join(" · ")}
                         </div>
                       </td>
-                      <td className="px-3 py-2 text-[var(--text-secondary)]">
+                      <td className="px-3 py-2 text-[var(--text-secondary)] whitespace-normal min-w-[7rem]">
                         {k.status_pasien}
                         {k.penanggung && <div className="text-[11px] text-[var(--text-muted)]">ditanggung {k.penanggung}</div>}
                       </td>
@@ -656,13 +729,8 @@ export function KlinikLaporanTab({ klinik }: { klinik: string }) {
                         {k.asal_pasien && <div className="text-[11px] text-[var(--text-muted)]">{k.asal_pasien}</div>}
                       </td>
                       <td className="col-grow px-3 py-2">{k.diagnosis || "-"}</td>
-                      <td className="px-3 py-2 text-xs">
-                        <div className="flex flex-wrap gap-1">
-                          {k.kecelakaan_kerja && <span className="px-1.5 py-0.5 rounded bg-[var(--accent-red-bg)] text-[var(--accent-red)]">Kecelakaan kerja</span>}
-                          {k.istirahat && <span className="px-1.5 py-0.5 rounded bg-[var(--accent-amber-bg)] text-[var(--accent-amber)]">Istirahat {k.hari_istirahat} hr</span>}
-                          {k.rujukan && <span className="px-1.5 py-0.5 rounded bg-[var(--accent-blue-bg)] text-[var(--accent-blue)]">Rujuk{k.provider ? `: ${k.provider}` : ""}</span>}
-                          {!k.kecelakaan_kerja && !k.istirahat && !k.rujukan && <span className="text-[var(--text-muted)]">-</span>}
-                        </div>
+                      <td className="px-3 py-2 text-xs whitespace-normal min-w-[8rem] max-w-[13rem]">
+                        {medisBadges(k) ?? <span className="text-[var(--text-muted)]">-</span>}
                       </td>
                       <td className="col-grow px-3 py-2 text-xs text-[var(--text-secondary)]">
                         {k.obat.length
@@ -674,30 +742,13 @@ export function KlinikLaporanTab({ klinik }: { klinik: string }) {
                             ))
                           : "-"}
                       </td>
-                      <td className="px-3 py-2 text-xs text-[var(--text-secondary)]">
+                      <td className="col-grow px-3 py-2 text-xs text-[var(--text-secondary)]">
                         {k.evidence_id && <EvidenceLink id={k.evidence_id} />}
-                        {k.detail_kejadian && <div className="text-[11px] text-[var(--text-muted)] max-w-[16rem]">{k.detail_kejadian}</div>}
+                        {k.detail_kejadian && <div className="text-[11px] text-[var(--text-muted)]">{k.detail_kejadian}</div>}
                         {!k.evidence_id && !k.detail_kejadian && "-"}
                       </td>
                       {(canEdit || canDelete) && (
-                        <td className="px-3 py-2 text-right">
-                          <div className="inline-flex gap-1.5">
-                            {canEdit && (
-                              <button onClick={() => setEditing(k)} title="Edit kunjungan" className="p-1.5 rounded-md border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[#f1f5f9]">
-                                <Pencil size={14} />
-                              </button>
-                            )}
-                            {canDelete && (
-                              <button
-                                onClick={() => setDeleting(k)}
-                                title="Hapus kunjungan"
-                                className="p-1.5 rounded-md border border-[var(--accent-red-border)] text-[var(--accent-red)] hover:bg-[var(--accent-red-bg)]"
-                              >
-                                <Trash2 size={14} />
-                              </button>
-                            )}
-                          </div>
-                        </td>
+                        <td className="px-3 py-2 text-right">{rowActions(k)}</td>
                       )}
                     </tr>
                   ))
