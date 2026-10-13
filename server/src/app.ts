@@ -640,7 +640,7 @@ app.get("/api/items", async (req, res) => {
   const offset = (Math.max(parseInt(page) || 1, 1) - 1) * limit;
 
   const items = await queryMany(
-    `SELECT * FROM items ${where} ORDER BY ${sortCol} ${dir} LIMIT @limit OFFSET @offset`,
+    `SELECT * FROM items ${where} ORDER BY ${sortCol} ${dir} NULLS LAST LIMIT @limit OFFSET @offset`,
     { ...params, limit, offset }
   );
 
@@ -839,7 +839,7 @@ app.get("/api/gudang-stock", async (req, res) => {
     `SELECT gs.id, i.kode, i.nama, i.satuan, gs.buffer_stock, gs.stock_tersedia,
             CASE WHEN gs.stock_tersedia > 0 THEN 'AMAN' ELSE 'BUFFER STOCK' END AS keterangan
      ${joinSql}
-     ORDER BY ${sortCol === "kode" || sortCol === "nama" ? "i." + sortCol : "gs." + sortCol} ${dir}
+     ORDER BY ${sortCol === "kode" || sortCol === "nama" ? "i." + sortCol : "gs." + sortCol} ${dir} NULLS LAST
      LIMIT @limit OFFSET @offset`,
     { ...params, limit, offset }
   );
@@ -1620,8 +1620,9 @@ app.get("/api/stock-in", requireEstate("NILAM"), async (req, res) => {
   const offset = (Math.max(parseInt(page) || 1, 1) - 1) * limit;
 
   const data = await queryMany(
+    // Newest first; old imported rows without a date go last.
     `SELECT * FROM stock_in_log ${where}
-     ORDER BY tanggal_terima_iso DESC, id DESC LIMIT @limit OFFSET @offset`,
+     ORDER BY NULLIF(tanggal_terima_iso, '') DESC NULLS LAST, id DESC LIMIT @limit OFFSET @offset`,
     { ...params, limit, offset }
   );
 
@@ -1746,8 +1747,9 @@ app.get("/api/stock-out", requireEstate("NILAM"), async (req, res) => {
   const offset = (Math.max(parseInt(page) || 1, 1) - 1) * limit;
 
   const data = await queryMany(
+    // Newest first; old imported rows without a date go last.
     `SELECT * FROM stock_out_log ${where}
-     ORDER BY tanggal_keluar_iso DESC, id DESC LIMIT @limit OFFSET @offset`,
+     ORDER BY NULLIF(tanggal_keluar_iso, '') DESC NULLS LAST, id DESC LIMIT @limit OFFSET @offset`,
     { ...params, limit, offset }
   );
 
@@ -2736,7 +2738,7 @@ app.get("/api/pupuk", async (req, res) => {
   const limit = Math.min(parseInt(q.pageSize) || 50, 500);
   const offset = (Math.max(parseInt(q.page) || 1, 1) - 1) * limit;
   const data = await queryMany(
-    `SELECT *, (SELECT p.jenis FROM pinjaman p WHERE p.id = pupuk_log.pinjaman_id) AS pinjaman_jenis FROM pupuk_log ${where} ORDER BY tanggal_iso DESC, id DESC LIMIT @limit OFFSET @offset`,
+    `SELECT *, (SELECT p.jenis FROM pinjaman p WHERE p.id = pupuk_log.pinjaman_id) AS pinjaman_jenis FROM pupuk_log ${where} ORDER BY NULLIF(tanggal_iso, '') DESC NULLS LAST, id DESC LIMIT @limit OFFSET @offset`,
     { ...params, limit, offset }
   );
   res.json({ data, total: totals.c, keluarSum: totals.keluar, diterimaSum: totals.diterima, page: parseInt(q.page) || 1, pageSize: limit });
@@ -4643,7 +4645,7 @@ app.get("/api/bbm", async (req, res) => {
          WHERE kode_kendaraan <> '' AND hm_terakhir ~ '\\d'
        ) x
      ) h ON h.id = b.id
-     ${where} ORDER BY b.${sortCol} ${dir}, b.id ${dir} LIMIT @limit OFFSET @offset`,
+     ${where} ORDER BY b.${sortCol} ${dir} NULLS LAST, b.id ${dir} LIMIT @limit OFFSET @offset`,
     { ...params, limit, offset }
   );
 
@@ -5643,7 +5645,7 @@ app.get("/api/oli", async (req, res) => {
   ))!;
   const limit = Math.min(parseInt(q.pageSize) || 50, 500);
   const offset = (Math.max(parseInt(q.page) || 1, 1) - 1) * limit;
-  const data = await queryMany(`SELECT *, (SELECT p.jenis FROM pinjaman p WHERE p.id = oli_log.pinjaman_id) AS pinjaman_jenis FROM oli_log ${where} ORDER BY tanggal_iso DESC, id DESC LIMIT @limit OFFSET @offset`, {
+  const data = await queryMany(`SELECT *, (SELECT p.jenis FROM pinjaman p WHERE p.id = oli_log.pinjaman_id) AS pinjaman_jenis FROM oli_log ${where} ORDER BY NULLIF(tanggal_iso, '') DESC NULLS LAST, id DESC LIMIT @limit OFFSET @offset`, {
     ...params,
     limit,
     offset,
