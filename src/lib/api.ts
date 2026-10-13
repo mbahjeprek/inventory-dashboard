@@ -724,6 +724,13 @@ export const api = {
   updateKunjungan: (id: number, payload: KunjunganInput & { evidence_id?: string | null }) =>
     req<{ success: boolean }>(`/api/klinik-laporan/kunjungan/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
   deleteKunjungan: (id: number) => req<{ success: boolean }>(`/api/klinik-laporan/kunjungan/${id}`, { method: "DELETE" }),
+  // Superuser: typed terapi names of a clinic no master obat covers, and saving one as an alias of a master obat.
+  obatBelumCocok: (klinik: string) =>
+    req<{ opname: string; rows: { key: string; nama: string; satuan: string | null; baris: number; sejak_opname: number; terakhir: string }[] }>(
+      `/api/klinik-laporan/obat-belum-cocok?${new URLSearchParams({ klinik })}`
+    ),
+  saveObatAlias: (nama: string, obat_kode: string) =>
+    req<{ success: boolean; updated: number }>("/api/klinik-laporan/obat-alias", { method: "POST", body: JSON.stringify({ nama, obat_kode }) }),
   // Superuser: every visit since the last opname brought in line with its terapi (dryRun = only show).
   sinkronStokKunjungan: (klinik: string, dryRun: boolean) =>
     req<{

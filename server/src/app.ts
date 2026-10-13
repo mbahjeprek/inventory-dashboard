@@ -3244,7 +3244,7 @@ app.get("/api/klinik-laporan/kunjungan", async (req, res) => {
                              'master', m.kode IS NOT NULL,
                              'terpotong', (SELECT SUM(CASE WHEN t.type = 'OUT' THEN t.qty ELSE -t.qty END) FROM klinik_stock_tx t WHERE t.kunjungan_id = k.id AND t.obat_kode = o.obat_kode)) ORDER BY o.urut, o.id)
                            FROM klinik_kunjungan_obat o LEFT JOIN obat m ON m.kode = o.obat_kode WHERE o.kunjungan_id = k.id), '[]') AS obat,
-       k.tanggal_iso < COALESCE((SELECT MAX(tanggal) FROM opname WHERE module = 'KLINIK' AND estate = k.klinik AND status = 'APPROVED'), '') AS sebelum_opname
+       k.tanggal_iso <= COALESCE((SELECT MAX(tanggal) FROM opname WHERE module = 'KLINIK' AND estate = k.klinik AND status = 'APPROVED'), '') AS sebelum_opname
      FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY klinik, left(tanggal_iso, 4) ORDER BY tanggal_iso, id)::int AS nomor FROM klinik_kunjungan) k
      WHERE ${where} ORDER BY k.tanggal_iso DESC, k.id DESC LIMIT @limit OFFSET @offset`,
     { ...params, limit, offset }
@@ -3326,6 +3326,44 @@ async function saveKunjunganObat(c: PoolClient, id: number, obat: NonNullable<Re
       c
     );
 }
+// ---- Nama obat -> master obat ----
+// A terapi typed by hand ("PCT", "Vit C50", a misspelling) is matched to the master obat it means:
+// its exact master name, or an alias in klinik_obat_alias (Super User: Cocokkan Nama Obat). Keys are
+// lower-case letters and digits only, so spacing / case / punctuation don't matter.
+const OBAT_KEY_SQL = (col: string) => `regexp_replace(lower(${col}), '[^a-z0-9]', '', 'g')`;
+const obatKey = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+async function resolveTerapiKode<T extends { obat_kode: string; nama_obat: string }>(c: PoolClient, obat: T[]): Promise<T[]> {
+  const keys = [...new Set(obat.map((o) => obatKey(o.nama_obat)).filter(Boolean))];
+  if (!keys.length) return obat;
+  const valid = new Set(
+    (await queryMany<{ kode: string }>("SELECT kode FROM obat WHERE kode = ANY(@kodes::text[])", { kodes: obat.map((o) => o.obat_kode).filter(Boolean) }, c)).map((r) => r.kode)
+  );
+  const byKey = new Map(
+    (
+      await queryMany<{ k: string; kode: string }>(
+        `SELECT ${OBAT_KEY_SQL("nama")} k, kode FROM obat WHERE ${OBAT_KEY_SQL("nama")} = ANY(@keys::text[])
+         UNION ALL SELECT nama_key, obat_kode FROM klinik_obat_alias WHERE nama_key = ANY(@keys::text[])`,
+        { keys },
+        c
+      )
+    ).map((r) => [r.k, r.kode])
+  );
+  return obat.map((o) => (valid.has(o.obat_kode) ? o : { ...o, obat_kode: byKey.get(obatKey(o.nama_obat)) ?? "" }));
+}
+// Every saved terapi row with a hand-typed / stale code that a master name or alias now covers.
+async function applyObatAlias(c?: PoolClient, key?: string) {
+  const r = await queryOne<{ n: number }>(
+    `WITH m AS (SELECT ${OBAT_KEY_SQL("nama")} k, kode FROM obat UNION ALL SELECT nama_key, obat_kode FROM klinik_obat_alias),
+     u AS (UPDATE klinik_kunjungan_obat o SET obat_kode = m.kode FROM m
+           WHERE m.k = ${OBAT_KEY_SQL("o.nama_obat")} ${key ? "AND m.k = @key" : ""} AND o.obat_kode IS DISTINCT FROM m.kode
+             AND NOT EXISTS (SELECT 1 FROM obat x WHERE x.kode = o.obat_kode) RETURNING 1)
+     SELECT COUNT(*)::int n FROM u`,
+    { key: key ?? "" },
+    c
+  );
+  return r?.n ?? 0;
+}
+
 // ---- Terapi -> Stock Out ----
 // Every terapi of a kunjungan that names a master obat (obat_kode) is a Stock Out of the visit's
 // clinic: FEFO from its batches, dated on the visit, penerima = the patient, linked by
@@ -3334,8 +3372,8 @@ async function saveKunjunganObat(c: PoolClient, id: number, obat: NonNullable<Re
 // change keeps its row - and deleting it puts the stock back. A manual Stock Out already entered for
 // that patient (a similar spelling counts, namaMirip) and obat around the visit day is linked instead
 // of booked again, so nothing is cut twice; when its qty differs from the terapi it stays as typed
-// until the visit itself is edited. A visit before the clinic's last approved stok opname is left
-// alone: the count has it.
+// until the visit itself is edited. A visit on or before the day of the clinic's last approved stok
+// opname is left alone: the count (done that day) has it.
 type TerapiStok = { obat_kode: string; nama_obat: string; qty: number | null };
 type KunjunganStokRef = { id: number; klinik: string; tanggal_iso: string; nama_pasien: string; diagnosis: string };
 async function klinikOpnameDay(klinik: string, c?: PoolClient) {
@@ -3345,16 +3383,22 @@ async function klinikOpnameDay(klinik: string, c?: PoolClient) {
 }
 const AUTO_NOTE = "(Laporan Harian)";
 // Unlinked manual Stock Out rows of this patient + obat from the day before to 3 days after the visit,
-// linked to it; their total qty (0 = none).
-async function linkManualStockOut(c: PoolClient, k: KunjunganStokRef, kode: string) {
+// nearest the visit day first, linked to it: one row with exactly the terapi qty, else the nearest
+// rows until they make it (so a patient seen two days running keeps each day's row with its visit).
+// Their total qty (0 = none).
+async function linkManualStockOut(c: PoolClient, k: KunjunganStokRef, kode: string, qty: number) {
   const rows = await queryMany<{ id: number; qty: number; penerima: string }>(
     `SELECT id, qty, COALESCE(penerima, '') penerima FROM klinik_stock_tx
      WHERE klinik = @klinik AND obat_kode = @kode AND type = 'OUT' AND is_correction = 0 AND pinjaman_id IS NULL AND kunjungan_id IS NULL
-       AND COALESCE(tujuan, '') <> 'DIBUANG' AND (created_at AT TIME ZONE 'Asia/Jakarta')::date BETWEEN @tgl::date - 1 AND @tgl::date + 3`,
+       AND COALESCE(tujuan, '') <> 'DIBUANG' AND (created_at AT TIME ZONE 'Asia/Jakarta')::date BETWEEN @tgl::date - 1 AND @tgl::date + 3
+     ORDER BY abs((created_at AT TIME ZONE 'Asia/Jakarta')::date - @tgl::date), id`,
     { klinik: k.klinik, kode, tgl: k.tanggal_iso },
     c
   );
-  const mine = rows.filter((r) => r.penerima.trim() && (namaKey(r.penerima) === namaKey(k.nama_pasien) || namaMirip(r.penerima, k.nama_pasien)));
+  const patient = rows.filter((r) => r.penerima.trim() && (namaKey(r.penerima) === namaKey(k.nama_pasien) || namaMirip(r.penerima, k.nama_pasien)));
+  const exact = patient.find((r) => r.qty === qty);
+  const mine: typeof patient = exact ? [exact] : [];
+  if (!exact) for (const r of patient) if (mine.reduce((s, x) => s + x.qty, 0) < qty) mine.push(r);
   if (!mine.length) return 0;
   await execute("UPDATE klinik_stock_tx SET kunjungan_id = @kid WHERE id = ANY(@ids::int[])", { kid: k.id, ids: mine.map((r) => r.id) }, c);
   return mine.reduce((s, r) => s + r.qty, 0);
@@ -3363,7 +3407,7 @@ type StokSync = { kode: string; nama: string; qty: number; how: string };
 // adjustManual: a linked manual Stock Out whose qty differs from the terapi is rebooked to the terapi
 // (an edit of the visit); otherwise it stays as typed and is only reported.
 async function syncKunjunganStok(c: PoolClient, req: express.Request, k: KunjunganStokRef, obat: TerapiStok[], adjustManual = false): Promise<StokSync[]> {
-  if (k.tanggal_iso < (await klinikOpnameDay(k.klinik, c))) return [];
+  if (k.tanggal_iso <= (await klinikOpnameDay(k.klinik, c))) return [];
   const kodes = obat.map((o) => o.obat_kode).filter(Boolean);
   const master = new Map(
     (await queryMany<{ kode: string; nama: string; satuan: string }>("SELECT kode, nama, COALESCE(satuan, '') satuan FROM obat WHERE kode = ANY(@kodes::text[])", { kodes }, c)).map((o) => [o.kode, o])
@@ -3396,7 +3440,7 @@ async function syncKunjunganStok(c: PoolClient, req: express.Request, k: Kunjung
       await klinikReverse(c, r);
       await execute("DELETE FROM klinik_stock_tx WHERE id = @id", { id: r.id }, c);
     }
-    const linked = qty > 0 && !rows.length && !adjustManual ? await linkManualStockOut(c, k, kode) : 0;
+    const linked = qty > 0 && !rows.length && !adjustManual ? await linkManualStockOut(c, k, kode, qty) : 0;
     if (linked) {
       done.push({ kode, nama, qty, how: linked === qty ? "dihubungkan" : `dihubungkan (Stock Out manual ${linked})` });
       continue;
@@ -3421,12 +3465,12 @@ async function syncKunjunganStok(c: PoolClient, req: express.Request, k: Kunjung
   }
   return done;
 }
-// A visit's Stock Out goes back to the batches with it - unless the visit is before the last approved
-// opname (counted there): then the rows only lose their link.
+// A visit's Stock Out goes back to the batches with it - unless the visit is on / before the last
+// approved opname day (counted there): then the rows only lose their link.
 async function dropKunjunganStok(c: PoolClient, k: { id: number; klinik: string; tanggal_iso: string }) {
   const rows = await queryMany<any>("SELECT * FROM klinik_stock_tx WHERE kunjungan_id = @id", { id: k.id }, c);
   if (!rows.length) return;
-  if (k.tanggal_iso < (await klinikOpnameDay(k.klinik, c))) {
+  if (k.tanggal_iso <= (await klinikOpnameDay(k.klinik, c))) {
     await execute("UPDATE klinik_stock_tx SET kunjungan_id = NULL WHERE kunjungan_id = @id", { id: k.id }, c);
     return;
   }
@@ -3608,6 +3652,7 @@ app.post("/api/klinik-laporan/kunjungan", async (req, res) => {
   try {
     id = await atVisitDay(p.data!.tanggal_iso, () => withTransaction(async (c) => {
     const pasienId = await resolvePasien(c, klinik, p.data!, req.body?.pasien_id);
+    p.obat = await resolveTerapiKode(c, p.obat!);
     const row = await queryOne<{ id: number }>(
       `INSERT INTO klinik_kunjungan (klinik, sumber, evidence_id, created_by, pasien_id, ${KUNJUNGAN_COLS.join(", ")})
        VALUES (@klinik, 'APP', @evidenceId::uuid, @by, @pasienId, ${KUNJUNGAN_COLS.map((k) => `@${k}`).join(", ")}) RETURNING id`,
@@ -3645,6 +3690,7 @@ app.put("/api/klinik-laporan/kunjungan/:id", async (req, res) => {
   try {
     await atVisitDay(p.data!.tanggal_iso, () => withTransaction(async (c) => {
     const pasienId = await resolvePasien(c, existing.klinik, p.data!, req.body?.pasien_id ?? existing.pasien_id);
+    p.obat = await resolveTerapiKode(c, p.obat!);
     await execute(
       `UPDATE klinik_kunjungan SET ${KUNJUNGAN_COLS.map((k) => `${k} = @${k}`).join(", ")}, pasien_id = @pasienId, updated_at = now() WHERE id = @id`,
       { ...p.data, id: existing.id, pasienId },
@@ -3652,7 +3698,7 @@ app.put("/api/klinik-laporan/kunjungan/:id", async (req, res) => {
     );
     await saveKunjunganObat(c, existing.id, p.obat!);
     // Moved to before the last opname: its Stock Out (if any) goes back first, like a delete.
-    if (p.data!.tanggal_iso < (await klinikOpnameDay(existing.klinik, c))) await dropKunjunganStok(c, existing);
+    if (p.data!.tanggal_iso <= (await klinikOpnameDay(existing.klinik, c))) await dropKunjunganStok(c, existing);
     stok = await syncKunjunganStok(c, req, { id: existing.id, klinik: existing.klinik, ...(p.data as any) }, p.obat!, true);
   }));
   } catch (e) {
@@ -3688,7 +3734,46 @@ app.delete("/api/klinik-laporan/kunjungan/:id", async (req, res) => {
   res.json({ success: true });
 });
 
-// Superuser: Sinkron Stok - every visit entered in the app after the clinic's last approved opname brought in line
+// Superuser: Cocokkan Nama Obat - the typed terapi names of a clinic that match no master obat, most
+// used first (the visits since the last opname are the ones that move stock once matched).
+app.get("/api/klinik-laporan/obat-belum-cocok", async (req, res) => {
+  if (req.user!.role !== "superuser") return res.status(403).json({ error: "Hanya Super User" });
+  const klinik = String((req.query as any).klinik ?? "");
+  if (!checkKlinik(req, res, klinik)) return;
+  const opname = await klinikOpnameDay(klinik);
+  const rows = await queryMany(
+    `SELECT ${OBAT_KEY_SQL("o.nama_obat")} AS key, (array_agg(o.nama_obat ORDER BY o.id DESC))[1] AS nama,
+       string_agg(DISTINCT NULLIF(upper(o.satuan), ''), '/') AS satuan, COUNT(*)::int AS baris,
+       COUNT(*) FILTER (WHERE k.tanggal_iso > @opname)::int AS sejak_opname, MAX(k.tanggal_iso) AS terakhir
+     FROM klinik_kunjungan_obat o JOIN klinik_kunjungan k ON k.id = o.kunjungan_id
+     WHERE k.klinik = @klinik AND ${OBAT_KEY_SQL("o.nama_obat")} <> '' AND NOT EXISTS (SELECT 1 FROM obat m WHERE m.kode = o.obat_kode)
+     GROUP BY 1 ORDER BY sejak_opname DESC, baris DESC, 2`,
+    { klinik, opname }
+  );
+  res.json({ opname, rows });
+});
+app.post("/api/klinik-laporan/obat-alias", async (req, res) => {
+  if (req.user!.role !== "superuser") return res.status(403).json({ error: "Hanya Super User" });
+  const nama = String(req.body?.nama ?? "").trim();
+  const kode = String(req.body?.obat_kode ?? "");
+  const key = obatKey(nama);
+  if (!key) return res.status(400).json({ error: "Nama obat kosong" });
+  const obat = await queryOne<{ nama: string }>("SELECT nama FROM obat WHERE kode = @kode", { kode });
+  if (!obat) return res.status(400).json({ error: "Pilih obat dari master" });
+  const updated = await withTransaction(async (c) => {
+    await execute(
+      `INSERT INTO klinik_obat_alias (nama_key, obat_kode, nama_contoh) VALUES (@key, @kode, @nama)
+       ON CONFLICT (nama_key) DO UPDATE SET obat_kode = EXCLUDED.obat_kode, nama_contoh = EXCLUDED.nama_contoh`,
+      { key, kode, nama },
+      c
+    );
+    return applyObatAlias(c, key);
+  });
+  await logActivity(req, { module: "KLINIK", estate: null, aksi: "Cocokkan Nama Obat", objek: `${nama} → ${kode} ${obat.nama}`, detail: `${updated} baris terapi diperbarui` });
+  res.json({ success: true, updated });
+});
+
+// Superuser: Sinkron Stok - every visit after the clinic's last approved opname brought in line
 // with its terapi, each visit in its own transaction (a visit the stock can't cover is listed, the
 // others go on). dryRun: the same, rolled back, to see what it would do.
 class DryRun extends Error {}
@@ -3700,7 +3785,7 @@ app.post("/api/klinik-laporan/sinkron-stok", async (req, res) => {
   const opname = await klinikOpnameDay(klinik);
   const visits = await queryMany<any>(
     `SELECT k.id, k.klinik, k.tanggal_iso, k.nama_pasien, k.diagnosis FROM klinik_kunjungan k
-     WHERE k.klinik = @klinik AND k.sumber = 'APP' AND k.tanggal_iso >= @opname
+     WHERE k.klinik = @klinik AND k.tanggal_iso > @opname
        AND (EXISTS (SELECT 1 FROM klinik_kunjungan_obat o JOIN obat m ON m.kode = o.obat_kode WHERE o.kunjungan_id = k.id)
             OR EXISTS (SELECT 1 FROM klinik_stock_tx t WHERE t.kunjungan_id = k.id))
      ORDER BY k.tanggal_iso, k.id`,

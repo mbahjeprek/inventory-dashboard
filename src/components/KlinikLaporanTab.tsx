@@ -10,6 +10,7 @@ import { ExportButtons } from "./ExportButtons";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { EvidenceLink } from "./EvidenceInput";
 import { KunjunganModal } from "./KunjunganModal";
+import { CocokkanObatModal } from "./CocokkanObatModal";
 import { fetchAllRows, type ReportSection, type SectionReport, type TableReport } from "../lib/printTable";
 import { MAX_TERAPI, hariOf, kodeTglOf, periodeOf, tglSheet, yaTidak } from "../lib/kunjungan";
 
@@ -90,6 +91,7 @@ export function KlinikLaporanTab({ klinik }: { klinik: string }) {
   // Super User: Sinkron Stok - what the visits since the last opname would cut / link, then run it.
   const [sinkron, setSinkron] = useState<Awaited<ReturnType<typeof api.sinkronStokKunjungan>> | null>(null);
   const [sinkronBusy, setSinkronBusy] = useState(false);
+  const [cocokkan, setCocokkan] = useState(false);
   const [sinkronError, setSinkronError] = useState("");
   const runSinkron = async (dryRun: boolean) => {
     setSinkronBusy(true);
@@ -655,6 +657,15 @@ export function KlinikLaporanTab({ klinik }: { klinik: string }) {
             </select>
             {user?.role === "superuser" && (
               <button
+                onClick={() => setCocokkan(true)}
+                title="Nama terapi yang diketik manual dan belum cocok dengan master obat"
+                className="text-sm px-3 py-1.5 rounded-md border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[#f1f5f9]"
+              >
+                Cocokkan Nama Obat
+              </button>
+            )}
+            {user?.role === "superuser" && (
+              <button
                 onClick={() => runSinkron(true)}
                 disabled={sinkronBusy}
                 title="Cek terapi kunjungan sejak stok opname terakhir yang belum tercatat di Stock Out klinik"
@@ -846,6 +857,7 @@ export function KlinikLaporanTab({ klinik }: { klinik: string }) {
         </div>
       )}
 
+      {cocokkan && <CocokkanObatModal klinik={klinik} onClose={() => setCocokkan(false)} onChanged={() => setReloadKey((n) => n + 1)} />}
       {editing && <KunjunganModal klinik={klinik} kunjungan={editing === "new" ? null : editing} onClose={() => setEditing(null)} onSaved={() => setReloadKey((k) => k + 1)} />}
       {deleting && (
         <ConfirmDialog

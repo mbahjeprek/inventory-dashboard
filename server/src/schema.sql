@@ -620,3 +620,13 @@ END $$;
 -- entered for the same patient / obat is linked to the visit instead of being booked twice.
 ALTER TABLE klinik_stock_tx ADD COLUMN IF NOT EXISTS kunjungan_id INTEGER;
 CREATE INDEX IF NOT EXISTS idx_klinik_tx_kunjungan ON klinik_stock_tx(kunjungan_id);
+
+-- Nama obat typed in a kunjungan's terapi (key: lower-case letters and digits only) -> the master obat
+-- it means ("PCT" -> Paracetamol 500 mg). A visit saved with such a name gets that obat_kode, so its
+-- terapi is cut from stock (app.ts resolveTerapiKode); Super User adds names via Cocokkan Nama Obat.
+CREATE TABLE IF NOT EXISTS klinik_obat_alias (
+  nama_key TEXT PRIMARY KEY,
+  obat_kode TEXT NOT NULL REFERENCES obat(kode) ON UPDATE CASCADE ON DELETE CASCADE,
+  nama_contoh TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ DEFAULT now()
+);
