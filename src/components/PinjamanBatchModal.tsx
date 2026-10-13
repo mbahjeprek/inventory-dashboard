@@ -32,7 +32,8 @@ export function PinjamanBatchModal({
   const [tanggal, setTanggal] = useState(localToday());
 
   useEffect(() => {
-    if (!keOptions.includes(ke)) setKe(keOptions[0] ?? "");
+    // Functional: a "ke" just restored from this lender's draft is kept.
+    setKe((k) => (k && k !== dari ? k : (keOptions[0] ?? "")));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dari]);
 
@@ -122,11 +123,11 @@ export function PinjamanBatchModal({
       title="Input Banyak Pinjaman"
       subtitle={`Banyak barang dipinjamkan ${dari} ke ${ke} sekaligus; tiap baris jadi satu pinjaman`}
       draftKey={`batch:pinjaman:${module}:${dari}`}
-      extra={{ ke, tanggal }}
+      extra={{ ke }}
       onRestoreExtra={(x) => {
-        const d = x as { ke?: string; tanggal?: string } | null;
+        const d = x as { ke?: string } | null;
         if (d?.ke && d.ke !== dari && ESTATES.includes(d.ke)) setKe(d.ke);
-        if (d?.tanggal && d.tanggal <= localToday()) setTanggal(d.tanggal);
+        // The date isn't restored: a draft left from yesterday would book every row on yesterday.
       }}
       header={
         <>

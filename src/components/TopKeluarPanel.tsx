@@ -214,6 +214,7 @@ export function TopKeluarPanel({ estates, onExport }: { estates: EstateLink[]; o
                   }}
                 />
                 <Bar
+                  isAnimationActive={false}
                   dataKey="trx"
                   radius={[0, 4, 4, 0]}
                   onMouseLeave={() => setHover(null)}

@@ -15,7 +15,7 @@ export function SessionExpiredModal() {
 
   useEffect(() => {
     const onExpired = () => {
-      setUsername((u) => u || user?.username || "");
+      setUsername(user?.username || "");
       setOpen(true);
     };
     window.addEventListener("session-expired", onExpired);
@@ -54,7 +54,15 @@ export function SessionExpiredModal() {
         <p className="text-xs text-[var(--text-secondary)]">
           Login lagi untuk melanjutkan. Halaman dan isian form di belakang tidak hilang - setelah login, tekan Simpan lagi.
         </p>
-        <input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="Username" autoComplete="username" className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-2" />
+        {/* The same account: the page and its form belong to it. */}
+        <input
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
+          readOnly={!!user}
+          placeholder="Username"
+          autoComplete="username"
+          className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-2 read-only:bg-[#f8fafc] read-only:text-[var(--text-secondary)]"
+        />
         <input
           type="password"
           value={password}

@@ -392,7 +392,7 @@ export function PerbandinganPanel({ estates, onExport }: { estates: EstateLink[]
                         );
                       }}
                     />
-                    <Bar dataKey="value" radius={[0, 4, 4, 0]} maxBarSize={26}>
+                    <Bar dataKey="value" radius={[0, 4, 4, 0]} maxBarSize={26} isAnimationActive={false}>
                       {bars.map((r) => (
                         <Cell key={r.estate} fill={ESTATE_COLOR[r.estate]} />
                       ))}

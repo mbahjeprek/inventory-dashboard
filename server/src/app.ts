@@ -242,7 +242,9 @@ async function stockLocations(req: express.Request): Promise<StockLocation[]> {
     return K((await queryOne<{ v: string }>("SELECT klinik v FROM klinik_stock WHERE id = @id", { id: p.split("/")[2] }))?.v);
   if (/^\/klinik-stock\/history\/\d+$/.test(p)) return K(await col("klinik_stock_tx", "klinik"));
   // Laporan Harian: a kunjungan moves the clinic's stock when its terapi names a master obat.
-  const terapiStok = Array.isArray(b.obat) && b.obat.some((o: any) => String(o?.obat_kode ?? "").trim());
+  // Any terapi: a name typed by hand may be a master obat through an alias (resolveTerapiKode).
+  const terapiStok = Array.isArray(b.obat) && b.obat.some((o: any) => String(o?.obat_kode ?? "").trim() || String(o?.nama_obat ?? "").trim());
+  if (p === "/klinik-laporan/sinkron-stok" && m === "POST") return K(b.klinik);
   if (p === "/klinik-laporan/kunjungan" && m === "POST") return terapiStok ? K(b.klinik) : [];
   if (/^\/klinik-laporan\/kunjungan\/\d+$/.test(p)) {
     const linked = await queryOne("SELECT 1 FROM klinik_stock_tx WHERE kunjungan_id = @id LIMIT 1", { id });
@@ -3270,6 +3272,7 @@ function kunjunganPayload(b: any): { data?: Record<string, any>; obat?: { obat_k
   const t = (v: unknown) => String(v ?? "").replace(/\s+/g, " ").trim();
   const tanggal_iso = t(b.tanggal_iso);
   if (!ISO_DATE.test(tanggal_iso)) return { error: "Tanggal tidak valid" };
+  if (tanggal_iso > jakartaToday()) return { error: "Tanggal kunjungan tidak boleh lewat dari hari ini" };
   const nama_pasien = t(b.nama_pasien);
   if (!nama_pasien) return { error: "Nama pasien wajib diisi" };
   const jenis_kunjungan = t(b.jenis_kunjungan);
@@ -3401,17 +3404,25 @@ async function linkManualStockOut(c: PoolClient, k: KunjunganStokRef, kode: stri
     `SELECT id, qty, COALESCE(penerima, '') penerima FROM klinik_stock_tx
      WHERE klinik = @klinik AND obat_kode = @kode AND type = 'OUT' AND is_correction = 0 AND pinjaman_id IS NULL AND kunjungan_id IS NULL
        AND COALESCE(tujuan, '') <> 'DIBUANG' AND (created_at AT TIME ZONE 'Asia/Jakarta')::date BETWEEN @tgl::date - 1 AND @tgl::date + 14
+       AND (created_at AT TIME ZONE 'Asia/Jakarta')::date::text > @opname
      ORDER BY abs((created_at AT TIME ZONE 'Asia/Jakarta')::date - @tgl::date), id`,
-    { klinik: k.klinik, kode, tgl: k.tanggal_iso },
+    { klinik: k.klinik, kode, tgl: k.tanggal_iso, opname: await klinikOpnameDay(k.klinik, c) },
     c
   );
   const patient = rows.filter((r) => r.penerima.trim() && (namaKey(r.penerima) === namaKey(k.nama_pasien) || namaMirip(r.penerima, k.nama_pasien)));
+  // One row with the terapi qty; else the nearest rows that together stay within it (a further row
+  // may be the next visit's); else the nearest one (a qty typed differently on the two pages).
   const exact = patient.find((r) => r.qty === qty);
   const mine: typeof patient = exact ? [exact] : [];
-  if (!exact) for (const r of patient) if (mine.reduce((s, x) => s + x.qty, 0) < qty) mine.push(r);
+  if (!exact) for (const r of patient) if (mine.reduce((s, x) => s + x.qty, 0) + r.qty <= qty) mine.push(r);
+  if (!mine.length && patient.length) mine.push(patient[0]);
   if (!mine.length) return 0;
-  await execute("UPDATE klinik_stock_tx SET kunjungan_id = @kid WHERE id = ANY(@ids::int[])", { kid: k.id, ids: mine.map((r) => r.id) }, c);
-  return mine.reduce((s, r) => s + r.qty, 0);
+  const linked = await queryMany<{ qty: number }>(
+    "UPDATE klinik_stock_tx SET kunjungan_id = @kid WHERE id = ANY(@ids::int[]) AND kunjungan_id IS NULL RETURNING qty",
+    { kid: k.id, ids: mine.map((r) => r.id) },
+    c
+  );
+  return linked.reduce((s, r) => s + r.qty, 0);
 }
 type StokSync = { kode: string; nama: string; qty: number; how: string };
 // adjustManual: a linked manual Stock Out whose qty differs from the terapi is rebooked to the terapi
@@ -3473,7 +3484,7 @@ async function syncKunjunganStok(
     if (booked === qty) return null;
     const nama = master.get(kode)?.nama ?? kode;
     const manual = rows.some((r) => !String(r.note ?? "").endsWith(AUTO_NOTE));
-    if (manual && !opts.adjustManual) return qty > 0 ? { kode, nama, qty, how: `dihubungkan (Stock Out manual ${booked})` } : null;
+    if (manual && !opts.adjustManual) return null;
     for (const r of rows) {
       await klinikReverse(c, r);
       await execute("DELETE FROM klinik_stock_tx WHERE id = @id", { id: r.id }, c);
@@ -3757,8 +3768,11 @@ app.put("/api/klinik-laporan/kunjungan/:id", async (req, res) => {
       c
     );
     await saveKunjunganObat(c, existing.id, p.obat!);
-    // Moved to before the last opname: its Stock Out (if any) goes back first, like a delete.
-    if (p.data!.tanggal_iso <= (await klinikOpnameDay(existing.klinik, c))) await dropKunjunganStok(c, existing);
+    // The date crosses the last opname day: the rows booked for the old date go first, like a delete -
+    // back to stock when they were after the opname, only unlinked when the opname counted them.
+    // Then the visit is booked for its new date (nothing when that is on / before the opname).
+    const opname = await klinikOpnameDay(existing.klinik, c);
+    if ((existing.tanggal_iso <= opname) !== (p.data!.tanggal_iso <= opname)) await dropKunjunganStok(c, existing);
     stok = await syncKunjunganStok(c, req, { id: existing.id, klinik: existing.klinik, ...(p.data as any) }, p.obat!, { adjustManual: true });
   }));
   } catch (e) {
@@ -6391,7 +6405,6 @@ async function loanMove(
   const module = l.module as SaldoModule;
   const t = SALDO_LEDGER[module];
   const now = (await latestSaldoRow(module, l.estate, l.kode, client))?.saldo_stock ?? 0;
-  if (module === "BBM" && l.type === "OUT" && now < l.qty) throw short(now);
   const signed = l.type === "IN" ? l.qty : -l.qty;
   const lastIso =
     (
@@ -6404,6 +6417,17 @@ async function loanMove(
   const today = jakartaToday();
   const iso = l.iso ?? (lastIso > today ? lastIso : today);
   const before = l.iso ? await saldoAsOf(module, l.estate, l.kode, iso, client) : now;
+  // A BBM Stok Keluar can't exceed the saldo - on its own day and on every later row, which it lowers
+  // too (a loan / transfer dated back), not just today's.
+  if (module === "BBM" && l.type === "OUT") {
+    const later = await queryOne<{ m: number | null }>(
+      `SELECT MIN(saldo_stock)::float8 m FROM ${t.table} WHERE ${t.jenis} = @jenis AND ${t.estate} = @estate AND tanggal_iso > @iso AND saldo_stock IS NOT NULL`,
+      { jenis: l.kode, estate: l.estate, iso },
+      client
+    );
+    const lowest = Math.min(before, later?.m ?? before);
+    if (lowest < l.qty) throw short(lowest);
+  }
   const p = { estate: l.estate, jenis: l.kode, iso, saldo: round3(before + signed), pinjam: signed, note: l.note, pid: l.pinjamanId, ev: l.evidenceId };
   if (module === "BBM") {
     const { tanggal, periode } = isoToIndoDate(iso);

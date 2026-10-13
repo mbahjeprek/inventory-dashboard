@@ -101,6 +101,13 @@ export function KunjunganModal({ klinik, kunjungan, onClose, onSaved }: { klinik
   const usiaAuto = usiaOf(f.tanggal_lahir_iso, f.tanggal_iso);
   const usia = usiaAuto ?? f.usia;
   const obatByNama = new Map((opts?.obat ?? []).map((o) => [o.nama.toLowerCase(), o]));
+  const obatByKode = new Map((opts?.obat ?? []).map((o) => [o.kode, o]));
+  // A terapi's master obat: its code (also one the server matched from an alias, e.g. "PCT"), else the typed name.
+  const masterOf = (o: KunjunganObat) => obatByKode.get(o.obat_kode) ?? obatByNama.get(o.nama_obat.trim().toLowerCase());
+  // Stock this visit already took (an edit): it comes back when the visit is saved again.
+  const booked = new Map((kunjungan?.obat ?? []).filter((o) => o.obat_kode && o.terpotong).map((o) => [o.obat_kode, Number(o.terpotong)]));
+  // One obat on several terapi rows: their qty together against the stock.
+  const wantOf = (kode: string) => f.obat.reduce((s, o) => s + (masterOf(o)?.kode === kode ? (o.qty ?? 0) : 0), 0);
   const setObat = (i: number, patch: Partial<KunjunganObat>) => setF((cur) => ({ ...cur, obat: cur.obat.map((o, j) => (j === i ? { ...o, ...patch } : o)) }));
   const pickObat = (i: number, nama: string) => {
     const m = obatByNama.get(nama.trim().toLowerCase());
@@ -321,15 +328,17 @@ export function KunjunganModal({ klinik, kunjungan, onClose, onSaved }: { klinik
             </div>
             <div className="space-y-2">
               {f.obat.map((o, i) => {
-                const m = obatByNama.get(o.nama_obat.trim().toLowerCase());
+                const m = masterOf(o);
+                const available = m ? (m.stok ?? 0) + (booked.get(m.kode) ?? 0) : 0;
+                const short = !!m && o.qty !== null && wantOf(m.kode) > available;
                 return (
                   <div key={i} className="grid grid-cols-[2rem_1fr_2rem] sm:grid-cols-[2rem_1fr_6rem_8rem_2rem] gap-2 items-start">
                     <span className="text-xs text-[var(--text-muted)] pt-2.5">{i + 1}</span>
                     <div className="min-w-0">
                       <input value={o.nama_obat} onChange={(e) => pickObat(i, e.target.value)} list="kj-obat" placeholder={`Terapi ${i + 1}`} aria-label={`Terapi ${i + 1}`} className={inputCls} />
                       {m ? (
-                        <span className={`text-[11px] ${o.qty !== null && o.qty > (m.stok ?? 0) ? "text-[var(--accent-red)]" : "text-[var(--text-muted)]"}`}>
-                          stok klinik {(m.stok ?? 0).toLocaleString("id-ID")} {m.satuan} · {o.qty !== null && o.qty > (m.stok ?? 0) ? "stok tidak cukup" : "otomatis jadi Stock Out"}
+                        <span className={`text-[11px] ${short ? "text-[var(--accent-red)]" : "text-[var(--text-muted)]"}`}>
+                          stok klinik {available.toLocaleString("id-ID")} {m.satuan} · {short ? "stok tidak cukup" : "otomatis jadi Stock Out"}
                         </span>
                       ) : (
                         o.nama_obat.trim() && <span className="text-[11px] text-[var(--accent-amber)]">bukan dari daftar obat - stok tidak terpotong</span>

@@ -385,7 +385,7 @@ export function KlinikLaporanTab({ klinik }: { klinik: string }) {
         </span>
       );
     return (
-      <span className="text-[10px] text-[var(--accent-amber)]" title={o.master ? "Belum tercatat di Stock Out klinik - stok obat ini di sistem tidak cukup. Catat Stock In / koreksi stoknya, lalu Sinkron Stok." : "Nama tidak dari daftar obat, stok tidak terpotong"}>
+      <span className="text-[10px] text-[var(--accent-amber)]" title={o.master ? "Belum tercatat di Stock Out klinik - stok obat ini di sistem tidak cukup, atau kunjungan belum disinkronkan. Catat Stock In / koreksi stoknya bila perlu, lalu Sinkron Stok / simpan ulang kunjungannya." : "Nama tidak dari daftar obat, stok tidak terpotong"}>
         {" "}
         {o.master ? "belum terpotong" : "bukan obat master"}
       </span>

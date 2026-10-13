@@ -110,7 +110,8 @@ export function KonsumsiObatPanel({ klinik, dateFrom, dateTo, periodText }: { kl
     const n = Math.max(months.length, 1);
     return [...by.values()].map((o) => ({ ...o, avg: o.total / n })).sort((a, b) => b.total - a.total || a.nama.localeCompare(b.nama));
   }, [data, months]);
-  const shown = search.trim() ? list.filter((o) => `${o.nama} ${o.kode}`.toLowerCase().includes(search.trim().toLowerCase())) : list;
+  // The search box is hidden while one obat is picked, so it doesn't narrow the table then.
+  const shown = !obat && search.trim() ? list.filter((o) => `${o.nama} ${o.kode}`.toLowerCase().includes(search.trim().toLowerCase())) : list;
   const cukup = (o: ObatRow) => (o.stok === null ? null : o.avg > 0 ? o.stok / o.avg : null);
 
   const one = obat ? list.find((o) => o.kode === obat.kode) : null;
