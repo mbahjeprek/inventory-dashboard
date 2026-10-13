@@ -295,6 +295,12 @@ export function TransactionModal({
             )}
           </div>
 
+          {isKlinik && mode === "OUT" && (
+            <p className="text-xs rounded-md px-3 py-2 bg-[var(--accent-blue-bg)] text-[var(--accent-blue)]">
+              Obat untuk pasien tidak perlu diinput di sini: terapi di Laporan Harian (Input Kunjungan) otomatis tercatat sebagai Stock Out. Pakai ini untuk pemakaian lain (mis. alat untuk klinik).
+            </p>
+          )}
+
           <div>
             <label className="text-xs text-[var(--text-secondary)] mb-1 block">Tanggal</label>
             <input type="date" value={tanggal} max={localToday()} onChange={(e) => setTanggal(e.target.value)} className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-2" />

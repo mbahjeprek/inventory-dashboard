@@ -234,6 +234,13 @@ async function stockLocations(req: express.Request): Promise<StockLocation[]> {
   if (/^\/klinik-stock\/\d+\/batches$/.test(p))
     return K((await queryOne<{ v: string }>("SELECT klinik v FROM klinik_stock WHERE id = @id", { id: p.split("/")[2] }))?.v);
   if (/^\/klinik-stock\/history\/\d+$/.test(p)) return K(await col("klinik_stock_tx", "klinik"));
+  // Laporan Harian: a kunjungan moves the clinic's stock when its terapi names a master obat.
+  const terapiStok = Array.isArray(b.obat) && b.obat.some((o: any) => String(o?.obat_kode ?? "").trim());
+  if (p === "/klinik-laporan/kunjungan" && m === "POST") return terapiStok ? K(b.klinik) : [];
+  if (/^\/klinik-laporan\/kunjungan\/\d+$/.test(p)) {
+    const linked = await queryOne("SELECT 1 FROM klinik_stock_tx WHERE kunjungan_id = @id LIMIT 1", { id });
+    return terapiStok || linked ? K(await col("klinik_kunjungan", "klinik")) : [];
+  }
   if ((p === "/bbm" || p === "/bbm/batch") && m === "POST") return B(b.lokasi);
   if (/^\/bbm\/\d+$/.test(p)) return B(await col("bbm_log", "lokasi"));
   if ((p === "/pupuk" || p === "/pupuk/batch") && m === "POST") return P(b.estate);
@@ -271,9 +278,14 @@ app.use("/api", async (req, res, next) => {
   for (const [re, table] of PINJAMAN_ROWS) {
     const id = p.match(re)?.[1];
     if (!id) continue;
-    const row = await queryOne<{ pinjaman_id: number | null }>(`SELECT pinjaman_id FROM ${table} WHERE id = @id`, { id });
+    const row = await queryOne<{ pinjaman_id: number | null; kunjungan_id: number | null }>(
+      `SELECT pinjaman_id, ${table === "klinik_stock_tx" ? "kunjungan_id" : "NULL::int AS kunjungan_id"} FROM ${table} WHERE id = @id`,
+      { id }
+    );
     if (row?.pinjaman_id)
       return res.status(409).json({ error: `Transaksi ini bagian dari Pinjaman #${row.pinjaman_id}. Kelola lewat menu Pinjaman Antar Estate.` });
+    if (row?.kunjungan_id)
+      return res.status(409).json({ error: "Stock Out ini dari terapi pasien di Laporan Harian. Ubah / hapus lewat Edit Kunjungan di tab Laporan Harian." });
   }
   next();
 });
@@ -3228,8 +3240,11 @@ app.get("/api/klinik-laporan/kunjungan", async (req, res) => {
   const offset = (Math.max(parseInt(q.page) || 1, 1) - 1) * limit;
   const data = await queryMany(
     // No = the visit's number in its clinic and year, by date, as the sheet numbers its rows.
-    `SELECT k.*, COALESCE((SELECT json_agg(json_build_object('obat_kode', o.obat_kode, 'nama_obat', o.nama_obat, 'qty', o.qty, 'satuan', o.satuan) ORDER BY o.urut, o.id)
-                           FROM klinik_kunjungan_obat o WHERE o.kunjungan_id = k.id), '[]') AS obat
+    `SELECT k.*, COALESCE((SELECT json_agg(json_build_object('obat_kode', o.obat_kode, 'nama_obat', o.nama_obat, 'qty', o.qty, 'satuan', o.satuan,
+                             'master', m.kode IS NOT NULL,
+                             'terpotong', (SELECT SUM(CASE WHEN t.type = 'OUT' THEN t.qty ELSE -t.qty END) FROM klinik_stock_tx t WHERE t.kunjungan_id = k.id AND t.obat_kode = o.obat_kode)) ORDER BY o.urut, o.id)
+                           FROM klinik_kunjungan_obat o LEFT JOIN obat m ON m.kode = o.obat_kode WHERE o.kunjungan_id = k.id), '[]') AS obat,
+       k.tanggal_iso < COALESCE((SELECT MAX(tanggal) FROM opname WHERE module = 'KLINIK' AND estate = k.klinik AND status = 'APPROVED'), '') AS sebelum_opname
      FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY klinik, left(tanggal_iso, 4) ORDER BY tanggal_iso, id)::int AS nomor FROM klinik_kunjungan) k
      WHERE ${where} ORDER BY k.tanggal_iso DESC, k.id DESC LIMIT @limit OFFSET @offset`,
     { ...params, limit, offset }
@@ -3311,6 +3326,122 @@ async function saveKunjunganObat(c: PoolClient, id: number, obat: NonNullable<Re
       c
     );
 }
+// ---- Terapi -> Stock Out ----
+// Every terapi of a kunjungan that names a master obat (obat_kode) is a Stock Out of the visit's
+// clinic: FEFO from its batches, dated on the visit, penerima = the patient, linked by
+// klinik_stock_tx.kunjungan_id, so the admin types it once (in Laporan Harian) and not again on the
+// Stock Out page. Saving / editing a visit brings its Stock Out in line - an obat whose qty didn't
+// change keeps its row - and deleting it puts the stock back. A manual Stock Out already entered for
+// that patient (a similar spelling counts, namaMirip) and obat around the visit day is linked instead
+// of booked again, so nothing is cut twice; when its qty differs from the terapi it stays as typed
+// until the visit itself is edited. A visit before the clinic's last approved stok opname is left
+// alone: the count has it.
+type TerapiStok = { obat_kode: string; nama_obat: string; qty: number | null };
+type KunjunganStokRef = { id: number; klinik: string; tanggal_iso: string; nama_pasien: string; diagnosis: string };
+async function klinikOpnameDay(klinik: string, c?: PoolClient) {
+  return (
+    (await queryOne<{ t: string | null }>("SELECT MAX(tanggal) t FROM opname WHERE module = 'KLINIK' AND estate = @klinik AND status = 'APPROVED'", { klinik }, c))?.t ?? ""
+  );
+}
+const AUTO_NOTE = "(Laporan Harian)";
+// Unlinked manual Stock Out rows of this patient + obat from the day before to 3 days after the visit,
+// linked to it; their total qty (0 = none).
+async function linkManualStockOut(c: PoolClient, k: KunjunganStokRef, kode: string) {
+  const rows = await queryMany<{ id: number; qty: number; penerima: string }>(
+    `SELECT id, qty, COALESCE(penerima, '') penerima FROM klinik_stock_tx
+     WHERE klinik = @klinik AND obat_kode = @kode AND type = 'OUT' AND is_correction = 0 AND pinjaman_id IS NULL AND kunjungan_id IS NULL
+       AND COALESCE(tujuan, '') <> 'DIBUANG' AND (created_at AT TIME ZONE 'Asia/Jakarta')::date BETWEEN @tgl::date - 1 AND @tgl::date + 3`,
+    { klinik: k.klinik, kode, tgl: k.tanggal_iso },
+    c
+  );
+  const mine = rows.filter((r) => r.penerima.trim() && (namaKey(r.penerima) === namaKey(k.nama_pasien) || namaMirip(r.penerima, k.nama_pasien)));
+  if (!mine.length) return 0;
+  await execute("UPDATE klinik_stock_tx SET kunjungan_id = @kid WHERE id = ANY(@ids::int[])", { kid: k.id, ids: mine.map((r) => r.id) }, c);
+  return mine.reduce((s, r) => s + r.qty, 0);
+}
+type StokSync = { kode: string; nama: string; qty: number; how: string };
+// adjustManual: a linked manual Stock Out whose qty differs from the terapi is rebooked to the terapi
+// (an edit of the visit); otherwise it stays as typed and is only reported.
+async function syncKunjunganStok(c: PoolClient, req: express.Request, k: KunjunganStokRef, obat: TerapiStok[], adjustManual = false): Promise<StokSync[]> {
+  if (k.tanggal_iso < (await klinikOpnameDay(k.klinik, c))) return [];
+  const kodes = obat.map((o) => o.obat_kode).filter(Boolean);
+  const master = new Map(
+    (await queryMany<{ kode: string; nama: string; satuan: string }>("SELECT kode, nama, COALESCE(satuan, '') satuan FROM obat WHERE kode = ANY(@kodes::text[])", { kodes }, c)).map((o) => [o.kode, o])
+  );
+  const want = new Map<string, number>();
+  for (const o of obat) {
+    const m = master.get(o.obat_kode);
+    if (!m) continue;
+    if (o.qty === null) throw new StockError(`Qty ${o.nama_obat} wajib diisi - obat dari master memotong stok klinik`);
+    if (!Number.isInteger(o.qty)) throw new StockError(`Qty ${o.nama_obat} harus bilangan bulat (${m.satuan || "satuan master"})`);
+    want.set(m.kode, (want.get(m.kode) ?? 0) + o.qty);
+  }
+  const have = new Map<string, any[]>();
+  for (const t of await queryMany<any>("SELECT * FROM klinik_stock_tx WHERE kunjungan_id = @id ORDER BY id", { id: k.id }, c))
+    have.set(t.obat_kode, [...(have.get(t.obat_kode) ?? []), t]);
+  const note = `Kunjungan ${k.tanggal_iso.split("-").reverse().join("/")}${k.diagnosis ? ` · ${k.diagnosis}` : ""} ${AUTO_NOTE}`;
+  const done: StokSync[] = [];
+  for (const kode of new Set([...want.keys(), ...have.keys()])) {
+    const qty = want.get(kode) ?? 0;
+    const rows = have.get(kode) ?? [];
+    const booked = rows.reduce((s, r) => s + (r.type === "OUT" ? r.qty : -r.qty), 0);
+    if (booked === qty) continue;
+    const nama = master.get(kode)?.nama ?? kode;
+    const manual = rows.some((r) => !String(r.note ?? "").endsWith(AUTO_NOTE));
+    if (manual && !adjustManual) {
+      if (qty > 0) done.push({ kode, nama, qty, how: `dihubungkan (Stock Out manual ${booked})` });
+      continue;
+    }
+    for (const r of rows) {
+      await klinikReverse(c, r);
+      await execute("DELETE FROM klinik_stock_tx WHERE id = @id", { id: r.id }, c);
+    }
+    const linked = qty > 0 && !rows.length && !adjustManual ? await linkManualStockOut(c, k, kode) : 0;
+    if (linked) {
+      done.push({ kode, nama, qty, how: linked === qty ? "dihubungkan" : `dihubungkan (Stock Out manual ${linked})` });
+      continue;
+    }
+    if (qty > 0) {
+      let alloc: Alloc[];
+      try {
+        alloc = await takeFromBatches(c, k.klinik, kode, qty);
+      } catch (e) {
+        if (e instanceof StockError) throw new StockError(e.message.replace("Stock tersedia hanya", `Stok ${nama} di Klinik ${k.klinik} hanya`));
+        throw e;
+      }
+      await execute(
+        `INSERT INTO klinik_stock_tx (klinik, obat_kode, type, qty, tujuan, penerima, note, is_correction, user_id, alloc, kunjungan_id)
+         VALUES (@klinik, @kode, 'OUT', @qty, '', @penerima, @note, 0, @uid, @alloc::jsonb, @kid)`,
+        { klinik: k.klinik, kode, qty, penerima: k.nama_pasien, note, uid: req.user!.id, alloc: JSON.stringify(alloc), kid: k.id },
+        c
+      );
+    }
+    await syncKlinikStock(c, k.klinik, kode);
+    done.push({ kode, nama, qty, how: qty === 0 ? "dikembalikan" : rows.length ? "diubah" : "dipotong" });
+  }
+  return done;
+}
+// A visit's Stock Out goes back to the batches with it - unless the visit is before the last approved
+// opname (counted there): then the rows only lose their link.
+async function dropKunjunganStok(c: PoolClient, k: { id: number; klinik: string; tanggal_iso: string }) {
+  const rows = await queryMany<any>("SELECT * FROM klinik_stock_tx WHERE kunjungan_id = @id", { id: k.id }, c);
+  if (!rows.length) return;
+  if (k.tanggal_iso < (await klinikOpnameDay(k.klinik, c))) {
+    await execute("UPDATE klinik_stock_tx SET kunjungan_id = NULL WHERE kunjungan_id = @id", { id: k.id }, c);
+    return;
+  }
+  for (const r of rows) await klinikReverse(c, r);
+  await execute("DELETE FROM klinik_stock_tx WHERE kunjungan_id = @id", { id: k.id }, c);
+  for (const kode of new Set(rows.map((r) => r.obat_kode))) await syncKlinikStock(c, k.klinik, kode);
+}
+// The Stock Out rows of a visit entered later carry the visit's day (txTime, see BACKDATE).
+const atVisitDay = <T>(tanggal: string, fn: () => Promise<T>): Promise<T> => {
+  if (tanggal >= jakartaToday()) return fn();
+  const time = new Date().toLocaleTimeString("en-GB", { timeZone: "Asia/Jakarta", hour12: false });
+  return txTime.run(`${tanggal}T${time}+07:00`, fn);
+};
+const stokSyncText = (d: StokSync[]) => (d.length ? `Stok: ${d.map((x) => `${x.nama} ${x.qty} ${x.how}`).join(", ")}` : "");
+
 const kunjunganObjek = (d: Record<string, any>) => `${d.nama_pasien} · ${d.tanggal_iso.split("-").reverse().join("/")}`;
 const kunjunganDetail = (d: Record<string, any>, obat: { nama_obat: string; qty: number | null; satuan: string }[]) =>
   [
@@ -3472,7 +3603,10 @@ app.post("/api/klinik-laporan/kunjungan", async (req, res) => {
   // transaction's.
   const evidenceId = req.body?.evidence_id ? await claimEvidence(req, res) : null;
   if (evidenceId === undefined) return;
-  const id = await withTransaction(async (c) => {
+  let stok: StokSync[] = [];
+  let id: number;
+  try {
+    id = await atVisitDay(p.data!.tanggal_iso, () => withTransaction(async (c) => {
     const pasienId = await resolvePasien(c, klinik, p.data!, req.body?.pasien_id);
     const row = await queryOne<{ id: number }>(
       `INSERT INTO klinik_kunjungan (klinik, sumber, evidence_id, created_by, pasien_id, ${KUNJUNGAN_COLS.join(", ")})
@@ -3481,9 +3615,21 @@ app.post("/api/klinik-laporan/kunjungan", async (req, res) => {
       c
     );
     await saveKunjunganObat(c, row!.id, p.obat!);
+    stok = await syncKunjunganStok(c, req, { id: row!.id, klinik, ...(p.data as any) }, p.obat!);
     return row!.id;
+  }));
+  } catch (e) {
+    await releaseEvidence(evidenceId);
+    if (e instanceof StockError) return res.status(400).json({ error: e.message });
+    throw e;
+  }
+  await logActivity(req, {
+    module: "KLINIK",
+    estate: klinik,
+    aksi: "Input Kunjungan",
+    objek: kunjunganObjek(p.data!),
+    detail: [kunjunganDetail(p.data!, p.obat!), stokSyncText(stok)].filter(Boolean).join("; "),
   });
-  await logActivity(req, { module: "KLINIK", estate: klinik, aksi: "Input Kunjungan", objek: kunjunganObjek(p.data!), detail: kunjunganDetail(p.data!, p.obat!) });
   res.json({ success: true, id });
 });
 
@@ -3495,7 +3641,9 @@ app.put("/api/klinik-laporan/kunjungan/:id", async (req, res) => {
   if (p.error) return res.status(400).json({ error: p.error });
   const newEvidence = await checkEditEvidence(req, res, existing.evidence_id);
   if (newEvidence === undefined) return;
-  await withTransaction(async (c) => {
+  let stok: StokSync[] = [];
+  try {
+    await atVisitDay(p.data!.tanggal_iso, () => withTransaction(async (c) => {
     const pasienId = await resolvePasien(c, existing.klinik, p.data!, req.body?.pasien_id ?? existing.pasien_id);
     await execute(
       `UPDATE klinik_kunjungan SET ${KUNJUNGAN_COLS.map((k) => `${k} = @${k}`).join(", ")}, pasien_id = @pasienId, updated_at = now() WHERE id = @id`,
@@ -3503,7 +3651,14 @@ app.put("/api/klinik-laporan/kunjungan/:id", async (req, res) => {
       c
     );
     await saveKunjunganObat(c, existing.id, p.obat!);
-  });
+    // Moved to before the last opname: its Stock Out (if any) goes back first, like a delete.
+    if (p.data!.tanggal_iso < (await klinikOpnameDay(existing.klinik, c))) await dropKunjunganStok(c, existing);
+    stok = await syncKunjunganStok(c, req, { id: existing.id, klinik: existing.klinik, ...(p.data as any) }, p.obat!, true);
+  }));
+  } catch (e) {
+    if (e instanceof StockError) return res.status(400).json({ error: e.message });
+    throw e;
+  }
   await useEditEvidence(newEvidence, [{ table: "klinik_kunjungan", where: "id = @id", params: { id: existing.id } }]);
   const labels: Record<string, string> = {
     tanggal_iso: "Tanggal", jenis_kunjungan: "Jenis Kunjungan", nama_pasien: "Nama", jenis_kelamin: "L/P", tanggal_lahir_iso: "Tanggal Lahir", usia: "Usia",
@@ -3515,7 +3670,7 @@ app.put("/api/klinik-laporan/kunjungan/:id", async (req, res) => {
     estate: existing.klinik,
     aksi: "Edit Kunjungan",
     objek: kunjunganObjek(p.data!),
-    detail: [describeChanges(existing, p.data!, labels), newEvidence && "Foto diganti"].filter(Boolean).join("; "),
+    detail: [describeChanges(existing, p.data!, labels), newEvidence && "Foto diganti", stokSyncText(stok)].filter(Boolean).join("; "),
   });
   res.json({ success: true });
 });
@@ -3524,10 +3679,62 @@ app.delete("/api/klinik-laporan/kunjungan/:id", async (req, res) => {
   const existing = await queryOne<any>("SELECT * FROM klinik_kunjungan WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Kunjungan tidak ditemukan" });
   if (!estateAllowed(req.user!, existing.klinik)) return res.status(403).json({ error: "Akses ditolak" });
-  await execute("DELETE FROM klinik_kunjungan WHERE id = @id", { id: existing.id });
+  await withTransaction(async (c) => {
+    await dropKunjunganStok(c, existing);
+    await execute("DELETE FROM klinik_kunjungan WHERE id = @id", { id: existing.id }, c);
+  });
   await releaseEvidence(existing.evidence_id);
   await logActivity(req, { module: "KLINIK", estate: existing.klinik, aksi: "Hapus Kunjungan", objek: kunjunganObjek(existing), detail: existing.diagnosis || "" });
   res.json({ success: true });
+});
+
+// Superuser: Sinkron Stok - every visit entered in the app after the clinic's last approved opname brought in line
+// with its terapi, each visit in its own transaction (a visit the stock can't cover is listed, the
+// others go on). dryRun: the same, rolled back, to see what it would do.
+class DryRun extends Error {}
+app.post("/api/klinik-laporan/sinkron-stok", async (req, res) => {
+  if (req.user!.role !== "superuser") return res.status(403).json({ error: "Hanya Super User" });
+  const klinik = String(req.body?.klinik ?? "");
+  if (!checkKlinik(req, res, klinik)) return;
+  const dryRun = req.body?.dryRun !== false;
+  const opname = await klinikOpnameDay(klinik);
+  const visits = await queryMany<any>(
+    `SELECT k.id, k.klinik, k.tanggal_iso, k.nama_pasien, k.diagnosis FROM klinik_kunjungan k
+     WHERE k.klinik = @klinik AND k.sumber = 'APP' AND k.tanggal_iso >= @opname
+       AND (EXISTS (SELECT 1 FROM klinik_kunjungan_obat o JOIN obat m ON m.kode = o.obat_kode WHERE o.kunjungan_id = k.id)
+            OR EXISTS (SELECT 1 FROM klinik_stock_tx t WHERE t.kunjungan_id = k.id))
+     ORDER BY k.tanggal_iso, k.id`,
+    { klinik, opname }
+  );
+  const out: { id: number; tanggal_iso: string; nama_pasien: string; stok?: StokSync[]; error?: string }[] = [];
+  for (const v of visits) {
+    const obat = await queryMany<TerapiStok>("SELECT obat_kode, nama_obat, qty FROM klinik_kunjungan_obat WHERE kunjungan_id = @id ORDER BY urut, id", { id: v.id });
+    let stok: StokSync[] = [];
+    try {
+      await atVisitDay(v.tanggal_iso, () =>
+        withTransaction(async (c) => {
+          stok = await syncKunjunganStok(c, req, v, obat);
+          if (dryRun) throw new DryRun();
+        })
+      );
+    } catch (e) {
+      if (e instanceof StockError) {
+        out.push({ id: v.id, tanggal_iso: v.tanggal_iso, nama_pasien: v.nama_pasien, error: e.message });
+        continue;
+      }
+      if (!(e instanceof DryRun)) throw e;
+    }
+    if (stok.length) out.push({ id: v.id, tanggal_iso: v.tanggal_iso, nama_pasien: v.nama_pasien, stok });
+  }
+  if (!dryRun && out.some((r) => r.stok?.length))
+    await logActivity(req, {
+      module: "KLINIK",
+      estate: klinik,
+      aksi: "Sinkron Stok Laporan Harian",
+      objek: `${out.filter((r) => r.stok?.length).length} kunjungan sejak ${opname || "awal"}`,
+      detail: out.filter((r) => r.stok?.length).map((r) => `${r.nama_pasien} ${r.tanggal_iso}: ${stokSyncText(r.stok!)}`).join(" | ").slice(0, 2000),
+    });
+  res.json({ dryRun, opname, checked: visits.length, results: out });
 });
 
 // Suggestions for the form: what was typed before at this clinic (jabatan, tempat tinggal, ...), the

@@ -482,7 +482,15 @@ export type LaporanKlinikSummary = {
   }[];
 };
 // One patient visit (Klinik > Laporan Harian), the columns of the Daily Report sheet. nomor = No.
-export type KunjunganObat = { obat_kode: string; nama_obat: string; qty: number | null; satuan: string };
+export type KunjunganObat = {
+  obat_kode: string;
+  nama_obat: string;
+  qty: number | null;
+  satuan: string;
+  // List only: obat_kode is a master obat, and how much of it this visit took from the clinic's stock.
+  master?: boolean;
+  terpotong?: number | null;
+};
 export type KunjunganInput = {
   // The Master Pasien entry picked for Nama Pasien (null = matched / added by name on save).
   pasien_id?: number | null;
@@ -512,6 +520,8 @@ export type Kunjungan = KunjunganInput & {
   klinik: string;
   nomor: number;
   sumber: "APP" | "SHEET";
+  // Before the clinic's last approved stok opname: its terapi don't move stock (the count has them).
+  sebelum_opname?: boolean;
   evidence_id: string | null;
   created_at: string | null;
   created_by: string;
@@ -714,6 +724,14 @@ export const api = {
   updateKunjungan: (id: number, payload: KunjunganInput & { evidence_id?: string | null }) =>
     req<{ success: boolean }>(`/api/klinik-laporan/kunjungan/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
   deleteKunjungan: (id: number) => req<{ success: boolean }>(`/api/klinik-laporan/kunjungan/${id}`, { method: "DELETE" }),
+  // Superuser: every visit since the last opname brought in line with its terapi (dryRun = only show).
+  sinkronStokKunjungan: (klinik: string, dryRun: boolean) =>
+    req<{
+      dryRun: boolean;
+      opname: string;
+      checked: number;
+      results: { id: number; tanggal_iso: string; nama_pasien: string; stok?: { kode: string; nama: string; qty: number; how: string }[]; error?: string }[];
+    }>("/api/klinik-laporan/sinkron-stok", { method: "POST", body: JSON.stringify({ klinik, dryRun }) }),
 
   klinikPickItems: (params: Record<string, string | number>) => {
     const qs = new URLSearchParams(params as any).toString();

@@ -87,6 +87,22 @@ export function KlinikLaporanTab({ klinik }: { klinik: string }) {
   const canEdit = can(user, "klinik.edit");
   const canDelete = can(user, "klinik.delete");
   const tableScrollRef = useDragScroll<HTMLDivElement>();
+  // Super User: Sinkron Stok - what the visits since the last opname would cut / link, then run it.
+  const [sinkron, setSinkron] = useState<Awaited<ReturnType<typeof api.sinkronStokKunjungan>> | null>(null);
+  const [sinkronBusy, setSinkronBusy] = useState(false);
+  const [sinkronError, setSinkronError] = useState("");
+  const runSinkron = async (dryRun: boolean) => {
+    setSinkronBusy(true);
+    setSinkronError("");
+    try {
+      setSinkron(await api.sinkronStokKunjungan(klinik, dryRun));
+      if (!dryRun) setReloadKey((n) => n + 1);
+    } catch (e) {
+      setSinkronError(errorText(e, "Gagal sinkron stok"));
+    } finally {
+      setSinkronBusy(false);
+    }
+  };
   const P = useMemo(presets, []);
   const [view, setView] = useState<View>("data");
   const [preset, setPreset] = useState("bulan");
@@ -350,6 +366,17 @@ export function KlinikLaporanTab({ klinik }: { klinik: string }) {
         {k.rujukan && <span className="px-1.5 py-0.5 rounded bg-[var(--accent-blue-bg)] text-[var(--accent-blue)]">Rujuk{k.provider ? `: ${k.provider}` : ""}</span>}
       </div>
     );
+  // Per terapi: cut from the clinic's stock (Stock Out), or why not.
+  const obatStok = (k: Kunjungan, o: Kunjungan["obat"][number]) => {
+    if (k.sebelum_opname || o.master === undefined) return null;
+    if (o.master && o.terpotong) return <span className="text-[10px] text-[var(--accent-green)]" title="Sudah tercatat di Stock Out klinik"> ✓ stok</span>;
+    return (
+      <span className="text-[10px] text-[var(--accent-amber)]" title={o.master ? "Belum tercatat di Stock Out klinik" : "Nama tidak dari daftar obat, stok tidak terpotong"}>
+        {" "}
+        {o.master ? "belum terpotong" : "bukan obat master"}
+      </span>
+    );
+  };
   const rowActions = (k: Kunjungan) => (
     <div className="inline-flex gap-1.5">
       {canEdit && (
@@ -626,10 +653,56 @@ export function KlinikLaporanTab({ klinik }: { klinik: string }) {
                 </option>
               ))}
             </select>
+            {user?.role === "superuser" && (
+              <button
+                onClick={() => runSinkron(true)}
+                disabled={sinkronBusy}
+                title="Cek terapi kunjungan sejak stok opname terakhir yang belum tercatat di Stock Out klinik"
+                className="text-sm px-3 py-1.5 rounded-md border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[#f1f5f9] disabled:opacity-50"
+              >
+                {sinkronBusy ? "Memeriksa..." : "Sinkron Stok"}
+              </button>
+            )}
             <span className="text-xs text-[var(--text-muted)] ml-auto">
               {fmt(total)} kunjungan · {periodText}
             </span>
           </div>
+          {(sinkron || sinkronError) && (
+            <div className="mx-3 my-3 rounded-md border border-[var(--accent-blue-border)] bg-[var(--accent-blue-bg)] px-3 py-2 text-xs text-[var(--text-primary)] space-y-1.5">
+              {sinkronError ? (
+                <div className="text-[var(--accent-red)]">{sinkronError}</div>
+              ) : (
+                sinkron && (
+                  <>
+                    <div className="font-medium">
+                      {sinkron.dryRun ? "Pemeriksaan" : "Sinkron selesai"}: {sinkron.checked} kunjungan sejak stok opname {sinkron.opname ? tgl(sinkron.opname) : "-"} ·{" "}
+                      {sinkron.results.filter((r) => r.stok).length
+                        ? `${sinkron.results.filter((r) => r.stok).length} kunjungan ${sinkron.dryRun ? "akan disinkronkan" : "disinkronkan"}`
+                        : "semua sudah sinkron"}
+                      {sinkron.results.some((r) => r.error) && ` · ${sinkron.results.filter((r) => r.error).length} perlu diperbaiki`}
+                    </div>
+                    <ul className="max-h-48 overflow-y-auto space-y-0.5">
+                      {sinkron.results.map((r) => (
+                        <li key={r.id} className={r.error ? "text-[var(--accent-red)]" : "text-[var(--text-secondary)]"}>
+                          {tgl(r.tanggal_iso)} · {r.nama_pasien}: {r.error ?? r.stok!.map((x) => `${x.nama} ${x.qty} ${x.how}`).join(", ")}
+                        </li>
+                      ))}
+                    </ul>
+                    <div className="flex gap-2 pt-1">
+                      {sinkron.dryRun && sinkron.results.some((r) => r.stok) && (
+                        <button onClick={() => runSinkron(false)} disabled={sinkronBusy} className="px-3 py-1 rounded-md bg-[var(--accent-blue)] text-white disabled:opacity-50">
+                          {sinkronBusy ? "Menyimpan..." : "Jalankan sinkron"}
+                        </button>
+                      )}
+                      <button onClick={() => setSinkron(null)} className="px-3 py-1 rounded-md border border-[var(--border)] bg-white">
+                        Tutup
+                      </button>
+                    </div>
+                  </>
+                )
+              )}
+            </div>
+          )}
           <div className="md:hidden divide-y divide-[var(--border)]">
             {rows.length === 0 ? (
               <div className="px-4 py-8 text-center text-sm text-[var(--text-muted)]">Belum ada kunjungan di periode ini</div>
@@ -738,6 +811,7 @@ export function KlinikLaporanTab({ klinik }: { klinik: string }) {
                               <div key={i}>
                                 {o.nama_obat}
                                 {o.qty !== null && <span className="text-[var(--text-muted)]"> {fmt(o.qty)} {o.satuan}</span>}
+                                {obatStok(k, o)}
                               </div>
                             ))
                           : "-"}

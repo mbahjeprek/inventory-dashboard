@@ -614,3 +614,9 @@ BEGIN
     END IF;
   END LOOP;
 END $$;
+
+-- Terapi of a Laporan Harian kunjungan that names a master obat is that clinic's Stock Out (app.ts
+-- syncKunjunganStok): klinik_stock_tx.kunjungan_id = the visit it was given at. A manual Stock Out
+-- entered for the same patient / obat is linked to the visit instead of being booked twice.
+ALTER TABLE klinik_stock_tx ADD COLUMN IF NOT EXISTS kunjungan_id INTEGER;
+CREATE INDEX IF NOT EXISTS idx_klinik_tx_kunjungan ON klinik_stock_tx(kunjungan_id);

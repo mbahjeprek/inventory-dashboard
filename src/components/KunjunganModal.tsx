@@ -104,7 +104,7 @@ export function KunjunganModal({ klinik, kunjungan, onClose, onSaved }: { klinik
   const setObat = (i: number, patch: Partial<KunjunganObat>) => setF((cur) => ({ ...cur, obat: cur.obat.map((o, j) => (j === i ? { ...o, ...patch } : o)) }));
   const pickObat = (i: number, nama: string) => {
     const m = obatByNama.get(nama.trim().toLowerCase());
-    setObat(i, m ? { nama_obat: nama, obat_kode: m.kode, satuan: f.obat[i].satuan || (m.satuan ?? "").toUpperCase() } : { nama_obat: nama, obat_kode: "" });
+    setObat(i, m ? { nama_obat: nama, obat_kode: m.kode, satuan: (m.satuan ?? "").toUpperCase() || f.obat[i].satuan } : { nama_obat: nama, obat_kode: "" });
   };
 
   const save = async (again: boolean) => {
@@ -118,6 +118,12 @@ export function KunjunganModal({ klinik, kunjungan, onClose, onSaved }: { klinik
       f.istirahat && !(f.hari_istirahat > 0) && "Jumlah Hari Istirahat",
     ].filter(Boolean);
     if (missing.length) return setError(`Wajib diisi: ${missing.join(", ")}`);
+    // A master obat is cut from the clinic's stock (Stock Out), so it needs a whole qty.
+    for (const o of f.obat) {
+      if (!o.obat_kode || !o.nama_obat.trim()) continue;
+      if (o.qty === null) return setError(`Qty ${o.nama_obat} wajib diisi (memotong stok klinik)`);
+      if (!Number.isInteger(o.qty)) return setError(`Qty ${o.nama_obat} harus bilangan bulat`);
+    }
     const payload = { ...f, usia, hari_istirahat: f.istirahat ? f.hari_istirahat : 0, provider: f.rujukan ? f.provider : "", obat: f.obat.filter((o) => o.nama_obat.trim() || o.qty) };
     setSaving(true);
     try {
@@ -321,7 +327,13 @@ export function KunjunganModal({ klinik, kunjungan, onClose, onSaved }: { klinik
                     <span className="text-xs text-[var(--text-muted)] pt-2.5">{i + 1}</span>
                     <div className="min-w-0">
                       <input value={o.nama_obat} onChange={(e) => pickObat(i, e.target.value)} list="kj-obat" placeholder={`Terapi ${i + 1}`} aria-label={`Terapi ${i + 1}`} className={inputCls} />
-                      {m && m.stok !== null && <span className="text-[11px] text-[var(--text-muted)]">stok klinik {m.stok.toLocaleString("id-ID")} {m.satuan}</span>}
+                      {m ? (
+                        <span className={`text-[11px] ${o.qty !== null && m.stok !== null && o.qty > m.stok ? "text-[var(--accent-red)]" : "text-[var(--text-muted)]"}`}>
+                          stok klinik {(m.stok ?? 0).toLocaleString("id-ID")} {m.satuan} · otomatis jadi Stock Out
+                        </span>
+                      ) : (
+                        o.nama_obat.trim() && <span className="text-[11px] text-[var(--accent-amber)]">bukan dari daftar obat - stok tidak terpotong</span>
+                      )}
                     </div>
                     <button
                       type="button"
