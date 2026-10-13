@@ -62,9 +62,10 @@ export function signSession(user: Pick<SessionUser, "id" | "username" | "nama" |
   return jwt.sign({ id: user.id, username: user.username, nama: user.nama, role: user.role, estate: user.estate }, JWT_SECRET!, { expiresIn: "7d" });
 }
 
-export function verifySession(token: string): Pick<SessionUser, "id" | "username" | "nama" | "role" | "estate"> | null {
+// iat = when the token was issued (seconds), so an active session can be renewed (see app.ts).
+export function verifySession(token: string): (Pick<SessionUser, "id" | "username" | "nama" | "role" | "estate"> & { iat?: number }) | null {
   try {
-    const user = jwt.verify(token, JWT_SECRET!) as SessionUser;
+    const user = jwt.verify(token, JWT_SECRET!) as SessionUser & { iat?: number };
     // Tokens issued before roles existed carry no role/estate; treat them as logged out so the
     // user signs in again and gets a current token, instead of the client bouncing between
     // "/" and "/login" with a user it can't route anywhere (a blank page).

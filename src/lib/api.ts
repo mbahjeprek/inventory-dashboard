@@ -584,6 +584,7 @@ export const isOpnameLock = (e: unknown) => e instanceof ApiError && e.status ==
 // fallback with the status code (e.g. a server error or a timeout), so the cause can be traced.
 // `useServer` is kept for the call sites that already passed it; every refusal is shown now.
 export function errorText(e: unknown, fallback: string, _useServer = false): string {
+  if (e instanceof ApiError && e.status === 401) return "Sesi login habis. Login ulang di jendela yang muncul, lalu tekan Simpan lagi - isian form tidak hilang.";
   if (e instanceof ApiError) return e.serverMessage || `${fallback} (kode ${e.status})`;
   if (e instanceof TypeError) return `${fallback}: koneksi ke server terputus, coba lagi`;
   return fallback;
@@ -596,6 +597,8 @@ async function req<T>(url: string, opts?: RequestInit): Promise<T> {
   });
   if (!res.ok) {
     const body = await res.json().catch(() => null);
+    // The session ran out while the page was open: SessionExpiredModal asks to log in again on the spot.
+    if (res.status === 401 && !url.startsWith("/api/auth/")) window.dispatchEvent(new Event("session-expired"));
     throw new ApiError(res.status, typeof body?.error === "string" ? body.error : "", body);
   }
   return res.json();

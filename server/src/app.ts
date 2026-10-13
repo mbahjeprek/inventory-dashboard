@@ -70,17 +70,24 @@ function toSessionUser(row: UserRow): SessionUser {
 // is changed here, so a new checkbox applies within seconds everywhere.
 const sessionCache = new Map<number, { user: SessionUser; at: number }>();
 const SESSION_TTL_MS = 15_000;
-async function sessionFromCookie(req: express.Request): Promise<SessionUser | null> {
+// A session in use is renewed (a fresh 7-day cookie) at most once an hour, so an account working in
+// the app is never logged out in the middle of a form - only one left unused for 7 days.
+const SESSION_RENEW_S = 60 * 60;
+async function sessionFromCookie(req: express.Request, res?: express.Response): Promise<SessionUser | null> {
   const token = req.cookies?.[COOKIE_NAME];
   const claims = token ? verifySession(token) : null;
   if (!claims) return null;
+  const renew = (u: SessionUser) => {
+    if (res && claims.iat && Date.now() / 1000 - claims.iat > SESSION_RENEW_S) setSessionCookie(res, signSession(u));
+    return u;
+  };
   const hit = sessionCache.get(claims.id);
-  if (hit && Date.now() - hit.at < SESSION_TTL_MS) return hit.user;
+  if (hit && Date.now() - hit.at < SESSION_TTL_MS) return renew(hit.user);
   const row = await queryOne<UserRow>("SELECT id, username, nama, role, estate, estates, perms, temp_full_until FROM users WHERE id = @id", { id: claims.id });
   if (!row) return null;
   const user = toSessionUser(row);
   sessionCache.set(user.id, { user, at: Date.now() });
-  return user;
+  return renew(user);
 }
 
 app.post("/api/auth/login", async (req, res) => {
@@ -111,7 +118,7 @@ app.post("/api/auth/logout", (_req, res) => {
 app.get("/api/evidence-status", (_req, res) => res.json({ enabled: evidenceEnabled() }));
 
 app.get("/api/auth/me", async (req, res) => {
-  const user = await sessionFromCookie(req);
+  const user = await sessionFromCookie(req, res);
   if (!user) return res.status(401).json({ error: "Not authenticated" });
   res.json({ user });
 });
@@ -126,7 +133,7 @@ declare global {
 
 // ---- Everything else under /api requires a valid session ----
 app.use("/api", async (req, res, next) => {
-  const user = await sessionFromCookie(req);
+  const user = await sessionFromCookie(req, res);
   if (!user) return res.status(401).json({ error: "Not authenticated" });
   req.user = user;
   next();
