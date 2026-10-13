@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { ArrowLeftRight, ArrowRight, Plus, X } from "lucide-react";
+import { ArrowLeftRight, ArrowRight, Plus, ListPlus, X } from "lucide-react";
 import { api, errorText, type OpnameModule, type Pinjaman, type PinjamanBarang, type PinjamanStatus } from "../lib/api";
 import { useSearchParams } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
@@ -9,6 +9,7 @@ import { useShownEstates } from "../hooks/useEstateFilter";
 import { LOAN_LATE_DAYS, loanDays, useOpenPinjaman } from "../hooks/useOpenPinjaman";
 import { OPNAME_MODULES, OPNAME_MODULE_LABEL, fmtQty, localToday, opnameModule, round3 } from "../lib/opname";
 import { tanggalWaktu } from "../lib/datetime";
+import { PinjamanBatchModal } from "../components/PinjamanBatchModal";
 
 const ESTATES = ["NILAM", "KNS", "WJA", "ZAMRUD", "FIRUS"];
 const inputCls = "w-full text-sm rounded-md border border-[var(--border)] px-3 py-2";
@@ -45,7 +46,7 @@ export function PinjamanPage() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [reload, setReload] = useState(0);
-  const [creating, setCreating] = useState<"" | "PINJAM" | "TRANSFER">("");
+  const [creating, setCreating] = useState<"" | "PINJAM" | "TRANSFER" | "BATCH">("");
   const [returning, setReturning] = useState<{ loan: Pinjaman; batal: boolean } | null>(null);
   const [deleting, setDeleting] = useState<Pinjaman | null>(null);
   const refreshOpen = useOpenPinjaman((s) => s.refresh);
@@ -86,6 +87,12 @@ export function PinjamanPage() {
               className="inline-flex items-center gap-1.5 text-sm px-3.5 py-2 rounded-md border border-[var(--accent-blue-border)] text-[var(--accent-blue)] hover:bg-[var(--accent-blue-bg)]"
             >
               <ArrowRight size={16} /> Catat Transfer
+            </button>
+            <button
+              onClick={() => setCreating("BATCH")}
+              className="inline-flex items-center gap-1.5 text-sm px-3.5 py-2 rounded-md border border-[var(--accent-blue-border)] text-[var(--accent-blue)] hover:bg-[var(--accent-blue-bg)]"
+            >
+              <ListPlus size={16} /> Input Banyak Pinjaman
             </button>
             <button
               onClick={() => setCreating("PINJAM")}
@@ -234,7 +241,8 @@ export function PinjamanPage() {
         </table>
       </div>
 
-      {creating && <CreatePinjamanModal jenis={creating} modules={inputModules} myEstates={myEstates} onClose={() => setCreating("")} onSuccess={done} />}
+      {creating === "BATCH" && <PinjamanBatchModal modules={inputModules} myEstates={myEstates} onClose={() => setCreating("")} onSuccess={done} />}
+      {creating && creating !== "BATCH" && <CreatePinjamanModal jenis={creating} modules={inputModules} myEstates={myEstates} onClose={() => setCreating("")} onSuccess={done} />}
       {returning && <KembaliModal loan={returning.loan} batal={returning.batal} onClose={() => setReturning(null)} onSuccess={done} />}
       {deleting && <HapusModal loan={deleting} onClose={() => setDeleting(null)} onSuccess={done} />}
     </div>

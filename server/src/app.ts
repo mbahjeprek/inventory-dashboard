@@ -242,7 +242,7 @@ async function stockLocations(req: express.Request): Promise<StockLocation[]> {
   // Pinjaman: both the lending and the borrowing estate's stock move.
   const loanAt = (module: unknown, ...estates: unknown[]) =>
     OPNAME_MODULES_LIST.includes(module as OpnameModule) ? estates.flatMap(at(module as OpnameModule)) : [];
-  if (p === "/pinjaman" && m === "POST") return loanAt(b.module, b.dari, b.ke);
+  if ((p === "/pinjaman" || p === "/pinjaman/batch") && m === "POST") return loanAt(b.module, b.dari, b.ke);
   if (/^\/pinjaman\/\d+\/(kembali|batal)$/.test(p)) {
     const l = await queryOne<any>("SELECT module, dari_estate, ke_estate FROM pinjaman WHERE id = @id", { id: p.split("/")[2] });
     return l ? loanAt(l.module, l.dari_estate, l.ke_estate) : [];
@@ -6126,8 +6126,10 @@ app.get("/api/pinjaman", async (req, res) => {
 
 // The items the lender can lend: its stock of that module (only stock > 0 for gudang / klinik).
 app.get("/api/pinjaman/barang", async (req, res) => {
-  const { module = "", estate = "", search = "" } = req.query as Record<string, string>;
+  const { module = "", estate = "", search = "", all = "" } = req.query as Record<string, string>;
   const m = module as LoanModule;
+  // all=1: every barang with stock (Input Banyak lists them all), else the first 30 that match.
+  const limit = all === "1" ? 5000 : 30;
   if (!OPNAME_MODULES_LIST.includes(m)) return res.status(400).json({ error: "Modul tidak valid" });
   if (!(ESTATES as readonly string[]).includes(estate)) return res.status(400).json({ error: "Estate tidak valid" });
   if (!canLoan(req.user!, m, "input") || !estateAllowed(req.user!, estate)) return res.status(403).json({ error: "Akses ditolak" });
@@ -6137,13 +6139,13 @@ app.get("/api/pinjaman/barang", async (req, res) => {
       estate === "NILAM"
         ? await queryMany(
             `SELECT kode, nama, COALESCE(satuan, '') satuan, stock_tersedia::float8 stok FROM items
-             WHERE stock_tersedia > 0 AND (@search = '' OR kode ILIKE @like OR nama ILIKE @like) ORDER BY nama LIMIT 30`,
-            { search, like }
+             WHERE stock_tersedia > 0 AND (@search = '' OR kode ILIKE @like OR nama ILIKE @like) ORDER BY nama LIMIT @limit`,
+            { search, like, limit }
           )
         : await queryMany(
             `SELECT i.kode, i.nama, COALESCE(i.satuan, '') satuan, gs.stock_tersedia::float8 stok FROM gudang_stock gs JOIN items i ON i.kode = gs.item_kode
-             WHERE gs.gudang = @estate AND gs.stock_tersedia > 0 AND (@search = '' OR i.kode ILIKE @like OR i.nama ILIKE @like) ORDER BY i.nama LIMIT 30`,
-            { estate, search, like }
+             WHERE gs.gudang = @estate AND gs.stock_tersedia > 0 AND (@search = '' OR i.kode ILIKE @like OR i.nama ILIKE @like) ORDER BY i.nama LIMIT @limit`,
+            { estate, search, like, limit }
           );
     return res.json(data);
   }
@@ -6151,8 +6153,8 @@ app.get("/api/pinjaman/barang", async (req, res) => {
     return res.json(
       await queryMany(
         `SELECT o.kode, o.nama, COALESCE(o.satuan, '') satuan, ks.stock_tersedia::float8 stok FROM klinik_stock ks JOIN obat o ON o.kode = ks.obat_kode
-         WHERE ks.klinik = @estate AND ks.stock_tersedia > 0 AND (@search = '' OR o.kode ILIKE @like OR o.nama ILIKE @like) ORDER BY o.nama LIMIT 30`,
-        { estate, search, like }
+         WHERE ks.klinik = @estate AND ks.stock_tersedia > 0 AND (@search = '' OR o.kode ILIKE @like OR o.nama ILIKE @like) ORDER BY o.nama LIMIT @limit`,
+        { estate, search, like, limit }
       )
     );
   }
@@ -6211,6 +6213,47 @@ app.post("/api/pinjaman", async (req, res) => {
       : `${dari} meminjamkan ${fmtLoanQty(loan.qty, loan.satuan)} ke ${ke}; Alasan: ${alasan}`
   );
   res.json({ success: true, id: loan.id });
+});
+
+// Input Banyak Pinjaman: many barang lent by one estate to another at once, one foto bukti. Each row
+// is its own Pinjaman (returned on its own later), all saved or none - a row the stock can't cover
+// is refused with its number.
+app.post("/api/pinjaman/batch", async (req, res) => {
+  const { module, dari, ke } = req.body ?? {};
+  const u = req.user!;
+  const m = module as LoanModule;
+  if (!OPNAME_MODULES_LIST.includes(m)) return res.status(400).json({ error: "Modul tidak valid" });
+  if (!(ESTATES as readonly string[]).includes(dari) || !(ESTATES as readonly string[]).includes(ke)) return res.status(400).json({ error: "Estate tidak valid" });
+  if (dari === ke) return res.status(400).json({ error: "Estate peminjam harus beda dengan estate yang meminjamkan" });
+  if (!canLoan(u, m, "input") || !estateAllowed(u, dari)) return res.status(403).json({ error: "Pinjaman hanya bisa dicatat oleh estate yang meminjamkan" });
+  const rows = batchInput(req, res);
+  if (!rows) return;
+  const clean: { item: LoanItem; qty: number; alasan: string }[] = [];
+  for (const [i, r] of rows.entries()) {
+    const qty = Number(r?.qty);
+    const alasan = String(r?.alasan ?? "").trim();
+    const item = await loanItem(m, dari, String(r?.kode ?? ""));
+    if (!item) return refuseRow(res, i, "barang tidak ditemukan di master data");
+    if (!Number.isFinite(qty) || qty <= 0) return refuseRow(res, i, "jumlah harus lebih dari 0");
+    if (loanWhole(m, dari, ke) && !Number.isInteger(qty)) return refuseRow(res, i, "jumlah harus bilangan bulat");
+    if (!alasan) return refuseRow(res, i, "alasan wajib diisi");
+    clean.push({ item, qty, alasan });
+  }
+  const evidenceId = await claimEvidence(req, res);
+  if (evidenceId === undefined) return;
+
+  const loans: LoanRow[] = [];
+  const tanggal = jakartaToday();
+  const ok = await bookBatch(res, evidenceId, async (client, at) => {
+    for (const [i, r] of clean.entries()) {
+      at(i);
+      loans.push(await bookLoan(client, req, { module: m, dari, ke, item: r.item, qty: r.qty, alasan: r.alasan, tanggal, evidenceId, transfer: false }));
+    }
+  });
+  if (!ok) return;
+  for (const l of loans)
+    await logLoan(req, l, "Pinjaman Baru", `${dari} meminjamkan ${fmtLoanQty(l.qty, l.satuan)} ke ${ke}; Alasan: ${l.alasan}; Input Banyak (${loans.length} baris)`);
+  res.json({ success: true, count: loans.length });
 });
 
 // A return (may be partial) or a cancel: the borrower gives the qty back to the lender.
