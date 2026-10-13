@@ -3382,7 +3382,8 @@ async function klinikOpnameDay(klinik: string, c?: PoolClient) {
   );
 }
 const AUTO_NOTE = "(Laporan Harian)";
-// Unlinked manual Stock Out rows of this patient + obat from the day before to 3 days after the visit,
+// Unlinked manual Stock Out rows of this patient + obat from the day before to 14 days after the visit
+// (an admin catching up enters them days later),
 // nearest the visit day first, linked to it: one row with exactly the terapi qty, else the nearest
 // rows until they make it (so a patient seen two days running keeps each day's row with its visit).
 // Their total qty (0 = none).
@@ -3390,7 +3391,7 @@ async function linkManualStockOut(c: PoolClient, k: KunjunganStokRef, kode: stri
   const rows = await queryMany<{ id: number; qty: number; penerima: string }>(
     `SELECT id, qty, COALESCE(penerima, '') penerima FROM klinik_stock_tx
      WHERE klinik = @klinik AND obat_kode = @kode AND type = 'OUT' AND is_correction = 0 AND pinjaman_id IS NULL AND kunjungan_id IS NULL
-       AND COALESCE(tujuan, '') <> 'DIBUANG' AND (created_at AT TIME ZONE 'Asia/Jakarta')::date BETWEEN @tgl::date - 1 AND @tgl::date + 3
+       AND COALESCE(tujuan, '') <> 'DIBUANG' AND (created_at AT TIME ZONE 'Asia/Jakarta')::date BETWEEN @tgl::date - 1 AND @tgl::date + 14
      ORDER BY abs((created_at AT TIME ZONE 'Asia/Jakarta')::date - @tgl::date), id`,
     { klinik: k.klinik, kode, tgl: k.tanggal_iso },
     c
