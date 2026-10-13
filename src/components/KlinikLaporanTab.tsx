@@ -93,6 +93,10 @@ export function KlinikLaporanTab({ klinik }: { klinik: string }) {
   const [sinkronBusy, setSinkronBusy] = useState(false);
   const [cocokkan, setCocokkan] = useState(false);
   const [sinkronError, setSinkronError] = useState("");
+  // An obat Sinkron Stok left because its qty is empty or the stock is too low.
+  const tidakTerpotong = (x: { how: string }) => x.how.startsWith("tidak terpotong");
+  const sinkronMoves = (r: { stok?: { how: string }[] }) => (r.stok ?? []).some((x) => !tidakTerpotong(x));
+  const sinkronLeft = (r: { stok?: { how: string }[]; error?: string }) => !!r.error || (r.stok ?? []).some(tidakTerpotong);
   const runSinkron = async (dryRun: boolean) => {
     setSinkronBusy(true);
     setSinkronError("");
@@ -380,7 +384,7 @@ export function KlinikLaporanTab({ klinik }: { klinik: string }) {
         </span>
       );
     return (
-      <span className="text-[10px] text-[var(--accent-amber)]" title={o.master ? "Belum tercatat di Stock Out klinik" : "Nama tidak dari daftar obat, stok tidak terpotong"}>
+      <span className="text-[10px] text-[var(--accent-amber)]" title={o.master ? "Belum tercatat di Stock Out klinik - stok obat ini di sistem tidak cukup. Catat Stock In / koreksi stoknya, lalu Sinkron Stok." : "Nama tidak dari daftar obat, stok tidak terpotong"}>
         {" "}
         {o.master ? "belum terpotong" : "bukan obat master"}
       </span>
@@ -694,20 +698,27 @@ export function KlinikLaporanTab({ klinik }: { klinik: string }) {
                   <>
                     <div className="font-medium">
                       {sinkron.dryRun ? "Pemeriksaan" : "Sinkron selesai"}: {sinkron.checked} kunjungan sejak stok opname {sinkron.opname ? tgl(sinkron.opname) : "-"} ·{" "}
-                      {sinkron.results.filter((r) => r.stok).length
-                        ? `${sinkron.results.filter((r) => r.stok).length} kunjungan ${sinkron.dryRun ? "akan disinkronkan" : "disinkronkan"}`
-                        : "semua sudah sinkron"}
-                      {sinkron.results.some((r) => r.error) && ` · ${sinkron.results.filter((r) => r.error).length} perlu diperbaiki`}
+                      {sinkron.results.filter(sinkronMoves).length
+                        ? `${sinkron.results.filter(sinkronMoves).length} kunjungan ${sinkron.dryRun ? "akan disinkronkan" : "disinkronkan"}`
+                        : "tidak ada yang perlu disinkronkan lagi"}
+                      {sinkron.results.some(sinkronLeft) && ` · ${sinkron.results.filter(sinkronLeft).length} kunjungan perlu diperbaiki (qty kosong / stok kurang, merah)`}
                     </div>
                     <ul className="max-h-48 overflow-y-auto space-y-0.5">
                       {sinkron.results.map((r) => (
                         <li key={r.id} className={r.error ? "text-[var(--accent-red)]" : "text-[var(--text-secondary)]"}>
-                          {tgl(r.tanggal_iso)} · {r.nama_pasien}: {r.error ?? r.stok!.map((x) => `${x.nama} ${x.qty} ${x.how}`).join(", ")}
+                          {tgl(r.tanggal_iso)} · {r.nama_pasien}:{" "}
+                          {r.error ??
+                            r.stok!.map((x, i) => (
+                              <span key={i} className={tidakTerpotong(x) ? "text-[var(--accent-red)]" : ""}>
+                                {i > 0 && ", "}
+                                {x.nama} {x.qty} {x.how}
+                              </span>
+                            ))}
                         </li>
                       ))}
                     </ul>
                     <div className="flex gap-2 pt-1">
-                      {sinkron.dryRun && sinkron.results.some((r) => r.stok) && (
+                      {sinkron.dryRun && sinkron.results.some(sinkronMoves) && (
                         <button onClick={() => runSinkron(false)} disabled={sinkronBusy} className="px-3 py-1 rounded-md bg-[var(--accent-blue)] text-white disabled:opacity-50">
                           {sinkronBusy ? "Menyimpan..." : "Jalankan sinkron"}
                         </button>

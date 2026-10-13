@@ -3406,45 +3406,60 @@ async function linkManualStockOut(c: PoolClient, k: KunjunganStokRef, kode: stri
 type StokSync = { kode: string; nama: string; qty: number; how: string };
 // adjustManual: a linked manual Stock Out whose qty differs from the terapi is rebooked to the terapi
 // (an edit of the visit); otherwise it stays as typed and is only reported.
-async function syncKunjunganStok(c: PoolClient, req: express.Request, k: KunjunganStokRef, obat: TerapiStok[], adjustManual = false): Promise<StokSync[]> {
+// partial (Sinkron Stok of saved visits): each obat on its own - one without qty or with too little
+// stock is reported ("tidak terpotong: ...") and the others are still cut. Without it (a visit being
+// saved) such an obat refuses the save.
+async function syncKunjunganStok(
+  c: PoolClient,
+  req: express.Request,
+  k: KunjunganStokRef,
+  obat: TerapiStok[],
+  opts: { adjustManual?: boolean; partial?: boolean } = {}
+): Promise<StokSync[]> {
   if (k.tanggal_iso <= (await klinikOpnameDay(k.klinik, c))) return [];
   const kodes = obat.map((o) => o.obat_kode).filter(Boolean);
   const master = new Map(
     (await queryMany<{ kode: string; nama: string; satuan: string }>("SELECT kode, nama, COALESCE(satuan, '') satuan FROM obat WHERE kode = ANY(@kodes::text[])", { kodes }, c)).map((o) => [o.kode, o])
   );
+  const done: StokSync[] = [];
   const want = new Map<string, number>();
+  const skip = new Set<string>();
   for (const o of obat) {
     const m = master.get(o.obat_kode);
     if (!m) continue;
-    if (o.qty === null) throw new StockError(`Qty ${o.nama_obat} wajib diisi - obat dari master memotong stok klinik`);
-    if (!Number.isInteger(o.qty)) throw new StockError(`Qty ${o.nama_obat} harus bilangan bulat (${m.satuan || "satuan master"})`);
-    want.set(m.kode, (want.get(m.kode) ?? 0) + o.qty);
+    const bad =
+      o.qty === null
+        ? `Qty ${o.nama_obat} wajib diisi - obat dari master memotong stok klinik`
+        : !Number.isInteger(o.qty)
+          ? `Qty ${o.nama_obat} harus bilangan bulat (${m.satuan || "satuan master"})`
+          : "";
+    if (bad && !opts.partial) throw new StockError(bad);
+    if (bad) {
+      skip.add(m.kode);
+      done.push({ kode: m.kode, nama: m.nama, qty: o.qty ?? 0, how: `tidak terpotong: ${o.qty === null ? "qty kosong" : "qty harus bilangan bulat"}` });
+      continue;
+    }
+    want.set(m.kode, (want.get(m.kode) ?? 0) + o.qty!);
   }
   const have = new Map<string, any[]>();
   for (const t of await queryMany<any>("SELECT * FROM klinik_stock_tx WHERE kunjungan_id = @id ORDER BY id", { id: k.id }, c))
     have.set(t.obat_kode, [...(have.get(t.obat_kode) ?? []), t]);
   const note = `Kunjungan ${k.tanggal_iso.split("-").reverse().join("/")}${k.diagnosis ? ` · ${k.diagnosis}` : ""} ${AUTO_NOTE}`;
-  const done: StokSync[] = [];
-  for (const kode of new Set([...want.keys(), ...have.keys()])) {
+
+  const syncOne = async (kode: string): Promise<StokSync | null> => {
     const qty = want.get(kode) ?? 0;
     const rows = have.get(kode) ?? [];
     const booked = rows.reduce((s, r) => s + (r.type === "OUT" ? r.qty : -r.qty), 0);
-    if (booked === qty) continue;
+    if (booked === qty) return null;
     const nama = master.get(kode)?.nama ?? kode;
     const manual = rows.some((r) => !String(r.note ?? "").endsWith(AUTO_NOTE));
-    if (manual && !adjustManual) {
-      if (qty > 0) done.push({ kode, nama, qty, how: `dihubungkan (Stock Out manual ${booked})` });
-      continue;
-    }
+    if (manual && !opts.adjustManual) return qty > 0 ? { kode, nama, qty, how: `dihubungkan (Stock Out manual ${booked})` } : null;
     for (const r of rows) {
       await klinikReverse(c, r);
       await execute("DELETE FROM klinik_stock_tx WHERE id = @id", { id: r.id }, c);
     }
-    const linked = qty > 0 && !rows.length && !adjustManual ? await linkManualStockOut(c, k, kode, qty) : 0;
-    if (linked) {
-      done.push({ kode, nama, qty, how: linked === qty ? "dihubungkan" : `dihubungkan (Stock Out manual ${linked})` });
-      continue;
-    }
+    const linked = qty > 0 && !rows.length && !opts.adjustManual ? await linkManualStockOut(c, k, kode, qty) : 0;
+    if (linked) return { kode, nama, qty, how: linked === qty ? "dihubungkan" : `dihubungkan (Stock Out manual ${linked})` };
     if (qty > 0) {
       let alloc: Alloc[];
       try {
@@ -3461,7 +3476,27 @@ async function syncKunjunganStok(c: PoolClient, req: express.Request, k: Kunjung
       );
     }
     await syncKlinikStock(c, k.klinik, kode);
-    done.push({ kode, nama, qty, how: qty === 0 ? "dikembalikan" : rows.length ? "diubah" : "dipotong" });
+    return { kode, nama, qty, how: qty === 0 ? "dikembalikan" : rows.length ? "diubah" : "dipotong" };
+  };
+
+  for (const kode of new Set([...want.keys(), ...have.keys()])) {
+    if (skip.has(kode)) continue;
+    if (!opts.partial) {
+      const r = await syncOne(kode);
+      if (r) done.push(r);
+      continue;
+    }
+    // One obat that can't be cut is undone on its own; the visit's other obat stay.
+    await c.query("SAVEPOINT obat_stok");
+    try {
+      const r = await syncOne(kode);
+      if (r) done.push(r);
+      await c.query("RELEASE SAVEPOINT obat_stok");
+    } catch (e) {
+      if (!(e instanceof StockError)) throw e;
+      await c.query("ROLLBACK TO SAVEPOINT obat_stok");
+      done.push({ kode, nama: master.get(kode)?.nama ?? kode, qty: want.get(kode) ?? 0, how: `tidak terpotong: ${e.message}` });
+    }
   }
   return done;
 }
@@ -3484,7 +3519,10 @@ const atVisitDay = <T>(tanggal: string, fn: () => Promise<T>): Promise<T> => {
   const time = new Date().toLocaleTimeString("en-GB", { timeZone: "Asia/Jakarta", hour12: false });
   return txTime.run(`${tanggal}T${time}+07:00`, fn);
 };
-const stokSyncText = (d: StokSync[]) => (d.length ? `Stok: ${d.map((x) => `${x.nama} ${x.qty} ${x.how}`).join(", ")}` : "");
+const stokSyncText = (d: StokSync[]) => {
+  const moved = d.filter((x) => !x.how.startsWith("tidak terpotong"));
+  return moved.length ? `Stok: ${moved.map((x) => `${x.nama} ${x.qty} ${x.how}`).join(", ")}` : "";
+};
 
 const kunjunganObjek = (d: Record<string, any>) => `${d.nama_pasien} · ${d.tanggal_iso.split("-").reverse().join("/")}`;
 const kunjunganDetail = (d: Record<string, any>, obat: { nama_obat: string; qty: number | null; satuan: string }[]) =>
@@ -3699,7 +3737,7 @@ app.put("/api/klinik-laporan/kunjungan/:id", async (req, res) => {
     await saveKunjunganObat(c, existing.id, p.obat!);
     // Moved to before the last opname: its Stock Out (if any) goes back first, like a delete.
     if (p.data!.tanggal_iso <= (await klinikOpnameDay(existing.klinik, c))) await dropKunjunganStok(c, existing);
-    stok = await syncKunjunganStok(c, req, { id: existing.id, klinik: existing.klinik, ...(p.data as any) }, p.obat!, true);
+    stok = await syncKunjunganStok(c, req, { id: existing.id, klinik: existing.klinik, ...(p.data as any) }, p.obat!, { adjustManual: true });
   }));
   } catch (e) {
     if (e instanceof StockError) return res.status(400).json({ error: e.message });
@@ -3798,7 +3836,7 @@ app.post("/api/klinik-laporan/sinkron-stok", async (req, res) => {
     try {
       await atVisitDay(v.tanggal_iso, () =>
         withTransaction(async (c) => {
-          stok = await syncKunjunganStok(c, req, v, obat);
+          stok = await syncKunjunganStok(c, req, v, obat, { partial: true });
           if (dryRun) throw new DryRun();
         })
       );
@@ -3811,13 +3849,13 @@ app.post("/api/klinik-laporan/sinkron-stok", async (req, res) => {
     }
     if (stok.length) out.push({ id: v.id, tanggal_iso: v.tanggal_iso, nama_pasien: v.nama_pasien, stok });
   }
-  if (!dryRun && out.some((r) => r.stok?.length))
+  if (!dryRun && out.some((r) => stokSyncText(r.stok ?? [])))
     await logActivity(req, {
       module: "KLINIK",
       estate: klinik,
       aksi: "Sinkron Stok Laporan Harian",
-      objek: `${out.filter((r) => r.stok?.length).length} kunjungan sejak ${opname || "awal"}`,
-      detail: out.filter((r) => r.stok?.length).map((r) => `${r.nama_pasien} ${r.tanggal_iso}: ${stokSyncText(r.stok!)}`).join(" | ").slice(0, 2000),
+      objek: `${out.filter((r) => stokSyncText(r.stok ?? [])).length} kunjungan sejak ${opname || "awal"}`,
+      detail: out.filter((r) => stokSyncText(r.stok ?? [])).map((r) => `${r.nama_pasien} ${r.tanggal_iso}: ${stokSyncText(r.stok!)}`).join(" | ").slice(0, 2000),
     });
   res.json({ dryRun, opname, checked: visits.length, results: out });
 });
