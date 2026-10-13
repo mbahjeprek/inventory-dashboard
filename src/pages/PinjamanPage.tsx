@@ -23,8 +23,8 @@ const STATUS: Record<PinjamanStatus, { label: string; cls: string }> = {
   TRANSFER: { label: "Transfer", cls: "bg-[var(--accent-blue-bg)] border-[var(--accent-blue-border)] text-[var(--accent-blue)]" },
 };
 
-// Nilam's gudang, Klinik and BBM are counted in whole units (as on the server).
-const whole = (m: OpnameModule, a: string, b: string) => m === "KLINIK" || m === "BBM" || (m === "GUDANG" && (a === "NILAM" || b === "NILAM"));
+// Nilam's gudang and Klinik are counted in whole units; BBM, pupuk, oli and the other gudang take decimals (as loanWhole on the server).
+const whole = (m: OpnameModule, a: string, b: string) => m === "KLINIK" || (m === "GUDANG" && (a === "NILAM" || b === "NILAM"));
 const inputPerm = (m: OpnameModule) => `${m.toLowerCase()}.input`;
 
 // Pinjaman antar estate: one estate lends another stock of one item; the stock moves at once and

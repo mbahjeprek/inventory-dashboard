@@ -4,8 +4,8 @@ import { OPNAME_MODULE_LABEL } from "../lib/opname";
 import { BatchGrid, HeaderField, fmtNum, headerInputCls, isBlankIn, localToday, parseNum, runningStock, type Cells, type GridCol } from "./BatchGrid";
 
 const ESTATES = ["NILAM", "KNS", "WJA", "ZAMRUD", "FIRUS"];
-// Nilam's gudang, Klinik and BBM are counted in whole units (as in the Catat Pinjaman form).
-const whole = (m: OpnameModule, a: string, b: string) => m === "KLINIK" || m === "BBM" || (m === "GUDANG" && (a === "NILAM" || b === "NILAM"));
+// Nilam's gudang and Klinik are counted in whole units; BBM, pupuk, oli and the other gudang take decimals (as loanWhole on the server).
+const whole = (m: OpnameModule, a: string, b: string) => m === "KLINIK" || (m === "GUDANG" && (a === "NILAM" || b === "NILAM"));
 
 // Input Banyak Pinjaman: many barang lent by one estate to another in one go, one foto bukti. Every
 // row becomes its own Pinjaman - the lender's Stok Keluar and the borrower's Stok Masuk - and is
