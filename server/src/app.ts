@@ -3455,6 +3455,16 @@ async function syncKunjunganStok(
   for (const t of await queryMany<any>("SELECT * FROM klinik_stock_tx WHERE kunjungan_id = @id ORDER BY id", { id: k.id }, c))
     have.set(t.obat_kode, [...(have.get(t.obat_kode) ?? []), t]);
   const note = `Kunjungan ${k.tanggal_iso.split("-").reverse().join("/")}${k.diagnosis ? ` · ${k.diagnosis}` : ""} ${AUTO_NOTE}`;
+  // The visit's own Stock Out rows follow its date and diagnosis (an edit may move the visit to another
+  // day while its obat stay the same); the time of day is kept. Linked manual rows keep theirs.
+  await execute(
+    `UPDATE klinik_stock_tx SET note = @note,
+       created_at = ((@tgl::date + (created_at AT TIME ZONE 'Asia/Jakarta')::time) AT TIME ZONE 'Asia/Jakarta')
+     WHERE kunjungan_id = @id AND note LIKE @auto
+       AND (note <> @note OR (created_at AT TIME ZONE 'Asia/Jakarta')::date <> @tgl::date)`,
+    { note, tgl: k.tanggal_iso, id: k.id, auto: `%${AUTO_NOTE}` },
+    c
+  );
 
   const syncOne = async (kode: string): Promise<StokSync | null> => {
     const qty = want.get(kode) ?? 0;
@@ -3468,7 +3478,9 @@ async function syncKunjunganStok(
       await klinikReverse(c, r);
       await execute("DELETE FROM klinik_stock_tx WHERE id = @id", { id: r.id }, c);
     }
-    const linked = qty > 0 && !rows.length && !opts.adjustManual ? await linkManualStockOut(c, k, kode, qty) : 0;
+    // Nothing booked for this obat yet (a new visit, or an edit that fills in its qty): a manual Stock
+    // Out the admin already entered is linked rather than cut a second time.
+    const linked = qty > 0 && !rows.length ? await linkManualStockOut(c, k, kode, qty) : 0;
     if (linked) return { kode, nama, qty, how: linked === qty ? "dihubungkan" : `dihubungkan (Stock Out manual ${linked})` };
     if (qty > 0) {
       let alloc: Alloc[];
