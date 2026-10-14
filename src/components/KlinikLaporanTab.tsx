@@ -784,7 +784,7 @@ export function KlinikLaporanTab({ klinik }: { klinik: string }) {
               ))
             )}
           </div>
-          <div ref={tableScrollRef} className="hidden md:block overflow-x-auto">
+          <div ref={tableScrollRef} className="hidden md:block table-scroll">
             <table className="grid-table data-table text-sm">
               <thead>
                 <tr className="bg-[#f8fafc] text-[var(--text-secondary)] text-xs uppercase">

@@ -243,7 +243,7 @@ export function MasterPasienPage() {
       {error && <p className="text-sm text-[var(--accent-red)]">{error}</p>}
 
       <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg overflow-hidden">
-        <div className="overflow-x-auto">
+        <div className="table-scroll">
           <table className="grid-table data-table text-sm">
             <thead>
               <tr className="bg-[#f8fafc] text-[var(--text-secondary)] text-xs uppercase">

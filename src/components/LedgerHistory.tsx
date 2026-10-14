@@ -174,7 +174,7 @@ export function LedgerHistory({ scope, type, refreshKey }: { scope: StockScope; 
       </div>
 
       <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg overflow-hidden">
-        <div ref={tableScrollRef} className="overflow-x-auto">
+        <div ref={tableScrollRef} className="table-scroll">
           <table className="grid-table data-table text-sm">
             <thead>
               <tr className="text-left text-xs uppercase">

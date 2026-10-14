@@ -218,7 +218,7 @@ export function MasterObatPage() {
       {deleteError && <p className="text-xs text-[var(--accent-red)]">{deleteError}</p>}
 
       <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg overflow-hidden">
-        <div ref={tableScrollRef} className="overflow-x-auto">
+        <div ref={tableScrollRef} className="table-scroll">
           <table className="grid-table data-table text-sm">
             <thead>
               <tr className="bg-[#f8fafc] text-[var(--text-secondary)] text-xs uppercase">

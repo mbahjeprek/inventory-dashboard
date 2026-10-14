@@ -224,7 +224,7 @@ export function ActivityLogPage({
       <div className="text-sm text-[var(--text-secondary)]">{total.toLocaleString("id-ID")} aktivitas</div>
 
       <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg overflow-hidden">
-        <div className="overflow-x-auto">
+        <div className="table-scroll">
           <table className="grid-table data-table text-sm">
             <thead>
               <tr className="text-left text-xs uppercase">

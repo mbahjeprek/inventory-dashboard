@@ -120,11 +120,25 @@ body {
   outline: none;
 }
 
-/* A grid table whose header row stays in view while its (height-capped) container scrolls down.
-   border-collapse drops a sticky cell's borders, so the bottom line is drawn as a shadow. */
-.sticky-head thead th {
+/* A list table's scroll box: capped at 70% of the screen so its header row stays in view while the
+   rows scroll under it. border-collapse drops a sticky cell's borders, so the bottom line is a shadow.
+   :where() keeps these weak, so a table's own header colours (grid-table green, a tr bg class) win. */
+.table-scroll {
+  max-height: 70vh;
+  overflow: auto;
+}
+.table-scroll thead th {
   position: sticky;
   top: 0;
   z-index: 2;
+  box-shadow: inset 0 -1px 0 var(--border);
+}
+.table-scroll.table-scroll .grid-table thead th {
   box-shadow: inset 0 -1px 0 #b3d698;
+}
+:where(.table-scroll thead tr) {
+  background-color: var(--bg-card);
+}
+:where(.table-scroll thead th) {
+  background-color: inherit;
 }

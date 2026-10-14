@@ -123,7 +123,7 @@ export function PinjamanPage() {
         <span className="text-xs text-[var(--text-muted)] ml-auto">{total.toLocaleString("id-ID")} catatan</span>
       </div>
 
-      <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg overflow-x-auto">
+      <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg table-scroll">
         <table className="data-table text-sm">
           <thead>
             <tr className="bg-[#d5edc9] text-left text-xs text-[var(--text-primary)]">

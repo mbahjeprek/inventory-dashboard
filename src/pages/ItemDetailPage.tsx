@@ -184,7 +184,7 @@ export function ItemDetailPage() {
         </div>
 
         <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg overflow-hidden">
-          <div ref={tableScrollRef} className="overflow-x-auto max-h-[520px] overflow-y-auto">
+          <div ref={tableScrollRef} className="table-scroll">
             <table className="data-table text-sm">
               <thead className="sticky top-0">
                 <tr className="bg-[#f8fafc] text-left text-[var(--text-secondary)] text-xs uppercase">

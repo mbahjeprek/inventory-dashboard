@@ -153,7 +153,7 @@ export function UsersPage() {
       {deleteError && <p className="text-xs text-[var(--accent-red)]">{deleteError}</p>}
 
       <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg overflow-hidden">
-        <div className="overflow-x-auto">
+        <div className="table-scroll">
           <table className="data-table text-sm">
             <thead>
               <tr className="bg-[#f8fafc] text-[var(--text-secondary)] text-xs uppercase">
