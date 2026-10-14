@@ -13,7 +13,7 @@ const localIso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).pad
 
 type Data = Awaited<ReturnType<typeof api.konsumsiObat>>;
 type Detail = Awaited<ReturnType<typeof api.konsumsiObatDetail>>["data"];
-type ObatRow = { kode: string; nama: string; satuan: string; per: Map<string, number>; total: number; pasien: number; avg: number; stok: number | null };
+type ObatRow = { kode: string; nama: string; satuan: string; bhp: boolean; per: Map<string, number>; total: number; pasien: number; avg: number; stok: number | null };
 
 // Every month from `from` to `to` (to capped at today), as YYYY-MM.
 function monthsBetween(from: string, to: string) {
@@ -99,7 +99,7 @@ export function KonsumsiObatPanel({ klinik, dateFrom, dateTo, periodText }: { kl
     const stok = new Map(data.stok.map((s) => [s.kode, Number(s.stok)]));
     const by = new Map<string, ObatRow>();
     for (const r of data.rows) {
-      const o = by.get(r.kode) ?? { kode: r.kode, nama: r.nama, satuan: r.satuan, per: new Map(), total: 0, pasien: 0, avg: 0, stok: stok.get(r.kode) ?? null };
+      const o = by.get(r.kode) ?? { kode: r.kode, nama: r.nama, satuan: r.satuan, bhp: r.bhp, per: new Map(), total: 0, pasien: 0, avg: 0, stok: stok.get(r.kode) ?? null };
       o.per.set(r.bulan, (o.per.get(r.bulan) ?? 0) + Number(r.qty));
       o.total += Number(r.qty);
       o.pasien += r.pasien;
@@ -110,7 +110,8 @@ export function KonsumsiObatPanel({ klinik, dateFrom, dateTo, periodText }: { kl
   }, [data, months]);
   // The search box is hidden while one obat is picked, so it doesn't narrow the table then.
   const shown = !obat && search.trim() ? list.filter((o) => `${o.nama} ${o.kode}`.toLowerCase().includes(search.trim().toLowerCase())) : list;
-  const cukup = (o: ObatRow) => (o.stok === null ? null : o.avg > 0 ? o.stok / o.avg : null);
+  // A bahan habis pakai's terapi carry no qty (its stock goes per roll when opened), so no rate.
+  const cukup = (o: ObatRow) => (o.bhp || o.stok === null ? null : o.avg > 0 ? o.stok / o.avg : null);
 
   const one = obat ? list.find((o) => o.kode === obat.kode) : null;
   const chart = one ? months.map((m) => ({ bulan: bulanLabel(m), qty: one.per.get(m) ?? 0 })) : [];
@@ -275,6 +276,7 @@ export function KonsumsiObatPanel({ klinik, dateFrom, dateTo, periodText }: { kl
                           <div className="font-medium text-[var(--text-primary)]">{o.nama}</div>
                           <div className="text-[11px] text-[var(--text-muted)]">
                             {o.kode} · {o.satuan}
+                            {o.bhp && <span title="Bahan habis pakai: stok dipotong per kemasan saat dibuka; qty di terapi boleh kosong"> · BHP</span>}
                           </div>
                         </td>
                         {months.map((m) => (
@@ -363,7 +365,7 @@ function DetailList({
 }) {
   const when = bulan ? bulanLabelPanjang(bulan) : `periode ${periodText}`;
   const total = (rows ?? []).reduce((s, r) => s + (r.qty ?? 0), 0);
-  const stok = (r: Detail[number]) => (r.sebelum_opname ? "sebelum opname" : r.terpotong ? "terpotong" : r.qty === null ? "qty kosong" : "belum terpotong");
+  const stok = (r: Detail[number]) => (r.bhp ? "BHP (per kemasan)" : r.sebelum_opname ? "sebelum opname" : r.terpotong ? "terpotong" : r.qty === null ? "qty kosong" : "belum terpotong");
   const report = async (): Promise<TableReport> => ({
     title: `${obat.nama} - Klinik ${klinik}`,
     subtitle: [`Pasien yang menerima ${obat.nama} · ${when}`, `${fmt(total)} ${obat.satuan} · ${fmt((rows ?? []).length)} pemberian`],
@@ -454,7 +456,9 @@ function DetailList({
                     {r.qty === null ? "-" : fmt(r.qty)} <span className="text-[11px] text-[var(--text-muted)]">{obat.satuan}</span>
                   </td>
                   <td className="px-3 py-2 text-xs">
-                    {r.sebelum_opname ? (
+                    {r.bhp ? (
+                      <span className="text-[var(--text-muted)]" title="Bahan habis pakai: stok dipotong per kemasan saat dibuka">BHP</span>
+                    ) : r.sebelum_opname ? (
                       <span className="text-[var(--text-muted)]">sebelum opname</span>
                     ) : r.terpotong ? (
                       <span className="text-[var(--accent-green)]">✓ terpotong</span>

@@ -113,6 +113,8 @@ export type Obat = {
   // Pack it comes in (STRIP) and how many `satuan` one holds (0 = none), see src/lib/kemasan.ts.
   kemasan: string;
   isi_kemasan: number;
+  // Bahan habis pakai (Hypafix, kasa gulung): stock is cut per roll / pack when opened, a terapi of it never cuts stock.
+  bhp: boolean;
 };
 
 export type KlinikStockItem = {
@@ -490,6 +492,7 @@ export type KunjunganObat = {
   satuan: string;
   // List only: obat_kode is a master obat, and how much of it this visit took from the clinic's stock.
   master?: boolean;
+  bhp?: boolean;
   terpotong?: number | null;
 };
 export type KunjunganInput = {
@@ -555,7 +558,7 @@ export type KunjunganOptions = {
   diagnosis: string[];
   provider: string[];
   satuan: string[];
-  obat: { kode: string; nama: string; satuan: string; stok: number | null }[];
+  obat: { kode: string; nama: string; satuan: string; bhp: boolean; stok: number | null }[];
 };
 
 export type TopKeluar = { rows: TopKeluarRow[]; totalQty: number; totalTrx: number };
@@ -731,7 +734,7 @@ export const api = {
   // Konsumsi Obat: qty / patients per master obat per month from the Laporan Harian terapi, and stock now.
   konsumsiObat: (params: { klinik: string; dateFrom: string; dateTo: string; obat?: string }) =>
     req<{
-      rows: { kode: string; nama: string; satuan: string; bulan: string; qty: number; pasien: number }[];
+      rows: { kode: string; nama: string; satuan: string; bhp: boolean; bulan: string; qty: number; pasien: number }[];
       totals: { pasien: number; tanpa_master: number; tanpa_qty: number };
       stok: { kode: string; stok: number }[];
       bulanData: string[];
@@ -754,6 +757,7 @@ export const api = {
         nama_obat: string;
         qty: number | null;
         satuan: string;
+        bhp: boolean;
         sebelum_opname: boolean;
         terpotong: number | null;
       }[];

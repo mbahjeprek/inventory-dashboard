@@ -125,9 +125,10 @@ export function KunjunganModal({ klinik, kunjungan, onClose, onSaved }: { klinik
       f.istirahat && !(f.hari_istirahat > 0) && "Jumlah Hari Istirahat",
     ].filter(Boolean);
     if (missing.length) return setError(`Wajib diisi: ${missing.join(", ")}`);
-    // A master obat is cut from the clinic's stock (Stock Out), so it needs a whole qty.
+    // A master obat is cut from the clinic's stock (Stock Out), so it needs a whole qty - except a
+    // bahan habis pakai (cut per roll when opened), which is only a record here.
     for (const o of f.obat) {
-      if (!o.obat_kode || !o.nama_obat.trim()) continue;
+      if (!o.obat_kode || !o.nama_obat.trim() || masterOf(o)?.bhp) continue;
       if (o.qty === null) return setError(`Qty ${o.nama_obat} wajib diisi (memotong stok klinik)`);
       if (!Number.isInteger(o.qty)) return setError(`Qty ${o.nama_obat} harus bilangan bulat`);
     }
@@ -330,13 +331,15 @@ export function KunjunganModal({ klinik, kunjungan, onClose, onSaved }: { klinik
               {f.obat.map((o, i) => {
                 const m = masterOf(o);
                 const available = m ? (m.stok ?? 0) + (booked.get(m.kode) ?? 0) : 0;
-                const short = !!m && o.qty !== null && wantOf(m.kode) > available;
+                const short = !!m && !m.bhp && o.qty !== null && wantOf(m.kode) > available;
                 return (
                   <div key={i} className="grid grid-cols-[2rem_1fr_2rem] sm:grid-cols-[2rem_1fr_6rem_8rem_2rem] gap-2 items-start">
                     <span className="text-xs text-[var(--text-muted)] pt-2.5">{i + 1}</span>
                     <div className="min-w-0">
                       <input value={o.nama_obat} onChange={(e) => pickObat(i, e.target.value)} list="kj-obat" placeholder={`Terapi ${i + 1}`} aria-label={`Terapi ${i + 1}`} className={inputCls} />
-                      {m ? (
+                      {m?.bhp ? (
+                        <span className="text-[11px] text-[var(--text-muted)]">bahan habis pakai - stok dipotong per {(m.satuan || "kemasan").toLowerCase()} saat dibuka, qty boleh kosong</span>
+                      ) : m ? (
                         <span className={`text-[11px] ${short ? "text-[var(--accent-red)]" : "text-[var(--text-muted)]"}`}>
                           stok klinik {available.toLocaleString("id-ID")} {m.satuan} · {short ? "stok tidak cukup" : "otomatis jadi Stock Out"}
                         </span>

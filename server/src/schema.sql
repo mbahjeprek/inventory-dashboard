@@ -521,6 +521,9 @@ ALTER TABLE bbm_log
 -- Stock is still kept in `satuan`; the forms convert (Stock In per strip, opname strip + biji lepas).
 ALTER TABLE obat ADD COLUMN IF NOT EXISTS kemasan TEXT NOT NULL DEFAULT '';
 ALTER TABLE obat ADD COLUMN IF NOT EXISTS isi_kemasan INTEGER NOT NULL DEFAULT 0;
+-- Bahan habis pakai dipakai sebagian per pasien (Hypafix, kasa gulung, perban): stock is cut one
+-- roll / pack when it is opened (a manual Stock Out), so a terapi of it never moves stock and needs no qty.
+ALTER TABLE obat ADD COLUMN IF NOT EXISTS bhp BOOLEAN NOT NULL DEFAULT false;
 
 -- Laporan Harian Klinik (KPI): one row per patient visit, read from each clinic's Daily Report
 -- Google Sheet (server/src/klinikLaporan.ts). Report only - the obat given here do not move stock

@@ -30,6 +30,7 @@ export function EditObatModal({
     kemasan: obat?.kemasan ?? "",
     isi_kemasan: obat?.isi_kemasan ? String(obat.isi_kemasan) : "",
   });
+  const [bhp, setBhp] = useState(!!obat?.bhp);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   // Jenis/Kelompok: a dropdown of the jenis already used in the chosen kategori (all when none is
@@ -55,7 +56,7 @@ export function EditObatModal({
         setSubmitting(false);
         return;
       }
-      const payload = { ...form, satuan: form.satuan.trim().toUpperCase(), kemasan: form.kemasan.trim().toUpperCase(), isi_kemasan: isi };
+      const payload = { ...form, satuan: form.satuan.trim().toUpperCase(), kemasan: form.kemasan.trim().toUpperCase(), isi_kemasan: isi, bhp };
       if (isEdit) await api.updateObat(obat.id, payload);
       else await api.createObat(payload);
       onSuccess();
@@ -170,6 +171,17 @@ export function EditObatModal({
                 : "Kosongkan kalau obat tidak dikemas (stok per satuan saja)."}
             </p>
           </div>
+
+          <label className="flex items-start gap-2 rounded-md border border-[var(--border)] p-2.5 cursor-pointer">
+            <input type="checkbox" checked={bhp} onChange={(e) => setBhp(e.target.checked)} className="mt-0.5" />
+            <span className="text-sm text-[var(--text-primary)]">
+              Bahan habis pakai (dipotong per {(form.satuan || "roll / kemasan").toLowerCase()} saat dibuka)
+              <span className="block text-[11px] text-[var(--text-muted)]">
+                Untuk barang yang dipakai sedikit-sedikit per pasien, cth. Hypafix, kasa gulung, perban. Stok dipotong lewat Stock Out saat {(form.satuan || "roll").toLowerCase()} baru dibuka;
+                di Laporan Harian boleh ditulis sebagai terapi tanpa qty dan tidak memotong stok.
+              </span>
+            </span>
+          </label>
 
           <div>
             <label className="text-xs text-[var(--text-secondary)] mb-1 block">Deskripsi / Kegunaan</label>

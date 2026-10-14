@@ -2894,6 +2894,8 @@ const OBAT_FIELDS = ["kode", "nama", "kategori", "jenis", "deskripsi", "satuan",
 const obatPayload = (body: any) => ({
   ...(Object.fromEntries(OBAT_FIELDS.map((f) => [f, String(body[f] ?? "").replace(/\s+/g, " ").trim()])) as Record<(typeof OBAT_FIELDS)[number], string>),
   isi_kemasan: Math.max(0, Math.floor(Number(body.isi_kemasan) || 0)),
+  // Bahan habis pakai: cut per roll / pack when opened, never from a terapi (see schema.sql obat.bhp).
+  bhp: body.bhp === true,
 });
 
 app.get("/api/obat/options", requireSuperuser, async (_req, res) => {
@@ -2931,11 +2933,11 @@ app.post("/api/obat", requireSuperuser, async (req, res) => {
   if (!o.kode || !o.nama) return res.status(400).json({ error: "Kode dan nama wajib diisi" });
   try {
     const row = await queryOne<{ id: number }>(
-      `INSERT INTO obat (kode, nama, kategori, jenis, deskripsi, satuan, kemasan, isi_kemasan)
-       VALUES (@kode, @nama, @kategori, @jenis, @deskripsi, @satuan, @kemasan, @isi_kemasan) RETURNING id`,
+      `INSERT INTO obat (kode, nama, kategori, jenis, deskripsi, satuan, kemasan, isi_kemasan, bhp)
+       VALUES (@kode, @nama, @kategori, @jenis, @deskripsi, @satuan, @kemasan, @isi_kemasan, @bhp) RETURNING id`,
       o
     );
-    await logActivity(req, { module: "KLINIK", estate: null, aksi: "Tambah Obat", objek: `${o.kode} - ${o.nama}`, detail: `Kategori: ${o.kategori || "-"}; Satuan: ${o.satuan || "-"}` });
+    await logActivity(req, { module: "KLINIK", estate: null, aksi: "Tambah Obat", objek: `${o.kode} - ${o.nama}`, detail: `Kategori: ${o.kategori || "-"}; Satuan: ${o.satuan || "-"}${o.bhp ? "; Bahan habis pakai" : ""}` });
     res.json({ success: true, id: row!.id });
   } catch (e: any) {
     if (e.code === "23505") return res.status(409).json({ error: "Kode sudah digunakan obat lain" });
@@ -2950,7 +2952,7 @@ app.put("/api/obat/:id", requireSuperuser, async (req, res) => {
   if (!o.kode || !o.nama) return res.status(400).json({ error: "Kode dan nama wajib diisi" });
   try {
     await execute(
-      "UPDATE obat SET kode = @kode, nama = @nama, kategori = @kategori, jenis = @jenis, deskripsi = @deskripsi, satuan = @satuan, kemasan = @kemasan, isi_kemasan = @isi_kemasan WHERE id = @id",
+      "UPDATE obat SET kode = @kode, nama = @nama, kategori = @kategori, jenis = @jenis, deskripsi = @deskripsi, satuan = @satuan, kemasan = @kemasan, isi_kemasan = @isi_kemasan, bhp = @bhp WHERE id = @id",
       { ...o, id: req.params.id }
     );
   } catch (e: any) {
@@ -2962,7 +2964,7 @@ app.put("/api/obat/:id", requireSuperuser, async (req, res) => {
     estate: null,
     aksi: "Edit Obat",
     objek: `${o.kode} - ${o.nama}`,
-    detail: describeChanges(existing, o, { kode: "Kode", nama: "Nama", kategori: "Kategori", jenis: "Jenis", deskripsi: "Deskripsi", satuan: "Satuan", kemasan: "Kemasan", isi_kemasan: "Isi per kemasan" }),
+    detail: describeChanges(existing, o, { kode: "Kode", nama: "Nama", kategori: "Kategori", jenis: "Jenis", deskripsi: "Deskripsi", satuan: "Satuan", kemasan: "Kemasan", isi_kemasan: "Isi per kemasan", bhp: "Bahan habis pakai" }),
   });
   res.json({ success: true });
 });
@@ -3254,7 +3256,7 @@ app.get("/api/klinik-laporan/kunjungan", async (req, res) => {
   const data = await queryMany(
     // No = the visit's number in its clinic and year, by date, as the sheet numbers its rows.
     `SELECT k.*, COALESCE((SELECT json_agg(json_build_object('obat_kode', o.obat_kode, 'nama_obat', o.nama_obat, 'qty', o.qty, 'satuan', o.satuan,
-                             'master', m.kode IS NOT NULL,
+                             'master', m.kode IS NOT NULL, 'bhp', COALESCE(m.bhp, false),
                              'terpotong', (SELECT SUM(CASE WHEN t.type = 'OUT' THEN t.qty ELSE -t.qty END) FROM klinik_stock_tx t WHERE t.kunjungan_id = k.id AND t.obat_kode = o.obat_kode)) ORDER BY o.urut, o.id)
                            FROM klinik_kunjungan_obat o LEFT JOIN obat m ON m.kode = o.obat_kode WHERE o.kunjungan_id = k.id), '[]') AS obat,
        k.tanggal_iso <= COALESCE((SELECT MAX(tanggal) FROM opname WHERE module = 'KLINIK' AND estate = k.klinik AND status = 'APPROVED'), '') AS sebelum_opname
@@ -3442,7 +3444,13 @@ async function syncKunjunganStok(
   if (k.tanggal_iso <= (await klinikOpnameDay(k.klinik, c))) return [];
   const kodes = obat.map((o) => o.obat_kode).filter(Boolean);
   const master = new Map(
-    (await queryMany<{ kode: string; nama: string; satuan: string }>("SELECT kode, nama, COALESCE(satuan, '') satuan FROM obat WHERE kode = ANY(@kodes::text[])", { kodes }, c)).map((o) => [o.kode, o])
+    (
+      await queryMany<{ kode: string; nama: string; satuan: string; bhp: boolean }>(
+        "SELECT kode, nama, COALESCE(satuan, '') satuan, bhp FROM obat WHERE kode = ANY(@kodes::text[])",
+        { kodes },
+        c
+      )
+    ).map((o) => [o.kode, o])
   );
   const done: StokSync[] = [];
   const want = new Map<string, number>();
@@ -3450,6 +3458,12 @@ async function syncKunjunganStok(
   for (const o of obat) {
     const m = master.get(o.obat_kode);
     if (!m) continue;
+    // Bahan habis pakai: its stock is cut when a roll / pack is opened, the terapi is only a record.
+    // Rows the visit booked before it was marked stay as they are.
+    if (m.bhp) {
+      skip.add(m.kode);
+      continue;
+    }
     const bad =
       o.qty === null
         ? `Qty ${o.nama_obat} wajib diisi - obat dari master memotong stok klinik`
@@ -3823,17 +3837,17 @@ app.get("/api/klinik-laporan/konsumsi-obat", async (req, res) => {
   const params = { kliniks, from, to, obat };
   const scope = `k.klinik = ANY(@kliniks) AND k.tanggal_iso BETWEEN @from AND @to`;
   const rows = await queryMany(
-    `SELECT o.obat_kode AS kode, m.nama, COALESCE(m.satuan, '') AS satuan, left(k.tanggal_iso, 7) AS bulan,
+    `SELECT o.obat_kode AS kode, m.nama, COALESCE(m.satuan, '') AS satuan, m.bhp, left(k.tanggal_iso, 7) AS bulan,
        COALESCE(SUM(o.qty), 0)::float8 AS qty, COUNT(DISTINCT k.id)::int AS pasien
      FROM klinik_kunjungan k JOIN klinik_kunjungan_obat o ON o.kunjungan_id = k.id JOIN obat m ON m.kode = o.obat_kode
      WHERE ${scope} ${obat ? "AND o.obat_kode = @obat" : ""}
-     GROUP BY 1, 2, 3, 4 ORDER BY 2, 4`,
+     GROUP BY 1, 2, 3, 4, 5 ORDER BY 2, 5`,
     params
   );
   const totals = await queryOne<{ pasien: number; tanpa_master: number; tanpa_qty: number }>(
     `SELECT COUNT(DISTINCT k.id) FILTER (WHERE m.kode IS NOT NULL ${obat ? "AND o.obat_kode = @obat" : ""})::int AS pasien,
        COUNT(*) FILTER (WHERE m.kode IS NULL AND trim(o.nama_obat) NOT IN ('', '-'))::int AS tanpa_master,
-       COUNT(*) FILTER (WHERE m.kode IS NOT NULL AND o.qty IS NULL ${obat ? "AND o.obat_kode = @obat" : ""})::int AS tanpa_qty
+       COUNT(*) FILTER (WHERE m.kode IS NOT NULL AND NOT m.bhp AND o.qty IS NULL ${obat ? "AND o.obat_kode = @obat" : ""})::int AS tanpa_qty
      FROM klinik_kunjungan k JOIN klinik_kunjungan_obat o ON o.kunjungan_id = k.id LEFT JOIN obat m ON m.kode = o.obat_kode
      WHERE ${scope}`,
     params
@@ -3861,7 +3875,7 @@ app.get("/api/klinik-laporan/konsumsi-obat/detail", async (req, res) => {
   if (!obat) return res.status(400).json({ error: "Pilih obat" });
   const data = await queryMany(
     `SELECT k.id, k.klinik, k.tanggal_iso, k.nama_pasien, k.jenis_kelamin, k.usia, k.status_pasien, k.jabatan, k.divisi, k.diagnosis,
-       k.jenis_kunjungan, o.nama_obat, o.qty::float8 AS qty, o.satuan,
+       k.jenis_kunjungan, o.nama_obat, o.qty::float8 AS qty, o.satuan, COALESCE((SELECT m.bhp FROM obat m WHERE m.kode = o.obat_kode), false) AS bhp,
        k.tanggal_iso <= COALESCE((SELECT MAX(tanggal) FROM opname WHERE module = 'KLINIK' AND estate = k.klinik AND status = 'APPROVED'), '') AS sebelum_opname,
        (SELECT SUM(CASE WHEN t.type = 'OUT' THEN t.qty ELSE -t.qty END) FROM klinik_stock_tx t WHERE t.kunjungan_id = k.id AND t.obat_kode = o.obat_kode)::float8 AS terpotong
      FROM klinik_kunjungan k JOIN klinik_kunjungan_obat o ON o.kunjungan_id = k.id
@@ -3978,8 +3992,8 @@ app.get("/api/klinik-laporan/options", async (req, res) => {
     queryMany<{ label: string; n: number }>("SELECT provider label, COUNT(*)::int n FROM klinik_kunjungan WHERE provider <> '' GROUP BY 1", {}),
     queryMany<{ v: string }>("SELECT upper(satuan) v FROM klinik_kunjungan_obat WHERE satuan <> '' GROUP BY 1 ORDER BY COUNT(*) DESC LIMIT 30", {}),
   ]);
-  const obat = await queryMany<{ kode: string; nama: string; satuan: string; stok: number | null }>(
-    `SELECT o.kode, o.nama, o.satuan, ks.stock_tersedia::float8 stok FROM obat o
+  const obat = await queryMany<{ kode: string; nama: string; satuan: string; bhp: boolean; stok: number | null }>(
+    `SELECT o.kode, o.nama, o.satuan, o.bhp, ks.stock_tersedia::float8 stok FROM obat o
      LEFT JOIN klinik_stock ks ON ks.obat_kode = o.kode AND ks.klinik = @klinik ORDER BY o.nama`,
     { klinik }
   );

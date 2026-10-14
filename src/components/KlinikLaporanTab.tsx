@@ -374,6 +374,13 @@ export function KlinikLaporanTab({ klinik }: { klinik: string }) {
   // Per terapi: cut from the clinic's stock (Stock Out), or why not.
   const obatStok = (k: Kunjungan, o: Kunjungan["obat"][number]) => {
     if (k.sebelum_opname || o.master === undefined) return null;
+    if (o.bhp)
+      return (
+        <span className="text-[10px] text-[var(--text-muted)]" title="Bahan habis pakai: stoknya dipotong per kemasan saat dibuka (Stock Out manual), bukan dari terapi pasien">
+          {" "}
+          BHP
+        </span>
+      );
     if (o.master && o.terpotong) return <span className="text-[10px] text-[var(--accent-green)]" title="Sudah tercatat di Stock Out klinik"> ✓ stok</span>;
     if (o.master && o.qty === null)
       return (

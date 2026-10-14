@@ -174,8 +174,9 @@ export function MasterObatPage() {
         { label: "Deskripsi / Kegunaan" },
         { label: "Satuan" },
         { label: "Kemasan" },
+        { label: "Bahan habis pakai" },
       ],
-      rows: all.map((o, n) => [n + 1, o.kode, o.nama, o.kategori, o.jenis, o.deskripsi, o.satuan, kemasanLabel(o)]),
+      rows: all.map((o, n) => [n + 1, o.kode, o.nama, o.kategori, o.jenis, o.deskripsi, o.satuan, kemasanLabel(o), o.bhp ? "Ya" : ""]),
     };
   };
 
@@ -265,7 +266,14 @@ export function MasterObatPage() {
                   <tr key={o.id} className="border-t border-[var(--border)] hover:bg-[#f8fafc]">
                     <td className="px-4 py-2.5 text-right text-[var(--text-muted)]">{(page - 1) * pageSize + idx + 1}</td>
                     <td className="px-4 py-2.5 font-mono text-xs whitespace-nowrap">{o.kode}</td>
-                    <td className="col-grow px-4 py-2.5">{o.nama}</td>
+                    <td className="col-grow px-4 py-2.5">
+                      {o.nama}
+                      {o.bhp && (
+                        <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded bg-[var(--accent-amber-bg)] text-[var(--accent-amber)] whitespace-nowrap" title="Bahan habis pakai: stok dipotong per kemasan saat dibuka, bukan dari terapi pasien">
+                          BHP
+                        </span>
+                      )}
+                    </td>
                     <td className="px-4 py-2.5 text-[var(--text-secondary)]">{o.kategori || "-"}</td>
                     <td className="px-4 py-2.5 text-[var(--text-secondary)]">{o.jenis || "-"}</td>
                     <td className="col-grow px-4 py-2.5 text-xs text-[var(--text-secondary)]">{o.deskripsi || "-"}</td>
