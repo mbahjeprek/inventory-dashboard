@@ -3,7 +3,6 @@ import { Bar, BarChart, CartesianGrid, Cell, LabelList, ResponsiveContainer, Too
 import { Search, X } from "lucide-react";
 import { api, errorText, type KunjunganOptions } from "../lib/api";
 import { ExportButtons } from "./ExportButtons";
-import { useDragScroll } from "../hooks/useDragScroll";
 import type { SectionReport, TableReport } from "../lib/printTable";
 
 const BULAN = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
@@ -41,7 +40,6 @@ export function KonsumsiObatPanel({ klinik, dateFrom, dateTo, periodText }: { kl
   const [master, setMaster] = useState<KunjunganOptions["obat"]>([]);
   const [obatText, setObatText] = useState("");
   const [search, setSearch] = useState("");
-  const scrollRef = useDragScroll<HTMLDivElement>();
   // The month whose patients are listed (YYYY-MM, "" = the whole period, null = none).
   const [bulan, setBulan] = useState<string | null>(null);
   const [detail, setDetail] = useState<Detail | null>(null);
@@ -240,7 +238,7 @@ export function KonsumsiObatPanel({ klinik, dateFrom, dateTo, periodText }: { kl
             />
           )}
 
-          <div ref={scrollRef} className="table-scroll">
+          <div className="table-scroll">
             <table className="grid-table data-table text-sm">
               <thead>
                 <tr className="bg-[#f8fafc] text-[var(--text-secondary)] text-xs uppercase">

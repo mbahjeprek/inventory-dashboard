@@ -1,84 +1,81 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect } from "react";
 
-// Lets a horizontally scrollable container be dragged sideways with the mouse, like grabbing the
-// table. Drags that start on a button/input/link are ignored so row actions keep working, and a
-// click right after a real drag is swallowed so letting go doesn't trigger whatever is under it.
-// Returns a callback ref, so it also attaches to a container that only renders after data loads.
-export function useDragScroll<T extends HTMLElement>() {
-  const ref = useRef<T | null>(null);
-  // Bumped when the container mounts/unmounts, so the effect re-attaches to the new element.
-  const [attached, setAttached] = useState(0);
-  const setRef = useCallback((node: T | null) => {
-    ref.current = node;
-    setAttached((n) => n + 1);
-  }, []);
-
+// Lets every list table's scroll box (.table-scroll, see index.css) be dragged with the mouse, up /
+// down as well as sideways, like grabbing the table. Mounted once in the layout and delegated from
+// the document, so a table that renders later (or in a dialog) works too. Drags that start on a
+// button/input/link are ignored so row actions keep working, and a click right after a real drag is
+// swallowed so letting go doesn't trigger whatever is under it.
+export function useTableDragScroll() {
   useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-
+    let el: HTMLElement | null = null;
     let startX = 0;
-    let startScroll = 0;
-    let pressed = false;
+    let startY = 0;
+    let startLeft = 0;
+    let startTop = 0;
     let dragged = false;
 
-    const updateCursor = () => {
-      el.style.cursor = el.scrollWidth > el.clientWidth ? "grab" : "";
+    const box = (t: EventTarget | null) => (t instanceof Element ? (t.closest(".table-scroll") as HTMLElement | null) : null);
+    const scrollable = (b: HTMLElement) => b.scrollWidth > b.clientWidth || b.scrollHeight > b.clientHeight;
+
+    // The grab cursor shows only on a box that can actually scroll.
+    const onOver = (e: MouseEvent) => {
+      const b = box(e.target);
+      if (b && !el) b.style.cursor = scrollable(b) ? "grab" : "";
     };
 
     const onDown = (e: MouseEvent) => {
-      if (e.button !== 0 || el.scrollWidth <= el.clientWidth) return;
+      const b = box(e.target);
+      if (!b || e.button !== 0 || !scrollable(b)) return;
       if ((e.target as HTMLElement).closest("button, a, input, select, textarea, label")) return;
-      pressed = true;
+      el = b;
       dragged = false;
-      startX = e.pageX;
-      startScroll = el.scrollLeft;
+      startX = e.clientX;
+      startY = e.clientY;
+      startLeft = b.scrollLeft;
+      startTop = b.scrollTop;
     };
 
     const onMove = (e: MouseEvent) => {
-      if (!pressed) return;
-      const dx = e.pageX - startX;
-      if (!dragged && Math.abs(dx) < 5) return;
+      if (!el) return;
+      const dx = e.clientX - startX;
+      const dy = e.clientY - startY;
+      if (!dragged && Math.abs(dx) < 5 && Math.abs(dy) < 5) return;
       if (!dragged) {
         dragged = true;
         el.style.cursor = "grabbing";
         el.style.userSelect = "none";
       }
       e.preventDefault();
-      el.scrollLeft = startScroll - dx;
+      el.scrollLeft = startLeft - dx;
+      el.scrollTop = startTop - dy;
     };
 
     const onUp = () => {
-      if (!pressed) return;
-      pressed = false;
+      if (!el) return;
       el.style.userSelect = "";
-      updateCursor();
+      el.style.cursor = scrollable(el) ? "grab" : "";
+      el = null;
     };
 
     const onClick = (e: MouseEvent) => {
       if (!dragged) return;
       dragged = false;
+      if (!box(e.target)) return;
       e.preventDefault();
       e.stopPropagation();
     };
 
-    updateCursor();
-    const observer = new ResizeObserver(updateCursor);
-    observer.observe(el);
-    if (el.firstElementChild) observer.observe(el.firstElementChild);
-
-    el.addEventListener("mousedown", onDown);
+    document.addEventListener("mouseover", onOver);
+    document.addEventListener("mousedown", onDown);
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
-    el.addEventListener("click", onClick, true);
+    document.addEventListener("click", onClick, true);
     return () => {
-      observer.disconnect();
-      el.removeEventListener("mousedown", onDown);
+      document.removeEventListener("mouseover", onOver);
+      document.removeEventListener("mousedown", onDown);
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
-      el.removeEventListener("click", onClick, true);
+      document.removeEventListener("click", onClick, true);
     };
-  }, [attached]);
-
-  return setRef;
+  }, []);
 }

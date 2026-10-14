@@ -28,7 +28,6 @@ import { ItemPickerModal } from "../components/ItemPickerModal";
 import { TransactionModal } from "../components/TransactionModal";
 import { useAuth } from "../context/AuthContext";
 import { can } from "../lib/access";
-import { useDragScroll } from "../hooks/useDragScroll";
 import { InventoryTabs, useInventoryTab } from "../components/InventoryTabs";
 import { LedgerHistory } from "../components/LedgerHistory";
 import { StockBatchModal } from "../components/StockBatchModal";
@@ -139,7 +138,6 @@ export function InventoryGudangStockPage({ gudang }: { gudang: string }) {
   const [editingItem, setEditingItem] = useState<GudangStockItem | null>(null);
   const [deleteError, setDeleteError] = useState("");
   const [confirmDelete, setConfirmDelete] = useState<GudangStockItem | null>(null);
-  const tableScrollRef = useDragScroll<HTMLDivElement>();
   const pageSize = 25;
 
   const load = () => {
@@ -314,7 +312,7 @@ export function InventoryGudangStockPage({ gudang }: { gudang: string }) {
           {deleteError && <p className="text-xs text-[var(--accent-red)]">{deleteError}</p>}
 
           <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg overflow-hidden">
-            <div ref={tableScrollRef} className="table-scroll">
+            <div className="table-scroll">
               <table className="grid-table data-table text-sm">
                 <thead>
                   <tr className="bg-[#f8fafc] text-[var(--text-secondary)] text-xs uppercase">

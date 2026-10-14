@@ -3,7 +3,6 @@ import { Bar, BarChart, CartesianGrid, Cell, LabelList, ResponsiveContainer, Too
 import { BarChart3, Search, X } from "lucide-react";
 import { api, errorText, type PakaiModule } from "../lib/api";
 import { ExportButtons } from "./ExportButtons";
-import { useDragScroll } from "../hooks/useDragScroll";
 import type { SectionReport, TableReport } from "../lib/printTable";
 
 const BULAN = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
@@ -102,7 +101,6 @@ export function PemakaianPanel({ module, estate, onClose }: { module: PakaiModul
   const [error, setError] = useState("");
   const [pickText, setPickText] = useState("");
   const [search, setSearch] = useState("");
-  const scrollRef = useDragScroll<HTMLDivElement>();
   // The month whose rows are listed (YYYY-MM, "" = the whole period, null = none).
   const [bulan, setBulan] = useState<string | null>(null);
   const [detail, setDetail] = useState<Detail | null>(null);
@@ -359,7 +357,7 @@ export function PemakaianPanel({ module, estate, onClose }: { module: PakaiModul
               />
             )}
 
-            <div ref={scrollRef} className="table-scroll">
+            <div className="table-scroll">
               <table className="grid-table data-table text-sm">
                 <thead>
                   <tr className="bg-[#f8fafc] text-[var(--text-secondary)] text-xs uppercase">

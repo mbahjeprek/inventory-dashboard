@@ -10,7 +10,6 @@ import { ConfirmDialog } from "../components/ConfirmDialog";
 import { PupukTransactionModal } from "../components/PupukTransactionModal";
 import { EditPupukModal } from "../components/EditPupukModal";
 import { fetchAllRows, type TableReport } from "../lib/printTable";
-import { useDragScroll } from "../hooks/useDragScroll";
 import { useAuth } from "../context/AuthContext";
 import { can } from "../lib/access";
 import { EvidenceLink } from "../components/EvidenceInput";
@@ -31,7 +30,6 @@ export function InventoryPupukPage({ estate }: { estate: string }) {
   const [options, setOptions] = useState<{ jenis: string[]; divisi: string[] }>({ jenis: [], divisi: [] });
   const [rows, setRows] = useState<PupukRecord[]>([]);
   const [total, setTotal] = useState(0);
-  const tableScrollRef = useDragScroll<HTMLDivElement>();
   const [keluarSum, setKeluarSum] = useState(0);
   const [diterimaSum, setDiterimaSum] = useState(0);
   const [search, setSearch] = useState("");
@@ -307,7 +305,7 @@ export function InventoryPupukPage({ estate }: { estate: string }) {
       </div>
 
       <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg overflow-hidden">
-        <div ref={tableScrollRef} className="table-scroll">
+        <div className="table-scroll">
           <table className="grid-table data-table text-sm">
             <thead>
               <tr className="text-left text-xs uppercase">

@@ -7,7 +7,6 @@ import { EditItemModal } from "../components/EditItemModal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useAuth } from "../context/AuthContext";
 import { can } from "../lib/access";
-import { useDragScroll } from "../hooks/useDragScroll";
 import { EvidenceLink } from "../components/EvidenceInput";
 import { tanggalWaktu, waktu } from "../lib/datetime";
 import { loanTag } from "../lib/opname";
@@ -43,7 +42,6 @@ export function ItemDetailPage() {
   // "Transaksi" opens the Stok Masuk / Keluar / Koreksi form: shown when any of those is allowed.
   const canInput = can(user, "gudang.input");
   const canTx = canInput || can(user, "gudang.koreksi");
-  const tableScrollRef = useDragScroll<HTMLDivElement>();
   const [confirmDeleteMovement, setConfirmDeleteMovement] = useState<Movement | null>(null);
 
   const load = () => {
@@ -184,7 +182,7 @@ export function ItemDetailPage() {
         </div>
 
         <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg overflow-hidden">
-          <div ref={tableScrollRef} className="table-scroll">
+          <div className="table-scroll">
             <table className="data-table text-sm">
               <thead className="sticky top-0">
                 <tr className="bg-[#f8fafc] text-left text-[var(--text-secondary)] text-xs uppercase">

@@ -5,7 +5,6 @@ import { ExportButtons } from "./ExportButtons";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { EditLedgerTxModal } from "./EditLedgerTxModal";
 import { fetchAllRows, type TableReport } from "../lib/printTable";
-import { useDragScroll } from "../hooks/useDragScroll";
 import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { can } from "../lib/access";
@@ -42,7 +41,6 @@ export function LedgerHistory({ scope, type, refreshKey }: { scope: StockScope; 
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<LedgerTx | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<LedgerTx | null>(null);
-  const tableScrollRef = useDragScroll<HTMLDivElement>();
   const pageSize = 25;
   const colCount = 8 + (showTujuan ? 1 : 0) + (showActions ? 1 : 0);
 
@@ -174,7 +172,7 @@ export function LedgerHistory({ scope, type, refreshKey }: { scope: StockScope; 
       </div>
 
       <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg overflow-hidden">
-        <div ref={tableScrollRef} className="table-scroll">
+        <div className="table-scroll">
           <table className="grid-table data-table text-sm">
             <thead>
               <tr className="text-left text-xs uppercase">

@@ -10,7 +10,6 @@ import { ConfirmDialog } from "../components/ConfirmDialog";
 import { OliTransactionModal } from "../components/OliTransactionModal";
 import { EditOliModal } from "../components/EditOliModal";
 import { fetchAllRows, type TableReport } from "../lib/printTable";
-import { useDragScroll } from "../hooks/useDragScroll";
 import { useAuth } from "../context/AuthContext";
 import { can } from "../lib/access";
 import { EvidenceLink } from "../components/EvidenceInput";
@@ -32,7 +31,6 @@ export function InventoryOliPage({ estate }: { estate: string }) {
   const [jenisOptions, setJenisOptions] = useState<string[]>([]);
   const [rows, setRows] = useState<OliRecord[]>([]);
   const [total, setTotal] = useState(0);
-  const tableScrollRef = useDragScroll<HTMLDivElement>();
   const [pemakaianSum, setPemakaianSum] = useState(0);
   const [diterimaSum, setDiterimaSum] = useState(0);
   const [search, setSearch] = useState("");
@@ -267,7 +265,7 @@ export function InventoryOliPage({ estate }: { estate: string }) {
       </div>
 
       <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg overflow-hidden">
-        <div ref={tableScrollRef} className="table-scroll">
+        <div className="table-scroll">
           <table className="grid-table data-table text-sm">
             <thead>
               <tr className="text-left text-xs uppercase">

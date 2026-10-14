@@ -5,12 +5,15 @@ import { Sidebar } from "../components/Sidebar";
 import { PinjamanBanner } from "../components/PinjamanBanner";
 import { SessionExpiredModal } from "../components/SessionExpiredModal";
 import { useOpenPinjaman } from "../hooks/useOpenPinjaman";
+import { useTableDragScroll } from "../hooks/useDragScroll";
 
 export function MainLayout() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const location = useLocation();
 
   const refreshPinjaman = useOpenPinjaman((s) => s.refresh);
+  // Every list table can be dragged with the mouse, up / down and sideways.
+  useTableDragScroll();
 
   // Close the phone drawer once a menu item has navigated somewhere; open loans are re-read so the
   // warnings follow a loan made or returned a moment ago.

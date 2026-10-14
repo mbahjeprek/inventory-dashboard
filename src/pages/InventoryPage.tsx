@@ -28,7 +28,6 @@ import { PemakaianButton } from "../components/PemakaianPanel";
 import { fetchAllRows, type TableReport } from "../lib/printTable";
 import { useAuth } from "../context/AuthContext";
 import { can } from "../lib/access";
-import { useDragScroll } from "../hooks/useDragScroll";
 import { InventoryTabs, useInventoryTab } from "../components/InventoryTabs";
 import { StockInPage } from "./StockInPage";
 import { StockOutPage } from "./StockOutPage";
@@ -140,7 +139,6 @@ export function InventoryPage() {
   // Input Banyak (many Stok Masuk / Keluar in one go) and its "saved" notice.
   const [showBatch, setShowBatch] = useState(false);
   const [batchNotice, setBatchNotice] = useState("");
-  const tableScrollRef = useDragScroll<HTMLDivElement>();
   const pageSize = 25;
 
   const load = () => {
@@ -305,7 +303,7 @@ export function InventoryPage() {
           </div>
 
           <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg overflow-hidden">
-            <div ref={tableScrollRef} className="table-scroll">
+            <div className="table-scroll">
               <table className="grid-table data-table text-sm">
                 <thead>
                   <tr className="bg-[#f8fafc] text-[var(--text-secondary)] text-xs uppercase">

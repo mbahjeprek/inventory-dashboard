@@ -13,7 +13,6 @@ import { EditBbmModal } from "../components/EditBbmModal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useAuth } from "../context/AuthContext";
 import { can } from "../lib/access";
-import { useDragScroll } from "../hooks/useDragScroll";
 import { EvidenceLink } from "../components/EvidenceInput";
 import { tanggalWaktu } from "../lib/datetime";
 import { loanTag } from "../lib/opname";
@@ -48,7 +47,6 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
   // "Transaksi" opens the Stok Masuk / Keluar / Koreksi form: shown when any of those is allowed.
   const canInput = can(user, "bbm.input");
   const canTx = canInput || can(user, "bbm.koreksi");
-  const tableScrollRef = useDragScroll<HTMLDivElement>();
   const [editing, setEditing] = useState<BbmRecord | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<BbmRecord | null>(null);
   const pageSize = 25;
@@ -355,7 +353,7 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
       </div>
 
       <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg overflow-hidden">
-        <div ref={tableScrollRef} className="table-scroll">
+        <div className="table-scroll">
           <table className="grid-table data-table text-sm">
             <thead>
               <tr className="bg-[#f8fafc] text-left text-[var(--text-secondary)] text-xs uppercase">

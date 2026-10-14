@@ -7,7 +7,6 @@ import { ConfirmDialog } from "../components/ConfirmDialog";
 import { ExportButtons } from "../components/ExportButtons";
 import { ActivityLogButton } from "../components/ActivityLogButton";
 import { fetchAllRows, type TableReport } from "../lib/printTable";
-import { useDragScroll } from "../hooks/useDragScroll";
 
 // "STRIP isi 10" - or "-" for an obat without a pack.
 const kemasanLabel = (o: Obat) => (isiOf(o) ? `${kemasanName(o)} isi ${o.isi_kemasan}` : "-");
@@ -101,7 +100,6 @@ export function MasterObatPage() {
   const [creating, setCreating] = useState(false);
   const [deleteError, setDeleteError] = useState("");
   const [confirmDelete, setConfirmDelete] = useState<Obat | null>(null);
-  const tableScrollRef = useDragScroll<HTMLDivElement>();
   const pageSize = 25;
 
   const query = () => ({ search, kategori, satuan, sortBy, sortDir });
@@ -218,7 +216,7 @@ export function MasterObatPage() {
       {deleteError && <p className="text-xs text-[var(--accent-red)]">{deleteError}</p>}
 
       <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg overflow-hidden">
-        <div ref={tableScrollRef} className="table-scroll">
+        <div className="table-scroll">
           <table className="grid-table data-table text-sm">
             <thead>
               <tr className="bg-[#f8fafc] text-[var(--text-secondary)] text-xs uppercase">

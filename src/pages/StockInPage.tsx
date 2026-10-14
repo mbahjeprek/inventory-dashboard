@@ -7,7 +7,6 @@ import { useAuth } from "../context/AuthContext";
 import { can } from "../lib/access";
 import { ExportButtons } from "../components/ExportButtons";
 import { fetchAllRows, type TableReport } from "../lib/printTable";
-import { useDragScroll } from "../hooks/useDragScroll";
 import { EvidenceLink } from "../components/EvidenceInput";
 
 const TUJUAN_OPTIONS = ["NILAM", "KNS", "WJA", "ZAMRUD", "FIRUS"];
@@ -34,7 +33,6 @@ export function StockInPage({ embedded = false }: { embedded?: boolean }) {
   const showActions = canEdit || canDelete;
   const [editing, setEditing] = useState<StockInRecord | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<StockInRecord | null>(null);
-  const tableScrollRef = useDragScroll<HTMLDivElement>();
   const pageSize = 25;
 
   const load = () => {
@@ -184,7 +182,7 @@ export function StockInPage({ embedded = false }: { embedded?: boolean }) {
       </div>
 
       <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg overflow-hidden">
-        <div ref={tableScrollRef} className="table-scroll">
+        <div className="table-scroll">
           <table className="grid-table data-table text-sm">
             <thead>
               <tr className="bg-[#f8fafc] text-left text-[var(--text-secondary)] text-xs uppercase">

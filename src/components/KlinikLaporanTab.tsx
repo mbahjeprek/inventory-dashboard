@@ -3,7 +3,6 @@ import { AlertTriangle, BedDouble, ChevronLeft, ChevronRight, ClipboardList, Hos
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { api, errorText, type Kunjungan, type LaporanCount, type LaporanKlinikSummary } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
-import { useDragScroll } from "../hooks/useDragScroll";
 import { can } from "../lib/access";
 import { StatCard } from "./StatCard";
 import { ExportButtons } from "./ExportButtons";
@@ -88,7 +87,6 @@ export function KlinikLaporanTab({ klinik }: { klinik: string }) {
   const canInput = can(user, "klinik.input");
   const canEdit = can(user, "klinik.edit");
   const canDelete = can(user, "klinik.delete");
-  const tableScrollRef = useDragScroll<HTMLDivElement>();
   // Super User: Sinkron Stok - what the visits since the last opname would cut / link, then run it.
   const [sinkron, setSinkron] = useState<Awaited<ReturnType<typeof api.sinkronStokKunjungan>> | null>(null);
   const [sinkronBusy, setSinkronBusy] = useState(false);
@@ -784,7 +782,7 @@ export function KlinikLaporanTab({ klinik }: { klinik: string }) {
               ))
             )}
           </div>
-          <div ref={tableScrollRef} className="hidden md:block table-scroll">
+          <div className="hidden md:block table-scroll">
             <table className="grid-table data-table text-sm">
               <thead>
                 <tr className="bg-[#f8fafc] text-[var(--text-secondary)] text-xs uppercase">
