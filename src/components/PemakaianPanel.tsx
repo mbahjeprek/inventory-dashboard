@@ -359,8 +359,8 @@ export function PemakaianPanel({ module, estate, onClose }: { module: PakaiModul
               />
             )}
 
-            <div ref={scrollRef} className="overflow-x-auto">
-              <table className="grid-table data-table text-sm">
+            <div ref={scrollRef} className="overflow-auto max-h-[70vh]">
+              <table className="grid-table sticky-head data-table text-sm">
                 <thead>
                   <tr className="bg-[#f8fafc] text-[var(--text-secondary)] text-xs uppercase">
                     <th className="px-3 py-2.5 text-right">No</th>

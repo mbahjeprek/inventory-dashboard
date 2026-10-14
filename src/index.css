@@ -119,3 +119,12 @@ body {
 .recharts-wrapper *:focus {
   outline: none;
 }
+
+/* A grid table whose header row stays in view while its (height-capped) container scrolls down.
+   border-collapse drops a sticky cell's borders, so the bottom line is drawn as a shadow. */
+.sticky-head thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  box-shadow: inset 0 -1px 0 #b3d698;
+}
