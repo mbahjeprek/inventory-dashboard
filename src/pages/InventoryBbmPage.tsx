@@ -5,6 +5,7 @@ import { api, errorText, type BbmRecord, type BbmSummary } from "../lib/api";
 import { StatCard } from "../components/StatCard";
 import { ExportButtons } from "../components/ExportButtons";
 import { ActivityLogButton } from "../components/ActivityLogButton";
+import { PemakaianButton } from "../components/PemakaianPanel";
 import { fetchAllRows, type TableReport } from "../lib/printTable";
 import { BbmTransactionModal } from "../components/BbmTransactionModal";
 import { BbmBatchModal } from "../components/BbmBatchModal";
@@ -193,6 +194,7 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {(lokasiLock || lokasi) && <ActivityLogButton key={lokasiLock || lokasi} module="BBM" estate={lokasiLock || lokasi} />}
+          {(lokasiLock || lokasi) && <PemakaianButton key={`p-${lokasiLock || lokasi}`} module="BBM" estate={lokasiLock || lokasi} />}
           <ExportButtons
             total={total}
             buildReport={buildReport}

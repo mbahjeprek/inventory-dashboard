@@ -160,6 +160,8 @@ function requiredPerms(req: express.Request): Need {
   if (is(/^\/pinjaman(\/|$)/)) return null;
   // Perbandingan antar estate: the route checks the module's Lihat and the estates itself.
   if (is(/^\/perbandingan(\/|$)/)) return null;
+  // Pemakaian per bulan: the route checks the module's Lihat and the estate itself.
+  if (is(/^\/pemakaian(\/|$)/)) return null;
   // Foto bukti: any logged-in account uploads for its own transactions (the transaction route checks).
   if (is(/^\/evidence(\/|$)/)) return null;
   if (is(/^\/(stock-correction|gudang-stock\/correction)$/)) return ["gudang.koreksi"];
@@ -6936,6 +6938,106 @@ app.get("/api/perbandingan/barang", async (req, res) => {
       ? await queryMany<{ v: string }>("SELECT nama v FROM master_oli ORDER BY nama")
       : await queryMany<{ v: string }>("SELECT DISTINCT jenis_pupuk v FROM pupuk_log WHERE jenis_pupuk <> '' ORDER BY 1");
   res.json(list.map((r) => ({ kode: r.v, nama: r.v, satuan: m === "PUPUK" ? "KG" : "LTR" })));
+});
+
+// ---- Pemakaian per bulan (Gudang / BBM / Pupuk / Oli of one estate) ----
+// How much of each barang / jenis left the estate's stock per month, the monthly average and the
+// stock now - the same "pemakaian" as Perbandingan (no koreksi, pinjaman / transfer, nor a Nilam Stok
+// Keluar that went into another estate's gudang). BBM can also be grouped per alat / kendaraan.
+const PAKAI_MODULES = ["GUDANG", "BBM", "PUPUK", "OLI"] as const;
+type PakaiModule = (typeof PAKAI_MODULES)[number];
+
+// One row per Stok Keluar: kode (the group key), nama, satuan, info (shown under the nama), d (YYYY-MM-DD),
+// qty, and for the detail list id, ref (no. dokumen), tujuan, penerima, ket.
+function pakaiSource(module: PakaiModule, estate: string, alat: boolean): string {
+  if (module === "GUDANG" && estate === "NILAM") {
+    return `SELECT s.kode, COALESCE(i.nama, s.nama, s.kode) nama, COALESCE(i.satuan, s.satuan, '') satuan, s.kode info,
+        s.tanggal_keluar_iso d, s.qty::float8 qty, s.id, COALESCE(NULLIF(s.no_embrace_gudang, ''), s.no_request, '') ref,
+        concat_ws(' · ', NULLIF(s.tujuan, ''), NULLIF(s.divisi, '')) tujuan, COALESCE(s.penerima, '') penerima, COALESCE(s.keterangan, '') ket
+      FROM stock_out_log s LEFT JOIN items i ON i.kode = s.kode
+      WHERE s.kode IS NOT NULL AND s.pinjaman_id IS NULL AND s.tanggal_keluar_iso LIKE '____-__-__'
+        AND NOT EXISTS (SELECT 1 FROM transactions x JOIN gudang_stock_tx g ON g.transfer_from_id = x.id
+                        WHERE x.mirror_source = 'stock_out_log' AND x.mirror_id = s.id)`;
+  }
+  if (module === "GUDANG") {
+    return `SELECT t.item_kode kode, COALESCE(i.nama, t.item_kode) nama, COALESCE(i.satuan, '') satuan, t.item_kode info,
+        to_char((t.created_at AT TIME ZONE 'Asia/Jakarta')::date, 'YYYY-MM-DD') d, t.qty::float8 qty, t.id, '' ref,
+        COALESCE(t.tujuan, '') tujuan, COALESCE(t.penerima, '') penerima, COALESCE(t.note, '') ket
+      FROM gudang_stock_tx t LEFT JOIN items i ON i.kode = t.item_kode
+      WHERE t.gudang = @estate AND t.type = 'OUT' AND t.is_correction = 0 AND t.pinjaman_id IS NULL`;
+  }
+  if (module === "BBM") {
+    const unit = "COALESCE(NULLIF(trim(kode_kendaraan), ''), '(tanpa kode alat)')";
+    return `SELECT ${alat ? `jenis_bbm || '|' || ${unit}` : "jenis_bbm"} kode, ${alat ? unit : "jenis_bbm"} nama, 'LTR' satuan,
+        ${alat ? "jenis_bbm" : "''"} info, tanggal_iso d, pemakaian::float8 qty, id, COALESCE(no_spb, '') ref,
+        concat_ws(' · ', NULLIF(kode_kendaraan, ''), NULLIF(estate, '')) tujuan, COALESCE(hm_terakhir, '') penerima, COALESCE(keterangan, '') ket
+      FROM bbm_log WHERE lokasi = @estate AND pemakaian > 0 AND tanggal_iso LIKE '____-__-__'`;
+  }
+  if (module === "PUPUK") {
+    return `SELECT jenis_pupuk kode, jenis_pupuk nama, 'KG' satuan, '' info, tanggal_iso d, keluar::float8 qty, id, COALESCE(no_embrace, '') ref,
+        concat_ws(' · ', NULLIF(divisi, ''), NULLIF(blok, '')) tujuan, '' penerima, COALESCE(keterangan, '') ket
+      FROM pupuk_log WHERE estate = @estate AND keluar > 0 AND tanggal_iso LIKE '____-__-__'`;
+  }
+  return `SELECT l.jenis_oli kode, l.jenis_oli nama, COALESCE(m.satuan, 'LTR') satuan, '' info, l.tanggal_iso d, l.pemakaian::float8 qty, l.id,
+      COALESCE(l.no_embrace, '') ref, '' tujuan, '' penerima, COALESCE(l.keterangan, '') ket
+    FROM oli_log l LEFT JOIN master_oli m ON m.nama = l.jenis_oli
+    WHERE l.estate = @estate AND l.pemakaian > 0 AND l.tanggal_iso LIKE '____-__-__'`;
+}
+
+function pakaiQuery(req: express.Request, res: express.Response) {
+  const q = req.query as Record<string, string>;
+  const m = q.module as PakaiModule;
+  if (!PAKAI_MODULES.includes(m)) return void res.status(400).json({ error: "Modul tidak valid" });
+  if (!canLoan(req.user!, m, "view")) return void res.status(403).json({ error: "Akses ditolak" });
+  const estate = String(q.estate ?? "");
+  if (!(ESTATES as readonly string[]).includes(estate)) return void res.status(400).json({ error: "Estate tidak valid" });
+  if (!estateAllowed(req.user!, estate)) return void res.status(403).json({ error: "Akses ditolak" });
+  const alat = m === "BBM" && q.group === "alat";
+  const { from, to } = laporanRange(q);
+  return { m, estate, alat, src: pakaiSource(m, estate, alat), params: { estate, from, to, kode: String(q.kode ?? "") } };
+}
+
+app.get("/api/pemakaian", async (req, res) => {
+  const p = pakaiQuery(req, res);
+  if (!p) return;
+  const { m, estate, alat, src, params } = p;
+  const rows = await queryMany(
+    `WITH src AS (${src})
+     SELECT kode, nama, satuan, info, left(d, 7) bulan, SUM(qty)::float8 qty, COUNT(*)::int trx
+     FROM src WHERE d BETWEEN @from AND @to GROUP BY 1, 2, 3, 4, 5 ORDER BY 2, 5`,
+    params
+  );
+  // The first month with any pemakaian at this estate: months before it aren't 0, just no data yet.
+  const mulai = (await queryOne<{ b: string | null }>(`WITH src AS (${src}) SELECT left(MIN(d), 7) b FROM src`, params))?.b ?? null;
+  let stok: { kode: string; stok: number }[] = [];
+  if (m === "GUDANG" && estate === "NILAM") stok = await queryMany("SELECT kode, stock_tersedia::float8 stok FROM items");
+  else if (m === "GUDANG") stok = await queryMany("SELECT item_kode kode, stock_tersedia::float8 stok FROM gudang_stock WHERE gudang = @estate", { estate });
+  else if (m === "PUPUK") stok = (await latestPupukSaldo(estate)).map((r) => ({ kode: r.jenis_pupuk, stok: Number(r.saldo_stock) }));
+  else if (m === "OLI") stok = (await latestOliSaldo(estate)).map((r) => ({ kode: r.jenis_oli, stok: Number(r.saldo_stock) }));
+  else if (!alat)
+    stok = await queryMany(
+      `SELECT jenis_bbm kode, saldo_stock::float8 stok FROM (
+         SELECT jenis_bbm, saldo_stock, ROW_NUMBER() OVER (PARTITION BY jenis_bbm ORDER BY tanggal_iso DESC, id DESC) rn
+         FROM bbm_log WHERE lokasi = @estate AND saldo_stock IS NOT NULL) s WHERE rn = 1`,
+      { estate }
+    );
+  res.json({ rows, stok, mulai });
+});
+
+// The Stok Keluar rows behind one figure: one kode in one month (YYYY-MM) or the whole period.
+app.get("/api/pemakaian/detail", async (req, res) => {
+  const p = pakaiQuery(req, res);
+  if (!p) return;
+  if (!p.params.kode) return res.status(400).json({ error: "Pilih barang" });
+  const bulan = /^\d{4}-\d{2}$/.test(String(req.query.bulan ?? "")) ? String(req.query.bulan) : "";
+  const data = await queryMany(
+    `WITH src AS (${p.src})
+     SELECT id, d tanggal_iso, ref, tujuan, penerima, ket, qty FROM src
+     WHERE kode = @kode AND d BETWEEN @from AND @to ${bulan ? "AND left(d, 7) = @bulan" : ""}
+     ORDER BY d, id LIMIT 2000`,
+    { ...p.params, bulan }
+  );
+  res.json({ data });
 });
 
 // ---- Foto bukti transaksi (see schema.sql evidence) ----

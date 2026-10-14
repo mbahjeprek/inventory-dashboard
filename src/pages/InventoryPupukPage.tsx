@@ -5,6 +5,7 @@ import { api, errorText, type PupukRecord, type PupukSummary } from "../lib/api"
 import { StatCard } from "../components/StatCard";
 import { ExportButtons } from "../components/ExportButtons";
 import { ActivityLogButton } from "../components/ActivityLogButton";
+import { PemakaianButton } from "../components/PemakaianPanel";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { PupukTransactionModal } from "../components/PupukTransactionModal";
 import { EditPupukModal } from "../components/EditPupukModal";
@@ -178,6 +179,7 @@ export function InventoryPupukPage({ estate }: { estate: string }) {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <ActivityLogButton module="PUPUK" estate={estate} />
+          <PemakaianButton module="PUPUK" estate={estate} />
           <ExportButtons total={total} buildReport={buildReport} fileName={`inventory-pupuk-${estate.toLowerCase()}`} />
           {canInput && (
             <button

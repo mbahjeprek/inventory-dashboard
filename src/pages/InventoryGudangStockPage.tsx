@@ -20,6 +20,7 @@ import { api, errorText, type GudangStockItem, type GudangStockSummary, type Pic
 import { StatCard } from "../components/StatCard";
 import { ExportButtons } from "../components/ExportButtons";
 import { ActivityLogButton } from "../components/ActivityLogButton";
+import { PemakaianButton } from "../components/PemakaianPanel";
 import { fetchAllRows, type TableReport } from "../lib/printTable";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { EditGudangStockModal } from "../components/EditGudangStockModal";
@@ -234,6 +235,7 @@ export function InventoryGudangStockPage({ gudang }: { gudang: string }) {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <ActivityLogButton module="BARANG" estate={gudang} />
+          <PemakaianButton module="GUDANG" estate={gudang} />
           {tab === "stok" && <ExportButtons total={total} buildReport={buildReport} fileName={`inventory-gudang-${gudang.toLowerCase()}`} />}
           {canInput && (
             <button

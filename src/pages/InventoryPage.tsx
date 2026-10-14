@@ -24,6 +24,7 @@ import { ItemPickerModal } from "../components/ItemPickerModal";
 import { StatCard } from "../components/StatCard";
 import { ExportButtons } from "../components/ExportButtons";
 import { ActivityLogButton } from "../components/ActivityLogButton";
+import { PemakaianButton } from "../components/PemakaianPanel";
 import { fetchAllRows, type TableReport } from "../lib/printTable";
 import { useAuth } from "../context/AuthContext";
 import { can } from "../lib/access";
@@ -225,6 +226,7 @@ export function InventoryPage() {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <ActivityLogButton module="BARANG" estate="NILAM" />
+          <PemakaianButton module="GUDANG" estate="NILAM" />
           {tab === "stok" && <ExportButtons total={total} buildReport={buildReport} fileName="inventory-gudang-nilam" />}
           {canInput && (
             <button
