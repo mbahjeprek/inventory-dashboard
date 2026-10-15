@@ -33,6 +33,7 @@ import { can } from "../lib/access";
 import { InventoryTabs, useInventoryTab } from "../components/InventoryTabs";
 import { KlinikLaporanTab } from "../components/KlinikLaporanTab";
 import { LedgerHistory } from "../components/LedgerHistory";
+import { ItemRiwayatButton } from "../components/ItemRiwayat";
 import { StockBatchModal } from "../components/StockBatchModal";
 
 // Matches EXPIRY_WARNING_DAYS in server/src/app.ts.
@@ -153,8 +154,8 @@ export function InventoryKlinikPage({ klinik }: { klinik: string }) {
   // "Transaksi" opens the Stok Masuk / Keluar / Koreksi form: shown when any of those is allowed.
   const canInput = can(user, "klinik.input");
   const canTx = canInput || can(user, "klinik.koreksi");
-  // Aksi column: per-row Transaksi shortcut plus Edit / Hapus.
-  const showActions = canEdit || canDelete || canTx;
+  // Aksi column: Riwayat (everyone), the per-row Transaksi shortcut plus Edit / Hapus.
+  const showActions = true;
   const [editingItem, setEditingItem] = useState<KlinikStockItem | null>(null);
   const [deleteError, setDeleteError] = useState("");
   const [confirmDelete, setConfirmDelete] = useState<KlinikStockItem | null>(null);
@@ -493,6 +494,7 @@ export function InventoryKlinikPage({ klinik }: { klinik: string }) {
                           {showActions && (
                             <td className="px-4 py-2.5 text-right">
                               <div className="inline-flex gap-1.5">
+                                <ItemRiwayatButton scope={{ kind: "klinik", name: klinik }} item={{ kode: item.kode, nama: item.nama, satuan: item.satuan, stok: item.stock_tersedia }} />
                                 {canTx && (
                                   <button
                                     onClick={() => openTx(item)}

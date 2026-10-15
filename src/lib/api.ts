@@ -100,6 +100,8 @@ export type LedgerTx = {
   nama: string;
   satuan: string;
   input_oleh: string;
+  // One item's Riwayat only: its stock after this movement.
+  saldo?: number | null;
 };
 
 export type Obat = {
@@ -825,7 +827,7 @@ export const api = {
       scope: scope.name,
       tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
     }).toString();
-    return req<{ data: LedgerTx[]; total: number; qtySum: number; page: number; pageSize: number }>(
+    return req<{ data: LedgerTx[]; total: number; qtySum: number; inSum: number; outSum: number; page: number; pageSize: number }>(
       `/api/${scope.kind === "klinik" ? "klinik-stock" : "gudang-stock"}/history?${qs}`
     );
   },

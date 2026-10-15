@@ -30,6 +30,7 @@ import { useAuth } from "../context/AuthContext";
 import { can } from "../lib/access";
 import { InventoryTabs, useInventoryTab } from "../components/InventoryTabs";
 import { LedgerHistory } from "../components/LedgerHistory";
+import { ItemRiwayatButton } from "../components/ItemRiwayat";
 import { StockBatchModal } from "../components/StockBatchModal";
 
 const STATUSES = ["AMAN", "BUFFER STOCK"];
@@ -131,7 +132,8 @@ export function InventoryGudangStockPage({ gudang }: { gudang: string }) {
   // when it may do either.
   const canEdit = can(user, "gudang.edit");
   const canDelete = can(user, "gudang.delete");
-  const showActions = canEdit || canDelete;
+  // Riwayat is open to everyone, so the Aksi column always shows.
+  const showActions = true;
   // "Transaksi" opens the Stok Masuk / Keluar / Koreksi form: shown when any of those is allowed.
   const canInput = can(user, "gudang.input");
   const canTx = canInput || can(user, "gudang.koreksi");
@@ -374,6 +376,7 @@ export function InventoryGudangStockPage({ gudang }: { gudang: string }) {
                         {showActions && (
                           <td className="px-4 py-2.5 text-right">
                             <div className="inline-flex gap-1.5">
+                              <ItemRiwayatButton scope={{ kind: "gudang", name: gudang }} item={{ kode: item.kode, nama: item.nama, satuan: item.satuan, stok: item.stock_tersedia }} />
                               {canEdit && (<button
                                 onClick={() => setEditingItem(item)}
                                 title="Edit stok barang"

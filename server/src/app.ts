@@ -4352,13 +4352,15 @@ for (const lr of LEDGER_ROUTES) {
   const { ledger: l, master } = lr;
 
   app.get(`/api/${lr.path}/history`, async (req, res) => {
-    const { scope = "", type = "", search = "", dateFrom = "", dateTo = "", tz = "", page = "1", pageSize = "50" } = req.query as Record<string, string>;
+    const { scope = "", type = "", kode = "", search = "", dateFrom = "", dateTo = "", tz = "", page = "1", pageSize = "50" } = req.query as Record<string, string>;
     if (!lr.options.includes(scope)) return res.status(400).json({ error: "Lokasi tidak valid" });
     if (!estateAllowed(req.user!, scope)) return res.status(403).json({ error: "Akses ditolak" });
-    if (!["IN", "OUT"].includes(type)) return res.status(400).json({ error: "Tipe tidak valid" });
+    // One item's Riwayat (kode) lists its Stock In and Out together, each with the saldo after it.
+    if (!["IN", "OUT"].includes(type) && !(kode && type === "")) return res.status(400).json({ error: "Tipe tidak valid" });
 
-    const conditions = [`t.${l.scope} = @scope`, "t.type = @type"];
-    const params: any = { scope, type, tz: /^[A-Za-z_]+(\/[A-Za-z0-9_+-]+)*$/.test(tz) ? tz : "Asia/Jakarta" };
+    const conditions = [`t.${l.scope} = @scope`, ...(type ? ["t.type = @type"] : [])];
+    const params: any = { scope, type, kode, tz: /^[A-Za-z_]+(\/[A-Za-z0-9_+-]+)*$/.test(tz) ? tz : "Asia/Jakarta" };
+    if (kode) conditions.push(`t.${l.item} = @kode`);
     addWordSearch(search, "m.", conditions, params, [...(master === "obat" ? OBAT_SEARCH : ["satuan"]), "t.penerima", "t.tujuan", "t.note"]);
     if (dateFrom) {
       conditions.push("(t.created_at AT TIME ZONE @tz)::date >= @dateFrom::date");
@@ -4368,19 +4370,28 @@ for (const lr of LEDGER_ROUTES) {
       conditions.push("(t.created_at AT TIME ZONE @tz)::date <= @dateTo::date");
       params.dateTo = dateTo;
     }
-    const fromSql = `FROM ${l.tx} t JOIN ${master} m ON m.kode = t.${l.item} LEFT JOIN users u ON u.id = t.user_id WHERE ${conditions.join(" AND ")}`;
-    const agg = (await queryOne<any>(`SELECT COUNT(*)::int c, COALESCE(SUM(t.qty), 0)::int q ${fromSql}`, params))!;
+    // The saldo runs over all of the item's movements here, before the date / search filters.
+    const txSql = kode
+      ? `(SELECT x.*, SUM(CASE WHEN x.type = 'IN' THEN x.qty ELSE -x.qty END) OVER (ORDER BY x.created_at, x.id)::float8 AS saldo
+          FROM ${l.tx} x WHERE x.${l.scope} = @scope AND x.${l.item} = @kode)`
+      : l.tx;
+    const fromSql = `FROM ${txSql} t JOIN ${master} m ON m.kode = t.${l.item} LEFT JOIN users u ON u.id = t.user_id WHERE ${conditions.join(" AND ")}`;
+    const agg = (await queryOne<any>(
+      `SELECT COUNT(*)::int c, COALESCE(SUM(t.qty), 0)::float8 q, COALESCE(SUM(t.qty) FILTER (WHERE t.type = 'IN'), 0)::float8 qin,
+         COALESCE(SUM(t.qty) FILTER (WHERE t.type = 'OUT'), 0)::float8 qout ${fromSql}`,
+      params
+    ))!;
     const limit = Math.min(parseInt(pageSize) || 50, 500);
     const offset = (Math.max(parseInt(page) || 1, 1) - 1) * limit;
     const data = await queryMany(
       `SELECT t.id, t.created_at, t.input_at, t.type, t.qty, t.tujuan, t.penerima, t.note, t.is_correction, t.evidence_id, t.pinjaman_id,
               ${l === GUDANG_LEDGER ? "t.transfer_from_id IS NOT NULL" : "false"} AS is_transfer,
-              ${l === KLINIK_LEDGER ? "t.alloc" : "NULL"} AS alloc,
+              ${l === KLINIK_LEDGER ? "t.alloc" : "NULL"} AS alloc, ${kode ? "t.saldo" : "NULL::float8 AS saldo"},
               m.kode, m.nama, m.satuan, COALESCE(u.nama, u.username, '') AS input_oleh
        ${fromSql} ORDER BY t.created_at DESC, t.id DESC LIMIT @limit OFFSET @offset`,
       { ...params, limit, offset }
     );
-    res.json({ data, total: agg.c, qtySum: agg.q, page: parseInt(page), pageSize: limit });
+    res.json({ data, total: agg.c, qtySum: agg.q, inSum: agg.qin, outSum: agg.qout, page: parseInt(page), pageSize: limit });
   });
 
   // Edit a movement's qty/tujuan/penerima/note; the stock is adjusted by the qty difference.
