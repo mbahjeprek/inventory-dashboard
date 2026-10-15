@@ -145,7 +145,10 @@ export function StatusUpdateBanner() {
   const superuser = user.role === "superuser";
   // The Dashboard shows the whole table already.
   if (superuser && pathname === "/") return null;
-  const mine = status.data.filter((r) => late(r) && (superuser || can(user, `${UPDATE_COLS.find((c) => c.modul === r.modul)!.perm}.input`)));
+  // Pupuk is seasonal (months without pemupukan are normal): it shows on the Dashboard panel only.
+  const mine = status.data.filter(
+    (r) => r.modul !== "PUPUK" && late(r) && (superuser || can(user, `${UPDATE_COLS.find((c) => c.modul === r.modul)!.perm}.input`))
+  );
   if (!mine.length) return null;
   const key = `${status.today}|${mine.map((r) => `${r.modul}-${r.estate}-${r.hari}`).join(",")}`;
   if (hidden === key) return null;
