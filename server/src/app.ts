@@ -162,6 +162,8 @@ function requiredPerms(req: express.Request): Need {
   if (is(/^\/perbandingan(\/|$)/)) return null;
   // Pemakaian per bulan: the route checks the module's Lihat and the estate itself.
   if (is(/^\/pemakaian(\/|$)/)) return null;
+  // Status Update: the route lists only the estates and modules the account can see.
+  if (is(/^\/status-update$/)) return null;
   // Foto bukti: any logged-in account uploads for its own transactions (the transaction route checks).
   if (is(/^\/evidence(\/|$)/)) return null;
   if (is(/^\/(stock-correction|gudang-stock\/correction)$/)) return ["gudang.koreksi"];
@@ -7063,6 +7065,34 @@ app.get("/api/pemakaian/detail", async (req, res) => {
     { ...p.params, bulan }
   );
   res.json({ data });
+});
+
+// ---- Status Update: how current each estate's data is, per module ----
+// The latest date with data (transaction date, so a back-entered day counts) and how many days ago
+// that is, against a limit per module. The Dashboard panel and the admins' reminder banner read it.
+// A module / estate that has never had data isn't late, it just isn't used there (yet).
+const UPDATE_LIMIT: Record<string, number> = { BBM: 1, LAPORAN: 1, KLINIK: 3, OLI: 3, PUPUK: 3, GUDANG: 7 };
+const UPDATE_MODULE: Record<string, LoanModule> = { GUDANG: "GUDANG", BBM: "BBM", OLI: "OLI", PUPUK: "PUPUK", KLINIK: "KLINIK", LAPORAN: "KLINIK" };
+app.get("/api/status-update", async (req, res) => {
+  const jak = (col: string) => `to_char((${col} AT TIME ZONE 'Asia/Jakarta')::date, 'YYYY-MM-DD')`;
+  const iso = (col: string) => `CASE WHEN ${col} LIKE '____-__-__' THEN ${col} END`;
+  const rows = await queryMany<{ modul: string; estate: string; terakhir: string | null }>(
+    `SELECT 'GUDANG' modul, 'NILAM' estate, GREATEST(
+        (SELECT MAX(${iso("tanggal_keluar_iso")}) FROM stock_out_log), (SELECT MAX(${iso("tanggal_terima_iso")}) FROM stock_in_log),
+        (SELECT MAX(${jak("created_at")}) FROM transactions)) terakhir
+     UNION ALL SELECT 'GUDANG', gudang, MAX(${jak("created_at")}) FROM gudang_stock_tx GROUP BY 2
+     UNION ALL SELECT 'BBM', lokasi, MAX(${iso("tanggal_iso")}) FROM bbm_log GROUP BY 2
+     UNION ALL SELECT 'OLI', estate, MAX(${iso("tanggal_iso")}) FROM oli_log GROUP BY 2
+     UNION ALL SELECT 'PUPUK', estate, MAX(${iso("tanggal_iso")}) FROM pupuk_log GROUP BY 2
+     UNION ALL SELECT 'KLINIK', klinik, MAX(${jak("created_at")}) FROM klinik_stock_tx GROUP BY 2
+     UNION ALL SELECT 'LAPORAN', klinik, MAX(${iso("tanggal_iso")}) FROM klinik_kunjungan GROUP BY 2`
+  );
+  const today = jakartaToday();
+  const days = (d: string) => Math.max(Math.round((Date.parse(today) - Date.parse(d)) / 86400000), 0);
+  const data = rows
+    .filter((r) => (ESTATES as readonly string[]).includes(r.estate) && estateAllowed(req.user!, r.estate) && canLoan(req.user!, UPDATE_MODULE[r.modul], "view"))
+    .map((r) => ({ ...r, hari: r.terakhir ? days(r.terakhir) : null, batas: UPDATE_LIMIT[r.modul] }));
+  res.json({ today, limits: UPDATE_LIMIT, data });
 });
 
 // ---- Foto bukti transaksi (see schema.sql evidence) ----

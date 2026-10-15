@@ -8,6 +8,7 @@ import { canModule, MODULES, userEstates, type Module } from "../lib/access";
 import { TopKeluarPanel } from "../components/TopKeluarPanel";
 import { PerbandinganPanel } from "../components/PerbandinganPanel";
 import { ExportButtons } from "../components/ExportButtons";
+import { StatusUpdatePanel } from "../components/StatusUpdate";
 import type { ReportPart, ReportSection, SectionReport } from "../lib/printTable";
 
 type ExportBuild = (() => ReportPart) | null;
@@ -732,6 +733,8 @@ export function DashboardPage() {
           Akun ini tidak punya akses inventory. Buka menu di samping untuk halaman yang bisa diakses.
         </div>
       )}
+
+      {tab === "ringkasan" && anyModule && <StatusUpdatePanel estates={shown.map((e) => e.estate)} />}
 
       {tab === "ringkasan" && anyModule && shown.map((e) => (
         <section key={e.estate} className="space-y-3">

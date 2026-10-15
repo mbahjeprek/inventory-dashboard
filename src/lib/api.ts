@@ -387,6 +387,12 @@ export type TopKeluarRow = { kode: string; id: number | null; nama: string; satu
 // ---- Stok Opname (server/src/app.ts "Stok Opname") ----
 export type OpnameModule = "GUDANG" | "KLINIK" | "BBM" | "PUPUK" | "OLI";
 export type PakaiModule = "GUDANG" | "BBM" | "PUPUK" | "OLI";
+// Status Update: the latest date with data per module + estate, days since then and the module's limit.
+export type StatusUpdate = {
+  today: string;
+  limits: Record<string, number>;
+  data: { modul: string; estate: string; terakhir: string | null; hari: number | null; batas: number }[];
+};
 
 // Usage per estate for the Dashboard "Perbandingan" tab (metric trx = number of Stok Keluar).
 export type Perbandingan = {
@@ -1122,6 +1128,7 @@ export const api = {
 
   perbandingan: (params: { module: OpnameModule; estates: string[]; dateFrom: string; dateTo: string; kode: string }) =>
     req<Perbandingan>(`/api/perbandingan?${new URLSearchParams({ ...params, estates: params.estates.join(",") })}`),
+  statusUpdate: () => req<StatusUpdate>("/api/status-update"),
   // Pemakaian per bulan of one estate: Stok Keluar per barang / jenis (BBM: or per alat) per month, and stock now.
   pemakaian: (params: { module: PakaiModule; estate: string; dateFrom: string; dateTo: string; group?: string }) =>
     req<{
