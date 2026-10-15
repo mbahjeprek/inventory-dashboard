@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { create } from "zustand";
 import { BellRing, ChevronRight, ClipboardCheck, X } from "lucide-react";
@@ -54,6 +54,14 @@ const LEVEL_CLS: Record<string, string> = {
 // Dashboard: estates x modules, the last date with data and how long ago, coloured by the limit.
 export function StatusUpdatePanel({ estates }: { estates: string[] }) {
   const status = useStatusUpdate((s) => s.status);
+  const refresh = useStatusUpdate((s) => s.refresh);
+  // Fresh figures when the Dashboard opens and whenever its browser tab comes back into view.
+  useEffect(() => {
+    refresh();
+    const onShow = () => document.visibilityState === "visible" && refresh();
+    document.addEventListener("visibilitychange", onShow);
+    return () => document.removeEventListener("visibilitychange", onShow);
+  }, [refresh]);
   if (!status) return null;
   const cols = UPDATE_COLS.filter((c) => status.data.some((r) => r.modul === c.modul));
   const rows = estates;
