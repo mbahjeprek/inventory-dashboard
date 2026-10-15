@@ -7071,7 +7071,8 @@ app.get("/api/pemakaian/detail", async (req, res) => {
 // The latest date with data (transaction date, so a back-entered day counts) and how many days ago
 // that is, against a limit per module. The Dashboard panel and the admins' reminder banner read it.
 // A module / estate that has never had data isn't late, it just isn't used there (yet).
-const UPDATE_LIMIT: Record<string, number> = { BBM: 1, LAPORAN: 1, KLINIK: 3, OLI: 3, PUPUK: 3, GUDANG: 7 };
+// Pupuk is seasonal (pemupukan rounds), so it gets a month; it also stays out of the reminder banner.
+const UPDATE_LIMIT: Record<string, number> = { BBM: 1, LAPORAN: 1, KLINIK: 3, OLI: 3, PUPUK: 30, GUDANG: 7 };
 const UPDATE_MODULE: Record<string, LoanModule> = { GUDANG: "GUDANG", BBM: "BBM", OLI: "OLI", PUPUK: "PUPUK", KLINIK: "KLINIK", LAPORAN: "KLINIK" };
 app.get("/api/status-update", async (req, res) => {
   const jak = (col: string) => `to_char((${col} AT TIME ZONE 'Asia/Jakarta')::date, 'YYYY-MM-DD')`;
