@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Download, Eraser, Minus, Paintbrush, Plus, Save, Search, Trash2 } from "lucide-react";
+import { Download, Eraser, Maximize2, Minimize2, Minus, Paintbrush, Plus, Save, Search, Trash2 } from "lucide-react";
 import { api, errorText, type PetaBlok, type PetaCell, type PetaLegend } from "../lib/api";
 
 const ESTATE_LABEL: Record<string, string> = { NILAM: "Nilam", KNS: "KNS", WJA: "WJA", ZAMRUD: "Zamrud", FIRUS: "Firus" };
@@ -31,6 +31,29 @@ export function PetaBlokPage() {
   const [estate, setEstate] = useState("");
   const [search, setSearch] = useState("");
   const [zoom, setZoom] = useState(1);
+  // Layar penuh: the page covers the window (and the browser goes full screen where it can).
+  const [full, setFull] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const toggleFull = () => {
+    if (full) {
+      if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+      setFull(false);
+    } else {
+      setFull(true);
+      rootRef.current?.requestFullscreen?.().catch(() => {});
+    }
+  };
+  useEffect(() => {
+    // Esc (or the browser's own exit) leaves full screen: the page follows.
+    const onChange = () => !document.fullscreenElement && setFull(false);
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setFull(false);
+    document.addEventListener("fullscreenchange", onChange);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("fullscreenchange", onChange);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, []);
   const [hover, setHover] = useState<PetaCell | null>(null);
   const [paint, setPaint] = useState<string | null>("#6aa84f");
   const [legend, setLegend] = useState<PetaLegend[]>([]);
@@ -179,15 +202,24 @@ export function PetaBlokPage() {
   const hp = hover ? pctOf(hover) : null;
 
   return (
-    <div className="space-y-4">
+    <div ref={rootRef} className={full ? "fixed inset-0 z-50 overflow-auto bg-[var(--bg-page)] p-3 sm:p-4 space-y-3" : "space-y-4"}>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold text-[var(--text-primary)]">Peta Blok AKSS</h1>
           <p className="text-sm text-[var(--text-secondary)]">Mapping pemupukan NPK per blok, atau warnai blok sesuai kebutuhan</p>
         </div>
-        <button onClick={download} className="inline-flex items-center gap-1.5 text-sm px-3.5 py-2 rounded-md border border-[var(--border)] bg-[var(--bg-card)] hover:bg-[#f1f5f9]">
-          <Download size={16} /> Unduh Gambar
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button onClick={download} className="inline-flex items-center gap-1.5 text-sm px-3.5 py-2 rounded-md border border-[var(--border)] bg-[var(--bg-card)] hover:bg-[#f1f5f9]">
+            <Download size={16} /> Unduh Gambar
+          </button>
+          <button
+            onClick={toggleFull}
+            title={full ? "Keluar layar penuh (Esc)" : "Tampilkan peta layar penuh"}
+            className="inline-flex items-center gap-1.5 text-sm px-3.5 py-2 rounded-md border border-[var(--accent-blue-border)] text-[var(--accent-blue)] bg-[var(--bg-card)] hover:bg-[var(--accent-blue-bg)]"
+          >
+            {full ? <Minimize2 size={16} /> : <Maximize2 size={16} />} {full ? "Keluar Layar Penuh" : "Layar Penuh"}
+          </button>
+        </div>
       </div>
 
       <div className="flex gap-1 border-b border-[var(--border)]">
@@ -256,7 +288,7 @@ export function PetaBlokPage() {
               </span>
             )}
           </div>
-          <div className="overflow-auto max-h-[75vh] relative" onMouseLeave={() => setHover(null)}>
+          <div className={`overflow-auto relative ${full ? "max-h-[calc(100vh-13rem)]" : "max-h-[75vh]"}`} onMouseLeave={() => setHover(null)}>
             {!data ? (
               <p className="p-4 text-sm text-[var(--text-muted)]">Memuat peta...</p>
             ) : (
