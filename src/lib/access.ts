@@ -111,6 +111,7 @@ export const PAGE_PERMS: Record<string, string> = {
   "/karyawan": "master.karyawan",
   "/alat-berat": "master.alat",
   "/master-blok": "master.blok",
+  "/peta-blok": "master.blok",
   "/users": "master.users",
   "/log-user": "monitor.log_user",
 };

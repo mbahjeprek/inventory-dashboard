@@ -257,6 +257,27 @@ export type Blok = {
   urut: number;
 };
 export type BlokInput = Omit<Blok, "id" | "urut">;
+// Peta Blok: one box of the block map (kind 'label' = an estate name on the map) with its Master
+// Blok figures and the pupuk out to it in the period; null figures = another estate / not in Master Blok.
+export type PetaCell = {
+  id: number;
+  kind: "blok" | "label";
+  label: string;
+  gx: number;
+  gy: number;
+  h: number;
+  estate: string | null;
+  warna: string | null;
+  divisi: string | null;
+  tahun_tanam: string | null;
+  planting_material: string | null;
+  ha: number | null;
+  pkk: number | null;
+  kg: number | null;
+  terakhir: string | null;
+};
+export type PetaLegend = { id: number; dari: number; label: string; warna: string };
+export type PetaBlok = { estates: string[]; cells: PetaCell[]; legend: PetaLegend[] };
 
 export type AlatBerat = {
   id: number;
@@ -1041,6 +1062,11 @@ export const api = {
   createBlok: (payload: BlokInput) => req<{ success: boolean; id: number }>("/api/master-blok", { method: "POST", body: JSON.stringify(payload) }),
   updateBlok: (id: number, payload: BlokInput) => req<{ success: boolean }>(`/api/master-blok/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
   deleteBlok: (id: number) => req<{ success: boolean }>(`/api/master-blok/${id}`, { method: "DELETE" }),
+  petaBlok: (range: { dateFrom: string; dateTo: string }) => req<PetaBlok>(`/api/peta-blok?${new URLSearchParams(range)}`),
+  petaBlokWarna: (ids: number[], warna: string | null) =>
+    req<{ success: boolean }>("/api/peta-blok/warna", { method: "PUT", body: JSON.stringify({ ids, warna }) }),
+  petaBlokLegend: (items: { dari: number; label: string; warna: string }[]) =>
+    req<{ success: boolean }>("/api/peta-blok/legend", { method: "PUT", body: JSON.stringify({ items }) }),
 
   bbmSummary: (lokasi?: string, range?: { dateFrom?: string; dateTo?: string; asOf?: string }) => {
     const qs = new URLSearchParams(

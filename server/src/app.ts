@@ -188,6 +188,7 @@ function requiredPerms(req: express.Request): Need {
   if (is(/^\/karyawan(\/|$)/)) return ["master.karyawan"];
   if (is(/^\/alat-berat(\/|$)/)) return ["master.alat"];
   if (is(/^\/master-blok(\/|$)/)) return ["master.blok"];
+  if (is(/^\/peta-blok(\/|$)/)) return ["master.blok"];
   if (is(/^\/users(\/|$)/)) return ["master.users"];
   if (is(/^\/user-activity$/)) return ["monitor.log_user"];
   return "super";
@@ -2351,6 +2352,60 @@ app.delete("/api/master-blok/:id", async (req, res) => {
   if (!estateAllowed(req.user!, existing.estate)) return res.status(403).json({ error: "Akses ditolak" });
   await execute("DELETE FROM master_blok WHERE id = @id", { id: existing.id });
   await logActivity(req, { module: "PUPUK", estate: existing.estate, aksi: "Hapus Blok", objek: blokObjek(existing) });
+  res.json({ success: true });
+});
+
+// ---- Peta Blok (see schema.sql peta_blok / peta_legend) ----
+// The map's boxes with, per blok of the account's estates, its Master Blok figures (divisi, tahun
+// tanam, Ha, PKK) and the pupuk NPK that went out to it in the period (pupuk_log keluar by blok), as
+// the sheet's SUMIFS did; progress = kg / PKK. Other estates' boxes come without figures.
+const HEX = /^#[0-9a-f]{6}$/i;
+app.get("/api/peta-blok", async (req, res) => {
+  const { from, to } = laporanRange(req.query as Record<string, string>);
+  const estates = blokEstates(req);
+  const cells = await queryMany(
+    `SELECT c.id, c.kind, c.label, c.gx, c.gy, c.h, c.estate, c.warna,
+       m.divisi, m.tahun_tanam, m.planting_material, m.ha, m.pkk, p.kg, p.terakhir
+     FROM peta_blok c
+     LEFT JOIN (SELECT estate, upper(blok) b, string_agg(DISTINCT divisi, ' / ') divisi, string_agg(DISTINCT tahun_tanam::text, ' / ') tahun_tanam,
+                  string_agg(DISTINCT planting_material, ' / ') planting_material, SUM(ha)::float8 ha, SUM(pkk)::int pkk
+                FROM master_blok WHERE estate = ANY(@estates) GROUP BY 1, 2) m ON m.estate = c.estate AND m.b = upper(c.label)
+     LEFT JOIN (SELECT estate, upper(blok) b, SUM(keluar)::float8 kg, MAX(tanggal_iso) terakhir
+                FROM pupuk_log WHERE keluar > 0 AND estate = ANY(@estates) AND tanggal_iso BETWEEN @from AND @to GROUP BY 1, 2) p
+       ON p.estate = c.estate AND p.b = upper(c.label)
+     ORDER BY c.gy, c.gx`,
+    { estates, from, to }
+  );
+  const legend = await queryMany("SELECT id, dari, label, warna FROM peta_legend ORDER BY dari");
+  res.json({ estates, cells, legend });
+});
+
+// Warna Bebas: paint (or clear, warna null) a set of boxes.
+app.put("/api/peta-blok/warna", async (req, res) => {
+  const ids = (Array.isArray(req.body?.ids) ? req.body.ids : []).map(Number).filter(Number.isInteger).slice(0, 2000);
+  const warna = req.body?.warna === null ? null : String(req.body?.warna ?? "");
+  if (!ids.length) return res.status(400).json({ error: "Pilih blok" });
+  if (warna !== null && !HEX.test(warna)) return res.status(400).json({ error: "Warna tidak valid" });
+  await execute("UPDATE peta_blok SET warna = @warna WHERE id = ANY(@ids::int[]) AND kind = 'blok'", { ids, warna: warna?.toLowerCase() ?? null });
+  res.json({ success: true });
+});
+
+// The progress legend: from which % each colour starts, its text and colour.
+app.put("/api/peta-blok/legend", async (req, res) => {
+  const items = (Array.isArray(req.body?.items) ? req.body.items : []).map((i: any) => ({
+    dari: Number(i?.dari),
+    label: String(i?.label ?? "").trim(),
+    warna: String(i?.warna ?? ""),
+  }));
+  if (!items.length || items.length > 12) return res.status(400).json({ error: "Isi 1 - 12 warna" });
+  const bad = items.find((i: any) => !Number.isFinite(i.dari) || i.dari < 0 || !HEX.test(i.warna));
+  if (bad) return res.status(400).json({ error: "Batas % harus angka ≥ 0 dan warna harus dipilih" });
+  if (!items.some((i: any) => i.dari === 0)) return res.status(400).json({ error: "Harus ada warna yang mulai dari 0%" });
+  await withTransaction(async (c) => {
+    await execute("DELETE FROM peta_legend", {}, c);
+    for (const i of items) await execute("INSERT INTO peta_legend (dari, label, warna) VALUES (@dari, @label, @warna)", { ...i, warna: i.warna.toLowerCase() }, c);
+  });
+  await logActivity(req, { module: "PUPUK", estate: null, aksi: "Ubah Legenda Peta Blok", objek: items.map((i: any) => `${i.dari}%: ${i.warna}`).join(", ") });
   res.json({ success: true });
 });
 

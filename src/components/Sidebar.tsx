@@ -22,6 +22,7 @@ import {
   Contact,
   MapPin,
   Grid3x3,
+  Map as MapIcon,
   Check,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
@@ -85,6 +86,7 @@ const navSections: NavSection[] = [
       { to: "/karyawan", label: "Karyawan", icon: Users },
       { to: "/alat-berat", label: "Alat Berat", icon: Truck },
       { to: "/master-blok", label: "Blok", icon: Grid3x3 },
+      { to: "/peta-blok", label: "Peta Blok", icon: MapIcon },
       { to: "/users", label: "Pengguna", icon: KeyRound },
     ],
   },

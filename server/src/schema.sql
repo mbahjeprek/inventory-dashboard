@@ -650,3 +650,25 @@ CREATE TABLE IF NOT EXISTS master_blok (
   urut INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_master_blok_estate ON master_blok(estate, blok);
+
+-- Peta Blok: the AKSS block map as drawn in the "mapping pemupukan npk akss" sheet. One box per
+-- blok at grid column gx / row gy (h rows tall), the estate whose master_blok it is (NULL = not in
+-- Master Blok), and the colour someone painted on it (Warna Bebas, '#rrggbb', NULL = none).
+-- kind 'label' = a text label on the map (estate names).
+CREATE TABLE IF NOT EXISTS peta_blok (
+  id SERIAL PRIMARY KEY,
+  kind TEXT NOT NULL DEFAULT 'blok',
+  label TEXT NOT NULL,
+  gx INTEGER NOT NULL,
+  gy INTEGER NOT NULL,
+  h INTEGER NOT NULL DEFAULT 1,
+  estate TEXT,
+  warna TEXT
+);
+-- The colours of the progress pemupukan map: a blok gets the item with the highest `dari` (%) it reaches.
+CREATE TABLE IF NOT EXISTS peta_legend (
+  id SERIAL PRIMARY KEY,
+  dari DOUBLE PRECISION NOT NULL,
+  label TEXT NOT NULL,
+  warna TEXT NOT NULL
+);

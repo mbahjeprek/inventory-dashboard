@@ -11,6 +11,7 @@ import { KaryawanPage } from "./pages/KaryawanPage";
 import { InventoryBbmPage } from "./pages/InventoryBbmPage";
 import { AlatBeratPage } from "./pages/AlatBeratPage";
 import { MasterBlokPage } from "./pages/MasterBlokPage";
+import { PetaBlokPage } from "./pages/PetaBlokPage";
 import { MasterBarangPage } from "./pages/MasterBarangPage";
 import { UsersPage } from "./pages/UsersPage";
 import { DashboardPage } from "./pages/DashboardPage";
@@ -225,6 +226,14 @@ function App() {
                 element={
                   <RequirePageAccess>
                     <MasterBlokPage />
+                  </RequirePageAccess>
+                }
+              />
+              <Route
+                path="/peta-blok"
+                element={
+                  <RequirePageAccess>
+                    <PetaBlokPage />
                   </RequirePageAccess>
                 }
               />
