@@ -188,7 +188,8 @@ function requiredPerms(req: express.Request): Need {
   if (is(/^\/karyawan(\/|$)/)) return ["master.karyawan"];
   if (is(/^\/alat-berat(\/|$)/)) return ["master.alat"];
   if (is(/^\/master-blok(\/|$)/)) return ["master.blok"];
-  if (is(/^\/peta-blok(\/|$)/)) return ["master.blok"];
+  // Peta Blok: seen with Master Blok (or Ubah Peta Blok), its colours / legend changed only with Ubah Peta Blok.
+  if (is(/^\/peta-blok(\/|$)/)) return m === "GET" ? ["master.blok", "master.peta_edit"] : ["master.peta_edit"];
   if (is(/^\/users(\/|$)/)) return ["master.users"];
   if (is(/^\/user-activity$/)) return ["monitor.log_user"];
   return "super";
@@ -2386,7 +2387,21 @@ app.put("/api/peta-blok/warna", async (req, res) => {
   const warna = req.body?.warna === null ? null : String(req.body?.warna ?? "");
   if (!ids.length) return res.status(400).json({ error: "Pilih blok" });
   if (warna !== null && !HEX.test(warna)) return res.status(400).json({ error: "Warna tidak valid" });
-  await execute("UPDATE peta_blok SET warna = @warna WHERE id = ANY(@ids::int[]) AND kind = 'blok'", { ids, warna: warna?.toLowerCase() ?? null });
+  const changed = await queryMany<{ label: string; estate: string | null }>(
+    "UPDATE peta_blok SET warna = @warna WHERE id = ANY(@ids::int[]) AND kind = 'blok' AND warna IS DISTINCT FROM @warna RETURNING label, estate",
+    { ids, warna: warna?.toLowerCase() ?? null }
+  );
+  if (changed.length) {
+    const estates = [...new Set(changed.map((r) => r.estate).filter(Boolean))];
+    const list = changed.map((r) => r.label);
+    await logActivity(req, {
+      module: "PUPUK",
+      estate: estates.length === 1 ? estates[0] : null,
+      aksi: warna ? "Warnai Peta Blok" : "Hapus Warna Peta Blok",
+      objek: `${list.length} blok${warna ? ` → ${warna.toLowerCase()}` : ""}`,
+      detail: list.slice(0, 80).join(", ") + (list.length > 80 ? ` +${list.length - 80} lainnya` : ""),
+    });
+  }
   res.json({ success: true });
 });
 

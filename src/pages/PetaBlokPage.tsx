@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Download, Eraser, Hand, Maximize2, Minimize2, Minus, Paintbrush, Plus, Save, Search, Trash2 } from "lucide-react";
+import { Download, Eraser, Hand, Lock, LockOpen, Maximize2, Minimize2, Minus, Paintbrush, Plus, Save, Search, Trash2 } from "lucide-react";
 import { api, errorText, type PetaBlok, type PetaCell, type PetaLegend } from "../lib/api";
+import { useAuth } from "../context/AuthContext";
+import { can } from "../lib/access";
 
 const ESTATE_LABEL: Record<string, string> = { NILAM: "Nilam", KNS: "KNS", WJA: "WJA", ZAMRUD: "Zamrud", FIRUS: "Firus" };
 const fmt = (n: number | null | undefined, d = 0) => (n === null || n === undefined ? "-" : n.toLocaleString("id-ID", { minimumFractionDigits: d, maximumFractionDigits: d }));
@@ -63,7 +65,13 @@ export function PetaBlokPage() {
   const stroke = useRef<Set<number> | null>(null);
   // Warna Bebas: the brush paints the blok it is dragged over, Geser drags the map like everywhere else.
   const [tool, setTool] = useState<"kuas" | "geser">("kuas");
-  const painting = mode === "bebas" && tool === "kuas";
+  // Changing colours / the legend needs Ubah Peta Blok (Pengguna) and the page unlocked first, so a
+  // stray click or drag never paints; it opens locked every time.
+  const { user } = useAuth();
+  const canEdit = can(user, "master.peta_edit");
+  const [unlocked, setUnlocked] = useState(false);
+  const editing = canEdit && unlocked;
+  const painting = editing && mode === "bebas" && tool === "kuas";
   // Drag the map with the mouse (hold and pull), and Ctrl + scroll wheel zooms.
   const scrollRef = useRef<HTMLDivElement>(null);
   const pan = useRef<{ x: number; y: number; left: number; top: number } | null>(null);
@@ -246,6 +254,12 @@ export function PetaBlokPage() {
     </button>
   );
   const hp = hover ? pctOf(hover) : null;
+  // Warna Bebas, read-only: the colours painted (in the chosen estate) and on how many blok.
+  const usedColors = [
+    ...blok
+      .filter((c) => c.warna && (!estate || c.estate === estate))
+      .reduce((m, c) => m.set(c.warna!, (m.get(c.warna!) ?? 0) + 1), new Map<string, number>()),
+  ].sort((a, b) => b[1] - a[1]);
 
   return (
     <div ref={rootRef} className={full ? "fixed inset-0 z-50 overflow-auto bg-[var(--bg-page)] p-3 sm:p-4 space-y-3" : "space-y-4"}>
@@ -255,6 +269,25 @@ export function PetaBlokPage() {
           <p className="text-sm text-[var(--text-secondary)]">Mapping pemupukan NPK per blok, atau warnai blok sesuai kebutuhan</p>
         </div>
         <div className="flex flex-wrap gap-2">
+          {canEdit && (
+            <button
+              onClick={() => {
+                if (editing && legendDirty) {
+                  setLegend(data?.legend ?? []);
+                  setLegendDirty(false);
+                }
+                setUnlocked(!unlocked);
+              }}
+              title={editing ? "Kunci lagi supaya peta tidak berubah karena salah klik" : "Buka kunci untuk mengubah warna / legenda"}
+              className={`inline-flex items-center gap-1.5 text-sm px-3.5 py-2 rounded-md border ${
+                editing
+                  ? "border-[var(--accent-amber-border)] bg-[var(--accent-amber-bg)] text-[var(--accent-amber)]"
+                  : "border-[var(--border)] bg-[var(--bg-card)] text-[var(--text-primary)] hover:bg-[#f1f5f9]"
+              }`}
+            >
+              {editing ? <LockOpen size={16} /> : <Lock size={16} />} {editing ? "Edit terbuka · Kunci" : "Buka Edit"}
+            </button>
+          )}
           <button onClick={download} className="inline-flex items-center gap-1.5 text-sm px-3.5 py-2 rounded-md border border-[var(--border)] bg-[var(--bg-card)] hover:bg-[#f1f5f9]">
             <Download size={16} /> Unduh Gambar
           </button>
@@ -492,17 +525,18 @@ export function PetaBlokPage() {
 
           {mode === "progress" ? (
             <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg p-3 space-y-2">
-              <div className="text-xs font-semibold uppercase text-[var(--text-secondary)]">Legenda (bisa diubah)</div>
+              <div className="text-xs font-semibold uppercase text-[var(--text-secondary)]">Legenda{editing ? " (bisa diubah)" : ""}</div>
               {legend.map((l, i) => (
                 <div key={i} className="flex items-center gap-2">
-                  <input type="color" value={l.warna} onChange={(e) => setLegendItem(i, { warna: e.target.value })} className="w-9 h-8 rounded border border-[var(--border)] cursor-pointer shrink-0" title="Ganti warna" />
+                  <input type="color" disabled={!editing} value={l.warna} onChange={(e) => setLegendItem(i, { warna: e.target.value })} className="w-9 h-8 rounded border border-[var(--border)] cursor-pointer disabled:cursor-default shrink-0" title={editing ? "Ganti warna" : l.warna} />
                   <div className="flex-1 min-w-0">
-                    <input value={l.label} onChange={(e) => setLegendItem(i, { label: e.target.value })} className="w-full text-xs rounded border border-[var(--border)] px-2 py-1" />
+                    <input disabled={!editing} value={l.label} onChange={(e) => setLegendItem(i, { label: e.target.value })} className="w-full text-xs rounded border border-[var(--border)] px-2 py-1 disabled:border-transparent disabled:bg-transparent disabled:px-0 disabled:text-[var(--text-primary)]" />
                     <div className="flex items-center gap-1 mt-0.5 text-[11px] text-[var(--text-muted)]">
                       mulai
                       <input
                         type="number"
                         min={0}
+                        disabled={!editing}
                         value={l.dari}
                         onChange={(e) => setLegendItem(i, { dari: Number(e.target.value) })}
                         className="w-14 rounded border border-[var(--border)] px-1 py-0.5 text-[11px]"
@@ -510,14 +544,17 @@ export function PetaBlokPage() {
                       % · {countOf(l)} blok
                     </div>
                   </div>
-                  <button onClick={() => (setLegend((x) => x.filter((_, j) => j !== i)), setLegendDirty(true))} title="Hapus" className="p-1 text-[var(--text-muted)] hover:text-[var(--accent-red)]">
-                    <Trash2 size={14} />
-                  </button>
+                  {editing && (
+                    <button onClick={() => (setLegend((x) => x.filter((_, j) => j !== i)), setLegendDirty(true))} title="Hapus" className="p-1 text-[var(--text-muted)] hover:text-[var(--accent-red)]">
+                      <Trash2 size={14} />
+                    </button>
+                  )}
                 </div>
               ))}
               <div className="flex items-center gap-2 text-[11px] text-[var(--text-muted)]">
                 <span className="inline-block w-9 h-4 rounded border border-[var(--border)]" style={{ background: NO_DATA }} /> tidak ada di Master Blok / estate lain
               </div>
+              {editing && (
               <div className="flex gap-2 pt-1">
                 <button
                   onClick={() => (setLegend((x) => [...x, { id: 0, dari: 0, label: "Warna baru", warna: "#4a86e8" }]), setLegendDirty(true))}
@@ -533,7 +570,25 @@ export function PetaBlokPage() {
                   <Save size={13} /> {saving ? "Menyimpan..." : "Simpan legenda"}
                 </button>
               </div>
+              )}
+              {!editing && <LockNote canEdit={canEdit} />}
               <p className="text-[11px] text-[var(--text-muted)]">Progress = pupuk NPK keluar ke blok (kg, Inventory Pupuk) ÷ jumlah pokok (PKK, Master Blok) × 100%, seperti di sheet.</p>
+            </div>
+          ) : !editing ? (
+            <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg p-3 space-y-2">
+              <div className="text-xs font-semibold uppercase text-[var(--text-secondary)]">Warna yang dipakai</div>
+              {usedColors.length === 0 ? (
+                <p className="text-xs text-[var(--text-muted)]">Belum ada blok yang diwarnai.</p>
+              ) : (
+                usedColors.map(([w, n]) => (
+                  <div key={w} className="flex items-center gap-2 text-xs">
+                    <span className="inline-block w-9 h-5 rounded border border-[var(--border)]" style={{ background: w }} />
+                    <span className="text-[var(--text-secondary)]">{w}</span>
+                    <span className="ml-auto">{n} blok</span>
+                  </div>
+                ))
+              )}
+              <LockNote canEdit={canEdit} />
             </div>
           ) : (
             <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg p-3 space-y-2">
@@ -588,5 +643,17 @@ export function PetaBlokPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+// Why the map can't be changed right now.
+function LockNote({ canEdit }: { canEdit: boolean }) {
+  return (
+    <p className="flex items-start gap-1.5 text-[11px] text-[var(--text-muted)] pt-1">
+      <Lock size={12} className="shrink-0 mt-0.5" />
+      {canEdit
+        ? "Terkunci. Klik Buka Edit di atas untuk mengubah warna atau legenda."
+        : "Hanya lihat. Untuk mengubah warna atau legenda, minta Super User mencentang Ubah Peta Blok di menu Pengguna."}
+    </p>
   );
 }

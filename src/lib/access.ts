@@ -39,6 +39,7 @@ export const OTHER_PERMS: { group: string; items: { key: string; label: string }
       { key: "master.karyawan", label: "Karyawan" },
       { key: "master.alat", label: "Alat Berat" },
       { key: "master.blok", label: "Blok" },
+      { key: "master.peta_edit", label: "Ubah Peta Blok" },
       { key: "master.users", label: "Pengguna" },
     ],
   },
@@ -138,6 +139,8 @@ export function pageAllowed(user: AuthUser | null, path: string): boolean {
   if (path === OPNAME_PATH || path.startsWith(`${OPNAME_PATH}/`)) return hasOpnameAccess(user);
   if (path === PINJAMAN_PATH) return MODULES.some((m) => canModule(user, m));
   if (path === PASIEN_PATH) return canModule(user, "KLINIK");
+  // Peta Blok: seen with Master Blok, or by an account that may change the map.
+  if (path === "/peta-blok") return can(user, "master.blok") || can(user, "master.peta_edit");
   return !!PAGE_PERMS[path] && can(user, PAGE_PERMS[path]);
 }
 

@@ -32,6 +32,7 @@ export const ALL_PERMS: string[] = [
   "master.karyawan",
   "master.alat",
   "master.blok",
+  "master.peta_edit",
   "master.users",
   "monitor.log_user",
 ];
