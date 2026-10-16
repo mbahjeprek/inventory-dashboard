@@ -187,6 +187,7 @@ function requiredPerms(req: express.Request): Need {
   if (is(/^\/master-oli(\/|$)/)) return ["master.oli"];
   if (is(/^\/karyawan(\/|$)/)) return ["master.karyawan"];
   if (is(/^\/alat-berat(\/|$)/)) return ["master.alat"];
+  if (is(/^\/master-blok(\/|$)/)) return ["master.blok"];
   if (is(/^\/users(\/|$)/)) return ["master.users"];
   if (is(/^\/user-activity$/)) return ["monitor.log_user"];
   return "super";
@@ -2235,6 +2236,121 @@ app.delete("/api/alat-berat/:id", requireSuperuser, async (req, res) => {
   if (!existing) return res.status(404).json({ error: "Not found" });
 
   await execute("DELETE FROM alat_berat WHERE id = @id", { id: req.params.id });
+  res.json({ success: true });
+});
+
+// ---- Master Blok (see schema.sql master_blok) ----
+// The blocks of the account's estates, in the sheet's order unless sorted. A superuser or an
+// account with master.blok changes them; an estate account only those of its own estates.
+const BLOK_SORT: Record<string, string> = {
+  urut: "urut", estate: "estate", divisi: "divisi", blok: "blok", planting_material: "planting_material",
+  tahun_tanam: "tahun_tanam", ha: "ha", sph: "sph", pkk: "pkk",
+};
+const blokEstates = (req: express.Request) => ESTATES.filter((e) => estateAllowed(req.user!, e)) as string[];
+function blokFilters(req: express.Request) {
+  const q = req.query as Record<string, string>;
+  const estates = blokEstates(req);
+  const conditions = ["estate = ANY(@estates)"];
+  const params: any = { estates: q.estate && estates.includes(q.estate) ? [q.estate] : estates };
+  for (const f of ["divisi", "planting_material"]) {
+    if (q[f]) {
+      conditions.push(`${f} = @${f}`);
+      params[f] = q[f];
+    }
+  }
+  if (/^\d{4}$/.test(q.tahun_tanam ?? "")) {
+    conditions.push("tahun_tanam = @tahun_tanam");
+    params.tahun_tanam = Number(q.tahun_tanam);
+  }
+  // Each word anywhere in blok / divisi / planting material ("I-5" only finds I-5, not I5).
+  wordSearch(q.search || "", ["blok", "divisi", "planting_material"], conditions, params);
+  return { where: "WHERE " + conditions.join(" AND "), params };
+}
+
+app.get("/api/master-blok/options", async (req, res) => {
+  const estates = blokEstates(req);
+  const col = async (c: string) =>
+    (await queryMany<{ v: any }>(`SELECT DISTINCT ${c} v FROM master_blok WHERE estate = ANY(@estates) AND ${c} IS NOT NULL ORDER BY 1`, { estates })).map((r) => r.v);
+  res.json({ estates, divisi: await col("divisi"), planting_material: await col("planting_material"), tahun_tanam: await col("tahun_tanam") });
+});
+
+app.get("/api/master-blok", async (req, res) => {
+  const q = req.query as Record<string, string>;
+  const { where, params } = blokFilters(req);
+  const sortCol = BLOK_SORT[q.sortBy] ?? "urut";
+  const dir = q.sortDir === "desc" ? "DESC" : "ASC";
+  const totals = (await queryOne<any>(
+    `SELECT COUNT(*)::int c, COALESCE(SUM(ha), 0)::float8 ha, COALESCE(SUM(pkk), 0)::int pkk FROM master_blok ${where}`,
+    params
+  ))!;
+  const limit = Math.min(parseInt(q.pageSize) || 50, 1000);
+  const offset = (Math.max(parseInt(q.page) || 1, 1) - 1) * limit;
+  // An exact blok match comes first when searching (so "I5" lists I5 before I50).
+  const exact = q.search?.trim() ? "(upper(blok) = upper(@exact)) DESC," : "";
+  const data = await queryMany(
+    `SELECT * FROM master_blok ${where} ORDER BY ${exact} ${sortCol} ${dir} NULLS LAST, urut, id LIMIT @limit OFFSET @offset`,
+    { ...params, exact: q.search?.trim() ?? "", limit, offset }
+  );
+  res.json({ data, total: totals.c, totalHa: totals.ha, totalPkk: totals.pkk, page: parseInt(q.page) || 1, pageSize: limit });
+});
+
+function blokPayload(b: any): { data?: Record<string, any>; error?: string } {
+  const t = (v: unknown) => String(v ?? "").replace(/\s+/g, " ").trim();
+  const num = (v: unknown) => (v === "" || v === null || v === undefined || !Number.isFinite(Number(v)) ? null : Number(v));
+  const data = {
+    estate: t(b.estate).toUpperCase(),
+    divisi: t(b.divisi),
+    blok: t(b.blok),
+    planting_material: t(b.planting_material),
+    tahun_tanam: num(b.tahun_tanam),
+    ha: num(b.ha),
+    sph: num(b.sph),
+    pkk: num(b.pkk),
+  };
+  if (!(ESTATES as readonly string[]).includes(data.estate)) return { error: "Pilih estate" };
+  if (!data.blok) return { error: "Nama blok wajib diisi" };
+  if (data.tahun_tanam !== null && !Number.isInteger(data.tahun_tanam)) return { error: "Tahun tanam harus tahun (cth. 2013)" };
+  for (const f of ["sph", "pkk"] as const) if (data[f] !== null && !Number.isInteger(data[f])) return { error: `${f.toUpperCase()} harus bilangan bulat` };
+  return { data };
+}
+const blokObjek = (r: { estate: string; divisi: string; blok: string; tahun_tanam: number | null }) =>
+  `${r.estate} · Div ${r.divisi || "-"} · Blok ${r.blok}${r.tahun_tanam ? ` (TT ${r.tahun_tanam})` : ""}`;
+const BLOK_LABELS = { estate: "Estate", divisi: "Divisi", blok: "Blok", planting_material: "Planting Material", tahun_tanam: "Tahun Tanam", ha: "Ha", sph: "SPH", pkk: "PKK" };
+
+app.post("/api/master-blok", async (req, res) => {
+  const p = blokPayload(req.body);
+  if (!p.data) return res.status(400).json({ error: p.error });
+  if (!estateAllowed(req.user!, p.data.estate)) return res.status(403).json({ error: "Akses ditolak" });
+  const row = await queryOne<{ id: number }>(
+    `INSERT INTO master_blok (estate, divisi, blok, planting_material, tahun_tanam, ha, sph, pkk, urut)
+     VALUES (@estate, @divisi, @blok, @planting_material, @tahun_tanam, @ha, @sph, @pkk, (SELECT COALESCE(MAX(urut), 0) + 1 FROM master_blok)) RETURNING id`,
+    p.data
+  );
+  await logActivity(req, { module: "PUPUK", estate: p.data.estate, aksi: "Tambah Blok", objek: blokObjek(p.data as any) });
+  res.json({ success: true, id: row!.id });
+});
+
+app.put("/api/master-blok/:id", async (req, res) => {
+  const existing = await queryOne<any>("SELECT * FROM master_blok WHERE id = @id", { id: req.params.id });
+  if (!existing) return res.status(404).json({ error: "Blok tidak ditemukan" });
+  const p = blokPayload(req.body);
+  if (!p.data) return res.status(400).json({ error: p.error });
+  if (!estateAllowed(req.user!, existing.estate) || !estateAllowed(req.user!, p.data.estate)) return res.status(403).json({ error: "Akses ditolak" });
+  await execute(
+    `UPDATE master_blok SET estate = @estate, divisi = @divisi, blok = @blok, planting_material = @planting_material,
+       tahun_tanam = @tahun_tanam, ha = @ha, sph = @sph, pkk = @pkk WHERE id = @id`,
+    { ...p.data, id: existing.id }
+  );
+  await logActivity(req, { module: "PUPUK", estate: p.data.estate, aksi: "Edit Blok", objek: blokObjek(p.data as any), detail: describeChanges(existing, p.data, BLOK_LABELS) });
+  res.json({ success: true });
+});
+
+app.delete("/api/master-blok/:id", async (req, res) => {
+  const existing = await queryOne<any>("SELECT * FROM master_blok WHERE id = @id", { id: req.params.id });
+  if (!existing) return res.status(404).json({ error: "Blok tidak ditemukan" });
+  if (!estateAllowed(req.user!, existing.estate)) return res.status(403).json({ error: "Akses ditolak" });
+  await execute("DELETE FROM master_blok WHERE id = @id", { id: existing.id });
+  await logActivity(req, { module: "PUPUK", estate: existing.estate, aksi: "Hapus Blok", objek: blokObjek(existing) });
   res.json({ success: true });
 });
 

@@ -17,6 +17,7 @@
     "import:logs": "tsx server/src/importLogs.ts",
     "import:karyawan": "tsx server/src/importKaryawan.ts",
     "import:alat-berat": "tsx server/src/importAlatBerat.ts",
+    "import:blok": "tsx server/src/importBlok.ts",
     "import:bbm": "tsx server/src/importBbm.ts",
     "import:klinik-laporan": "tsx server/src/importKlinikLaporan.ts",
     "build:pasien": "tsx server/src/buildPasien.ts",

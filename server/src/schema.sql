@@ -633,3 +633,20 @@ CREATE TABLE IF NOT EXISTS klinik_obat_alias (
   nama_contoh TEXT NOT NULL DEFAULT '',
   created_at TIMESTAMPTZ DEFAULT now()
 );
+
+-- Master Blok: the estate's blocks as in the "AKSS - BLOCK DETAIL" sheet, row for row. A blok name is
+-- kept exactly as written ("I-5" is block minus 5, a different block from "I5"), and one blok can
+-- have several rows (planted in two years, or split between divisi). urut = the sheet's order.
+CREATE TABLE IF NOT EXISTS master_blok (
+  id SERIAL PRIMARY KEY,
+  estate TEXT NOT NULL,
+  divisi TEXT NOT NULL DEFAULT '',
+  blok TEXT NOT NULL,
+  planting_material TEXT NOT NULL DEFAULT '',
+  tahun_tanam INTEGER,
+  ha DOUBLE PRECISION,
+  sph INTEGER,
+  pkk INTEGER,
+  urut INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_master_blok_estate ON master_blok(estate, blok);

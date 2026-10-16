@@ -38,6 +38,7 @@ export const OTHER_PERMS: { group: string; items: { key: string; label: string }
       { key: "master.oli", label: "Oli" },
       { key: "master.karyawan", label: "Karyawan" },
       { key: "master.alat", label: "Alat Berat" },
+      { key: "master.blok", label: "Blok" },
       { key: "master.users", label: "Pengguna" },
     ],
   },
@@ -109,6 +110,7 @@ export const PAGE_PERMS: Record<string, string> = {
   "/master-oli": "master.oli",
   "/karyawan": "master.karyawan",
   "/alat-berat": "master.alat",
+  "/master-blok": "master.blok",
   "/users": "master.users",
   "/log-user": "monitor.log_user",
 };

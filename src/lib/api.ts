@@ -243,6 +243,21 @@ export type Karyawan = {
   nik_ktp: string;
 };
 
+// Master Blok: one row of the estate block sheet (a blok may have several rows, see schema.sql).
+export type Blok = {
+  id: number;
+  estate: string;
+  divisi: string;
+  blok: string;
+  planting_material: string;
+  tahun_tanam: number | null;
+  ha: number | null;
+  sph: number | null;
+  pkk: number | null;
+  urut: number;
+};
+export type BlokInput = Omit<Blok, "id" | "urut">;
+
 export type AlatBerat = {
   id: number;
   kode: string;
@@ -1017,6 +1032,15 @@ export const api = {
     req<{ success: boolean }>(`/api/alat-berat/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
 
   deleteAlatBerat: (id: number) => req<{ success: boolean }>(`/api/alat-berat/${id}`, { method: "DELETE" }),
+
+  masterBlok: (params: Record<string, string | number>) =>
+    req<{ data: Blok[]; total: number; totalHa: number; totalPkk: number; page: number; pageSize: number }>(
+      `/api/master-blok?${new URLSearchParams(params as any)}`
+    ),
+  masterBlokOptions: () => req<{ estates: string[]; divisi: string[]; planting_material: string[]; tahun_tanam: number[] }>("/api/master-blok/options"),
+  createBlok: (payload: BlokInput) => req<{ success: boolean; id: number }>("/api/master-blok", { method: "POST", body: JSON.stringify(payload) }),
+  updateBlok: (id: number, payload: BlokInput) => req<{ success: boolean }>(`/api/master-blok/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
+  deleteBlok: (id: number) => req<{ success: boolean }>(`/api/master-blok/${id}`, { method: "DELETE" }),
 
   bbmSummary: (lokasi?: string, range?: { dateFrom?: string; dateTo?: string; asOf?: string }) => {
     const qs = new URLSearchParams(
