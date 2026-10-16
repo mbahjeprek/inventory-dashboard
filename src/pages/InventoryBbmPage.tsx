@@ -12,7 +12,7 @@ import { BbmBatchModal } from "../components/BbmBatchModal";
 import { EditBbmModal } from "../components/EditBbmModal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useAuth } from "../context/AuthContext";
-import { can } from "../lib/access";
+import { can, canEditRow } from "../lib/access";
 import { EvidenceLink } from "../components/EvidenceInput";
 import { tanggalWaktu } from "../lib/datetime";
 import { loanTag } from "../lib/opname";
@@ -421,7 +421,7 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
                               {loanTag(r.pinjaman_id, r.keterangan)}
                             </Link>
                           )}
-                          {!r.pinjaman_id && canEdit && (<button
+                          {!r.pinjaman_id && canEditRow(user, "BBM", r) && (<button
                             onClick={() => setEditing(r)}
                             title="Edit"
                             className="p-1.5 rounded-md border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[#f1f5f9]"

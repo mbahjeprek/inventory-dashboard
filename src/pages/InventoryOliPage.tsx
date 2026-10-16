@@ -11,7 +11,7 @@ import { OliTransactionModal } from "../components/OliTransactionModal";
 import { EditOliModal } from "../components/EditOliModal";
 import { fetchAllRows, type TableReport } from "../lib/printTable";
 import { useAuth } from "../context/AuthContext";
-import { can } from "../lib/access";
+import { can, canEditRow } from "../lib/access";
 import { EvidenceLink } from "../components/EvidenceInput";
 import { tanggalWaktu } from "../lib/datetime";
 import { OliBatchModal } from "../components/SaldoBatchModal";
@@ -321,7 +321,7 @@ export function InventoryOliPage({ estate }: { estate: string }) {
                               {loanTag(r.pinjaman_id, r.keterangan)}
                             </Link>
                           )}
-                          {!r.pinjaman_id && canEdit && (
+                          {!r.pinjaman_id && canEditRow(user, "OLI", r) && (
                             <button
                               onClick={() => setEditing(r)}
                               title="Edit"

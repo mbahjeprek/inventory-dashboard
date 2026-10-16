@@ -3,7 +3,7 @@ import { AlertTriangle, BedDouble, ChevronLeft, ChevronRight, ClipboardList, Hos
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { api, errorText, type Kunjungan, type LaporanCount, type LaporanKlinikSummary } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
-import { can } from "../lib/access";
+import { can, canEditRow } from "../lib/access";
 import { StatCard } from "./StatCard";
 import { ExportButtons } from "./ExportButtons";
 import { ConfirmDialog } from "./ConfirmDialog";
@@ -398,7 +398,7 @@ export function KlinikLaporanTab({ klinik }: { klinik: string }) {
   };
   const rowActions = (k: Kunjungan) => (
     <div className="inline-flex gap-1.5">
-      {canEdit && (
+      {canEditRow(user, "KLINIK", k as { created_at?: string | null }) && (
         <button onClick={() => setEditing(k)} title="Edit kunjungan" className="p-1.5 rounded-md border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[#f1f5f9]">
           <Pencil size={14} />
         </button>

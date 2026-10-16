@@ -78,6 +78,16 @@ export function can(user: AuthUser | null, perm: string): boolean {
   return user.role === "superuser" || (user.perms ?? []).includes(perm);
 }
 
+// Edit terbatas (same as the server's editTooLate): without the module's Approve, a row can be edited
+// only within EDIT_DAYS of when it was input; rows imported from a sheet (no input time) not at all.
+export const EDIT_DAYS = 3;
+export function canEditRow(user: AuthUser | null, m: Module, row: { input_at?: string | null; created_at?: string | null }): boolean {
+  if (!can(user, modulePerm(m, "edit"))) return false;
+  if (user!.role === "superuser" || can(user, modulePerm(m, "approve"))) return true;
+  const at = row.input_at ?? row.created_at;
+  return !!at && Date.now() - new Date(at).getTime() <= EDIT_DAYS * 86400000;
+}
+
 export function canModule(user: AuthUser | null, m: Module): boolean {
   return can(user, modulePerm(m, "view"));
 }

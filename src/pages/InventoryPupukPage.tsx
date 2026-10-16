@@ -11,7 +11,7 @@ import { PupukTransactionModal } from "../components/PupukTransactionModal";
 import { EditPupukModal } from "../components/EditPupukModal";
 import { fetchAllRows, type TableReport } from "../lib/printTable";
 import { useAuth } from "../context/AuthContext";
-import { can } from "../lib/access";
+import { can, canEditRow } from "../lib/access";
 import { EvidenceLink } from "../components/EvidenceInput";
 import { tanggalWaktu } from "../lib/datetime";
 import { PupukBatchModal } from "../components/SaldoBatchModal";
@@ -371,7 +371,7 @@ export function InventoryPupukPage({ estate }: { estate: string }) {
                               {loanTag(r.pinjaman_id, r.keterangan)}
                             </Link>
                           )}
-                          {!r.pinjaman_id && canEdit && (<button
+                          {!r.pinjaman_id && canEditRow(user, "PUPUK", r) && (<button
                             onClick={() => setEditing(r)}
                             title="Edit"
                             className="p-1.5 rounded-md border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[#f1f5f9]"

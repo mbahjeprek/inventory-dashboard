@@ -4,7 +4,7 @@ import { api, type StockOutRecord } from "../lib/api";
 import { EditStockOutModal } from "../components/EditStockOutModal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useAuth } from "../context/AuthContext";
-import { can } from "../lib/access";
+import { can, canEditRow } from "../lib/access";
 import { ExportButtons } from "../components/ExportButtons";
 import { fetchAllRows, type TableReport } from "../lib/printTable";
 import { EvidenceLink } from "../components/EvidenceInput";
@@ -204,7 +204,7 @@ export function StockOutPage({ embedded = false }: { embedded?: boolean }) {
                     {showActions && (
                       <td className="px-4 py-2.5 text-right">
                         <div className="inline-flex gap-1.5">
-                          {canEdit && (<button
+                          {canEditRow(user, "GUDANG", r as { input_at?: string | null; created_at?: string | null }) && (<button
                             onClick={() => setEditing(r)}
                             title="Edit"
                             className="p-1.5 rounded-md border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[#f1f5f9]"

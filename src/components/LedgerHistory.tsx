@@ -7,7 +7,7 @@ import { EditLedgerTxModal } from "./EditLedgerTxModal";
 import { fetchAllRows, type TableReport } from "../lib/printTable";
 import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
-import { can } from "../lib/access";
+import { can, canEditRow } from "../lib/access";
 import { EvidenceLink } from "./EvidenceInput";
 import { loanTag } from "../lib/opname";
 
@@ -255,7 +255,7 @@ export function LedgerHistory({ scope, type, refreshKey }: { scope: StockScope; 
                           </Link>
                         ) : (
                           <div className="inline-flex gap-1.5">
-                            {canEdit && (<button
+                            {canEditRow(user, isKlinik ? "KLINIK" : "GUDANG", r) && (<button
                               onClick={() => setEditing(r)}
                               title="Edit transaksi"
                               className="p-1.5 rounded-md border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[#f1f5f9]"

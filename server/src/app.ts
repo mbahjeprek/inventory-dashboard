@@ -343,6 +343,23 @@ function requireSuperuser(req: express.Request, res: express.Response, next: exp
   return res.status(403).json({ error: "Akses ditolak" });
 }
 
+// Edit terbatas: an account that isn't a supervisor of the module (its Approve) may change a row only
+// within EDIT_DAYS of when it was input; an older row - or one imported from a sheet - goes through a
+// supervisor or Super User. Every edit is still logged with its before / after.
+const EDIT_DAYS = 3;
+function editTooLate(req: express.Request, res: express.Response, module: string, row: { input_at?: unknown; created_at?: unknown }) {
+  const u = req.user!;
+  if (u.role === "superuser" || u.perms.includes(`${module}.approve`)) return false;
+  const at = (row.input_at ?? row.created_at) as string | Date | null | undefined;
+  if (at && Date.now() - new Date(at).getTime() <= EDIT_DAYS * 86400000) return false;
+  res.status(403).json({
+    error: at
+      ? `Transaksi ini diinput lebih dari ${EDIT_DAYS} hari lalu, jadi hanya bisa diubah oleh supervisor (hak Approve) atau Super User.`
+      : "Transaksi lama dari data import hanya bisa diubah oleh supervisor (hak Approve) atau Super User.",
+  });
+  return true;
+}
+
 function estateAllowed(user: SessionUser, estate: string | null | undefined) {
   return user.role === "superuser" || (!!estate && user.estates.includes(estate));
 }
@@ -1462,6 +1479,7 @@ app.post("/api/transactions", requireEstate("NILAM"), async (req, res) => {
 app.put("/api/transactions/:id", requireSuperuser, async (req, res) => {
   const existing = await queryOne<any>("SELECT * FROM transactions WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Not found" });
+  if (editTooLate(req, res, "gudang", existing)) return;
 
   const { tujuan, type, qty, note, penerima } = req.body;
   if (!["IN", "OUT"].includes(type) || !qty || qty <= 0) {
@@ -1659,6 +1677,7 @@ app.get("/api/stock-in/vendors", requireEstate("NILAM"), async (_req, res) => {
 app.put("/api/stock-in/:id", requireSuperuser, async (req, res) => {
   const existing = await queryOne("SELECT * FROM stock_in_log WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Not found" });
+  if (editTooLate(req, res, "gudang", existing)) return;
   const newEvidence = await checkEditEvidence(req, res, existing.evidence_id);
   if (newEvidence === undefined) return;
 
@@ -1779,6 +1798,7 @@ app.get("/api/stock-out", requireEstate("NILAM"), async (req, res) => {
 app.put("/api/stock-out/:id", requireSuperuser, async (req, res) => {
   const existing = await queryOne("SELECT * FROM stock_out_log WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Not found" });
+  if (editTooLate(req, res, "gudang", existing)) return;
   const newEvidence = await checkEditEvidence(req, res, existing.evidence_id);
   if (newEvidence === undefined) return;
 
@@ -2775,6 +2795,7 @@ app.put("/api/bbm/:id", requireSuperuser, async (req, res) => {
   const existing = await queryOne<any>("SELECT * FROM bbm_log WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Not found" });
   if (!estateAllowed(req.user!, existing.lokasi)) return res.status(403).json({ error: "Akses ditolak" });
+  if (editTooLate(req, res, "bbm", existing)) return;
   const newEvidence = await checkEditEvidence(req, res, existing.evidence_id);
   if (newEvidence === undefined) return;
 
@@ -3010,6 +3031,7 @@ app.put("/api/pupuk/:id", requireSuperuser, async (req, res) => {
   const existing = await queryOne<any>("SELECT * FROM pupuk_log WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Not found" });
   if (!estateAllowed(req.user!, existing.estate)) return res.status(403).json({ error: "Akses ditolak" });
+  if (editTooLate(req, res, "pupuk", existing)) return;
   const newEvidence = await checkEditEvidence(req, res, existing.evidence_id);
   if (newEvidence === undefined) return;
   const b = req.body;
@@ -3968,6 +3990,7 @@ app.put("/api/klinik-laporan/kunjungan/:id", async (req, res) => {
   const existing = await queryOne<any>("SELECT * FROM klinik_kunjungan WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Kunjungan tidak ditemukan" });
   if (!estateAllowed(req.user!, existing.klinik)) return res.status(403).json({ error: "Akses ditolak" });
+  if (editTooLate(req, res, "klinik", existing)) return;
   const p = kunjunganPayload(req.body ?? {});
   if (p.error) return res.status(400).json({ error: p.error });
   const newEvidence = await checkEditEvidence(req, res, existing.evidence_id);
@@ -4597,6 +4620,7 @@ for (const lr of LEDGER_ROUTES) {
   app.put(`/api/${lr.path}/history/:id`, requireSuperuser, async (req, res) => {
     const existing = await queryOne<any>(`SELECT * FROM ${l.tx} WHERE id = @id`, { id: req.params.id });
     if (!existing) return res.status(404).json({ error: "Not found" });
+    if (editTooLate(req, res, l === KLINIK_LEDGER ? "klinik" : "gudang", existing)) return;
     if (existing.transfer_from_id) return res.status(400).json({ error: TRANSFER_LOCKED });
     const newEvidence = await checkEditEvidence(req, res, existing.evidence_id);
     if (newEvidence === undefined) return;
@@ -5967,6 +5991,7 @@ app.put("/api/oli/:id", requireSuperuser, async (req, res) => {
   const existing = await queryOne<any>("SELECT * FROM oli_log WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Not found" });
   if (!estateAllowed(req.user!, existing.estate)) return res.status(403).json({ error: "Akses ditolak" });
+  if (editTooLate(req, res, "oli", existing)) return;
   const newEvidence = await checkEditEvidence(req, res, existing.evidence_id);
   if (newEvidence === undefined) return;
   const b = req.body;
