@@ -5006,7 +5006,7 @@ async function opnameSnapshot(module: OpnameModule, estate: string, client?: Poo
       `SELECT j kode, j nama, 'LTR' satuan, '' exp,
          COALESCE((SELECT saldo_stock FROM oli_log WHERE jenis_oli = j AND estate = @estate AND saldo_stock IS NOT NULL
                    ORDER BY tanggal_iso DESC, id DESC LIMIT 1), 0)::float8 stok_sistem
-       FROM (SELECT nama j FROM master_oli UNION SELECT DISTINCT jenis_oli FROM oli_log WHERE estate = @estate) x ORDER BY j`,
+       FROM (SELECT nama j FROM master_oli WHERE ${OLI_AT_ESTATE} UNION SELECT DISTINCT jenis_oli FROM oli_log WHERE estate = @estate) x ORDER BY j`,
       { estate },
       client
     );
@@ -5147,7 +5147,7 @@ async function opnameCurrent(module: OpnameModule, estate: string, kode: string,
   }
   if (module === "BBM" && !BBM_JENIS.includes(kode)) return null;
   if (!isSaldoModule(module)) return null;
-  if (module === "OLI" && !(await queryOne("SELECT 1 FROM master_oli WHERE nama = @kode", { kode }))) return null;
+  if (module === "OLI" && !(await queryOne(`SELECT 1 FROM master_oli WHERE nama = @kode AND ${OLI_AT_ESTATE}`, { kode, estate }))) return null;
   const last = await latestSaldoRow(module, estate, kode);
   return { kode, nama: kode, satuan: module === "PUPUK" ? "KG" : "LTR", exp: "", stok_sistem: last?.saldo_stock ?? 0 };
 }
@@ -5811,6 +5811,8 @@ app.post("/api/stock-opname/:id/cancel", async (req, res) => {
 // Same shape as Inventory Pupuk: a running saldo per estate + jenis oli. Nilam was imported from its
 // "STOK OLI" sheet; the other estates start empty.
 const OLI_ESTATES = ["NILAM", "KNS", "WJA", "ZAMRUD", "FIRUS"];
+// A master oli jenis is used at @estate: listed for it, or for every estate (estates '').
+const OLI_AT_ESTATE = "(estates = '' OR @estate = ANY(string_to_array(estates, ',')))";
 
 function checkOliEstate(req: express.Request, res: express.Response, estate: string) {
   if (!OLI_ESTATES.includes(estate)) {
@@ -5871,8 +5873,8 @@ app.get("/api/oli/summary", async (req, res) => {
 app.get("/api/oli/options", async (req, res) => {
   const { estate = "" } = req.query as Record<string, string>;
   if (!checkOliEstate(req, res, estate)) return;
-  // The jenis in master oli; transactions may only use these.
-  const rows = await queryMany<{ v: string }>("SELECT nama v FROM master_oli ORDER BY nama");
+  // The jenis in master oli used at this estate; transactions may only use these.
+  const rows = await queryMany<{ v: string }>(`SELECT nama v FROM master_oli WHERE ${OLI_AT_ESTATE} ORDER BY nama`, { estate });
   res.json({ jenis: rows.map((r) => r.v) });
 });
 
@@ -5911,8 +5913,8 @@ app.post("/api/oli", async (req, res) => {
   if (!ISO_DATE.test(tanggal_iso || "")) return res.status(400).json({ error: "Tanggal tidak valid" });
 
   const jenis = String(jenis_oli).trim().toUpperCase();
-  if (!(await queryOne("SELECT 1 FROM master_oli WHERE nama = @jenis", { jenis }))) {
-    return res.status(400).json({ error: `Jenis oli ${jenis} belum ada di Master Data Oli` });
+  if (!(await queryOne(`SELECT 1 FROM master_oli WHERE nama = @jenis AND ${OLI_AT_ESTATE}`, { jenis, estate }))) {
+    return res.status(400).json({ error: `Jenis oli ${jenis} belum ada di Master Data Oli untuk estate ${estate}` });
   }
   const evidenceId = await claimEvidence(req, res);
   if (evidenceId === undefined) return;
@@ -6022,6 +6024,8 @@ const masterOliPayload = (b: any) => ({
   nama: String(b?.nama ?? "").trim().toUpperCase(),
   satuan: String(b?.satuan ?? "").trim().toUpperCase() || "LTR",
   keterangan: String(b?.keterangan ?? "").trim(),
+  // The estates it is used in ('' = all), in the estates' order.
+  estates: ESTATES.filter((e) => (Array.isArray(b?.estates) ? b.estates : []).includes(e)).join(","),
 });
 
 app.get("/api/master-oli", async (req, res) => {
@@ -6042,10 +6046,10 @@ app.post("/api/master-oli", async (req, res) => {
   if (!o.kode || !o.nama) return res.status(400).json({ error: "Kode dan nama jenis oli wajib diisi" });
   try {
     const row = await queryOne<{ id: number }>(
-      "INSERT INTO master_oli (kode, nama, satuan, keterangan) VALUES (@kode, @nama, @satuan, @keterangan) RETURNING id",
+      "INSERT INTO master_oli (kode, nama, satuan, keterangan, estates) VALUES (@kode, @nama, @satuan, @keterangan, @estates) RETURNING id",
       o
     );
-    await logActivity(req, { module: "OLI", estate: null, aksi: "Tambah Jenis Oli", objek: `${o.kode} - ${o.nama}`, detail: `Satuan: ${o.satuan}` });
+    await logActivity(req, { module: "OLI", estate: null, aksi: "Tambah Jenis Oli", objek: `${o.kode} - ${o.nama}`, detail: `Satuan: ${o.satuan}; Estate: ${o.estates || "semua"}` });
     res.json({ success: true, id: row!.id });
   } catch (e: any) {
     if (e.code === "23505") return res.status(409).json({ error: "Kode atau nama jenis oli sudah dipakai" });
@@ -6061,7 +6065,7 @@ app.put("/api/master-oli/:id", async (req, res) => {
   if (!o.kode || !o.nama) return res.status(400).json({ error: "Kode dan nama jenis oli wajib diisi" });
   try {
     await withTransaction(async (c) => {
-      await execute("UPDATE master_oli SET kode = @kode, nama = @nama, satuan = @satuan, keterangan = @keterangan WHERE id = @id", { ...o, id: existing.id }, c);
+      await execute("UPDATE master_oli SET kode = @kode, nama = @nama, satuan = @satuan, keterangan = @keterangan, estates = @estates WHERE id = @id", { ...o, id: existing.id }, c);
       if (o.nama !== existing.nama) {
         await execute("UPDATE oli_log SET jenis_oli = @nama WHERE jenis_oli = @old", { nama: o.nama, old: existing.nama }, c);
       }
@@ -6075,7 +6079,7 @@ app.put("/api/master-oli/:id", async (req, res) => {
     estate: null,
     aksi: "Edit Jenis Oli",
     objek: `${o.kode} - ${o.nama}`,
-    detail: describeChanges(existing, o, { kode: "Kode", nama: "Nama", satuan: "Satuan", keterangan: "Keterangan" }),
+    detail: describeChanges(existing, o, { kode: "Kode", nama: "Nama", satuan: "Satuan", keterangan: "Keterangan", estates: "Estate" }),
   });
   res.json({ success: true });
 });
@@ -6413,7 +6417,7 @@ app.post("/api/oli/batch", async (req, res) => {
   if (!ISO_DATE.test(tanggal_iso || "")) return res.status(400).json({ error: "Tanggal tidak valid" });
   const rows = batchInput(req, res);
   if (!rows) return;
-  const known = new Set((await queryMany<{ nama: string }>("SELECT nama FROM master_oli")).map((o) => o.nama));
+  const known = new Set((await queryMany<{ nama: string }>(`SELECT nama FROM master_oli WHERE ${OLI_AT_ESTATE}`, { estate })).map((o) => o.nama));
   type R = { jenis: string; tipe: "MASUK" | "PEMAKAIAN"; qty: number; no_embrace: string; keterangan: string; ke: string; item?: LoanItem };
   const clean: R[] = [];
   for (const [i, r] of rows.entries()) {
@@ -6531,7 +6535,7 @@ async function loanItem(module: LoanModule, estate: string, kode: string, client
     );
   }
   if (module === "BBM" && !BBM_JENIS.includes(kode)) return null;
-  if (module === "OLI" && !(await queryOne("SELECT 1 FROM master_oli WHERE nama = @kode", { kode }, client))) return null;
+  if (module === "OLI" && !(await queryOne(`SELECT 1 FROM master_oli WHERE nama = @kode AND ${OLI_AT_ESTATE}`, { kode, estate }, client))) return null;
   const stok = (await latestSaldoRow(module as SaldoModule, estate, kode, client))?.saldo_stock ?? 0;
   return { kode, nama: kode, satuan: module === "PUPUK" ? "KG" : "LTR", stok };
 }

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Search, Plus, Pencil, Trash2, X } from "lucide-react";
-import { api, errorText, type MasterOli } from "../lib/api";
+import { api, errorText, ESTATES, type MasterOli } from "../lib/api";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 
 // Master data oli: the jenis oli that Inventory Oli transactions and Stok Opname can use.
@@ -41,7 +41,7 @@ export function MasterOliPage() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold text-[var(--text-primary)]">Master Data Oli</h1>
-          <p className="text-sm text-[var(--text-secondary)]">Jenis oli yang bisa dipakai di Inventory Oli dan Stok Opname</p>
+          <p className="text-sm text-[var(--text-secondary)]">Jenis oli yang bisa dipakai di Inventory Oli dan Stok Opname, untuk semua estate atau estate tertentu</p>
         </div>
         <button
           onClick={() => setEditing("new")}
@@ -73,6 +73,7 @@ export function MasterOliPage() {
                 <th className="px-4 py-2.5 text-left">Kode</th>
                 <th className="px-4 py-2.5 text-left">Nama Jenis Oli</th>
                 <th className="px-4 py-2.5 text-left">Satuan</th>
+                <th className="px-4 py-2.5 text-left">Estate</th>
                 <th className="px-4 py-2.5 text-left">Keterangan</th>
                 <th className="px-4 py-2.5 text-right">Transaksi</th>
                 <th className="px-4 py-2.5 text-right">Aksi</th>
@@ -81,13 +82,13 @@ export function MasterOliPage() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-[var(--text-muted)]">
+                  <td colSpan={7} className="px-4 py-8 text-center text-[var(--text-muted)]">
                     Memuat...
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-[var(--text-muted)]">
+                  <td colSpan={7} className="px-4 py-8 text-center text-[var(--text-muted)]">
                     {search ? "Tidak ada jenis oli yang cocok" : "Belum ada jenis oli"}
                   </td>
                 </tr>
@@ -97,6 +98,13 @@ export function MasterOliPage() {
                     <td className="px-4 py-2.5 font-mono text-xs whitespace-nowrap">{o.kode}</td>
                     <td className="col-grow px-4 py-2.5 font-medium">{o.nama}</td>
                     <td className="px-4 py-2.5 text-[var(--text-secondary)]">{o.satuan}</td>
+                    <td className="px-4 py-2.5">
+                      {o.estates ? (
+                        <span className="text-xs px-1.5 py-0.5 rounded bg-[var(--accent-amber-bg)] text-[var(--accent-amber)] whitespace-nowrap">Khusus {o.estates.split(",").join(", ")}</span>
+                      ) : (
+                        <span className="text-xs text-[var(--text-muted)]">Semua estate</span>
+                      )}
+                    </td>
                     <td className="col-grow px-4 py-2.5 text-[var(--text-secondary)]">{o.keterangan || "-"}</td>
                     <td className="px-4 py-2.5 text-right text-[var(--text-secondary)]">{o.transaksi.toLocaleString("id-ID")}</td>
                     <td className="px-4 py-2.5 text-right">
@@ -157,6 +165,8 @@ function MasterOliModal({ record, onClose, onSuccess }: { record: MasterOli | nu
     satuan: record?.satuan ?? "LTR",
     keterangan: record?.keterangan ?? "",
   });
+  // The estates it is used in; none ticked = every estate.
+  const [estates, setEstates] = useState<string[]>(record?.estates ? record.estates.split(",") : []);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const set = (k: keyof typeof form) => (e: { target: { value: string } }) => setForm((f) => ({ ...f, [k]: e.target.value }));
@@ -167,8 +177,8 @@ function MasterOliModal({ record, onClose, onSuccess }: { record: MasterOli | nu
     setSubmitting(true);
     setError("");
     try {
-      if (record) await api.updateMasterOli(record.id, form);
-      else await api.createMasterOli(form);
+      if (record) await api.updateMasterOli(record.id, { ...form, estates });
+      else await api.createMasterOli({ ...form, estates });
       onSuccess();
     } catch (e) {
       setError(errorText(e, "Gagal menyimpan", true));
@@ -208,6 +218,27 @@ function MasterOliModal({ record, onClose, onSuccess }: { record: MasterOli | nu
               <label className={labelCls}>Keterangan</label>
               <input value={form.keterangan} onChange={set("keterangan")} placeholder="cth. Oli mesin" className={inputCls} />
             </div>
+          </div>
+          <div>
+            <label className={labelCls}>Dipakai di estate</label>
+            <div className="flex flex-wrap gap-1.5">
+              {ESTATES.map((e) => {
+                const on = estates.includes(e);
+                return (
+                  <button
+                    key={e}
+                    type="button"
+                    onClick={() => setEstates((x) => (on ? x.filter((y) => y !== e) : [...x, e]))}
+                    className={`text-xs px-2.5 py-1 rounded-md border ${on ? "border-[var(--accent-blue)] bg-[var(--accent-blue-bg)] text-[var(--accent-blue)] font-medium" : "border-[var(--border)]"}`}
+                  >
+                    {e}
+                  </button>
+                );
+              })}
+            </div>
+            <p className="text-[11px] text-[var(--text-muted)] mt-1">
+              {estates.length ? `Hanya muncul di Inventory Oli / Stok Opname ${estates.join(", ")}.` : "Tidak ada yang dipilih = dipakai di semua estate."}
+            </p>
           </div>
           {renamed && (
             <p className="text-xs text-[var(--accent-amber)]">

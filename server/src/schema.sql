@@ -384,6 +384,7 @@ CREATE INDEX IF NOT EXISTS idx_oli_estate_date ON oli_log(estate, tanggal_iso);
 
 -- Master data oli: the jenis oli that transactions and opname may use. oli_log.jenis_oli holds the
 -- `nama`; renaming a jenis here renames it in oli_log too (see PUT /api/master-oli/:id).
+-- estates: the estates a jenis is used in, comma separated ('' = every estate), e.g. SAE 40 only at KNS.
 CREATE TABLE IF NOT EXISTS master_oli (
   id SERIAL PRIMARY KEY,
   kode TEXT UNIQUE NOT NULL,
@@ -672,3 +673,4 @@ CREATE TABLE IF NOT EXISTS peta_legend (
   label TEXT NOT NULL,
   warna TEXT NOT NULL
 );
+ALTER TABLE master_oli ADD COLUMN IF NOT EXISTS estates TEXT NOT NULL DEFAULT '';
