@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Download, Eraser, Maximize2, Minimize2, Minus, Paintbrush, Plus, Save, Search, Trash2 } from "lucide-react";
+import { Download, Eraser, Hand, Maximize2, Minimize2, Minus, Paintbrush, Plus, Save, Search, Trash2 } from "lucide-react";
 import { api, errorText, type PetaBlok, type PetaCell, type PetaLegend } from "../lib/api";
 
 const ESTATE_LABEL: Record<string, string> = { NILAM: "Nilam", KNS: "KNS", WJA: "WJA", ZAMRUD: "Zamrud", FIRUS: "Firus" };
@@ -61,6 +61,52 @@ export function PetaBlokPage() {
   const [saving, setSaving] = useState(false);
   const svgRef = useRef<SVGSVGElement>(null);
   const stroke = useRef<Set<number> | null>(null);
+  // Warna Bebas: the brush paints the blok it is dragged over, Geser drags the map like everywhere else.
+  const [tool, setTool] = useState<"kuas" | "geser">("kuas");
+  const painting = mode === "bebas" && tool === "kuas";
+  // Drag the map with the mouse (hold and pull), and Ctrl + scroll wheel zooms.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const pan = useRef<{ x: number; y: number; left: number; top: number } | null>(null);
+  const [panning, setPanning] = useState(false);
+  const startPan = (e: React.MouseEvent) => {
+    if (e.button !== 0 || !scrollRef.current) return;
+    if (painting && (e.target as Element).closest("[data-cell]")) return;
+    e.preventDefault();
+    pan.current = { x: e.clientX, y: e.clientY, left: scrollRef.current.scrollLeft, top: scrollRef.current.scrollTop };
+    setPanning(true);
+  };
+  // Ctrl + wheel zooms the map instead of the browser page.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const wheel = (e: WheelEvent) => {
+      if (!e.ctrlKey) return;
+      e.preventDefault();
+      setZoom((z) => Math.min(2, Math.max(0.5, +(z + (e.deltaY < 0 ? 0.1 : -0.1)).toFixed(1))));
+    };
+    el.addEventListener("wheel", wheel, { passive: false });
+    return () => el.removeEventListener("wheel", wheel);
+  }, [!!data]);
+  useEffect(() => {
+    const move = (e: MouseEvent) => {
+      const p = pan.current;
+      const el = scrollRef.current;
+      if (!p || !el) return;
+      el.scrollLeft = p.left - (e.clientX - p.x);
+      el.scrollTop = p.top - (e.clientY - p.y);
+    };
+    const up = () => {
+      if (!pan.current) return;
+      pan.current = null;
+      setPanning(false);
+    };
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+    return () => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+    };
+  }, []);
 
   const now = new Date();
   const range =
@@ -284,11 +330,19 @@ export function PetaBlokPage() {
               </span>
             ) : (
               <span className="text-[var(--text-muted)]">
-                {mode === "bebas" ? "Pilih warna di kanan, lalu klik / tarik di atas blok untuk mewarnai. Tersimpan otomatis." : "Arahkan kursor ke blok untuk melihat detailnya."}
+                {painting
+                  ? "Klik / tarik di atas blok untuk mewarnai (tersimpan otomatis). Pilih Geser peta di kanan untuk menggeser."
+                  : "Klik tahan lalu tarik untuk menggeser peta · Ctrl + scroll untuk zoom · arahkan kursor ke blok untuk detailnya."}
               </span>
             )}
           </div>
-          <div className={`overflow-auto relative ${full ? "max-h-[calc(100vh-13rem)]" : "max-h-[75vh]"}`} onMouseLeave={() => setHover(null)}>
+          <div
+            ref={scrollRef}
+            onMouseDown={startPan}
+            className={`overflow-auto relative ${full ? "max-h-[calc(100vh-13rem)]" : "max-h-[75vh]"}`}
+            style={{ cursor: panning ? "grabbing" : "grab" }}
+            onMouseLeave={() => setHover(null)}
+          >
             {!data ? (
               <p className="p-4 text-sm text-[var(--text-muted)]">Memuat peta...</p>
             ) : (
@@ -319,15 +373,16 @@ export function PetaBlokPage() {
                         opacity={dim ? 0.25 : 1}
                         onMouseEnter={() => {
                           setHover(c);
-                          if (mode === "bebas") paintCell(c);
+                          if (painting) paintCell(c);
                         }}
+                        data-cell
                         onMouseDown={(e) => {
-                          if (mode !== "bebas" || e.button !== 0) return;
+                          if (!painting || e.button !== 0) return;
                           e.preventDefault();
                           stroke.current = new Set();
                           paintCell(c);
                         }}
-                        style={{ cursor: mode === "bebas" ? "crosshair" : "default" }}
+                        style={{ cursor: painting ? "crosshair" : panning ? "grabbing" : "grab" }}
                       >
                         <rect
                           x={c.gx * CW}
@@ -436,6 +491,24 @@ export function PetaBlokPage() {
             </div>
           ) : (
             <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg p-3 space-y-2">
+              <div className="flex gap-1">
+                {(
+                  [
+                    ["kuas", "Kuas", Paintbrush],
+                    ["geser", "Geser peta", Hand],
+                  ] as const
+                ).map(([t, label, Icon]) => (
+                  <button
+                    key={t}
+                    onClick={() => setTool(t)}
+                    className={`flex-1 inline-flex items-center justify-center gap-1 text-xs px-2 py-1.5 rounded-md border ${
+                      tool === t ? "border-[var(--accent-blue)] bg-[var(--accent-blue-bg)] text-[var(--accent-blue)] font-medium" : "border-[var(--border)]"
+                    }`}
+                  >
+                    <Icon size={13} /> {label}
+                  </button>
+                ))}
+              </div>
               <div className="text-xs font-semibold uppercase text-[var(--text-secondary)]">Kuas warna</div>
               <div className="flex flex-wrap gap-1.5">
                 {SWATCHES.map((s) => (
