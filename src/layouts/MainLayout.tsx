@@ -7,6 +7,7 @@ import { SessionExpiredModal } from "../components/SessionExpiredModal";
 import { useOpenPinjaman } from "../hooks/useOpenPinjaman";
 import { useTableDragScroll } from "../hooks/useDragScroll";
 import { StatusUpdateBanner, useStatusUpdate } from "../components/StatusUpdate";
+import { useAuth } from "../context/AuthContext";
 
 export function MainLayout() {
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -14,6 +15,7 @@ export function MainLayout() {
 
   const refreshPinjaman = useOpenPinjaman((s) => s.refresh);
   const refreshStatus = useStatusUpdate((s) => s.refresh);
+  const { refresh: refreshUser } = useAuth();
   // Every list table can be dragged with the mouse, up / down and sideways.
   useTableDragScroll();
 
@@ -23,7 +25,8 @@ export function MainLayout() {
     setMobileOpen(false);
     refreshPinjaman();
     refreshStatus();
-  }, [location.pathname, refreshPinjaman, refreshStatus]);
+    refreshUser();
+  }, [location.pathname, refreshPinjaman, refreshStatus, refreshUser]);
 
   return (
     <div className="flex min-h-screen bg-[var(--bg-page)]">

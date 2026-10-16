@@ -195,11 +195,22 @@ function requiredPerms(req: express.Request): Need {
   return "super";
 }
 
+// "bbm.edit" -> "Edit BBM", for telling the user which tick in Pengguna is missing.
+const PERM_MODUL: Record<string, string> = { gudang: "Gudang", bbm: "BBM", pupuk: "Pupuk", klinik: "Klinik", oli: "Oli" };
+const PERM_AKSI: Record<string, string> = { view: "Lihat", input: "Input", edit: "Edit", delete: "Hapus", koreksi: "Koreksi", opname: "Opname", approve: "Approve" };
+const permLabel = (p: string) => {
+  const [m, a] = p.split(".");
+  if (PERM_MODUL[m]) return `${PERM_AKSI[a] ?? a} ${PERM_MODUL[m]}`;
+  const other: Record<string, string> = { "master.peta": "Lihat Peta Blok", "master.peta_edit": "Ubah Peta Blok", "master.alat": "Master Alat Berat", "master.users": "Pengguna", "monitor.log_user": "Log Aktivitas User" };
+  return other[p] ?? (m === "master" ? `Master ${a.charAt(0).toUpperCase()}${a.slice(1)}` : p);
+};
+
 app.use("/api", (req, res, next) => {
   if (req.user!.role === "superuser") return next();
   const need = requiredPerms(req);
-  if (need === "super" || (need && !need.some((p) => req.user!.perms.includes(p)))) {
-    return res.status(403).json({ error: "Akses ditolak" });
+  if (need === "super") return res.status(403).json({ error: "Hanya Super User yang bisa melakukan ini" });
+  if (need && !need.some((p) => req.user!.perms.includes(p))) {
+    return res.status(403).json({ error: `Akun ini tidak punya hak ${permLabel(need[0])}. Minta Super User mencentangnya di menu Pengguna.` });
   }
   next();
 });
