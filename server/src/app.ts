@@ -188,8 +188,8 @@ function requiredPerms(req: express.Request): Need {
   if (is(/^\/karyawan(\/|$)/)) return ["master.karyawan"];
   if (is(/^\/alat-berat(\/|$)/)) return ["master.alat"];
   if (is(/^\/master-blok(\/|$)/)) return ["master.blok"];
-  // Peta Blok: seen with Master Blok (or Ubah Peta Blok), its colours / legend changed only with Ubah Peta Blok.
-  if (is(/^\/peta-blok(\/|$)/)) return m === "GET" ? ["master.blok", "master.peta_edit"] : ["master.peta_edit"];
+  // Peta Blok: seen with Lihat Peta Blok, Ubah Peta Blok or Master Blok; colours / legend changed only with Ubah Peta Blok.
+  if (is(/^\/peta-blok(\/|$)/)) return m === "GET" ? ["master.peta", "master.peta_edit", "master.blok"] : ["master.peta_edit"];
   if (is(/^\/users(\/|$)/)) return ["master.users"];
   if (is(/^\/user-activity$/)) return ["monitor.log_user"];
   return "super";
