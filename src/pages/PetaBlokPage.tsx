@@ -418,6 +418,52 @@ export function PetaBlokPage() {
                 </g>
               </svg>
             )}
+            {/* Info box next to the hovered blok (to its right, or its left near the right edge). */}
+            {hover && !panning && !stroke.current && data && (
+              <div
+                className="absolute z-10 pointer-events-none w-60 rounded-md border border-[var(--border)] bg-white shadow-lg px-3 py-2 text-xs leading-relaxed"
+                style={{
+                  left: (hover.gx + 1) * CW + 16 + 240 > cols * CW + 20 ? hover.gx * CW + 4 - 240 : (hover.gx + 1) * CW + 16,
+                  top: Math.max(4, hover.gy * CH + 4),
+                }}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <b className="text-sm text-[var(--text-primary)]">Blok {hover.label}</b>
+                  <span className="text-[var(--text-secondary)]">{hover.estate ? ESTATE_LABEL[hover.estate] ?? hover.estate : ""}</span>
+                </div>
+                {hover.pkk === null ? (
+                  <div className="text-[var(--text-muted)]">{hover.estate ? "Belum ada data di Master Blok" : "Tidak ada di Master Blok"}</div>
+                ) : (
+                  <>
+                    <div className="text-[var(--text-secondary)]">
+                      Divisi {hover.divisi || "-"} · TT {hover.tahun_tanam || "-"}
+                      {hover.planting_material && ` · ${hover.planting_material}`}
+                    </div>
+                    <div className="grid grid-cols-2 gap-x-2 mt-1">
+                      <span className="text-[var(--text-muted)]">Luas</span>
+                      <span className="text-right">{fmt(hover.ha, 2)} Ha</span>
+                      <span className="text-[var(--text-muted)]">Pokok (PKK)</span>
+                      <span className="text-right">{fmt(hover.pkk)}</span>
+                      <span className="text-[var(--text-muted)]">Pupuk NPK</span>
+                      <span className="text-right">{fmt(hover.kg ?? 0)} kg</span>
+                      <span className="text-[var(--text-muted)]">Progress</span>
+                      <span className="text-right font-semibold">
+                        <span className="inline-block w-2.5 h-2.5 rounded-sm border border-[var(--border)] mr-1 align-middle" style={{ background: autoColor(hover) }} />
+                        {fmt(hp, 1)}%
+                      </span>
+                    </div>
+                    <div className="text-[var(--text-muted)] mt-1">
+                      {hover.terakhir ? `Terakhir dipupuk ${hover.terakhir.split("-").reverse().join("/")}` : "Belum ada pemupukan di periode ini"}
+                    </div>
+                  </>
+                )}
+                {mode === "bebas" && hover.warna && (
+                  <div className="mt-1 flex items-center gap-1 text-[var(--text-secondary)]">
+                    <span className="inline-block w-2.5 h-2.5 rounded-sm border border-[var(--border)]" style={{ background: hover.warna }} /> warna bebas {hover.warna}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
 
