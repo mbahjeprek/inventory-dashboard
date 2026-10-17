@@ -1180,6 +1180,9 @@ export const api = {
   perbandingan: (params: { module: OpnameModule; estates: string[]; dateFrom: string; dateTo: string; kode: string }) =>
     req<Perbandingan>(`/api/perbandingan?${new URLSearchParams({ ...params, estates: params.estates.join(",") })}`),
   statusUpdate: () => req<StatusUpdate>("/api/status-update"),
+  // Tambah Bukti: a foto bukti on an older transaction that has none (estates opened for it, see access.ts).
+  attachEvidence: (kind: string, id: number, evidence_id: string) =>
+    req<{ success: boolean }>("/api/evidence/attach", { method: "PUT", body: JSON.stringify({ kind, id, evidence_id }) }),
   // Pemakaian per bulan of one estate: Stok Keluar per barang / jenis (BBM: or per alat) per month, and stock now.
   pemakaian: (params: { module: PakaiModule; estate: string; dateFrom: string; dateTo: string; group?: string }) =>
     req<{

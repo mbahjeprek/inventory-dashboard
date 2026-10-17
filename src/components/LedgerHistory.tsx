@@ -7,8 +7,8 @@ import { EditLedgerTxModal } from "./EditLedgerTxModal";
 import { fetchAllRows, type TableReport } from "../lib/printTable";
 import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
-import { can, canEditRow } from "../lib/access";
-import { EvidenceLink } from "./EvidenceInput";
+import { can, canEditRow, canAttachEvidence } from "../lib/access";
+import { EvidenceLink, AttachEvidenceButton } from "./EvidenceInput";
 import { loanTag } from "../lib/opname";
 
 const formatWaktu = (iso: string) =>
@@ -238,7 +238,13 @@ export function LedgerHistory({ scope, type, refreshKey }: { scope: StockScope; 
                       )}
                     </td>
                     <td className="px-4 py-2.5 text-center whitespace-nowrap">
-                      {r.evidence_id ? <EvidenceLink id={r.evidence_id} label="Lihat" /> : <span className="text-[var(--text-muted)]">-</span>}
+                      {r.evidence_id ? (
+                        <EvidenceLink id={r.evidence_id} label="Lihat" />
+                      ) : !r.pinjaman_id && canAttachEvidence(user, isKlinik ? "KLINIK" : "GUDANG", scope.name) ? (
+                        <AttachEvidenceButton kind={isKlinik ? "klinik" : "gudang"} id={r.id} onDone={load} />
+                      ) : (
+                        <span className="text-[var(--text-muted)]">-</span>
+                      )}
                     </td>
                     <td className="px-4 py-2.5 whitespace-nowrap text-[var(--text-secondary)]">{r.input_oleh || "-"}</td>
                     {showActions && (

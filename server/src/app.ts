@@ -7415,6 +7415,46 @@ app.post("/api/evidence/:id/rotation", async (req, res) => {
   res.json({ success: true });
 });
 
+// Tambah Bukti: puts a foto bukti on an older transaction that has none, without changing it - for the
+// estates in EVIDENCE_ANYTIME (KNS, filling in its earlier months), past the 3-day edit window. The
+// account needs Input or Edit of the module in that estate; a photo already there is not replaced
+// (that stays an edit). Loan / transfer rows keep the Pinjaman's photo.
+const EVIDENCE_ANYTIME = ["KNS"];
+const ATTACH: Record<string, { table: string; estate: string; module: string }> = {
+  bbm: { table: "bbm_log", estate: "lokasi", module: "bbm" },
+  oli: { table: "oli_log", estate: "estate", module: "oli" },
+  pupuk: { table: "pupuk_log", estate: "estate", module: "pupuk" },
+  gudang: { table: "gudang_stock_tx", estate: "gudang", module: "gudang" },
+  klinik: { table: "klinik_stock_tx", estate: "klinik", module: "klinik" },
+};
+app.put("/api/evidence/attach", async (req, res) => {
+  const t = ATTACH[String(req.body?.kind ?? "")];
+  const id = Number(req.body?.id);
+  if (!t || !Number.isInteger(id)) return res.status(400).json({ error: "Transaksi tidak valid" });
+  const row = await queryOne<any>(`SELECT *, ${t.estate} AS lokasi_ FROM ${t.table} WHERE id = @id`, { id });
+  if (!row) return res.status(404).json({ error: "Transaksi tidak ditemukan" });
+  const u = req.user!;
+  if (!estateAllowed(u, row.lokasi_)) return res.status(403).json({ error: "Akses ditolak" });
+  if (u.role !== "superuser" && !EVIDENCE_ANYTIME.includes(row.lokasi_)) return res.status(403).json({ error: "Tambah bukti transaksi lama hanya dibuka untuk estate KNS" });
+  if (u.role !== "superuser" && ![`${t.module}.input`, `${t.module}.edit`].some((p) => u.perms.includes(p)))
+    return res.status(403).json({ error: `Akun ini tidak punya hak Input ${t.module.toUpperCase()}` });
+  if (row.evidence_id) return res.status(409).json({ error: "Transaksi ini sudah punya foto bukti" });
+  if (row.pinjaman_id || row.transfer_from_id) return res.status(400).json({ error: "Foto bukti pinjaman / transfer diatur di menu Pinjaman" });
+  if (!req.body?.evidence_id) return res.status(400).json({ error: "Pilih foto bukti dulu" });
+  const ev = await checkEditEvidence(req, res, null);
+  if (ev === undefined) return;
+  if (!ev) return res.status(400).json({ error: "Foto bukti tidak valid, upload ulang fotonya" });
+  await useEditEvidence(ev, [{ table: t.table, where: "id = @id", params: { id } }]);
+  await logActivity(req, {
+    module: t.module === "gudang" ? "BARANG" : (t.module.toUpperCase() as LogModule),
+    estate: row.lokasi_,
+    aksi: "Tambah Foto Bukti",
+    objek: `${t.module.toUpperCase()} · ${row.tanggal ?? row.tanggal_iso ?? String(row.created_at ?? "").slice(0, 10)}${row.no_spb ? ` · SPB ${row.no_spb}` : ""}`,
+    detail: [row.keterangan, row.note, row.jenis_bbm, row.jenis_oli, row.jenis_pupuk, row.item_kode, row.obat_kode].filter(Boolean).join(" · "),
+  });
+  res.json({ success: true });
+});
+
 app.get("/api/evidence/:id", async (req, res) => {
   if (!/^[0-9a-f-]{36}$/.test(req.params.id)) return res.status(404).send("Foto tidak ditemukan");
   const ev = await queryOne<{ path: string; created_at: Date }>("SELECT path, created_at FROM evidence WHERE id = @id::uuid", { id: req.params.id });

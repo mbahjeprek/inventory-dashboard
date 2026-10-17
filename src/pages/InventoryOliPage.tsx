@@ -11,8 +11,8 @@ import { OliTransactionModal } from "../components/OliTransactionModal";
 import { EditOliModal } from "../components/EditOliModal";
 import { fetchAllRows, type TableReport } from "../lib/printTable";
 import { useAuth } from "../context/AuthContext";
-import { can, canEditRow } from "../lib/access";
-import { EvidenceLink } from "../components/EvidenceInput";
+import { can, canEditRow, canAttachEvidence } from "../lib/access";
+import { EvidenceLink, AttachEvidenceButton } from "../components/EvidenceInput";
 import { tanggalWaktu } from "../lib/datetime";
 import { OliBatchModal } from "../components/SaldoBatchModal";
 import { loanTag } from "../lib/opname";
@@ -310,7 +310,13 @@ export function InventoryOliPage({ estate }: { estate: string }) {
                       {r.keterangan || "-"}
                     </td>
                     <td className="px-4 py-2.5 text-center whitespace-nowrap">
-                      {r.evidence_id ? <EvidenceLink id={r.evidence_id} label="Lihat" /> : <span className="text-[var(--text-muted)]">-</span>}
+                      {r.evidence_id ? (
+                        <EvidenceLink id={r.evidence_id} label="Lihat" />
+                      ) : !r.pinjaman_id && canAttachEvidence(user, "OLI", estate) ? (
+                        <AttachEvidenceButton kind={"oli"} id={r.id} onDone={load} />
+                      ) : (
+                        <span className="text-[var(--text-muted)]">-</span>
+                      )}
                     </td>
                     {showActions && (
                       <td className="px-4 py-2.5 text-right">

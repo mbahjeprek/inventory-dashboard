@@ -12,8 +12,8 @@ import { BbmBatchModal } from "../components/BbmBatchModal";
 import { EditBbmModal } from "../components/EditBbmModal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useAuth } from "../context/AuthContext";
-import { can, canEditRow } from "../lib/access";
-import { EvidenceLink } from "../components/EvidenceInput";
+import { can, canEditRow, canAttachEvidence } from "../lib/access";
+import { EvidenceLink, AttachEvidenceButton } from "../components/EvidenceInput";
 import { tanggalWaktu } from "../lib/datetime";
 import { loanTag } from "../lib/opname";
 
@@ -404,7 +404,13 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
                       {r.keterangan || "-"}
                     </td>
                     <td className="px-4 py-2.5 text-center whitespace-nowrap">
-                      {r.evidence_id ? <EvidenceLink id={r.evidence_id} label="Lihat" /> : <span className="text-[var(--text-muted)]">-</span>}
+                      {r.evidence_id ? (
+                        <EvidenceLink id={r.evidence_id} label="Lihat" />
+                      ) : !r.pinjaman_id && canAttachEvidence(user, "BBM", r.lokasi) ? (
+                        <AttachEvidenceButton kind={"bbm"} id={r.id} onDone={load} />
+                      ) : (
+                        <span className="text-[var(--text-muted)]">-</span>
+                      )}
                     </td>
                     <td className="px-4 py-2.5 text-xs text-[var(--text-secondary)]">{r.status_kepemilikan || "-"}</td>
                     <td className="px-4 py-2.5 text-xs whitespace-nowrap">{r.kode_kendaraan || "-"}</td>

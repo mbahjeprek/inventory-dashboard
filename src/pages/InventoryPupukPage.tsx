@@ -11,8 +11,8 @@ import { PupukTransactionModal } from "../components/PupukTransactionModal";
 import { EditPupukModal } from "../components/EditPupukModal";
 import { fetchAllRows, type TableReport } from "../lib/printTable";
 import { useAuth } from "../context/AuthContext";
-import { can, canEditRow } from "../lib/access";
-import { EvidenceLink } from "../components/EvidenceInput";
+import { can, canEditRow, canAttachEvidence } from "../lib/access";
+import { EvidenceLink, AttachEvidenceButton } from "../components/EvidenceInput";
 import { tanggalWaktu } from "../lib/datetime";
 import { PupukBatchModal } from "../components/SaldoBatchModal";
 import { loanTag } from "../lib/opname";
@@ -357,7 +357,13 @@ export function InventoryPupukPage({ estate }: { estate: string }) {
                       {r.keterangan || "-"}
                     </td>
                     <td className="px-4 py-2.5 text-center whitespace-nowrap">
-                      {r.evidence_id ? <EvidenceLink id={r.evidence_id} label="Lihat" /> : <span className="text-[var(--text-muted)]">-</span>}
+                      {r.evidence_id ? (
+                        <EvidenceLink id={r.evidence_id} label="Lihat" />
+                      ) : !r.pinjaman_id && canAttachEvidence(user, "PUPUK", estate) ? (
+                        <AttachEvidenceButton kind={"pupuk"} id={r.id} onDone={load} />
+                      ) : (
+                        <span className="text-[var(--text-muted)]">-</span>
+                      )}
                     </td>
                     <td className="px-4 py-2.5 text-xs whitespace-nowrap">{r.blok || "-"}</td>
                     <td className="px-4 py-2.5 text-right text-xs">{r.ha != null ? r.ha.toLocaleString("id-ID", { maximumFractionDigits: 2 }) : "-"}</td>

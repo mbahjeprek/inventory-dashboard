@@ -413,3 +413,61 @@ export function EditEvidenceField({ current, value, onChange }: { current: strin
     </div>
   );
 }
+
+// "+ Bukti" on a transaction without a foto bukti in an estate opened for it (KNS: its earlier months
+// are filled in afterwards): adds the photo only, the transaction itself stays as it is.
+export function AttachEvidenceButton({ kind, id, onDone }: { kind: "bbm" | "oli" | "pupuk" | "gudang" | "klinik"; id: number; onDone: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [ev, setEv] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const save = async () => {
+    if (!ev) return setError("Pilih foto bukti dulu");
+    setBusy(true);
+    setError("");
+    try {
+      await api.attachEvidence(kind, id, ev);
+      setOpen(false);
+      setEv(null);
+      onDone();
+    } catch (e) {
+      setError(errorText(e, "Gagal menyimpan foto bukti"));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        title="Tambahkan foto bukti untuk transaksi ini"
+        className="text-xs font-medium px-1.5 py-0.5 rounded border border-[var(--accent-blue-border)] text-[var(--accent-blue)] hover:bg-[var(--accent-blue-bg)] whitespace-nowrap"
+      >
+        + Bukti
+      </button>
+      {open && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4 text-left whitespace-normal" onClick={() => !busy && setOpen(false)}>
+          <div className="bg-white rounded-lg w-full max-w-md shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <div className="px-5 py-4 border-b border-[var(--border)]">
+              <h3 className="font-semibold text-sm text-[var(--text-primary)]">Tambah Foto Bukti</h3>
+              <p className="text-xs text-[var(--text-secondary)]">Hanya menambahkan foto; isi transaksi tidak berubah.</p>
+            </div>
+            <div className="p-5 space-y-3">
+              <EvidenceInput value={ev} onChange={setEv} />
+              {error && <p className="text-xs text-[var(--accent-red)]">{error}</p>}
+              <div className="flex gap-2 justify-end">
+                <button onClick={() => setOpen(false)} disabled={busy} className="px-4 py-2 text-sm rounded-md border border-[var(--border)] text-[var(--text-secondary)]">
+                  Batal
+                </button>
+                <button onClick={save} disabled={busy || !ev} className="px-4 py-2 text-sm rounded-md bg-[var(--accent-blue)] text-white disabled:opacity-50">
+                  {busy ? "Menyimpan..." : "Simpan Bukti"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}

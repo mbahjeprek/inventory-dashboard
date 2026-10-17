@@ -88,6 +88,15 @@ export function canEditRow(user: AuthUser | null, m: Module, row: { input_at?: s
   return !!at && Date.now() - new Date(at).getTime() <= EDIT_DAYS * 86400000;
 }
 
+// Tambah Bukti on older transactions without a photo: open for these estates (as on the server's
+// EVIDENCE_ANYTIME) to an account with Input or Edit of the module.
+export const EVIDENCE_ANYTIME_ESTATES = ["KNS"];
+export function canAttachEvidence(user: AuthUser | null, m: Module, estate: string | null | undefined): boolean {
+  if (!user || !estate) return false;
+  if (user.role === "superuser") return true;
+  return EVIDENCE_ANYTIME_ESTATES.includes(estate) && (can(user, modulePerm(m, "input")) || can(user, modulePerm(m, "edit")));
+}
+
 export function canModule(user: AuthUser | null, m: Module): boolean {
   return can(user, modulePerm(m, "view"));
 }
