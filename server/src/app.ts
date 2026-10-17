@@ -2809,9 +2809,10 @@ app.put("/api/bbm/:id", requireSuperuser, async (req, res) => {
     tanggal_iso: tanggal_iso || existing.tanggal_iso,
     periode,
     no_spb: no_spb ?? "",
-    diterima: diterima === "" || diterima === undefined ? null : Number(diterima),
-    pemakaian: pemakaian === "" || pemakaian === undefined ? null : Number(pemakaian),
-    saldo_stock: saldo_stock === undefined ? existing.saldo_stock : saldo_stock === "" ? null : Number(saldo_stock),
+    // An empty field (sent as "" or null) stays empty: Number(null) would turn it into 0.
+    diterima: diterima === "" || diterima == null ? null : Number(diterima),
+    pemakaian: pemakaian === "" || pemakaian == null ? null : Number(pemakaian),
+    saldo_stock: saldo_stock === undefined ? existing.saldo_stock : saldo_stock === "" || saldo_stock === null ? null : Number(saldo_stock),
     keterangan: keterangan ?? "",
     estate: estate ?? "",
     kode_kendaraan: kode_kendaraan ?? existing.kode_kendaraan ?? "",
