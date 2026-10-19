@@ -121,6 +121,8 @@ export function KoperasiPage() {
   const { user } = useAuth();
   const canInput = can(user, "koperasi.input");
   const canEdit = can(user, "koperasi.edit");
+  // Marking bills paid / not paid is HR's (its own tick), not the koperasi admin's.
+  const canBayar = can(user, "koperasi.pelunasan");
   const [tab, setTab] = useState<Tab>("dashboard");
   const [periodes, setPeriodes] = useState<string[]>([]);
   const [periode, setPeriode] = useState(localToday().slice(0, 7));
@@ -181,7 +183,7 @@ export function KoperasiPage() {
         </div>
       </div>
 
-      <TunggakanBanner reload={reload} canInput={canInput} canEdit={canEdit} onChanged={done} />
+      <TunggakanBanner reload={reload} canBayar={canBayar} onChanged={done} />
 
       {ringkasan && tab !== "dashboard" && (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -234,7 +236,7 @@ export function KoperasiPage() {
 
       {tab === "dashboard" && <KoperasiDashboard periode={periode} reload={reload} />}
       {tab === "jual" && <TxTable jenis="JUAL" periode={periode} reload={reload} canEdit={canEdit} onChanged={done} />}
-      {tab === "rekap" && <RekapTab periode={periode} reload={reload} canInput={canInput} canEdit={canEdit} onChanged={done} />}
+      {tab === "rekap" && <RekapTab periode={periode} reload={reload} canBayar={canBayar} onChanged={done} />}
       {tab === "stok" && <StokTab reload={reload} canEdit={canEdit} onChanged={done} />}
       {tab === "opname" && <KoperasiOpname canInput={canInput} canEdit={canEdit} isSuperuser={user?.role === "superuser"} onChanged={done} />}
       {tab === "beli" && (
@@ -493,7 +495,8 @@ const statusBayar = (r: { potong_gaji: number; dibayar: number }, jatuhTempo: st
   return today <= jatuhTempo ? "MENUNGGU" : "BELUM";
 };
 
-function RekapTab({ periode, reload, canInput, canEdit, onChanged }: { periode: string; reload: number; canInput: boolean; canEdit: boolean; onChanged: () => void }) {
+function RekapTab({ periode, reload, canBayar, onChanged }: { periode: string; reload: number; canBayar: boolean; onChanged: () => void }) {
+  const canInput = canBayar;
   const [rows, setRows] = useState<KopRekap[] | null>(null);
   const [limit, setLimit] = useState(0);
   const [jatuhTempo, setJatuhTempo] = useState("");
@@ -631,7 +634,9 @@ function RekapTab({ periode, reload, canInput, canEdit, onChanged }: { periode: 
         <div className={`px-3 py-2 text-xs border-b border-[var(--border)] ${nBelum ? "bg-[var(--accent-red-bg)] text-[var(--accent-red)]" : "bg-[#f8fafc] text-[var(--text-secondary)]"}`}>
           Rekap {periodeLabel(periode)} disetor ke HRD tgl 1, dipotong dari gaji tgl 10–{isoDisplay(jatuhTempo)}.{" "}
           {today <= jatuhTempo
-            ? "Setelah gaji dipotong, centang yang sudah terpotong lalu tekan Tandai lunas. Yang gajinya tidak cukup: tekan Bayar dan isi yang terpotong saja."
+            ? canBayar
+              ? "Setelah gaji dipotong, centang yang sudah terpotong lalu tekan Tandai lunas. Yang gajinya tidak cukup: tekan Bayar dan isi yang terpotong saja."
+              : "Setelah gaji dipotong, HR menandai lunas di sini."
             : nBelum
               ? `${nBelum} orang belum lunas: mereka tidak bisa ngebon lagi sampai tagihannya dilunasi.`
               : "Semua sudah lunas."}
@@ -715,9 +720,9 @@ function RekapTab({ periode, reload, canInput, canEdit, onChanged }: { periode: 
                       </td>
                       {filter !== "POTONG_GAJI" && <td className="px-3 py-2 text-right whitespace-nowrap">{r.instansi ? rp(r.instansi) : "-"}</td>}
                       <td className="px-3 py-2 text-right whitespace-nowrap">
-                        {s && (canInput || canEdit) && (
+                        {s && (
                           <button onClick={() => setBayar(r)} className="text-xs text-[var(--accent-blue)] hover:underline">
-                            {sisa > 0.5 ? "Bayar" : "Pembayaran"}
+                            {canBayar ? (sisa > 0.5 ? "Bayar" : "Pembayaran") : "Lihat"}
                           </button>
                         )}
                       </td>
@@ -750,7 +755,7 @@ function RekapTab({ periode, reload, canInput, canEdit, onChanged }: { periode: 
           onCancel={() => setConfirmLunas(false)}
         />
       )}
-      {bayar && <BayarModal kode={bayar.kode} nama={bayar.nama} periode={periode} canInput={canInput} canEdit={canEdit} onClose={() => setBayar(null)} onChanged={onChanged} />}
+      {bayar && <BayarModal kode={bayar.kode} nama={bayar.nama} periode={periode} canBayar={canBayar} onClose={() => setBayar(null)} onChanged={onChanged} />}
       {detail && (
         <Modal title={`${detail.nama || detail.kode} · ${periodeLabel(periode)}`} subtitle={`${detail.kode} · total ${rp(detail.total)}`} onClose={() => setDetail(null)} wide>
           <TxTable jenis="JUAL" periode={periode} anggota={detail.kode} reload={reload} canEdit={false} onChanged={() => {}} />
@@ -762,24 +767,25 @@ function RekapTab({ periode, reload, canInput, canEdit, onChanged }: { periode: 
 
 const CARA_LABEL: Record<KopCara, string> = { POTONG_GAJI: "Potong gaji", TUNAI: "Tunai", LAINNYA: "Lainnya" };
 
-// Payments of one karyawan's bill of one periode: the list (Hapus with Edit) and a new payment (Input).
+// Payments of one karyawan's bill of one periode: the list and, with Pelunasan Koperasi (HR), a new
+// payment / Hapus. Without it the bill is only shown.
 function BayarModal({
   kode,
   nama,
   periode,
-  canInput,
-  canEdit,
+  canBayar,
   onClose,
   onChanged,
 }: {
   kode: string;
   nama: string;
   periode: string;
-  canInput: boolean;
-  canEdit: boolean;
+  canBayar: boolean;
   onClose: () => void;
   onChanged: () => void;
 }) {
+  const canInput = canBayar;
+  const canEdit = canBayar;
   const [data, setData] = useState<{ tagihan: KopTagihan; data: KopBayarRow[] } | null>(null);
   const [jumlah, setJumlah] = useState("");
   const [cara, setCara] = useState<KopCara>("POTONG_GAJI");
@@ -901,6 +907,7 @@ function BayarModal({
             </div>
           )}
           {t.sisa <= 0.5 && <p className="text-sm text-[var(--accent-green)] font-medium">Tagihan periode ini sudah lunas.</p>}
+          {!canBayar && t.sisa > 0.5 && <p className="text-xs text-[var(--text-muted)]">Pelunasan dicatat oleh HR (akun dengan hak Pelunasan Koperasi).</p>}
         </div>
       )}
       {hapus && (
@@ -915,7 +922,7 @@ function BayarModal({
 }
 
 // Top of the page: karyawan with a bill still open after its due date - they can't take goods.
-function TunggakanBanner({ reload, canInput, canEdit, onChanged }: { reload: number; canInput: boolean; canEdit: boolean; onChanged: () => void }) {
+function TunggakanBanner({ reload, canBayar, onChanged }: { reload: number; canBayar: boolean; onChanged: () => void }) {
   const [list, setList] = useState<KopTunggakan[]>([]);
   const [open, setOpen] = useState(false);
   const [bayar, setBayar] = useState<{ kode: string; nama: string; periode: string } | null>(null);
@@ -958,7 +965,7 @@ function TunggakanBanner({ reload, canInput, canEdit, onChanged }: { reload: num
                       key={p}
                       onClick={() => setBayar({ kode: t.kode, nama: t.nama, periode: p })}
                       className="text-xs px-2 py-0.5 rounded border border-[var(--accent-blue-border)] text-[var(--accent-blue)] hover:bg-[var(--accent-blue-bg)]"
-                      title="Catat pembayaran tagihan bulan ini"
+                      title={canBayar ? "Catat pembayaran tagihan bulan ini" : "Lihat tagihan bulan ini"}
                     >
                       {periodeLabel(p)}
                     </button>
@@ -969,7 +976,7 @@ function TunggakanBanner({ reload, canInput, canEdit, onChanged }: { reload: num
           </div>
         </div>
       )}
-      {bayar && <BayarModal {...bayar} canInput={canInput} canEdit={canEdit} onClose={() => setBayar(null)} onChanged={onChanged} />}
+      {bayar && <BayarModal {...bayar} canBayar={canBayar} onClose={() => setBayar(null)} onChanged={onChanged} />}
     </div>
   );
 }

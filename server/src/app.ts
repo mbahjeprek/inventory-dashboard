@@ -196,8 +196,10 @@ function requiredPerms(req: express.Request): Need {
   // Stok opname: start / fill in the counts with Input; Selesai / Batal and Koreksi Stok with Edit.
   if (is(/^\/koperasi(\/|$)/)) {
     if (m === "GET") return ["koperasi.view"];
+    // Pelunasan (record / tandai lunas / delete a payment): its own tick, given to HR only.
+    if (is(/^\/koperasi\/bayar(\/|$)/)) return ["koperasi.pelunasan"];
     const input =
-      (m === "POST" && is(/^\/koperasi\/((jual|beli|rusak)(\/batch)?|opname|bayar(\/lunas)?)$/)) || (m === "PUT" && is(/^\/koperasi\/opname\/\d+\/lines$/));
+      (m === "POST" && is(/^\/koperasi\/((jual|beli|rusak)(\/batch)?|opname)$/)) || (m === "PUT" && is(/^\/koperasi\/opname\/\d+\/lines$/));
     return input ? ["koperasi.input"] : ["koperasi.edit"];
   }
   return "super";
@@ -205,7 +207,7 @@ function requiredPerms(req: express.Request): Need {
 
 // "bbm.edit" -> "Edit BBM", for telling the user which tick in Pengguna is missing.
 const PERM_MODUL: Record<string, string> = { gudang: "Gudang", bbm: "BBM", pupuk: "Pupuk", klinik: "Klinik", oli: "Oli", koperasi: "Koperasi" };
-const PERM_AKSI: Record<string, string> = { view: "Lihat", input: "Input", edit: "Edit", delete: "Hapus", koreksi: "Koreksi", opname: "Opname", approve: "Approve" };
+const PERM_AKSI: Record<string, string> = { view: "Lihat", input: "Input", edit: "Edit", delete: "Hapus", koreksi: "Koreksi", opname: "Opname", approve: "Approve", pelunasan: "Pelunasan" };
 const permLabel = (p: string) => {
   const [m, a] = p.split(".");
   if (PERM_MODUL[m]) return `${PERM_AKSI[a] ?? a} ${PERM_MODUL[m]}`;
