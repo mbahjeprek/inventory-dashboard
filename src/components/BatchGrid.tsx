@@ -69,6 +69,7 @@ export function BatchGrid({
   onSuccess,
   evidenceOptional = false,
   evidenceLabel = "Foto Bukti (satu untuk semua baris)",
+  carryDown = false,
 }: {
   title: string;
   subtitle?: string;
@@ -92,6 +93,9 @@ export function BatchGrid({
   // Koperasi: the photo may be left out.
   evidenceOptional?: boolean;
   evidenceLabel?: string;
+  // Typing in a row whose `carry` cells are empty fills them from the nearest row above (Koperasi: the
+  // NIK of the person whose barang are listed under each other), wherever the row was clicked.
+  carryDown?: boolean;
 }) {
   const typed = columns.filter((c) => c.type !== "select" && !c.carry).map((c) => c.key);
   const isBlank = (c: Cells) => typed.every((k) => !(c[k] ?? "").trim());
@@ -161,7 +165,16 @@ export function BatchGrid({
   };
   const setCell = (key: number, col: GridCol, value: string) => {
     const row = rows.find((r) => r.key === key);
-    setRows((rs) => rs.map((r) => (r.key === key ? { ...r, c: { ...r.c, [col.key]: value } } : r)));
+    setRows((rs) => {
+      const at = rs.findIndex((r) => r.key === key);
+      const fill: Cells = {};
+      if (carryDown && !col.carry && value.trim() && at > 0)
+        for (const cc of columns.filter((x) => x.carry && !(rs[at].c[x.key] ?? "").trim())) {
+          const above = rs.slice(0, at).reverse().find((r) => (r.c[cc.key] ?? "").trim());
+          if (above) fill[cc.key] = above.c[cc.key];
+        }
+      return rs.map((r) => (r.key === key ? { ...r, c: { ...r.c, ...fill, [col.key]: value } } : r));
+    });
     setRowErrors((e) => (Object.keys(e).length ? {} : e));
     if (row) suggestFor(col, { ...row.c, [col.key]: value });
   };
@@ -310,7 +323,6 @@ export function BatchGrid({
             </thead>
             <tbody ref={tableRef}>
               {rows.map((r, i) => {
-                const blank = isBlank(r.c);
                 const s = saldoCells[i];
                 return (
                   <Fragment key={r.key}>
@@ -356,7 +368,9 @@ export function BatchGrid({
                       })}
                       {saldo && (
                         <td className={`py-1 pr-2 pt-2.5 text-right whitespace-nowrap ${s?.bad ? "text-[var(--accent-red)] font-semibold" : "text-[var(--text-secondary)]"}`}>
-                          {blank || !s ? "" : s.text}
+                          {/* Empty unless the inventory gives a value (runningStock gives none for a blank row;
+                              Koperasi shows the sisa limit as soon as the NIK is typed). */}
+                          {s ? s.text : ""}
                         </td>
                       )}
                       <td className="py-1 pt-1.5 whitespace-nowrap">

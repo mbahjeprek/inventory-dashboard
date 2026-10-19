@@ -140,18 +140,22 @@ export function KopJualBatchModal({ onClose, onSuccess }: { onClose: () => void;
       delta: (c) => (parseNum(c.jumlah) > 0 ? -parseNum(c.jumlah) : 0),
       blank,
     });
-  // Sisa limit of the row's anggota after it (instansi: none).
-  const sisa = (rows: Cells[]) =>
-    runningStock(rows, {
-      start: (k) => limit - (terpakai.get(k) ?? 0),
-      keyOf: (c) => (anggotaOf(c)?.jenis === "KARYAWAN" ? kodeOf(c) : ""),
-      delta: (c) => {
-        const q = parseNum(c.jumlah);
-        const h = hargaOf(c);
-        return q > 0 && Number.isFinite(h) ? -q * h : 0;
-      },
-      blank,
+  // Sisa limit of the row's anggota after it (instansi: none) - shown as soon as the NIK is known,
+  // before any barang is typed.
+  const sisa = (rows: Cells[]) => {
+    const run = new Map<string, number>();
+    return rows.map((c) => {
+      const a = anggotaOf(c);
+      if (!a || a.jenis !== "KARYAWAN") return null;
+      const k = a.kode.toUpperCase();
+      const before = run.has(k) ? run.get(k)! : limit - (terpakai.get(k) ?? 0);
+      const q = parseNum(c.jumlah);
+      const h = hargaOf(c);
+      const after = Math.round((before - (q > 0 && Number.isFinite(h) ? q * h : 0)) * 100) / 100;
+      run.set(k, after);
+      return { before, after };
     });
+  };
 
   const problem = (c: Cells, i: number, rows: Cells[]) => {
     const a = anggotaOf(c);
@@ -189,7 +193,7 @@ export function KopJualBatchModal({ onClose, onSuccess }: { onClose: () => void;
             <input type="date" value={tanggal} max={localToday()} onChange={(e) => setTanggal(e.target.value)} className={headerInputCls} />
           </HeaderField>
           <p className="text-xs text-[var(--text-secondary)] self-center max-w-md">
-            NIK terbawa ke baris berikutnya (Enter), jadi barang satu orang tinggal diketik ke bawah. Harga kosong = harga jual barang. Limit {rp(limit)} per orang per bulan.
+            Isi NIK sekali, barang berikutnya untuk orang yang sama cukup diketik di baris bawahnya (NIK terisi otomatis). Harga kosong = harga jual barang. Limit {rp(limit)} per orang per bulan.
           </p>
         </>
       }
@@ -215,6 +219,7 @@ export function KopJualBatchModal({ onClose, onSuccess }: { onClose: () => void;
       onClose={onClose}
       onSuccess={onSuccess}
       evidenceOptional
+      carryDown
       evidenceLabel="Foto bon (opsional, satu untuk semua baris)"
     />
   );
