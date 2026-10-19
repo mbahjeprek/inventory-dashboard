@@ -30,8 +30,13 @@ const btnOutline =
 
 const BULAN = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
 const periodeLabel = (p: string) => `${BULAN[Number(p.slice(5, 7)) - 1] ?? ""} ${p.slice(0, 4)}`;
+// Money is always shown as "Rp 1.500.000" (dots for thousands).
 const rp = (n: number) => `Rp ${Math.round(n).toLocaleString("id-ID")}`;
-const num = (n: number) => Math.round(n).toLocaleString("id-ID");
+// A typed rupiah amount shown with its thousands dots as it is typed ("1500000" -> "1.500.000").
+const rpText = (v: string | number) => {
+  const digits = String(typeof v === "number" ? Math.round(v) : v).replace(/\D/g, "").replace(/^0+(?=\d)/, "");
+  return digits ? Number(digits).toLocaleString("id-ID") : "";
+};
 const BAYAR_LABEL: Record<KopBayar, string> = { POTONG_GAJI: "Potong Gaji", TUNAI: "Tunai", INSTANSI: "Instansi" };
 const BAYAR_CLS: Record<KopBayar, string> = {
   POTONG_GAJI: "bg-[var(--accent-blue-bg)] border-[var(--accent-blue-border)] text-[var(--accent-blue)]",
@@ -250,7 +255,7 @@ function TxTable({
       title: `Koperasi Nilam - ${jual ? "Pengambilan" : beli ? "Pembelian" : rusak ? "Barang Rusak" : "Riwayat"}`,
       subtitle: [periode ? `Periode ${periodeLabel(periode)}` : "Semua periode", ...(q ? [`Cari: ${q}`] : [])],
       landscape: true,
-      columns: cols.map((c) => ({ label: c, align: ["Jumlah", "Harga", "Total"].includes(c) ? ("right" as const) : undefined })),
+      columns: cols.map((c) => ({ label: ["Harga", "Total"].includes(c) ? `${c} (Rp)` : c, align: ["Jumlah", "Harga", "Total"].includes(c) ? ("right" as const) : undefined })),
       rows: rows.map((t) => [
         isoDisplay(t.tanggal_iso),
         ...(jual || !jenis ? [t.anggota_kode ? `${t.anggota_nama || "-"} (${t.anggota_kode})` : "-"] : []),
@@ -333,8 +338,8 @@ function TxTable({
                     <td className="px-3 py-2 text-right whitespace-nowrap">
                       {fmtQty(t.qty)} {t.satuan}
                     </td>
-                    {!rusak && <td className="px-3 py-2 text-right whitespace-nowrap">{num(t.harga)}</td>}
-                    {!rusak && <td className="px-3 py-2 text-right whitespace-nowrap font-medium">{num(t.total)}</td>}
+                    {!rusak && <td className="px-3 py-2 text-right whitespace-nowrap">{rp(t.harga)}</td>}
+                    {!rusak && <td className="px-3 py-2 text-right whitespace-nowrap font-medium">{rp(t.total)}</td>}
                     {jual && (
                       <td className="px-3 py-2">
                         <span className={`text-[11px] px-2 py-0.5 rounded-full border whitespace-nowrap ${BAYAR_CLS[t.bayar]}`}>{BAYAR_LABEL[t.bayar]}</span>
@@ -420,10 +425,10 @@ function RekapTab({ periode, reload }: { periode: string; reload: number }) {
       { label: "Jabatan" },
       { label: "Estate / Divisi" },
       { label: "Jml Bon", align: "right" as const },
-      { label: "Potong Gaji", align: "right" as const },
-      { label: "Tunai", align: "right" as const },
-      { label: "Instansi", align: "right" as const },
-      { label: "Total", align: "right" as const },
+      { label: "Potong Gaji (Rp)", align: "right" as const },
+      { label: "Tunai (Rp)", align: "right" as const },
+      { label: "Instansi (Rp)", align: "right" as const },
+      { label: "Total (Rp)", align: "right" as const },
     ],
     rows: [
       ...shown.map((r, i) => [i + 1, r.kode, r.nama || "-", r.jabatan, [r.estate, r.divisi].filter(Boolean).join(" / "), r.n_bon, r.potong_gaji, r.tunai, r.instansi, r.total]),
@@ -491,11 +496,11 @@ function RekapTab({ periode, reload }: { periode: string; reload: number }) {
                     <td className="px-3 py-2 text-xs whitespace-nowrap">{[r.estate, r.divisi].filter(Boolean).join(" / ") || "-"}</td>
                     <td className="px-3 py-2 text-right">{r.n_bon}</td>
                     <td className={`px-3 py-2 text-right whitespace-nowrap font-semibold ${lewat(r) ? "text-[var(--accent-red)]" : ""}`} title={lewat(r) ? "Melebihi limit per bulan" : undefined}>
-                      {r.potong_gaji ? num(r.potong_gaji) : "-"}
+                      {r.potong_gaji ? rp(r.potong_gaji) : "-"}
                     </td>
-                    <td className="px-3 py-2 text-right whitespace-nowrap">{r.tunai ? num(r.tunai) : "-"}</td>
-                    <td className="px-3 py-2 text-right whitespace-nowrap">{r.instansi ? num(r.instansi) : "-"}</td>
-                    <td className="px-3 py-2 text-right whitespace-nowrap">{num(r.total)}</td>
+                    <td className="px-3 py-2 text-right whitespace-nowrap">{r.tunai ? rp(r.tunai) : "-"}</td>
+                    <td className="px-3 py-2 text-right whitespace-nowrap">{r.instansi ? rp(r.instansi) : "-"}</td>
+                    <td className="px-3 py-2 text-right whitespace-nowrap">{rp(r.total)}</td>
                   </tr>
                 ))}
                 <tr className="bg-[#f8fafc] font-semibold">
@@ -503,10 +508,10 @@ function RekapTab({ periode, reload }: { periode: string; reload: number }) {
                     TOTAL
                   </td>
                   <td className="px-3 py-2 text-right">{shown.reduce((s, r) => s + r.n_bon, 0)}</td>
-                  <td className="px-3 py-2 text-right whitespace-nowrap">{num(sum("potong_gaji"))}</td>
-                  <td className="px-3 py-2 text-right whitespace-nowrap">{num(sum("tunai"))}</td>
-                  <td className="px-3 py-2 text-right whitespace-nowrap">{num(sum("instansi"))}</td>
-                  <td className="px-3 py-2 text-right whitespace-nowrap">{num(sum("total"))}</td>
+                  <td className="px-3 py-2 text-right whitespace-nowrap">{rp(sum("potong_gaji"))}</td>
+                  <td className="px-3 py-2 text-right whitespace-nowrap">{rp(sum("tunai"))}</td>
+                  <td className="px-3 py-2 text-right whitespace-nowrap">{rp(sum("instansi"))}</td>
+                  <td className="px-3 py-2 text-right whitespace-nowrap">{rp(sum("total"))}</td>
                 </tr>
               </>
             )}
@@ -550,9 +555,9 @@ function StokTab({ reload, canEdit, onChanged }: { reload: number; canEdit: bool
       { label: "Nama Barang" },
       { label: "Stok", align: "right" as const },
       { label: "Satuan" },
-      { label: "Harga Beli", align: "right" as const },
-      { label: "Harga Jual", align: "right" as const },
-      { label: "Nilai Stok", align: "right" as const },
+      { label: "Harga Beli (Rp)", align: "right" as const },
+      { label: "Harga Jual (Rp)", align: "right" as const },
+      { label: "Nilai Stok (Rp)", align: "right" as const },
     ],
     rows: shown.map((b) => [b.kode, b.nama, b.lacak_stok ? b.stok : "tidak dilacak", b.satuan, b.harga_beli, b.harga_jual, b.lacak_stok ? Math.max(b.stok, 0) * b.harga_beli : ""]),
   });
@@ -621,8 +626,8 @@ function StokTab({ reload, canEdit, onChanged }: { reload: number; canEdit: bool
                   <td className={`px-3 py-2 text-right whitespace-nowrap font-semibold ${!b.lacak_stok ? "text-[var(--text-muted)]" : menipis(b) ? "text-[var(--accent-red)]" : "text-[var(--text-primary)]"}`}>
                     {b.lacak_stok ? `${fmtQty(b.stok)} ${b.satuan}` : <span className="text-xs font-normal">tidak dilacak</span>}
                   </td>
-                  <td className="px-3 py-2 text-right whitespace-nowrap">{num(b.harga_beli)}</td>
-                  <td className="px-3 py-2 text-right whitespace-nowrap">{num(b.harga_jual)}</td>
+                  <td className="px-3 py-2 text-right whitespace-nowrap">{rp(b.harga_beli)}</td>
+                  <td className="px-3 py-2 text-right whitespace-nowrap">{rp(b.harga_jual)}</td>
                   <td className="px-3 py-2 whitespace-nowrap text-xs text-[var(--text-secondary)]">{b.terakhir ? isoDisplay(b.terakhir) : "-"}</td>
                   <td className="px-3 py-2 text-right whitespace-nowrap">
                     <button onClick={() => setRiwayat(b)} className="text-xs text-[var(--accent-blue)] hover:underline mr-2">
@@ -654,8 +659,8 @@ function BarangModal({ barang, onClose, onSuccess }: { barang: KopBarang | null;
   const [f, setF] = useState({
     nama: barang?.nama ?? "",
     satuan: barang?.satuan ?? "PCS",
-    harga_beli: String(barang?.harga_beli ?? ""),
-    harga_jual: String(barang?.harga_jual ?? ""),
+    harga_beli: rpText(barang?.harga_beli ?? ""),
+    harga_jual: rpText(barang?.harga_jual ?? ""),
     stok_min: String(barang?.stok_min ?? 0),
     aktif: barang?.aktif ?? true,
     lacak_stok: barang?.lacak_stok ?? true,
@@ -700,12 +705,12 @@ function BarangModal({ barang, onClose, onSuccess }: { barang: KopBarang | null;
             <input value={f.stok_min} onChange={set("stok_min")} inputMode="decimal" className={inputCls} />
           </div>
           <div>
-            <label className={labelCls}>Harga beli (Rp)</label>
-            <input value={f.harga_beli} onChange={set("harga_beli")} inputMode="decimal" className={inputCls} />
+            <label className={labelCls}>Harga beli</label>
+            <RpInput value={f.harga_beli} onChange={(v) => setF((x) => ({ ...x, harga_beli: v }))} />
           </div>
           <div>
-            <label className={labelCls}>Harga jual ke anggota (Rp)</label>
-            <input value={f.harga_jual} onChange={set("harga_jual")} inputMode="decimal" className={inputCls} />
+            <label className={labelCls}>Harga jual ke anggota</label>
+            <RpInput value={f.harga_jual} onChange={(v) => setF((x) => ({ ...x, harga_jual: v }))} />
           </div>
         </div>
         <label className="flex items-center gap-2 text-sm">
@@ -757,7 +762,7 @@ function AnggotaTab({ reload, canEdit, onChanged }: { reload: number; canEdit: b
       { label: "Divisi" },
       { label: "Di Master Karyawan" },
       { label: "Terakhir Ambil" },
-      { label: "Bulan Ini", align: "right" as const },
+      { label: "Bulan Ini (Rp)", align: "right" as const },
     ],
     rows: shown.map((a) => [a.kode, a.nama, a.jenis === "INSTANSI" ? "Instansi" : "Karyawan", a.jabatan, a.estate, a.divisi, a.jenis === "INSTANSI" ? "-" : a.di_master ? "Ya" : "Tidak", a.terakhir ? isoDisplay(a.terakhir) : "", a.total_bulan_ini ?? 0]),
   });
@@ -829,7 +834,7 @@ function AnggotaTab({ reload, canEdit, onChanged }: { reload: number; canEdit: b
                   <td className="px-3 py-2 text-xs">{a.jabatan || "-"}</td>
                   <td className="px-3 py-2 text-xs whitespace-nowrap">{[a.estate, a.divisi].filter(Boolean).join(" / ") || "-"}</td>
                   <td className="px-3 py-2 text-xs whitespace-nowrap">{a.terakhir ? isoDisplay(a.terakhir) : "-"}</td>
-                  <td className="px-3 py-2 text-right whitespace-nowrap">{a.total_bulan_ini ? num(a.total_bulan_ini) : "-"}</td>
+                  <td className="px-3 py-2 text-right whitespace-nowrap">{a.total_bulan_ini ? rp(a.total_bulan_ini) : "-"}</td>
                   <td className="px-3 py-2 text-right whitespace-nowrap">
                     <button onClick={() => setRiwayat(a)} className="text-xs text-[var(--accent-blue)] hover:underline mr-2">
                       Riwayat
@@ -1020,6 +1025,21 @@ function AnggotaPicker({ value, onChange, karyawanOnly = false }: { value: KopAn
   );
 }
 
+// Input for a rupiah amount: "Rp" in front, dots added while typing.
+function RpInput({ value, onChange, small = false }: { value: string; onChange: (v: string) => void; small?: boolean }) {
+  return (
+    <div className="relative">
+      <span className={`absolute left-2 top-1/2 -translate-y-1/2 text-[var(--text-muted)] pointer-events-none ${small ? "text-xs" : "text-sm"}`}>Rp</span>
+      <input
+        value={value}
+        onChange={(e) => onChange(rpText(e.target.value))}
+        inputMode="numeric"
+        className={small ? "w-full text-sm rounded border border-[var(--border)] pl-7 pr-2 py-1 text-right" : `${inputCls} pl-8 text-right`}
+      />
+    </div>
+  );
+}
+
 // ---- Forms: lines of barang (pengambilan uses harga jual, pembelian harga beli) ----
 type Line = { barang: KopBarang; qty: string; harga: string };
 
@@ -1039,7 +1059,7 @@ function BarangLines({ lines, setLines, harga, checkStok }: { lines: Line[]; set
   const q = search.trim().toLowerCase();
   const options = q ? barang.filter((b) => (b.nama.toLowerCase().includes(q) || b.kode.toLowerCase().includes(q)) && !lines.some((l) => l.barang.kode === b.kode)).slice(0, 12) : [];
   const add = (b: KopBarang) => {
-    setLines((l) => [...l, { barang: b, qty: "1", harga: String(harga === "jual" ? b.harga_jual : b.harga_beli) }]);
+    setLines((l) => [...l, { barang: b, qty: "1", harga: rpText(harga === "jual" ? b.harga_jual : b.harga_beli) }]);
     setSearch("");
     setOpen(false);
   };
@@ -1070,7 +1090,7 @@ function BarangLines({ lines, setLines, harga, checkStok }: { lines: Line[]; set
                   {b.nama} <span className="text-[11px] text-[var(--text-muted)]">{b.kode}</span>
                 </span>
                 <span className={`text-xs whitespace-nowrap ${b.lacak_stok && b.stok <= 0 ? "text-[var(--accent-red)]" : "text-[var(--text-muted)]"}`}>
-                  {b.lacak_stok ? `stok ${fmtQty(b.stok)} ${b.satuan}` : "tanpa stok"} · {num(harga === "jual" ? b.harga_jual : b.harga_beli)}
+                  {b.lacak_stok ? `stok ${fmtQty(b.stok)} ${b.satuan}` : "tanpa stok"} · {rp(harga === "jual" ? b.harga_jual : b.harga_beli)}
                 </span>
               </button>
             ))}
@@ -1084,7 +1104,7 @@ function BarangLines({ lines, setLines, harga, checkStok }: { lines: Line[]; set
               <tr className="bg-[#f8fafc] text-xs text-[var(--text-secondary)] text-left">
                 <th className="px-2 py-1.5">Barang</th>
                 <th className="px-2 py-1.5 w-24">Jumlah</th>
-                <th className="px-2 py-1.5 w-28">{harga === "jual" ? "Harga" : "Harga beli"}</th>
+                <th className="px-2 py-1.5 w-36">{harga === "jual" ? "Harga" : "Harga beli"}</th>
                 <th className="px-2 py-1.5 text-right">Subtotal</th>
                 <th className="w-8" />
               </tr>
@@ -1105,9 +1125,9 @@ function BarangLines({ lines, setLines, harga, checkStok }: { lines: Line[]; set
                       <input value={l.qty} onChange={(e) => update(i, "qty", e.target.value)} inputMode="decimal" className="w-full text-sm rounded border border-[var(--border)] px-2 py-1" />
                     </td>
                     <td className="px-2 py-1.5">
-                      <input value={l.harga} onChange={(e) => update(i, "harga", e.target.value)} inputMode="decimal" className="w-full text-sm rounded border border-[var(--border)] px-2 py-1" />
+                      <RpInput small value={l.harga} onChange={(v) => update(i, "harga", v)} />
                     </td>
-                    <td className="px-2 py-1.5 text-right whitespace-nowrap">{num(qty * (parseNum(l.harga) || 0))}</td>
+                    <td className="px-2 py-1.5 text-right whitespace-nowrap">{rp(qty * (parseNum(l.harga) || 0))}</td>
                     <td className="px-1 py-1.5">
                       <button onClick={() => setLines((x) => x.filter((_, j) => j !== i))} title="Hapus baris" className="p-1 rounded text-[var(--accent-red)] hover:bg-[var(--accent-red-bg)]">
                         <X size={14} />
