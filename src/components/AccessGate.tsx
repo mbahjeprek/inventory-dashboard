@@ -2,13 +2,14 @@ import { Navigate, useLocation } from "react-router-dom";
 import type { ReactNode } from "react";
 import { useAuth } from "../context/AuthContext";
 import type { AuthUser } from "../lib/api";
-import { canModule, moduleOfPath, pageAllowed, userEstates } from "../lib/access";
+import { canModule, koperasiOnly, KOPERASI_PATH, moduleOfPath, pageAllowed, userEstates } from "../lib/access";
 
 // Everyone lands on the dashboard ("/"), which shows only what the account may open. An account
 // with no estate and no page permission has nowhere to go, so it's sent back to /login (which
 // offers "Keluar").
 export function homeRouteFor(user: AuthUser | null): string {
   if (!user) return "/login";
+  if (koperasiOnly(user)) return KOPERASI_PATH;
   if (user.role === "superuser" || userEstates(user).length || (user.perms ?? []).length) return "/";
   return "/login";
 }
@@ -22,6 +23,14 @@ export function RequireEstate({ estate, children }: { estate: string; children: 
   const m = moduleOfPath(pathname);
   if (userEstates(user).includes(estate) && (!m || canModule(user, m))) return <>{children}</>;
   return <Navigate to={homeRouteFor(user)} replace />;
+}
+
+// The main Dashboard ("/"): a Koperasi-only account goes to the Koperasi page instead.
+export function HomeGate({ children }: { children: ReactNode }) {
+  const { user } = useAuth();
+  if (!user) return null;
+  if (koperasiOnly(user)) return <Navigate to={KOPERASI_PATH} replace />;
+  return <>{children}</>;
 }
 
 // Master data / monitoring / Stok Opname pages (pageAllowed), superuser for anything else.

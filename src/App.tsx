@@ -1,7 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider } from "./context/AuthContext";
 import { ProtectedRoute } from "./components/ProtectedRoute";
-import { RequireEstate, RequirePageAccess } from "./components/AccessGate";
+import { HomeGate, RequireEstate, RequirePageAccess } from "./components/AccessGate";
 import { LoginPage } from "./pages/LoginPage";
 import { MainLayout } from "./layouts/MainLayout";
 import { InventoryPage } from "./pages/InventoryPage";
@@ -87,7 +87,14 @@ function App() {
                 />
               ))}
               {/* Landing page for every account; it only shows the estates the account can open. */}
-              <Route path="/" element={<DashboardPage />} />
+              <Route
+                path="/"
+                element={
+                  <HomeGate>
+                    <DashboardPage />
+                  </HomeGate>
+                }
+              />
 
               <Route
                 path="/inventory"

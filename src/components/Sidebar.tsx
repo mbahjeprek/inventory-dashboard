@@ -30,7 +30,7 @@ import { useAuth } from "../context/AuthContext";
 import { useEstateFilter } from "../hooks/useEstateFilter";
 import { useOpenPinjaman } from "../hooks/useOpenPinjaman";
 import { ChangePasswordModal } from "./ChangePasswordModal";
-import { canModule, pageAllowed, userEstates, OPNAME_PATH, PINJAMAN_PATH, PASIEN_PATH, KOPERASI_PATH, type Module } from "../lib/access";
+import { canModule, koperasiOnly, pageAllowed, userEstates, OPNAME_PATH, PINJAMAN_PATH, PASIEN_PATH, KOPERASI_PATH, type Module } from "../lib/access";
 
 type NavItem = { to: string; label: string; icon: typeof Package };
 type NavSection = { title?: string; collapsible?: boolean; items: NavItem[] };
@@ -154,8 +154,9 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: { mobileOpen?: bo
   const moduleLinks = MODULE_LINKS.filter((m) => canModule(user, m.key));
 
   const visibleSections = navSections
-    .map((s) => ({ ...s, items: s.items.filter((it) => it.to === "/" || pageAllowed(user, it.to)) }))
-    .filter((s) => !s.title || s.title === "Inventory" || s.items.length > 0);
+    // A Koperasi-only account has no main Dashboard and no inventory: only its Koperasi menu shows.
+    .map((s) => ({ ...s, items: s.items.filter((it) => (it.to === "/" ? !koperasiOnly(user) : pageAllowed(user, it.to))) }))
+    .filter((s) => (s.title === "Inventory" ? moduleLinks.length > 0 || s.items.length > 0 : s.items.length > 0));
 
   // The estate the module links point at: the current page's estate, else the last one used (while
   // it's still one of this account's estates), else the first.
@@ -235,10 +236,12 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: { mobileOpen?: bo
 
       <nav className="flex-1 px-3 space-y-4 overflow-y-auto overflow-x-hidden">
         {visibleSections.map((section, i) => {
-          // Sections start closed (except Inventory) so the sidebar stays short; a closed section that holds the
-          // current page shows a dot so it's still clear where you are.
+          // Sections start closed (except Inventory, or the only section an account has, e.g. Koperasi) so the
+          // sidebar stays short; a closed section that holds the current page shows a dot so it's still clear where you are.
           const isOpen =
-            minimized || !section.collapsible ? true : !(groupCollapsed[section.title!] ?? section.title !== "Inventory");
+            minimized || !section.collapsible
+              ? true
+              : !(groupCollapsed[section.title!] ?? (section.title !== "Inventory" && visibleSections.filter((x) => x.title).length > 1));
           const hasActive =
             section.items.some((it) => it.to === location.pathname || (it.to !== "/" && location.pathname.startsWith(`${it.to}/`))) ||
             (section.title === "Inventory" && !!current);

@@ -171,6 +171,14 @@ export const PASIEN_PATH = "/master-pasien";
 export const KOPERASI_PATH = "/koperasi";
 export const KOPERASI_ESTATE = "NILAM";
 
+// An account that only has Koperasi ticks (e.g. the koperasi admin, HR): it lands on the Koperasi
+// page instead of the main Dashboard, which has nothing for it.
+export function koperasiOnly(user: AuthUser | null): boolean {
+  if (!user || user.role === "superuser") return false;
+  const perms = user.perms ?? [];
+  return perms.length > 0 && perms.every((p) => p.startsWith("koperasi.")) && pageAllowed(user, KOPERASI_PATH);
+}
+
 // Whether a non-inventory page (sidebar / router) may be opened.
 export function pageAllowed(user: AuthUser | null, path: string): boolean {
   if (!user) return false;
