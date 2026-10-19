@@ -1303,7 +1303,9 @@ export const api = {
   kopRusak: (body: { tanggal: string; barang_kode: string; qty: number; keterangan: string; evidence_id: string | null }) =>
     req<{ success: boolean }>("/api/koperasi/rusak", { method: "POST", body: JSON.stringify(body) }),
   kopHapus: (id: number, bon = false) => req<{ success: boolean; n: number }>(`/api/koperasi/tx/${id}${bon ? "?bon=1" : ""}`, { method: "DELETE" }),
-  kopRekap: (periode: string) => req<{ periode: string; data: KopRekap[] }>(`/api/koperasi/rekap?periode=${periode}`),
+  kopRekap: (periode: string) => req<{ periode: string; limit: number; data: KopRekap[] }>(`/api/koperasi/rekap?periode=${periode}`),
+  kopLimit: (kode: string, periode: string) =>
+    req<{ periode: string; limit: number; terpakai: number; sisa: number }>(`/api/koperasi/limit/${encodeURIComponent(kode)}?periode=${periode}`),
   pinjamanLog: (params: Record<string, string | number>) =>
     req<{ data: PinjamanLog[]; total: number; ringkasan: PinjamanRingkasan }>(`/api/pinjaman/log?${new URLSearchParams(params as any)}`),
   pinjamanBarang: (module: OpnameModule, estate: string, search: string, all = false) =>

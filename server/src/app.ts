@@ -7364,6 +7364,9 @@ app.get("/api/pemakaian/detail", async (req, res) => {
 // An anggota takes goods (JUAL, deducted from the salary of that month = periode), the koperasi buys
 // them in (BELI) and throws away what spoiled (RUSAK). Stock = BELI - JUAL - RUSAK.
 const KOPERASI = "NILAM";
+// A karyawan may take up to this much per payroll month; everything is deducted from that month's
+// salary (no cicilan). Kantor / Mess Tamu (instansi) have no limit.
+const KOP_LIMIT = 1_500_000;
 const KOPERASI_LIST = [KOPERASI];
 const kopMonth = (d: string) => d.slice(0, 7);
 const isIsoDate = (d: unknown): d is string => typeof d === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d) && !Number.isNaN(Date.parse(d));
@@ -7373,7 +7376,8 @@ const isPeriode = (p: unknown): p is string => typeof p === "string" && /^\d{4}-
 const KOP_ANGGOTA_COLS = `a.kode, a.jenis, COALESCE(NULLIF(k.nama, ''), a.nama) AS nama, a.jabatan, COALESCE(NULLIF(k.estate, ''), a.estate) AS estate,
   COALESCE(NULLIF(k.lokasi_kerja, ''), a.divisi) AS divisi, a.aktif, a.catatan, (k.nik IS NOT NULL) AS di_master`;
 const KOP_ANGGOTA_JOIN = "LEFT JOIN karyawan k ON UPPER(REPLACE(k.nik, ' ', '')) = a.kode";
-const kopStokSql = `SUM(CASE t.jenis WHEN 'BELI' THEN t.qty ELSE -t.qty END)`;
+// The April 2023 rekap (sumber IMPORT-REKAP2023) is history from before the ledger: it doesn't move the stock.
+const kopStokSql = `SUM(CASE WHEN t.sumber = 'IMPORT-REKAP2023' THEN 0 WHEN t.jenis = 'BELI' THEN t.qty ELSE -t.qty END)`;
 
 app.use("/api/koperasi", (req, res, next) => {
   if (!estateAllowed(req.user!, KOPERASI)) return res.status(403).json({ error: "Koperasi hanya untuk akun estate Nilam" });
@@ -7559,6 +7563,21 @@ app.put("/api/koperasi/anggota/:kode", async (req, res) => {
   res.json({ success: true });
 });
 
+// Limit of one anggota in a periode: what is already deducted (potong gaji) and what is left.
+async function kopTerpakai(kode: string, periode: string, client?: PoolClient) {
+  const r = await queryOne<{ v: number }>(
+    "SELECT COALESCE(SUM(total), 0)::float8 AS v FROM koperasi_tx WHERE anggota_kode = @kode AND periode = @periode AND jenis = 'JUAL' AND bayar = 'POTONG_GAJI'",
+    { kode, periode },
+    client
+  );
+  return r!.v;
+}
+app.get("/api/koperasi/limit/:kode", async (req, res) => {
+  const periode = isPeriode(req.query.periode) ? req.query.periode : kopMonth(jakartaToday());
+  const terpakai = await kopTerpakai(String(req.params.kode).toUpperCase(), periode);
+  res.json({ periode, limit: KOP_LIMIT, terpakai, sisa: Math.max(KOP_LIMIT - terpakai, 0) });
+});
+
 // ---- Transaksi ----
 app.get("/api/koperasi/tx", async (req, res) => {
   const { jenis = "JUAL", periode = "", anggota = "", barang = "", search = "", page = "1", pageSize = "100" } = req.query as Record<string, string>;
@@ -7615,8 +7634,8 @@ async function kopStok(kode: string[], client: PoolClient) {
 }
 const kopQty = (n: number) => n.toLocaleString("id-ID", { maximumFractionDigits: 2 });
 
-// Pengambilan: one bon of an anggota, several barang. bayar POTONG_GAJI (deducted in the month of the
-// tanggal) or TUNAI; an INSTANSI (Kantor, Mess Tamu) is billed to the company.
+// Pengambilan: one bon of an anggota, several barang. A karyawan's is deducted from the salary of the
+// tanggal's month (POTONG_GAJI, up to KOP_LIMIT a month); an INSTANSI (Kantor, Mess Tamu) is billed to the company.
 app.post("/api/koperasi/jual", async (req, res) => {
   const b = req.body ?? {};
   if (!isIsoDate(b.tanggal) || b.tanggal > jakartaToday()) return res.status(400).json({ error: "Tanggal tidak valid (tidak boleh setelah hari ini)" });
@@ -7643,12 +7662,24 @@ app.post("/api/koperasi/jual", async (req, res) => {
         anggota = { kode, jenis: "KARYAWAN", nama: k.nama, aktif: true };
       }
       if (!anggota.aktif) return { error: `${anggota.nama || kode} sudah tidak aktif sebagai anggota koperasi` };
-      const bayar = anggota.jenis === "INSTANSI" ? "INSTANSI" : b.bayar === "TUNAI" ? "TUNAI" : "POTONG_GAJI";
+      const bayar = anggota.jenis === "INSTANSI" ? "INSTANSI" : "POTONG_GAJI";
       const v = await kopLines(b.items, client);
       if ("error" in v) return v;
       const stok = await kopStok(v.lines.map((l) => l.barang_kode), client);
       const short = v.lines.find((l) => l.lacak_stok && (stok.get(l.barang_kode) ?? 0) + 1e-9 < l.qty);
       if (short) return { error: `Stok ${short.nama} tinggal ${kopQty(stok.get(short.barang_kode) ?? 0)}, tidak cukup untuk ${kopQty(short.qty)}` };
+      if (bayar === "POTONG_GAJI") {
+        // The anggota row is locked so two bon at once can't both fit under the limit.
+        await queryOne("SELECT kode FROM koperasi_anggota WHERE kode = @kode FOR UPDATE", { kode }, client);
+        const terpakai = await kopTerpakai(kode, kopMonth(b.tanggal), client);
+        const baru = v.lines.reduce((s, l) => s + l.qty * l.harga, 0);
+        if (terpakai + baru > KOP_LIMIT + 0.005) {
+          const rpText = (n: number) => `Rp ${Math.round(n).toLocaleString("id-ID")}`;
+          return {
+            error: `Melebihi limit ${rpText(KOP_LIMIT)} per bulan: ${anggota.nama || kode} sudah mengambil ${rpText(terpakai)} di periode ini, sisa ${rpText(Math.max(KOP_LIMIT - terpakai, 0))}, bon ini ${rpText(baru)}`,
+          };
+        }
+      }
       const bon = `KOP-${b.tanggal.replace(/-/g, "")}-${Date.now().toString(36).toUpperCase()}`;
       await execute(
         `INSERT INTO koperasi_tx (koperasi, jenis, tanggal_iso, periode, bon, barang_kode, qty, harga, total, anggota_kode, bayar, keterangan, evidence_id, user_id)
@@ -7808,7 +7839,7 @@ app.get("/api/koperasi/rekap", async (req, res) => {
       ORDER BY a.jenis DESC, COALESCE(NULLIF(k.nama, ''), NULLIF(a.nama, ''), a.kode)`,
     { k: KOPERASI, periode }
   );
-  res.json({ periode, data });
+  res.json({ periode, limit: KOP_LIMIT, data });
 });
 
 // ---- Status Update: how current each estate's data is, per module ----

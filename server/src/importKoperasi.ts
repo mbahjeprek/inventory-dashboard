@@ -5,12 +5,14 @@ import { execute, pool, withTransaction } from "./db.js";
 // Koperasi Nilam from its Google Sheet (REKAP PENJUALAN 2023-2025, REKAP PEMBELIAN, BARANG RUSAK,
 // SISA STOCK, DATA KARYAWAN), prepared into one JSON file:
 //   npx tsx server/src/importKoperasi.ts koperasi_import.json
-// Barang and anggota are upserted; the imported movements (sumber 'IMPORT') are replaced as a whole,
+// Barang and anggota are upserted; the imported movements (sumber 'IMPORT...') are replaced as a whole,
 // so running it again with a newer sheet doesn't double them. Rows entered in the app stay.
 // Karyawan in the sheet's DATA KARYAWAN but not in master karyawan yet are added (never changed).
 type Barang = { kode: string; nama: string; satuan: string; harga_jual: number; harga_beli: number; lacak_stok: boolean; aktif: boolean };
 type Anggota = { kode: string; jenis: string; nama: string; jabatan: string; estate: string; divisi: string; aktif: boolean };
-type Tx = { jenis: string; tanggal: string; periode: string; bon?: string; barang: string; qty: number; harga: number; total: number; anggota?: string; no_po?: string; keterangan: string };
+// sumber: IMPORT (main sheets), IMPORT-DEPO (depo air rows not in the main sheet yet), IMPORT-REKAP2023
+// (the April 2023 matrix: history only, doesn't move the stock - see kopStokSql in app.ts).
+type Tx = { jenis: string; tanggal: string; periode: string; bon?: string; barang: string; qty: number; harga: number; total: number; anggota?: string; no_po?: string; keterangan: string; sumber?: string };
 type Karyawan = { nik: string; nama: string; status: string; estate: string; lokasi_kerja: string };
 
 const file = process.argv[2];
@@ -46,16 +48,16 @@ async function main() {
         a,
         c
       );
-    await execute("DELETE FROM koperasi_tx WHERE sumber = 'IMPORT'", {}, c);
+    await execute("DELETE FROM koperasi_tx WHERE sumber LIKE 'IMPORT%'", {}, c);
     // 1000 rows per INSERT (unnest of one array per column).
     for (let i = 0; i < data.tx.length; i += 1000) {
       const part = data.tx.slice(i, i + 1000);
       const col = <K extends keyof Tx>(k: K, d: Tx[K] | null = null) => part.map((t) => t[k] ?? d);
       await execute(
         `INSERT INTO koperasi_tx (jenis, tanggal_iso, periode, bon, barang_kode, qty, harga, total, anggota_kode, bayar, no_po, keterangan, sumber)
-         SELECT j, tg, p, b, k, q, h, t, a, CASE WHEN a IS NULL THEN 'POTONG_GAJI' WHEN a ~ '^[A-Z]{3}[0-9]+$' THEN 'POTONG_GAJI' ELSE 'INSTANSI' END, po, ket, 'IMPORT'
-           FROM unnest(@j::text[], @tg::text[], @p::text[], @b::text[], @k::text[], @q::float8[], @h::float8[], @t::float8[], @a::text[], @po::text[], @ket::text[])
-             AS x(j, tg, p, b, k, q, h, t, a, po, ket)`,
+         SELECT j, tg, p, b, k, q, h, t, a, CASE WHEN a IS NULL THEN 'POTONG_GAJI' WHEN a ~ '^[A-Z]{3}[0-9]+$' THEN 'POTONG_GAJI' ELSE 'INSTANSI' END, po, ket, s
+           FROM unnest(@j::text[], @tg::text[], @p::text[], @b::text[], @k::text[], @q::float8[], @h::float8[], @t::float8[], @a::text[], @po::text[], @ket::text[], @s::text[])
+             AS x(j, tg, p, b, k, q, h, t, a, po, ket, s)`,
         {
           j: col("jenis"),
           tg: col("tanggal"),
@@ -68,6 +70,7 @@ async function main() {
           a: col("anggota"),
           po: col("no_po", ""),
           ket: col("keterangan", ""),
+          s: col("sumber", "IMPORT"),
         },
         c
       );
@@ -76,7 +79,7 @@ async function main() {
     // purchase the goods came from): it gets the barang's last price, so its rekap isn't 0.
     const priced = await execute(
       `UPDATE koperasi_tx t SET harga = b.harga_jual, total = t.qty * b.harga_jual
-         FROM koperasi_barang b WHERE b.kode = t.barang_kode AND t.sumber = 'IMPORT' AND t.jenis = 'JUAL' AND t.harga = 0 AND b.harga_jual > 0`,
+         FROM koperasi_barang b WHERE b.kode = t.barang_kode AND t.sumber LIKE 'IMPORT%' AND t.jenis = 'JUAL' AND t.harga = 0 AND b.harga_jual > 0`,
       {},
       c
     );
