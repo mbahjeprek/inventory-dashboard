@@ -53,11 +53,11 @@ const parseNum = (s: string) => Number(s.replace(/\./g, "").replace(",", "."));
 type Tab = "dashboard" | "jual" | "rekap" | "stok" | "opname" | "beli" | "anggota";
 const TABS: { key: Tab; label: string; icon: typeof Package }[] = [
   { key: "dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { key: "jual", label: "Pengambilan", icon: ShoppingBasket },
+  { key: "jual", label: "Stock Out", icon: ShoppingBasket },
   { key: "rekap", label: "Rekap Potong Gaji", icon: HandCoins },
   { key: "stok", label: "Stok Barang", icon: Boxes },
   { key: "opname", label: "Stok Opname", icon: ClipboardCheck },
-  { key: "beli", label: "Pembelian & Rusak", icon: Truck },
+  { key: "beli", label: "Stock In & Rusak", icon: Truck },
   { key: "anggota", label: "Anggota", icon: Users },
 ];
 
@@ -88,7 +88,7 @@ export function KoperasiPage() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold text-[var(--text-primary)]">Koperasi Karyawan Nilam</h1>
-          <p className="text-sm text-[var(--text-secondary)]">Pengambilan barang oleh karyawan, dipotong dari gaji bulan itu (limit Rp 1.500.000 per bulan)</p>
+          <p className="text-sm text-[var(--text-secondary)]">Stock Out barang ke karyawan, dipotong dari gaji bulan itu (limit Rp 1.500.000 per bulan)</p>
         </div>
         {canInput && (
           <div className="flex flex-wrap gap-2">
@@ -96,16 +96,16 @@ export function KoperasiPage() {
               <PackageX size={16} /> Barang Rusak
             </button>
             <button onClick={() => setModal("beli")} className={btnOutline}>
-              <Truck size={16} /> Catat Pembelian
+              <Truck size={16} /> Input Stock In
             </button>
             <button onClick={() => setModal("beliBatch")} className={btnOutline}>
-              <ListPlus size={16} /> Input Banyak Pembelian
+              <ListPlus size={16} /> Input Banyak Stock In
             </button>
             <button onClick={() => setModal("jualBatch")} className={btnOutline}>
-              <ListPlus size={16} /> Input Banyak Pengambilan
+              <ListPlus size={16} /> Input Banyak Stock Out
             </button>
             <button onClick={() => setModal("jual")} className={btnPrimary}>
-              <Plus size={16} /> Input Pengambilan
+              <Plus size={16} /> Input Stock Out
             </button>
           </div>
         )}
@@ -128,7 +128,7 @@ export function KoperasiPage() {
       {ringkasan && tab !== "dashboard" && (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <StatCard
-            label={`Pengambilan ${periodeLabel(periode)}`}
+            label={`Stock Out ${periodeLabel(periode)}`}
             value={rp(ringkasan.jual)}
             icon={ShoppingBasket}
             tone="blue"
@@ -147,7 +147,7 @@ export function KoperasiPage() {
               </span>
             }
           />
-          <StatCard label={`Pembelian ${periodeLabel(periode)}`} value={rp(ringkasan.beli)} icon={Truck} tone="green" onClick={() => setTab("beli")} title="Buka Pembelian" />
+          <StatCard label={`Stock In ${periodeLabel(periode)}`} value={rp(ringkasan.beli)} icon={Truck} tone="green" onClick={() => setTab("beli")} title="Buka Stock In" />
           <StatCard
             label="Nilai Stok (harga beli)"
             value={rp(ringkasan.nilai_stok)}
@@ -264,14 +264,14 @@ function TxTable({
     ...(jual ? ["Bayar"] : []),
     "Keterangan",
   ];
-  const label = jual ? "pengambilan" : beli ? "pembelian" : rusak ? "barang rusak" : "transaksi";
+  const label = jual ? "stock out" : beli ? "stock in" : rusak ? "barang rusak" : "transaksi";
   const pages = Math.max(1, Math.ceil((res?.total ?? 0) / pageSize));
   const buildReport = async () => {
     const all = await api.kopTx({ ...params, page: 1, pageSize: 500 });
     let rows = all.data;
     for (let p = 2; rows.length < all.total && p <= 40; p++) rows = rows.concat((await api.kopTx({ ...params, page: p, pageSize: 500 })).data);
     return {
-      title: `Koperasi Nilam - ${jual ? "Pengambilan" : beli ? "Pembelian" : rusak ? "Barang Rusak" : "Riwayat"}`,
+      title: `Koperasi Nilam - ${jual ? "Stock Out" : beli ? "Stock In" : rusak ? "Barang Rusak" : "Riwayat"}`,
       subtitle: [periode ? `Periode ${periodeLabel(periode)}` : "Semua periode", ...(q ? [`Cari: ${q}`] : [])],
       landscape: true,
       columns: cols.map((c) => ({ label: ["Harga", "Total"].includes(c) ? `${c} (Rp)` : c, align: ["Jumlah", "Harga", "Total"].includes(c) ? ("right" as const) : undefined })),
@@ -351,7 +351,7 @@ function TxTable({
                       <div className="text-[var(--text-primary)]">{t.barang_nama}</div>
                       <div className="text-[11px] text-[var(--text-muted)]">
                         {t.barang_kode}
-                        {!jenis && ` · ${t.jenis === "JUAL" ? "Pengambilan" : t.jenis === "BELI" ? "Pembelian" : t.jenis === "KOREKSI" ? "Koreksi stok" : "Rusak"}`}
+                        {!jenis && ` · ${t.jenis === "JUAL" ? "Stock Out" : t.jenis === "BELI" ? "Stock In" : t.jenis === "KOREKSI" ? "Koreksi stok" : "Rusak"}`}
                       </div>
                     </td>
                     <td className="px-3 py-2 text-right whitespace-nowrap">
@@ -498,7 +498,7 @@ function RekapTab({ periode, reload }: { periode: string; reload: number }) {
             ) : !shown.length ? (
               <tr>
                 <td colSpan={10} className="px-4 py-10 text-center text-[var(--text-muted)]">
-                  Belum ada pengambilan di {periodeLabel(periode)}.
+                  Belum ada stock out di {periodeLabel(periode)}.
                 </td>
               </tr>
             ) : (
@@ -804,7 +804,7 @@ function BarangModal({ barang, onClose, onSuccess }: { barang: KopBarang | null;
           <input type="checkbox" checked={f.lacak_stok} onChange={set("lacak_stok")} /> Lacak stok (matikan untuk barang yang tidak dibeli, mis. air galon depo)
         </label>
         <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={f.aktif} onChange={set("aktif")} /> Aktif (muncul di form pengambilan / pembelian)
+          <input type="checkbox" checked={f.aktif} onChange={set("aktif")} /> Aktif (muncul di form Stock Out / Stock In)
         </label>
         {error && <p className="text-xs text-[var(--accent-red)]">{error}</p>}
         <div className="flex justify-end gap-2">
@@ -940,7 +940,7 @@ function AnggotaTab({ reload, canEdit, onChanged }: { reload: number; canEdit: b
       </div>
       {editing && <AnggotaModal anggota={editing === "new" ? null : editing} onClose={() => setEditing(null)} onSuccess={() => (setEditing(null), onChanged())} />}
       {riwayat && (
-        <Modal title={riwayat.nama || riwayat.kode} subtitle={`${riwayat.kode} · semua pengambilan`} onClose={() => setRiwayat(null)} wide>
+        <Modal title={riwayat.nama || riwayat.kode} subtitle={`${riwayat.kode} · semua stock out`} onClose={() => setRiwayat(null)} wide>
           <TxTable jenis="JUAL" periode="" anggota={riwayat.kode} reload={reload} canEdit={false} onChanged={() => {}} />
         </Modal>
       )}
@@ -1270,13 +1270,13 @@ function JualModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: () 
       await api.kopJual({ tanggal, anggota_kode: anggota.kode, bayar: anggota.jenis === "INSTANSI" ? "INSTANSI" : "POTONG_GAJI", keterangan, evidence_id: evidence, items: linesBody(lines) });
       onSuccess();
     } catch (e) {
-      setError(errorText(e, "Gagal menyimpan pengambilan"));
+      setError(errorText(e, "Gagal menyimpan stock out"));
     } finally {
       setBusy(false);
     }
   };
   return (
-    <Modal title="Input Pengambilan" subtitle={`Masuk potong gaji periode ${periodeLabel(tanggal.slice(0, 7))}`} onClose={onClose} wide>
+    <Modal title="Input Stock Out" subtitle={`Masuk potong gaji periode ${periodeLabel(tanggal.slice(0, 7))}`} onClose={onClose} wide>
       <div className="space-y-3">
         <div className="grid sm:grid-cols-[1fr_auto] gap-3">
           <AnggotaPicker value={anggota} onChange={setAnggota} />
@@ -1316,7 +1316,7 @@ function JualModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: () 
             Batal
           </button>
           <button onClick={save} disabled={busy || lewat} className={btnPrimary}>
-            <Banknote size={16} /> {busy ? "Menyimpan..." : "Simpan Pengambilan"}
+            <Banknote size={16} /> {busy ? "Menyimpan..." : "Simpan Stock Out"}
           </button>
         </div>
       </div>
@@ -1342,13 +1342,13 @@ function BeliModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: () 
       await api.kopBeli({ tanggal, no_po: noPo, keterangan, evidence_id: evidence, update_harga: updateHarga, items: linesBody(lines) });
       onSuccess();
     } catch (e) {
-      setError(errorText(e, "Gagal menyimpan pembelian"));
+      setError(errorText(e, "Gagal menyimpan stock in"));
     } finally {
       setBusy(false);
     }
   };
   return (
-    <Modal title="Catat Pembelian" subtitle="Barang masuk ke stok koperasi" onClose={onClose} wide>
+    <Modal title="Input Stock In" subtitle="Barang masuk ke stok koperasi" onClose={onClose} wide>
       <div className="space-y-3">
         <div className="grid grid-cols-2 gap-3">
           <div>
@@ -1375,7 +1375,7 @@ function BeliModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: () 
             Batal
           </button>
           <button onClick={save} disabled={busy} className={btnPrimary}>
-            {busy ? "Menyimpan..." : "Simpan Pembelian"}
+            {busy ? "Menyimpan..." : "Simpan Stock In"}
           </button>
         </div>
       </div>

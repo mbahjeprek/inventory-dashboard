@@ -167,12 +167,12 @@ export function KopJualBatchModal({ onClose, onSuccess }: { onClose: () => void;
 
   return (
     <BatchGrid
-      title="Input Banyak Pengambilan"
+      title="Input Banyak Stock Out"
       subtitle={`Banyak karyawan sekaligus; baris satu orang jadi satu bon, dipotong gaji ${new Date(`${periode}-01T00:00:00`).toLocaleDateString("id-ID", { month: "long", year: "numeric" })}`}
       draftKey="batch:koperasi:jual"
       header={
         <>
-          <HeaderField label="Tanggal pengambilan">
+          <HeaderField label="Tanggal stock out">
             <input type="date" value={tanggal} max={localToday()} onChange={(e) => setTanggal(e.target.value)} className={headerInputCls} />
           </HeaderField>
           <p className="text-xs text-[var(--text-secondary)] self-center max-w-md">
@@ -272,12 +272,12 @@ export function KopBeliBatchModal({ onClose, onSuccess }: { onClose: () => void;
 
   return (
     <BatchGrid
-      title="Input Banyak Pembelian"
+      title="Input Banyak Stock In"
       subtitle="Banyak barang masuk ke stok koperasi sekaligus"
       draftKey="batch:koperasi:beli"
       header={
         <>
-          <HeaderField label="Tanggal pembelian">
+          <HeaderField label="Tanggal stock in">
             <input type="date" value={tanggal} max={localToday()} onChange={(e) => setTanggal(e.target.value)} className={headerInputCls} />
           </HeaderField>
           <label className="flex items-center gap-2 text-sm self-end pb-1.5">

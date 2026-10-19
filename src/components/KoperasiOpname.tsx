@@ -87,7 +87,7 @@ export function KoperasiOpname({ canInput, canEdit, onChanged }: { canInput: boo
               <input value={catatan} onChange={(e) => setCatatan(e.target.value)} className={inputCls} placeholder="mis. opname akhir bulan" />
             </div>
           </div>
-          <p className="text-xs text-[var(--text-muted)]">Stok sistem semua barang aktif dicatat saat ini. Pengambilan yang terjadi selama menghitung tidak mengganggu hasil.</p>
+          <p className="text-xs text-[var(--text-muted)]">Stok sistem semua barang aktif dicatat saat ini. Stock out yang terjadi selama menghitung tidak mengganggu hasil.</p>
           {error && <p className="text-xs text-[var(--accent-red)]">{error}</p>}
           <div className="flex gap-2 justify-end">
             <button onClick={() => setStarting(false)} className="px-4 py-2 text-sm rounded-md border border-[var(--border)] text-[var(--text-secondary)]">

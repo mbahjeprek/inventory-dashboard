@@ -7792,14 +7792,14 @@ app.post("/api/koperasi/jual", async (req, res) => {
     await logActivity(req, {
       module: "KOPERASI",
       estate: KOPERASI,
-      aksi: "Pengambilan",
+      aksi: "Stock Out",
       objek: `${result.bon} ${kode} ${result.nama}`,
       detail: `${result.lines.map((l) => `${l.nama} ${kopQty(l.qty)}`).join(", ")} · Rp ${Math.round(result.total).toLocaleString("id-ID")} (${result.bayar === "POTONG_GAJI" ? "potong gaji" : result.bayar.toLowerCase()})`,
     });
     res.json({ bon: result.bon, total: result.total });
   } catch (e) {
     console.error(e);
-    res.status(500).json({ error: "Gagal menyimpan pengambilan" });
+    res.status(500).json({ error: "Gagal menyimpan stock out" });
   }
 });
 
@@ -7842,14 +7842,14 @@ app.post("/api/koperasi/beli", async (req, res) => {
     await logActivity(req, {
       module: "KOPERASI",
       estate: KOPERASI,
-      aksi: "Pembelian",
+      aksi: "Stock In",
       objek: String(b.no_po ?? "").trim() || `${result.lines.length} barang`,
       detail: `${result.lines.map((l) => `${l.nama} ${kopQty(l.qty)} @ ${l.harga.toLocaleString("id-ID")}`).join(", ")} · Rp ${Math.round(result.total).toLocaleString("id-ID")}`,
     });
     res.json({ success: true });
   } catch (e) {
     console.error(e);
-    res.status(500).json({ error: "Gagal menyimpan pembelian" });
+    res.status(500).json({ error: "Gagal menyimpan stock in" });
   }
 });
 
@@ -7974,14 +7974,14 @@ app.post("/api/koperasi/jual/batch", async (req, res) => {
     await logActivity(req, {
       module: "KOPERASI",
       estate: KOPERASI,
-      aksi: "Input Banyak Pengambilan",
+      aksi: "Input Banyak Stock Out",
       objek: `${result.bons} anggota · ${b.tanggal}`,
       detail: `${rows.length} baris · ${rpText(result.total)}`,
     });
     res.json({ count: rows.length, bons: result.bons });
   } catch (e) {
     console.error(e);
-    res.status(500).json({ error: "Gagal menyimpan pengambilan" });
+    res.status(500).json({ error: "Gagal menyimpan stock out" });
   }
 });
 
@@ -8032,14 +8032,14 @@ app.post("/api/koperasi/beli/batch", async (req, res) => {
     await logActivity(req, {
       module: "KOPERASI",
       estate: KOPERASI,
-      aksi: "Input Banyak Pembelian",
+      aksi: "Input Banyak Stock In",
       objek: `${rows.length} baris · ${b.tanggal}`,
       detail: `Rp ${Math.round(total).toLocaleString("id-ID")}`,
     });
     res.json({ count: rows.length });
   } catch (e) {
     console.error(e);
-    res.status(500).json({ error: "Gagal menyimpan pembelian" });
+    res.status(500).json({ error: "Gagal menyimpan stock in" });
   }
 });
 
@@ -8082,14 +8082,14 @@ app.delete("/api/koperasi/tx/:id", async (req, res) => {
     if (t.jenis === "BELI" && t.lacak_stok) {
       await queryOne("SELECT kode FROM koperasi_barang WHERE kode = @kode FOR UPDATE", { kode: t.barang_kode }, client);
       const stok = (await kopStok([t.barang_kode], client)).get(t.barang_kode) ?? 0;
-      if (stok + 1e-9 < t.qty) return { error: `Pembelian ini sudah terpakai: stok ${t.barang_nama} tinggal ${kopQty(stok)}, kurang dari ${kopQty(t.qty)}` };
+      if (stok + 1e-9 < t.qty) return { error: `Stock In ini sudah terpakai: stok ${t.barang_nama} tinggal ${kopQty(stok)}, kurang dari ${kopQty(t.qty)}` };
     }
     const r = await execute(whole ? "DELETE FROM koperasi_tx WHERE bon = @bon AND jenis = 'JUAL' RETURNING evidence_id" : "DELETE FROM koperasi_tx WHERE id = @id RETURNING evidence_id", { bon: t.bon, id: t.id }, client);
     return { n: r.rowCount };
   });
   if ("error" in result) return res.status(400).json(result);
   if (t.evidence_id) await releaseEvidence(t.evidence_id).catch(() => {});
-  const jenis: Record<string, string> = { JUAL: "Pengambilan", BELI: "Pembelian", RUSAK: "Barang Rusak" };
+  const jenis: Record<string, string> = { JUAL: "Stock Out", BELI: "Stock In", RUSAK: "Barang Rusak", KOREKSI: "Koreksi Stok" };
   await logActivity(req, {
     module: "KOPERASI",
     estate: KOPERASI,

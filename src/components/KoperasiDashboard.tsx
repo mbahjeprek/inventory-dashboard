@@ -90,7 +90,7 @@ export function KoperasiDashboard({ periode, reload }: { periode: string; reload
             ["Jumlah bon", k.bon],
             ["Rata-rata per bon (Rp)", Math.round(k.bon ? k.jual / k.bon : 0)],
             ["Jenis barang terjual", k.jenis_barang],
-            ["Pembelian barang (Rp)", Math.round(k.beli)],
+            ["Stock In barang (Rp)", Math.round(k.beli)],
           ],
         },
         ...(d.dekatLimit.length
@@ -105,7 +105,7 @@ export function KoperasiDashboard({ periode, reload }: { periode: string; reload
         {
           heading: `Penjualan per bulan (12 bulan sampai ${bulanLabel(d.sampai)})`,
           chart: chartOf(bulanRef.current),
-          columns: [{ label: "Bulan" }, { label: "Penjualan (Rp)", align: right }, { label: "Pengebon", align: right }, { label: "Pembelian (Rp)", align: right }],
+          columns: [{ label: "Bulan" }, { label: "Penjualan (Rp)", align: right }, { label: "Pengebon", align: right }, { label: "Stock In (Rp)", align: right }],
           rows: d.perBulan.map((r) => [bulanLabel(r.periode), Math.round(r.jual), r.pengebon, Math.round(r.beli)]),
         },
         ...(d.perHari.length
@@ -205,7 +205,7 @@ export function KoperasiDashboard({ periode, reload }: { periode: string; reload
               footer={<span className="text-[11px] text-[var(--text-muted)]">rata-rata {rp(k.pengebon ? k.potong_gaji / k.pengebon : 0)} / orang</span>}
             />
             <StatCard label="Jumlah bon" value={k.bon.toLocaleString("id-ID")} icon={Receipt} tone="blue" footer={<span className="text-[11px] text-[var(--text-muted)]">rata-rata {rp(k.bon ? k.jual / k.bon : 0)} / bon</span>} />
-            <StatCard label="Pembelian barang" value={rp(k.beli)} icon={Truck} tone="green" footer={<span className="text-[11px] text-[var(--text-muted)]">belanja stok di periode ini</span>} />
+            <StatCard label="Stock In barang" value={rp(k.beli)} icon={Truck} tone="green" footer={<span className="text-[11px] text-[var(--text-muted)]">belanja stok di periode ini</span>} />
           </div>
 
           {d.dekatLimit.length > 0 && (
@@ -240,7 +240,7 @@ export function KoperasiDashboard({ periode, reload }: { periode: string; reload
                               <div key="b" className="font-medium text-[var(--text-primary)]">{bulanLabel(r.periode)}</div>,
                               <div key="j">Penjualan <b>{rp(r.jual)}</b></div>,
                               <div key="p">{r.pengebon} karyawan pengebon</div>,
-                              <div key="be" className="text-[var(--text-muted)]">Pembelian {rp(r.beli)}</div>,
+                              <div key="be" className="text-[var(--text-muted)]">Stock In {rp(r.beli)}</div>,
                             ]}
                           />
                         ) : null;
@@ -373,7 +373,7 @@ export function KoperasiDashboard({ periode, reload }: { periode: string; reload
                   {range === 1 && <p className="text-[10px] text-[var(--text-muted)] mt-1.5">Garis kecil = pemakaian limit {rp(d.limit)} bulan ini.</p>}
                 </div>
               ) : (
-                <p className="text-sm text-[var(--text-muted)]">Belum ada pengambilan potong gaji.</p>
+                <p className="text-sm text-[var(--text-muted)]">Belum ada stock out potong gaji.</p>
               )}
             </Panel>
           </div>

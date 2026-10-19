@@ -26,8 +26,8 @@ function aksiTone(aksi: string) {
   if (aksi.startsWith("Hapus")) return "bg-[var(--accent-red-bg)] text-[var(--accent-red)] border-[var(--accent-red-border)]";
   if (aksi.startsWith("Tambah") || aksi === "Stok Masuk")
     return "bg-[var(--accent-green-bg)] text-[var(--accent-green)] border-[var(--accent-green-border)]";
-  if (aksi.includes("Pembelian")) return "bg-[var(--accent-green-bg)] text-[var(--accent-green)] border-[var(--accent-green-border)]";
-  if (aksi === "Stok Keluar" || aksi.includes("Pengambilan")) return "bg-[var(--accent-blue-bg)] text-[var(--accent-blue)] border-[var(--accent-blue-border)]";
+  if (aksi.includes("Stock In")) return "bg-[var(--accent-green-bg)] text-[var(--accent-green)] border-[var(--accent-green-border)]";
+  if (aksi === "Stok Keluar" || aksi.includes("Stock Out")) return "bg-[var(--accent-blue-bg)] text-[var(--accent-blue)] border-[var(--accent-blue-border)]";
   return "bg-[var(--accent-amber-bg)] text-[var(--accent-amber)] border-[var(--accent-amber-border)]";
 }
 
