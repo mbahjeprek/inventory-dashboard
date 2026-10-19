@@ -98,8 +98,8 @@ export function EvidenceLink({ id, label }: { id: string | null | undefined; lab
 // Pop-up with the photo on the page itself (no new tab); Download saves the original file. With `src`
 // (a form's photo not saved yet) it shows that picture, without Download. A photo taken sideways or
 // upside down is turned with the rotate buttons; for a stored one "Simpan arah" keeps that for everyone.
-// Zoom (to read a nota): + / - buttons, mouse wheel, pinch on a phone or double-click; zoomed in, the
-// picture is dragged around. The percentage button goes back to fit.
+// Zoom (to read a nota): + / - buttons, mouse wheel, pinch on a phone or a click on the photo; zoomed in,
+// the picture is dragged around. The percentage button goes back to fit.
 function EvidenceViewer({ id, src, onClose }: { id?: string; src?: string; onClose: () => void }) {
   const [state, setState] = useState<"loading" | "ok" | "error">("loading");
   const [rotation, setRotation] = useState(0);
@@ -253,7 +253,16 @@ function EvidenceViewer({ id, src, onClose }: { id?: string; src?: string; onClo
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
-        onClick={(e) => moved.current && e.stopPropagation()}
+        onClick={(e) => {
+          // The stage captures the pointer (for dragging), so a click on the photo lands here, not on the
+          // <img>: it is told apart by position. On the photo it zooms in, outside it closes the viewer.
+          e.stopPropagation();
+          if (moved.current) return;
+          const r = img.current?.getBoundingClientRect();
+          const onPhoto = r && e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+          if (!onPhoto) onClose();
+          else if (zoom === 1) zoomTo(2.5, e.clientX, e.clientY);
+        }}
       >
         {state === "loading" && <Loader2 size={28} className="animate-spin text-white/70 absolute" />}
         {state === "error" ? (
@@ -264,8 +273,6 @@ function EvidenceViewer({ id, src, onClose }: { id?: string; src?: string; onClo
             src={src || evidenceUrl(id!)}
             alt="Foto bukti"
             draggable={false}
-            onClick={(e) => e.stopPropagation()}
-            onDoubleClick={(e) => zoomTo(zoom > 1 ? 1 : 2.5, e.clientX, e.clientY)}
             onLoad={() => setState("ok")}
             onError={() => setState("error")}
             style={{
