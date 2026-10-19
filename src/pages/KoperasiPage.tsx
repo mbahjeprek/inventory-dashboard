@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Banknote, Boxes, HandCoins, LayoutDashboard, ListPlus, Package, PackageX, Pencil, Plus, Search, ShoppingBasket, Trash2, Truck, UserPlus, Users, X } from "lucide-react";
+import { Banknote, Boxes, ClipboardCheck, HandCoins, LayoutDashboard, ListPlus, Package, PackageX, Pencil, Plus, Search, ShoppingBasket, Trash2, Truck, UserPlus, Users, X } from "lucide-react";
 import {
   api,
   errorText,
@@ -19,6 +19,7 @@ import { EvidenceInput, EvidenceLink } from "../components/EvidenceInput";
 import { fmtQty, isoDisplay, localToday } from "../lib/opname";
 import { KopBeliBatchModal, KopJualBatchModal } from "../components/KoperasiBatchModal";
 import { KoperasiDashboard } from "../components/KoperasiDashboard";
+import { KoperasiOpname } from "../components/KoperasiOpname";
 
 // Koperasi karyawan Nilam: anggota (karyawan) take goods, deducted from the salary of the month taken
 // (periode = calendar month), up to Rp 1,5 juta a month, no cicilan; Kantor / Mess Tamu are billed to the company. The koperasi
@@ -48,12 +49,13 @@ const BAYAR_CLS: Record<KopBayar, string> = {
 // Number typed the Indonesian way ("1.500" or "2,5").
 const parseNum = (s: string) => Number(s.replace(/\./g, "").replace(",", "."));
 
-type Tab = "dashboard" | "jual" | "rekap" | "stok" | "beli" | "anggota";
+type Tab = "dashboard" | "jual" | "rekap" | "stok" | "opname" | "beli" | "anggota";
 const TABS: { key: Tab; label: string; icon: typeof Package }[] = [
   { key: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { key: "jual", label: "Pengambilan", icon: ShoppingBasket },
   { key: "rekap", label: "Rekap Potong Gaji", icon: HandCoins },
   { key: "stok", label: "Stok Barang", icon: Boxes },
+  { key: "opname", label: "Stok Opname", icon: ClipboardCheck },
   { key: "beli", label: "Pembelian & Rusak", icon: Truck },
   { key: "anggota", label: "Anggota", icon: Users },
 ];
@@ -172,6 +174,7 @@ export function KoperasiPage() {
       {tab === "jual" && <TxTable jenis="JUAL" periode={periode} reload={reload} canEdit={canEdit} onChanged={done} />}
       {tab === "rekap" && <RekapTab periode={periode} reload={reload} />}
       {tab === "stok" && <StokTab reload={reload} canEdit={canEdit} onChanged={done} />}
+      {tab === "opname" && <KoperasiOpname canInput={canInput} canEdit={canEdit} onChanged={done} />}
       {tab === "beli" && (
         <div className="space-y-4">
           <TxTable jenis="BELI" periode={periode} reload={reload} canEdit={canEdit} onChanged={done} />
@@ -344,7 +347,7 @@ function TxTable({
                       <div className="text-[var(--text-primary)]">{t.barang_nama}</div>
                       <div className="text-[11px] text-[var(--text-muted)]">
                         {t.barang_kode}
-                        {!jenis && ` · ${t.jenis === "JUAL" ? "Pengambilan" : t.jenis === "BELI" ? "Pembelian" : "Rusak"}`}
+                        {!jenis && ` · ${t.jenis === "JUAL" ? "Pengambilan" : t.jenis === "BELI" ? "Pembelian" : t.jenis === "KOREKSI" ? "Koreksi stok" : "Rusak"}`}
                       </div>
                     </td>
                     <td className="px-3 py-2 text-right whitespace-nowrap">
@@ -547,6 +550,7 @@ function StokTab({ reload, canEdit, onChanged }: { reload: number; canEdit: bool
   const [only, setOnly] = useState<"" | "ada" | "menipis">("");
   const [editing, setEditing] = useState<KopBarang | "new" | null>(null);
   const [riwayat, setRiwayat] = useState<KopBarang | null>(null);
+  const [koreksi, setKoreksi] = useState<KopBarang | null>(null);
   useEffect(() => {
     setRows(null);
     api
@@ -645,6 +649,11 @@ function StokTab({ reload, canEdit, onChanged }: { reload: number; canEdit: bool
                     <button onClick={() => setRiwayat(b)} className="text-xs text-[var(--accent-blue)] hover:underline mr-2">
                       Riwayat
                     </button>
+                    {canEdit && b.lacak_stok && (
+                      <button onClick={() => setKoreksi(b)} className="text-xs text-[var(--accent-blue)] hover:underline mr-2">
+                        Koreksi
+                      </button>
+                    )}
                     {canEdit && (
                       <button onClick={() => setEditing(b)} title="Edit barang" className="p-1.5 rounded-md text-[var(--text-secondary)] hover:bg-[#f1f5f9]">
                         <Pencil size={14} />
@@ -657,6 +666,7 @@ function StokTab({ reload, canEdit, onChanged }: { reload: number; canEdit: bool
           </tbody>
         </table>
       </div>
+      {koreksi && <KoreksiModal barang={koreksi} onClose={() => setKoreksi(null)} onSuccess={() => (setKoreksi(null), onChanged())} />}
       {editing && <BarangModal barang={editing === "new" ? null : editing} onClose={() => setEditing(null)} onSuccess={() => (setEditing(null), onChanged())} />}
       {riwayat && (
         <Modal title={riwayat.nama} subtitle={`${riwayat.kode} · stok ${riwayat.lacak_stok ? `${fmtQty(riwayat.stok)} ${riwayat.satuan}` : "tidak dilacak"}`} onClose={() => setRiwayat(null)} wide>
@@ -664,6 +674,67 @@ function StokTab({ reload, canEdit, onChanged }: { reload: number; canEdit: bool
         </Modal>
       )}
     </div>
+  );
+}
+
+// Koreksi Stok of one barang: the stock becomes the counted figure, the difference is booked as a koreksi.
+function KoreksiModal({ barang, onClose, onSuccess }: { barang: KopBarang; onClose: () => void; onSuccess: () => void }) {
+  const [tanggal, setTanggal] = useState(localToday());
+  const [fisik, setFisik] = useState("");
+  const [ket, setKet] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const n = parseNum(fisik || "x");
+  const selisih = Number.isFinite(n) ? Math.round((n - barang.stok) * 1000) / 1000 : null;
+  const save = async () => {
+    if (!(n >= 0)) return setError("Isi stok fisik (angka 0 atau lebih)");
+    if (!ket.trim()) return setError("Tulis alasan koreksinya");
+    setBusy(true);
+    setError("");
+    try {
+      await api.kopKoreksi({ tanggal, barang_kode: barang.kode, stok_fisik: n, keterangan: ket });
+      onSuccess();
+    } catch (e) {
+      setError(errorText(e, "Gagal menyimpan koreksi"));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal title={`Koreksi Stok ${barang.nama}`} subtitle={`${barang.kode} · stok sistem ${fmtQty(barang.stok)} ${barang.satuan}`} onClose={onClose}>
+      <div className="space-y-3">
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className={labelCls}>Stok fisik ({barang.satuan})</label>
+            <input value={fisik} onChange={(e) => setFisik(e.target.value)} inputMode="decimal" className={inputCls} autoFocus />
+          </div>
+          <div>
+            <label className={labelCls}>Tanggal</label>
+            <input type="date" value={tanggal} max={localToday()} onChange={(e) => setTanggal(e.target.value)} className={inputCls} />
+          </div>
+        </div>
+        {selisih !== null && selisih !== 0 && (
+          <p className={`text-sm ${selisih < 0 ? "text-[var(--accent-red)]" : "text-[var(--accent-green)]"}`}>
+            Selisih {selisih > 0 ? "+" : ""}
+            {fmtQty(selisih)} {barang.satuan} ({rp(selisih * barang.harga_beli)})
+          </p>
+        )}
+        <div>
+          <label className={labelCls}>Alasan (mis. salah hitung, hilang, selisih bon)</label>
+          <input value={ket} onChange={(e) => setKet(e.target.value)} className={inputCls} />
+        </div>
+        <p className="text-[11px] text-[var(--text-muted)]">Untuk menghitung banyak barang sekaligus pakai tab Stok Opname.</p>
+        {error && <p className="text-xs text-[var(--accent-red)]">{error}</p>}
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className="px-4 py-2 text-sm rounded-md border border-[var(--border)] text-[var(--text-secondary)]">
+            Batal
+          </button>
+          <button onClick={save} disabled={busy} className={btnPrimary}>
+            {busy ? "Menyimpan..." : "Simpan Koreksi"}
+          </button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 

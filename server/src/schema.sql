@@ -733,3 +733,28 @@ CREATE TABLE IF NOT EXISTS koperasi_tx (
 CREATE INDEX IF NOT EXISTS idx_koperasi_tx_periode ON koperasi_tx(koperasi, jenis, periode);
 CREATE INDEX IF NOT EXISTS idx_koperasi_tx_anggota ON koperasi_tx(anggota_kode, tanggal_iso);
 CREATE INDEX IF NOT EXISTS idx_koperasi_tx_barang ON koperasi_tx(barang_kode);
+
+-- Stok opname koperasi: stok_sistem = the stock when the opname was started; fisik = what was counted.
+-- Finishing it books each difference as a KOREKSI movement (qty signed: + found, - missing) of
+-- fisik - stok_sistem, so sales during the count don't skew it. KOREKSI also comes from a single
+-- Koreksi Stok (opname_id NULL).
+CREATE TABLE IF NOT EXISTS koperasi_opname (
+  id SERIAL PRIMARY KEY,
+  koperasi TEXT NOT NULL DEFAULT 'NILAM',
+  tanggal_iso TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'DRAFT',
+  catatan TEXT NOT NULL DEFAULT '',
+  user_id INTEGER,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  selesai_at TIMESTAMPTZ,
+  selesai_oleh INTEGER
+);
+CREATE TABLE IF NOT EXISTS koperasi_opname_line (
+  opname_id INTEGER NOT NULL REFERENCES koperasi_opname(id),
+  barang_kode TEXT NOT NULL REFERENCES koperasi_barang(kode),
+  stok_sistem DOUBLE PRECISION NOT NULL,
+  fisik DOUBLE PRECISION,
+  keterangan TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY (opname_id, barang_kode)
+);
+ALTER TABLE koperasi_tx ADD COLUMN IF NOT EXISTS opname_id INTEGER;
