@@ -33,7 +33,9 @@ import { ChangePasswordModal } from "./ChangePasswordModal";
 import { canModule, koperasiOnly, pageAllowed, userEstates, OPNAME_PATH, PINJAMAN_PATH, PASIEN_PATH, KOPERASI_PATH, type Module } from "../lib/access";
 
 type NavItem = { to: string; label: string; icon: typeof Package };
-type NavSection = { title?: string; collapsible?: boolean; items: NavItem[] };
+// highlight: a menu of its own that stands out from the inventory lists (Koperasi): a bordered card in
+// the koperasi gold, bigger, with a subtitle, instead of a small group heading.
+type NavSection = { title?: string; collapsible?: boolean; highlight?: boolean; subtitle?: string; items: NavItem[] };
 
 // Every inventory module has one page per estate. The sidebar shows one estate picker plus one link
 // per module, so switching estate (same module) or module (same estate) is a single click.
@@ -76,7 +78,7 @@ const navSections: NavSection[] = [
       { to: PINJAMAN_PATH, label: "Pinjaman & Transfer", icon: ArrowLeftRight },
     ],
   },
-  { title: "Koperasi", collapsible: true, items: [{ to: KOPERASI_PATH, label: "Koperasi Karyawan", icon: ShoppingBasket }] },
+  { highlight: true, subtitle: "Nilam · Stock Out & Potong Gaji", items: [{ to: KOPERASI_PATH, label: "Koperasi Karyawan", icon: ShoppingBasket }] },
   {
     title: "Master Data",
     collapsible: true,
@@ -342,7 +344,38 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: { mobileOpen?: bo
                   );
                 })}
 
+              {section.highlight &&
+                section.items.map(({ to, label, icon: Icon }) => (
+                  <NavLink
+                    key={to}
+                    to={to}
+                    title={minimized ? label : undefined}
+                    className={({ isActive }) =>
+                      `group flex items-center gap-3 rounded-lg border transition-colors ${minimized ? "justify-center p-2" : "px-3 py-3"} ${
+                        isActive
+                          ? "bg-[#f5c542] border-[#f5c542] text-[#1f3d12] shadow-md"
+                          : "bg-[#f5c542]/15 border-[#f5c542]/60 text-white hover:bg-[#f5c542]/25"
+                      }`
+                    }
+                  >
+                    {({ isActive }) => (
+                      <>
+                        <span className={`shrink-0 flex items-center justify-center rounded-full ${minimized ? "w-8 h-8" : "w-9 h-9"} ${isActive ? "bg-[#1f3d12]/10" : "bg-[#f5c542]"}`}>
+                          <Icon size={18} className={isActive ? "text-[#1f3d12]" : "text-[#1f3d12]"} />
+                        </span>
+                        {!minimized && (
+                          <span className="flex-1 min-w-0">
+                            <span className="block text-[15px] font-bold leading-tight">{label}</span>
+                            {section.subtitle && <span className={`block text-[11px] leading-tight mt-0.5 ${isActive ? "text-[#1f3d12]/75" : "text-white/70"}`}>{section.subtitle}</span>}
+                          </span>
+                        )}
+                      </>
+                    )}
+                  </NavLink>
+                ))}
+
               {isOpen &&
+                !section.highlight &&
                 section.items.map(({ to, label, icon: Icon }) => (
                   <NavLink
                     key={to}
