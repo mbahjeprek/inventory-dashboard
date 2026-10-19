@@ -20,6 +20,7 @@ import { fmtQty, isoDisplay, localToday } from "../lib/opname";
 import { KopBeliBatchModal, KopJualBatchModal } from "../components/KoperasiBatchModal";
 import { KoperasiDashboard } from "../components/KoperasiDashboard";
 import { KoperasiOpname } from "../components/KoperasiOpname";
+import { ActivityLogButton } from "../components/ActivityLogButton";
 
 // Koperasi karyawan Nilam: anggota (karyawan) take goods, deducted from the salary of the month taken
 // (periode = calendar month), up to Rp 1,5 juta a month, no cicilan; Kantor / Mess Tamu are billed to the company. The koperasi
@@ -119,6 +120,9 @@ export function KoperasiPage() {
             </option>
           ))}
         </select>
+        <div className="ml-auto">
+          <ActivityLogButton module="KOPERASI" estate="NILAM" />
+        </div>
       </div>
 
       {ringkasan && tab !== "dashboard" && (

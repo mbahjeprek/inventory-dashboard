@@ -14,7 +14,10 @@ const ESTATES_BY_MODULE = {
   PUPUK: ["NILAM", "KNS", "WJA", "ZAMRUD", "FIRUS"],
   KLINIK: ["NILAM", "KNS", "WJA", "ZAMRUD", "FIRUS"],
   OLI: ["NILAM", "KNS", "WJA", "ZAMRUD", "FIRUS"],
+  KOPERASI: ["NILAM"],
 };
+// Module names in titles / text.
+const MODULE_NAME: Record<ActivityLog["module"], string> = { BARANG: "Gudang", BBM: "BBM", PUPUK: "Pupuk NPK", KLINIK: "Klinik", OLI: "Oli", KOPERASI: "Koperasi" };
 
 const formatWaktu = (iso: string) =>
   new Date(iso).toLocaleString("id-ID", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
@@ -23,7 +26,8 @@ function aksiTone(aksi: string) {
   if (aksi.startsWith("Hapus")) return "bg-[var(--accent-red-bg)] text-[var(--accent-red)] border-[var(--accent-red-border)]";
   if (aksi.startsWith("Tambah") || aksi === "Stok Masuk")
     return "bg-[var(--accent-green-bg)] text-[var(--accent-green)] border-[var(--accent-green-border)]";
-  if (aksi === "Stok Keluar") return "bg-[var(--accent-blue-bg)] text-[var(--accent-blue)] border-[var(--accent-blue-border)]";
+  if (aksi.includes("Pembelian")) return "bg-[var(--accent-green-bg)] text-[var(--accent-green)] border-[var(--accent-green-border)]";
+  if (aksi === "Stok Keluar" || aksi.includes("Pengambilan")) return "bg-[var(--accent-blue-bg)] text-[var(--accent-blue)] border-[var(--accent-blue-border)]";
   return "bg-[var(--accent-amber-bg)] text-[var(--accent-amber)] border-[var(--accent-amber-border)]";
 }
 
@@ -34,7 +38,7 @@ export function ActivityLogPage({
   estateLock,
   onClose,
 }: {
-  module: "BARANG" | "BBM" | "PUPUK" | "KLINIK" | "OLI";
+  module: ActivityLog["module"];
   estateLock?: string;
   onClose?: () => void;
 }) {
@@ -43,8 +47,8 @@ export function ActivityLogPage({
   const isSuperuser = user?.role === "superuser";
   // The account's estates, narrowed to the ones picked on the dashboard, if any.
   const { estates: ownEstates, param: pickedEstates } = useShownEstates();
-  const estateLabel = module === "BBM" ? "Lokasi" : module === "PUPUK" || module === "OLI" ? "Estate" : module === "KLINIK" ? "Klinik" : "Gudang";
-  const title = `${module === "BBM" ? "Log Activity BBM" : module === "PUPUK" ? "Log Activity Pupuk NPK" : module === "KLINIK" ? "Log Activity Klinik" : module === "OLI" ? "Log Activity Oli" : "Log Activity Barang"}${estateLock ? ` - ${estateLock}` : ""}`;
+  const estateLabel = module === "BBM" ? "Lokasi" : module === "PUPUK" || module === "OLI" || module === "KOPERASI" ? "Estate" : module === "KLINIK" ? "Klinik" : "Gudang";
+  const title = `${module === "BARANG" ? "Log Activity Barang" : `Log Activity ${MODULE_NAME[module]}`}${estateLock ? ` - ${estateLock}` : ""}`;
 
   const [rows, setRows] = useState<ActivityLog[]>([]);
   const [total, setTotal] = useState(0);
@@ -130,7 +134,7 @@ export function ActivityLogPage({
         <div>
           <h1 className="text-xl font-semibold text-[var(--text-primary)]">{title}</h1>
           <p className="text-sm text-[var(--text-secondary)]">
-            Riwayat perubahan data Inventory {module === "BBM" ? "BBM" : module === "PUPUK" ? "Pupuk NPK" : module === "KLINIK" ? "Klinik" : module === "OLI" ? "Oli" : "Gudang"} (tambah, edit, hapus, transaksi) beserta
+            Riwayat perubahan data {module === "KOPERASI" ? "Koperasi" : `Inventory ${MODULE_NAME[module]}`} (tambah, edit, hapus, transaksi) beserta
             siapa yang melakukannya
           </p>
         </div>

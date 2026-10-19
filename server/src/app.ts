@@ -4800,7 +4800,7 @@ app.get("/api/user-activity", requireSuperuser, async (req, res) => {
 app.get("/api/activity-log", async (req, res) => {
   const { module = "", estate = "", estates = "", aksi = "", search = "", dateFrom = "", dateTo = "", tz = "", page = "1", pageSize = "50" } =
     req.query as Record<string, string>;
-  if (!["BARANG", "BBM", "PUPUK", "KLINIK", "OLI"].includes(module)) return res.status(400).json({ error: "Modul tidak valid" });
+  if (!["BARANG", "BBM", "PUPUK", "KLINIK", "OLI", "KOPERASI"].includes(module)) return res.status(400).json({ error: "Modul tidak valid" });
 
   const conditions = ["module = @module"];
   const params: any = { module };

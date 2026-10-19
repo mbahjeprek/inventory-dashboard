@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { History } from "lucide-react";
 import { ActivityLogPage } from "../pages/ActivityLogPage";
+import type { ActivityLog } from "../lib/api";
 
 // "Log" button for an inventory page: opens that page's own activity history (module + gudang/lokasi)
 // in a large dialog, so the history sits next to the data instead of in a separate menu.
-export function ActivityLogButton({ module, estate }: { module: "BARANG" | "BBM" | "PUPUK" | "KLINIK" | "OLI"; estate: string }) {
+export function ActivityLogButton({ module, estate }: { module: ActivityLog["module"]; estate: string }) {
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
