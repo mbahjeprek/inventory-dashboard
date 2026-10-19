@@ -398,12 +398,12 @@ export function KlinikLaporanTab({ klinik }: { klinik: string }) {
   };
   const rowActions = (k: Kunjungan) => (
     <div className="inline-flex gap-1.5">
-      {canEditRow(user, "KLINIK", k as { created_at?: string | null }) && (
+      {canEditRow(user, "KLINIK", k) && (
         <button onClick={() => setEditing(k)} title="Edit kunjungan" className="p-1.5 rounded-md border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[#f1f5f9]">
           <Pencil size={14} />
         </button>
       )}
-      {canDelete && (
+      {canEditRow(user, "KLINIK", k, "delete") && (
         <button
           onClick={() => setDeleting(k)}
           title="Hapus kunjungan"

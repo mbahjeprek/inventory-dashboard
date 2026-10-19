@@ -268,7 +268,7 @@ export function LedgerHistory({ scope, type, refreshKey }: { scope: StockScope; 
                             >
                               <Pencil size={14} />
                             </button>)}
-                            {canDelete && (<button
+                            {canEditRow(user, isKlinik ? "KLINIK" : "GUDANG", r, "delete") && (<button
                               onClick={() => setConfirmDelete(r)}
                               title="Hapus transaksi"
                               className="p-1.5 rounded-md border border-[var(--accent-red-border)] text-[var(--accent-red)] hover:bg-[var(--accent-red-bg)]"

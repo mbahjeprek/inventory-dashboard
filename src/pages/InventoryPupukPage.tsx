@@ -384,7 +384,7 @@ export function InventoryPupukPage({ estate }: { estate: string }) {
                           >
                             <Pencil size={14} />
                           </button>)}
-                          {!r.pinjaman_id && canDelete && (<button
+                          {!r.pinjaman_id && canEditRow(user, "PUPUK", r, "delete") && (<button
                             onClick={() => setConfirmDelete(r)}
                             title="Hapus"
                             className="p-1.5 rounded-md border border-[var(--accent-red-border)] text-[var(--accent-red)] hover:bg-[var(--accent-red-bg)]"

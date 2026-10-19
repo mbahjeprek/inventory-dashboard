@@ -78,14 +78,20 @@ export function can(user: AuthUser | null, perm: string): boolean {
   return user.role === "superuser" || (user.perms ?? []).includes(perm);
 }
 
-// Edit terbatas (same as the server's editTooLate): without the module's Approve, a row can be edited
-// only within EDIT_DAYS of when it was input; rows imported from a sheet (no input time) not at all.
-export const EDIT_DAYS = 3;
-export function canEditRow(user: AuthUser | null, m: Module, row: { input_at?: string | null; created_at?: string | null }): boolean {
-  if (!can(user, modulePerm(m, "edit"))) return false;
+// Edit / hapus bulan berjalan (same as the server's editTooLate): without the module's Approve, a
+// transaction can be edited / deleted only while its date is in the current month.
+const rowDay = (row: Record<string, any>): string => {
+  const d = row.tanggal_iso ?? row.tanggal_keluar_iso ?? row.tanggal_terima_iso;
+  if (d) return String(d);
+  if (!row.created_at) return "";
+  const t = new Date(row.created_at);
+  return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}-${String(t.getDate()).padStart(2, "0")}`;
+};
+export function canEditRow(user: AuthUser | null, m: Module, row: object, action: "edit" | "delete" = "edit"): boolean {
+  if (!can(user, modulePerm(m, action))) return false;
   if (user!.role === "superuser" || can(user, modulePerm(m, "approve"))) return true;
-  const at = row.input_at ?? row.created_at;
-  return !!at && Date.now() - new Date(at).getTime() <= EDIT_DAYS * 86400000;
+  const now = new Date();
+  return rowDay(row as Record<string, any>).slice(0, 7) === `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
 }
 
 // Tambah Bukti on older transactions without a photo: open for these estates (as on the server's

@@ -204,14 +204,14 @@ export function StockOutPage({ embedded = false }: { embedded?: boolean }) {
                     {showActions && (
                       <td className="px-4 py-2.5 text-right">
                         <div className="inline-flex gap-1.5">
-                          {canEditRow(user, "GUDANG", r as { input_at?: string | null; created_at?: string | null }) && (<button
+                          {canEditRow(user, "GUDANG", r) && (<button
                             onClick={() => setEditing(r)}
                             title="Edit"
                             className="p-1.5 rounded-md border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[#f1f5f9]"
                           >
                             <Pencil size={14} />
                           </button>)}
-                          {canDelete && (<button
+                          {canEditRow(user, "GUDANG", r, "delete") && (<button
                             onClick={() => setConfirmDelete(r)}
                             title="Hapus"
                             className="p-1.5 rounded-md border border-[var(--accent-red-border)] text-[var(--accent-red)] hover:bg-[var(--accent-red-bg)]"

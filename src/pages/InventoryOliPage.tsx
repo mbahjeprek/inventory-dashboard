@@ -336,7 +336,7 @@ export function InventoryOliPage({ estate }: { estate: string }) {
                               <Pencil size={14} />
                             </button>
                           )}
-                          {!r.pinjaman_id && canDelete && (
+                          {!r.pinjaman_id && canEditRow(user, "OLI", r, "delete") && (
                             <button
                               onClick={() => setConfirmDelete(r)}
                               title="Hapus"

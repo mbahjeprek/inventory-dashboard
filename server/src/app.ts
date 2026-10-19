@@ -343,19 +343,28 @@ function requireSuperuser(req: express.Request, res: express.Response, next: exp
   return res.status(403).json({ error: "Akses ditolak" });
 }
 
-// Edit terbatas: an account that isn't a supervisor of the module (its Approve) may change a row only
-// within EDIT_DAYS of when it was input; an older row - or one imported from a sheet - goes through a
-// supervisor or Super User. Every edit is still logged with its before / after.
-const EDIT_DAYS = 3;
-function editTooLate(req: express.Request, res: express.Response, module: string, row: { input_at?: unknown; created_at?: unknown }) {
+// Edit / hapus bulan berjalan: an account that isn't a supervisor of the module (its Approve) may
+// change or delete a transaction only while its date is in the current month (Jakarta), and an edit
+// may not move it out of that month; an earlier month goes through a supervisor or Super User.
+// Every change is still logged with its before / after.
+const jakartaDay = (v: unknown) =>
+  v instanceof Date || (typeof v === "string" && v.includes("T"))
+    ? new Date(new Date(v as string).getTime() + 7 * 3600_000).toISOString().slice(0, 10)
+    : String(v ?? "");
+const rowDay = (row: Record<string, any>) => jakartaDay(row.tanggal_iso ?? row.tanggal_keluar_iso ?? row.tanggal_terima_iso ?? row.created_at);
+function editTooLate(req: express.Request, res: express.Response, module: string, row: Record<string, any>) {
   const u = req.user!;
   if (u.role === "superuser" || u.perms.includes(`${module}.approve`)) return false;
-  const at = (row.input_at ?? row.created_at) as string | Date | null | undefined;
-  if (at && Date.now() - new Date(at).getTime() <= EDIT_DAYS * 86400000) return false;
+  const month = jakartaToday().slice(0, 7);
+  const b = req.method === "PUT" ? req.body ?? {} : {};
+  const moved = b.tanggal_iso ?? b.tanggal_keluar_iso ?? b.tanggal_terima_iso;
+  const day = rowDay(row);
+  if (/^\d{4}-\d{2}/.test(day) && day.slice(0, 7) === month && (!moved || String(moved).slice(0, 7) === month)) return false;
   res.status(403).json({
-    error: at
-      ? `Transaksi ini diinput lebih dari ${EDIT_DAYS} hari lalu, jadi hanya bisa diubah oleh supervisor (hak Approve) atau Super User.`
-      : "Transaksi lama dari data import hanya bisa diubah oleh supervisor (hak Approve) atau Super User.",
+    error:
+      day.slice(0, 7) === month
+        ? "Tanggal transaksi tidak bisa dipindah ke luar bulan berjalan. Minta supervisor (hak Approve) atau Super User."
+        : `Transaksi bulan ${day ? day.slice(0, 7).split("-").reverse().join("/") : "lalu"} hanya bisa ${req.method === "DELETE" ? "dihapus" : "diubah"} oleh supervisor (hak Approve) atau Super User. Admin hanya bisa mengubah / menghapus transaksi bulan berjalan.`,
   });
   return true;
 }
@@ -1537,6 +1546,7 @@ app.put("/api/transactions/:id", requireSuperuser, async (req, res) => {
 app.delete("/api/transactions/:id", requireSuperuser, async (req, res) => {
   const existing = await queryOne<any>("SELECT * FROM transactions WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Not found" });
+  if (editTooLate(req, res, "gudang", existing)) return;
   let removed: TransferChange = null;
   try {
     await withTransaction(async (client) => {
@@ -1728,6 +1738,7 @@ app.put("/api/stock-in/:id", requireSuperuser, async (req, res) => {
 app.delete("/api/stock-in/:id", requireSuperuser, async (req, res) => {
   const existing = await queryOne<any>("SELECT * FROM stock_in_log WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Not found" });
+  if (editTooLate(req, res, "gudang", existing)) return;
   // Made by a manual transaction: that transaction goes too, with its stock and transfer. An
   // imported history row is only a record (the stock never came from it).
   const tx = await mirroredTx("stock_in_log", existing.id);
@@ -1855,6 +1866,7 @@ app.put("/api/stock-out/:id", requireSuperuser, async (req, res) => {
 app.delete("/api/stock-out/:id", requireSuperuser, async (req, res) => {
   const existing = await queryOne<any>("SELECT * FROM stock_out_log WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Not found" });
+  if (editTooLate(req, res, "gudang", existing)) return;
   // Made by a manual transaction: that transaction goes too, with its stock and transfer. An
   // imported history row is only a record (the stock never came from it).
   const tx = await mirroredTx("stock_out_log", existing.id);
@@ -2851,6 +2863,7 @@ app.delete("/api/bbm/:id", requireSuperuser, async (req, res) => {
   const existing = await queryOne<any>("SELECT * FROM bbm_log WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Not found" });
   if (!estateAllowed(req.user!, existing.lokasi)) return res.status(403).json({ error: "Akses ditolak" });
+  if (editTooLate(req, res, "bbm", existing)) return;
 
   await execute("DELETE FROM bbm_log WHERE id = @id", { id: req.params.id });
   if (existing.tanggal_iso) await rechainSaldo("BBM", existing.lokasi, existing.jenis_bbm, existing.tanggal_iso);
@@ -3090,6 +3103,7 @@ app.delete("/api/pupuk/:id", requireSuperuser, async (req, res) => {
   const existing = await queryOne<any>("SELECT * FROM pupuk_log WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Not found" });
   if (!estateAllowed(req.user!, existing.estate)) return res.status(403).json({ error: "Akses ditolak" });
+  if (editTooLate(req, res, "pupuk", existing)) return;
   await execute("DELETE FROM pupuk_log WHERE id = @id", { id: req.params.id });
   if (existing.tanggal_iso) await rechainSaldo("PUPUK", existing.estate, existing.jenis_pupuk, existing.tanggal_iso);
   await logActivity(req, {
@@ -4038,6 +4052,7 @@ app.delete("/api/klinik-laporan/kunjungan/:id", async (req, res) => {
   const existing = await queryOne<any>("SELECT * FROM klinik_kunjungan WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Kunjungan tidak ditemukan" });
   if (!estateAllowed(req.user!, existing.klinik)) return res.status(403).json({ error: "Akses ditolak" });
+  if (editTooLate(req, res, "klinik", existing)) return;
   await withTransaction(async (c) => {
     await dropKunjunganStok(c, existing);
     await execute("DELETE FROM klinik_kunjungan WHERE id = @id", { id: existing.id }, c);
@@ -4701,6 +4716,7 @@ for (const lr of LEDGER_ROUTES) {
   app.delete(`/api/${lr.path}/history/:id`, requireSuperuser, async (req, res) => {
     const existing = await queryOne<any>(`SELECT * FROM ${l.tx} WHERE id = @id`, { id: req.params.id });
     if (!existing) return res.status(404).json({ error: "Not found" });
+    if (editTooLate(req, res, l === KLINIK_LEDGER ? "klinik" : "gudang", existing)) return;
     if (existing.transfer_from_id) return res.status(400).json({ error: TRANSFER_LOCKED });
     try {
       await withTransaction(async (client) => {
@@ -6036,6 +6052,7 @@ app.delete("/api/oli/:id", requireSuperuser, async (req, res) => {
   const existing = await queryOne<any>("SELECT * FROM oli_log WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Not found" });
   if (!estateAllowed(req.user!, existing.estate)) return res.status(403).json({ error: "Akses ditolak" });
+  if (editTooLate(req, res, "oli", existing)) return;
   await execute("DELETE FROM oli_log WHERE id = @id", { id: req.params.id });
   if (existing.tanggal_iso) await rechainSaldo("OLI", existing.estate, existing.jenis_oli, existing.tanggal_iso);
   await logActivity(req, {
