@@ -13,6 +13,7 @@ import { AlatBeratPage } from "./pages/AlatBeratPage";
 import { MasterBlokPage } from "./pages/MasterBlokPage";
 import { PetaBlokPage } from "./pages/PetaBlokPage";
 import { MasterBarangPage } from "./pages/MasterBarangPage";
+import { KoperasiPage } from "./pages/KoperasiPage";
 import { UsersPage } from "./pages/UsersPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { InventoryPupukPage } from "./pages/InventoryPupukPage";
@@ -276,6 +277,14 @@ function App() {
                 element={
                   <RequirePageAccess>
                     <StokOpnameDetailPage />
+                  </RequirePageAccess>
+                }
+              />
+              <Route
+                path="/koperasi"
+                element={
+                  <RequirePageAccess>
+                    <KoperasiPage />
                   </RequirePageAccess>
                 }
               />

@@ -16,6 +16,7 @@
     "import": "tsx server/src/import.ts",
     "import:logs": "tsx server/src/importLogs.ts",
     "import:karyawan": "tsx server/src/importKaryawan.ts",
+    "import:koperasi": "tsx server/src/importKoperasi.ts",
     "import:alat-berat": "tsx server/src/importAlatBerat.ts",
     "import:blok": "tsx server/src/importBlok.ts",
     "import:peta-blok": "tsx server/src/importPetaBlok.ts",

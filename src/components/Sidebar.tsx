@@ -24,12 +24,13 @@ import {
   Grid3x3,
   Map as MapIcon,
   Check,
+  ShoppingBasket,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { useEstateFilter } from "../hooks/useEstateFilter";
 import { useOpenPinjaman } from "../hooks/useOpenPinjaman";
 import { ChangePasswordModal } from "./ChangePasswordModal";
-import { canModule, pageAllowed, userEstates, OPNAME_PATH, PINJAMAN_PATH, PASIEN_PATH, type Module } from "../lib/access";
+import { canModule, pageAllowed, userEstates, OPNAME_PATH, PINJAMAN_PATH, PASIEN_PATH, KOPERASI_PATH, type Module } from "../lib/access";
 
 type NavItem = { to: string; label: string; icon: typeof Package };
 type NavSection = { title?: string; collapsible?: boolean; items: NavItem[] };
@@ -75,6 +76,7 @@ const navSections: NavSection[] = [
       { to: PINJAMAN_PATH, label: "Pinjaman & Transfer", icon: ArrowLeftRight },
     ],
   },
+  { title: "Koperasi", collapsible: true, items: [{ to: KOPERASI_PATH, label: "Koperasi Karyawan", icon: ShoppingBasket }] },
   {
     title: "Master Data",
     collapsible: true,

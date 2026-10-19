@@ -36,6 +36,10 @@ export const ALL_PERMS: string[] = [
   "master.peta_edit",
   "master.users",
   "monitor.log_user",
+  // Koperasi karyawan: Lihat, Input (pengambilan / pembelian / rusak), Edit (hapus transaksi, master barang & anggota).
+  "koperasi.view",
+  "koperasi.input",
+  "koperasi.edit",
 ];
 
 // Session: the token only identifies the account; estates and perms are re-read from the users

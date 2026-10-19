@@ -34,7 +34,7 @@ const ESTATES = [
 ];
 type EstateInfo = (typeof ESTATES)[number];
 
-const MODULE_LABEL: Record<ActivityLog["module"], string> = { BARANG: "Gudang", BBM: "BBM", PUPUK: "Pupuk NPK", KLINIK: "Klinik", OLI: "Oli" };
+const MODULE_LABEL: Record<ActivityLog["module"], string> = { BARANG: "Gudang", BBM: "BBM", PUPUK: "Pupuk NPK", KLINIK: "Klinik", OLI: "Oli", KOPERASI: "Koperasi" };
 
 // Postgres COUNT/SUM can arrive as strings, so coerce before formatting or comparing.
 const fmt = (n: number | string | undefined) => Number(n ?? 0).toLocaleString("id-ID");
@@ -508,7 +508,7 @@ function RecentActivity({ estate, onExport }: { estate: string; onExport?: (b: E
 
   useEffect(() => {
     let stale = false;
-    const modules = (["BARANG", "BBM", "PUPUK", "KLINIK", "OLI"] as ActivityLog["module"][]).filter((m) =>
+    const modules = (["BARANG", "BBM", "PUPUK", "KLINIK", "OLI"] as const).filter((m) =>
       canModule(user, m === "BARANG" ? "GUDANG" : m)
     );
     Promise.all(modules.map((module) => api.activityLog({ module, estate, page: 1, pageSize: 8 }).catch(() => ({ data: [] as ActivityLog[] }))))

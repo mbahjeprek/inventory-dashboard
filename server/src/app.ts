@@ -144,7 +144,7 @@ app.use("/api", async (req, res, next) => {
 // path (without the /api prefix), the action from the method. "super" = superusers
 // only; null = any logged-in account (the route still checks the estate itself).
 type Need = string[] | "super" | null;
-const ACTIVITY_PERM: Record<string, string> = { BARANG: "gudang", BBM: "bbm", PUPUK: "pupuk", KLINIK: "klinik", OLI: "oli" };
+const ACTIVITY_PERM: Record<string, string> = { BARANG: "gudang", BBM: "bbm", PUPUK: "pupuk", KLINIK: "klinik", OLI: "oli", KOPERASI: "koperasi" };
 function requiredPerms(req: express.Request): Need {
   // Inside app.use("/api") req.path is relative to the mount, inside a route it is the full path.
   const p = (req.baseUrl + req.path).replace(/^\/api/, "");
@@ -192,11 +192,13 @@ function requiredPerms(req: express.Request): Need {
   if (is(/^\/peta-blok(\/|$)/)) return m === "GET" ? ["master.peta", "master.peta_edit", "master.blok"] : ["master.peta_edit"];
   if (is(/^\/users(\/|$)/)) return ["master.users"];
   if (is(/^\/user-activity$/)) return ["monitor.log_user"];
+  // Koperasi: Lihat; Input = pengambilan / pembelian / barang rusak; Edit = hapus transaksi and the master barang / anggota.
+  if (is(/^\/koperasi(\/|$)/)) return m === "GET" ? ["koperasi.view"] : m === "POST" && is(/^\/koperasi\/(jual|beli|rusak)$/) ? ["koperasi.input"] : ["koperasi.edit"];
   return "super";
 }
 
 // "bbm.edit" -> "Edit BBM", for telling the user which tick in Pengguna is missing.
-const PERM_MODUL: Record<string, string> = { gudang: "Gudang", bbm: "BBM", pupuk: "Pupuk", klinik: "Klinik", oli: "Oli" };
+const PERM_MODUL: Record<string, string> = { gudang: "Gudang", bbm: "BBM", pupuk: "Pupuk", klinik: "Klinik", oli: "Oli", koperasi: "Koperasi" };
 const PERM_AKSI: Record<string, string> = { view: "Lihat", input: "Input", edit: "Edit", delete: "Hapus", koreksi: "Koreksi", opname: "Opname", approve: "Approve" };
 const permLabel = (p: string) => {
   const [m, a] = p.split(".");
@@ -391,7 +393,7 @@ function requireEstate(estate: string) {
 }
 
 // ---- Activity log (audit trail), see schema.sql's activity_log ----
-type LogModule = "BARANG" | "BBM" | "PUPUK" | "KLINIK" | "OLI";
+type LogModule = "BARANG" | "BBM" | "PUPUK" | "KLINIK" | "OLI" | "KOPERASI";
 
 // Records who changed what. Called after the change succeeded; a logging failure is reported but
 // never fails the user's action itself.
@@ -7358,6 +7360,457 @@ app.get("/api/pemakaian/detail", async (req, res) => {
   res.json({ data });
 });
 
+// ---- Koperasi karyawan (see schema.sql koperasi_*): Nilam only for now ----
+// An anggota takes goods (JUAL, deducted from the salary of that month = periode), the koperasi buys
+// them in (BELI) and throws away what spoiled (RUSAK). Stock = BELI - JUAL - RUSAK.
+const KOPERASI = "NILAM";
+const KOPERASI_LIST = [KOPERASI];
+const kopMonth = (d: string) => d.slice(0, 7);
+const isIsoDate = (d: unknown): d is string => typeof d === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d) && !Number.isNaN(Date.parse(d));
+const isPeriode = (p: unknown): p is string => typeof p === "string" && /^\d{4}-\d{2}$/.test(p);
+// The anggota's shown name / jabatan / estate: master karyawan's while the employee is there, else what
+// the koperasi kept (someone who left).
+const KOP_ANGGOTA_COLS = `a.kode, a.jenis, COALESCE(NULLIF(k.nama, ''), a.nama) AS nama, a.jabatan, COALESCE(NULLIF(k.estate, ''), a.estate) AS estate,
+  COALESCE(NULLIF(k.lokasi_kerja, ''), a.divisi) AS divisi, a.aktif, a.catatan, (k.nik IS NOT NULL) AS di_master`;
+const KOP_ANGGOTA_JOIN = "LEFT JOIN karyawan k ON UPPER(REPLACE(k.nik, ' ', '')) = a.kode";
+const kopStokSql = `SUM(CASE t.jenis WHEN 'BELI' THEN t.qty ELSE -t.qty END)`;
+
+app.use("/api/koperasi", (req, res, next) => {
+  if (!estateAllowed(req.user!, KOPERASI)) return res.status(403).json({ error: "Koperasi hanya untuk akun estate Nilam" });
+  next();
+});
+
+app.get("/api/koperasi/periode", async (_req, res) => {
+  const rows = await queryMany<{ periode: string }>("SELECT DISTINCT periode FROM koperasi_tx WHERE koperasi = @k ORDER BY periode DESC", { k: KOPERASI });
+  const now = kopMonth(jakartaToday());
+  const list = rows.map((r) => r.periode);
+  if (!list.includes(now)) list.unshift(now);
+  res.json(list);
+});
+
+// Cards on top of the page for one payroll month.
+app.get("/api/koperasi/ringkasan", async (req, res) => {
+  const periode = isPeriode(req.query.periode) ? req.query.periode : kopMonth(jakartaToday());
+  const r = await queryOne(
+    `SELECT COALESCE(SUM(total) FILTER (WHERE jenis = 'JUAL'), 0)::float8 AS jual,
+            COALESCE(SUM(total) FILTER (WHERE jenis = 'JUAL' AND bayar = 'POTONG_GAJI'), 0)::float8 AS potong_gaji,
+            COALESCE(SUM(total) FILTER (WHERE jenis = 'JUAL' AND bayar = 'TUNAI'), 0)::float8 AS tunai,
+            COALESCE(SUM(total) FILTER (WHERE jenis = 'JUAL' AND bayar = 'INSTANSI'), 0)::float8 AS instansi,
+            COUNT(DISTINCT anggota_kode) FILTER (WHERE jenis = 'JUAL')::int AS anggota,
+            COALESCE(SUM(total) FILTER (WHERE jenis = 'BELI'), 0)::float8 AS beli
+       FROM koperasi_tx WHERE koperasi = @k AND periode = @periode`,
+    { k: KOPERASI, periode }
+  );
+  const stok = await queryOne(
+    `SELECT COALESCE(SUM(GREATEST(s.stok, 0) * b.harga_beli), 0)::float8 AS nilai_stok,
+            COUNT(*) FILTER (WHERE b.aktif AND b.lacak_stok AND s.stok <= b.stok_min)::int AS menipis
+       FROM koperasi_barang b
+       LEFT JOIN (SELECT barang_kode, ${kopStokSql} AS stok FROM koperasi_tx t GROUP BY barang_kode) s ON s.barang_kode = b.kode
+      WHERE b.koperasi = @k AND b.lacak_stok`,
+    { k: KOPERASI }
+  );
+  res.json({ periode, ...r, ...stok });
+});
+
+// ---- Barang ----
+app.get("/api/koperasi/barang", async (req, res) => {
+  const { search = "", aktif = "1" } = req.query as Record<string, string>;
+  const data = await queryMany(
+    `SELECT b.*, COALESCE(s.stok, 0)::float8 AS stok, s.terakhir
+       FROM koperasi_barang b
+       LEFT JOIN (SELECT barang_kode, ${kopStokSql} AS stok, MAX(t.tanggal_iso) AS terakhir FROM koperasi_tx t GROUP BY barang_kode) s ON s.barang_kode = b.kode
+      WHERE b.koperasi = @k AND (@aktif = '' OR b.aktif = (@aktif = '1'))
+        AND (@search = '' OR b.nama ILIKE @like OR b.kode ILIKE @like)
+      ORDER BY b.nama`,
+    { k: KOPERASI, aktif, search, like: `%${search}%` }
+  );
+  res.json(data);
+});
+
+const KOP_BARANG_LABELS = { nama: "Nama", satuan: "Satuan", harga_jual: "Harga Jual", harga_beli: "Harga Beli", stok_min: "Stok Minimum", aktif: "Aktif", lacak_stok: "Lacak Stok" };
+function kopBarangBody(b: any): { error: string } | Record<string, unknown> {
+  const nama = String(b.nama ?? "").trim().replace(/\s+/g, " ");
+  const satuan = String(b.satuan ?? "").trim().toUpperCase();
+  const harga_jual = Number(b.harga_jual ?? 0);
+  const harga_beli = Number(b.harga_beli ?? 0);
+  const stok_min = Number(b.stok_min ?? 0);
+  if (!nama) return { error: "Nama barang wajib diisi" };
+  if (!satuan) return { error: "Satuan wajib diisi" };
+  if (![harga_jual, harga_beli, stok_min].every((n) => Number.isFinite(n) && n >= 0)) return { error: "Harga / stok minimum tidak valid" };
+  return { nama, satuan, harga_jual, harga_beli, stok_min, aktif: b.aktif !== false, lacak_stok: b.lacak_stok !== false };
+}
+
+app.post("/api/koperasi/barang", async (req, res) => {
+  const v = kopBarangBody(req.body ?? {});
+  if ("error" in v) return res.status(400).json(v);
+  // Next kode after the highest K0000.
+  const last = await queryOne<{ n: number }>("SELECT COALESCE(MAX(SUBSTRING(kode FROM 2)::int), 0) AS n FROM koperasi_barang WHERE kode ~ '^K[0-9]+$'");
+  const kode = `K${String(last!.n + 1).padStart(4, "0")}`;
+  await execute(
+    `INSERT INTO koperasi_barang (kode, koperasi, nama, satuan, harga_jual, harga_beli, stok_min, aktif, lacak_stok)
+     VALUES (@kode, @k, @nama, @satuan, @harga_jual, @harga_beli, @stok_min, @aktif, @lacak_stok)`,
+    { kode, k: KOPERASI, ...v }
+  );
+  await logActivity(req, { module: "KOPERASI", estate: KOPERASI, aksi: "Tambah Barang", objek: `${kode} ${v.nama}` });
+  res.json({ kode });
+});
+
+app.put("/api/koperasi/barang/:kode", async (req, res) => {
+  const before = await queryOne("SELECT * FROM koperasi_barang WHERE kode = @kode AND koperasi = @k", { kode: req.params.kode, k: KOPERASI });
+  if (!before) return res.status(404).json({ error: "Barang tidak ditemukan" });
+  const v = kopBarangBody(req.body ?? {});
+  if ("error" in v) return res.status(400).json(v);
+  await execute(
+    `UPDATE koperasi_barang SET nama = @nama, satuan = @satuan, harga_jual = @harga_jual, harga_beli = @harga_beli, stok_min = @stok_min,
+       aktif = @aktif, lacak_stok = @lacak_stok WHERE kode = @kode`,
+    { kode: req.params.kode, ...v }
+  );
+  await logActivity(req, { module: "KOPERASI", estate: KOPERASI, aksi: "Edit Barang", objek: `${before.kode} ${before.nama}`, detail: describeChanges(before, v, KOP_BARANG_LABELS) });
+  res.json({ success: true });
+});
+
+// ---- Anggota ----
+app.get("/api/koperasi/anggota", async (req, res) => {
+  const { search = "", status = "aktif", jenis = "" } = req.query as Record<string, string>;
+  const periode = kopMonth(jakartaToday());
+  const data = await queryMany(
+    `SELECT ${KOP_ANGGOTA_COLS}, s.n_bon, s.terakhir, s.total_bulan_ini
+       FROM koperasi_anggota a ${KOP_ANGGOTA_JOIN}
+       LEFT JOIN (SELECT anggota_kode, COUNT(DISTINCT bon)::int AS n_bon, MAX(tanggal_iso) AS terakhir,
+                         COALESCE(SUM(total) FILTER (WHERE periode = @periode), 0)::float8 AS total_bulan_ini
+                    FROM koperasi_tx WHERE jenis = 'JUAL' GROUP BY anggota_kode) s ON s.anggota_kode = a.kode
+      WHERE a.koperasi = @k AND (@status = '' OR a.aktif = (@status = 'aktif')) AND (@jenis = '' OR a.jenis = @jenis)
+        AND (@search = '' OR a.kode ILIKE @like OR a.nama ILIKE @like OR k.nama ILIKE @like)
+      ORDER BY a.jenis DESC, COALESCE(NULLIF(k.nama, ''), NULLIF(a.nama, ''), a.kode)`,
+    { k: KOPERASI, status, jenis, search, like: `%${search}%`, periode }
+  );
+  res.json(data);
+});
+
+// The pengambilan form's picker: active anggota and any karyawan not yet anggota (added on the first
+// pengambilan), matched by name or NIK.
+app.get("/api/koperasi/anggota/pick", async (req, res) => {
+  const search = String(req.query.search ?? "").trim();
+  if (search.length < 2) return res.json([]);
+  const like = `%${search}%`;
+  const anggota = await queryMany(
+    `SELECT ${KOP_ANGGOTA_COLS} FROM koperasi_anggota a ${KOP_ANGGOTA_JOIN}
+      WHERE a.koperasi = @k AND a.aktif AND (a.kode ILIKE @like OR a.nama ILIKE @like OR k.nama ILIKE @like)
+      ORDER BY COALESCE(NULLIF(k.nama, ''), a.nama) LIMIT 12`,
+    { k: KOPERASI, like }
+  );
+  const karyawan = await queryMany(
+    `SELECT UPPER(REPLACE(k.nik, ' ', '')) AS kode, 'KARYAWAN' AS jenis, k.nama, '' AS jabatan, k.estate, k.lokasi_kerja AS divisi, true AS aktif, '' AS catatan, true AS di_master, true AS baru
+       FROM karyawan k
+      WHERE (k.nama ILIKE @like OR k.nik ILIKE @like)
+        AND NOT EXISTS (SELECT 1 FROM koperasi_anggota a WHERE a.kode = UPPER(REPLACE(k.nik, ' ', '')))
+      ORDER BY k.nama LIMIT 8`,
+    { like }
+  );
+  res.json([...anggota, ...karyawan]);
+});
+
+const KOP_ANGGOTA_LABELS = { nama: "Nama", jabatan: "Jabatan", estate: "Estate", divisi: "Divisi", aktif: "Aktif", catatan: "Catatan" };
+app.post("/api/koperasi/anggota", async (req, res) => {
+  const b = req.body ?? {};
+  const jenis = b.jenis === "INSTANSI" ? "INSTANSI" : "KARYAWAN";
+  const kode = String(b.kode ?? "").trim().toUpperCase().replace(/\s+/g, jenis === "KARYAWAN" ? "" : " ");
+  const nama = String(b.nama ?? "").trim();
+  if (!kode) return res.status(400).json({ error: jenis === "KARYAWAN" ? "NIK wajib diisi" : "Kode wajib diisi" });
+  if (jenis === "INSTANSI" && !nama) return res.status(400).json({ error: "Nama wajib diisi" });
+  const k = jenis === "KARYAWAN" ? await queryOne("SELECT nama, estate, lokasi_kerja FROM karyawan WHERE UPPER(REPLACE(nik, ' ', '')) = @kode", { kode }) : null;
+  if (jenis === "KARYAWAN" && !k && !nama) return res.status(400).json({ error: "NIK ini tidak ada di master karyawan; isi namanya" });
+  const r = await execute(
+    `INSERT INTO koperasi_anggota (kode, koperasi, jenis, nama, jabatan, estate, divisi, catatan)
+     VALUES (@kode, @k, @jenis, @nama, @jabatan, @estate, @divisi, @catatan) ON CONFLICT (kode) DO NOTHING`,
+    {
+      kode,
+      k: KOPERASI,
+      jenis,
+      nama: k?.nama ?? nama,
+      jabatan: String(b.jabatan ?? "").trim(),
+      estate: k?.estate ?? String(b.estate ?? "").trim(),
+      divisi: k?.lokasi_kerja ?? String(b.divisi ?? "").trim(),
+      catatan: String(b.catatan ?? "").trim(),
+    }
+  );
+  if (!r.rowCount) return res.status(409).json({ error: `${kode} sudah terdaftar sebagai anggota` });
+  await logActivity(req, { module: "KOPERASI", estate: KOPERASI, aksi: "Tambah Anggota", objek: `${kode} ${k?.nama ?? nama}` });
+  res.json({ kode });
+});
+
+app.put("/api/koperasi/anggota/:kode", async (req, res) => {
+  const before = await queryOne("SELECT * FROM koperasi_anggota WHERE kode = @kode AND koperasi = @k", { kode: req.params.kode, k: KOPERASI });
+  if (!before) return res.status(404).json({ error: "Anggota tidak ditemukan" });
+  const b = req.body ?? {};
+  const next = {
+    nama: String(b.nama ?? before.nama).trim(),
+    jabatan: String(b.jabatan ?? before.jabatan).trim(),
+    estate: String(b.estate ?? before.estate).trim(),
+    divisi: String(b.divisi ?? before.divisi).trim(),
+    aktif: b.aktif === undefined ? before.aktif : b.aktif !== false,
+    catatan: String(b.catatan ?? before.catatan).trim(),
+  };
+  await execute(
+    "UPDATE koperasi_anggota SET nama = @nama, jabatan = @jabatan, estate = @estate, divisi = @divisi, aktif = @aktif, catatan = @catatan WHERE kode = @kode",
+    { kode: before.kode, ...next }
+  );
+  await logActivity(req, { module: "KOPERASI", estate: KOPERASI, aksi: "Edit Anggota", objek: `${before.kode} ${next.nama}`, detail: describeChanges(before, next, KOP_ANGGOTA_LABELS) });
+  res.json({ success: true });
+});
+
+// ---- Transaksi ----
+app.get("/api/koperasi/tx", async (req, res) => {
+  const { jenis = "JUAL", periode = "", anggota = "", barang = "", search = "", page = "1", pageSize = "100" } = req.query as Record<string, string>;
+  const conditions = ["t.koperasi = @k"];
+  if (["JUAL", "BELI", "RUSAK"].includes(jenis)) conditions.push("t.jenis = @jenis");
+  if (isPeriode(periode)) conditions.push("t.periode = @periode");
+  if (anggota) conditions.push("t.anggota_kode = @anggota");
+  if (barang) conditions.push("t.barang_kode = @barang");
+  if (search) conditions.push("(b.nama ILIKE @like OR t.barang_kode ILIKE @like OR t.anggota_kode ILIKE @like OR a.nama ILIKE @like OR k.nama ILIKE @like OR t.no_po ILIKE @like OR t.keterangan ILIKE @like)");
+  const where = `WHERE ${conditions.join(" AND ")}`;
+  const from = `FROM koperasi_tx t JOIN koperasi_barang b ON b.kode = t.barang_kode
+    LEFT JOIN koperasi_anggota a ON a.kode = t.anggota_kode LEFT JOIN karyawan k ON UPPER(REPLACE(k.nik, ' ', '')) = a.kode`;
+  const params = { k: KOPERASI, jenis, periode, anggota, barang, like: `%${search}%` };
+  const sum = await queryOne<{ n: number; total: number; qty: number }>(`SELECT COUNT(*)::int n, COALESCE(SUM(t.total), 0)::float8 total, COALESCE(SUM(t.qty), 0)::float8 qty ${from} ${where}`, params);
+  const limit = Math.min(parseInt(pageSize) || 100, 500);
+  const offset = (Math.max(parseInt(page) || 1, 1) - 1) * limit;
+  const data = await queryMany(
+    `SELECT t.id, t.jenis, t.tanggal_iso, t.periode, t.bon, t.barang_kode, b.nama AS barang_nama, b.satuan, t.qty, t.harga, t.total, t.anggota_kode,
+            COALESCE(NULLIF(k.nama, ''), a.nama) AS anggota_nama, a.jenis AS anggota_jenis, t.bayar, t.no_po, t.keterangan, t.evidence_id, t.sumber, t.created_at,
+            COALESCE(u.nama, u.username, '') AS oleh
+       ${from} LEFT JOIN users u ON u.id = t.user_id ${where}
+      ORDER BY t.tanggal_iso DESC, t.id DESC LIMIT @limit OFFSET @offset`,
+    { ...params, limit, offset }
+  );
+  res.json({ data, total: sum!.n, sum_total: sum!.total, sum_qty: sum!.qty });
+});
+
+type KopLine = { barang_kode: string; qty: number; harga: number };
+// The lines of a pengambilan / pembelian: known barang, qty > 0, harga >= 0 (one barang once).
+async function kopLines(items: unknown, client: PoolClient): Promise<{ error: string } | { lines: (KopLine & { nama: string; lacak_stok: boolean })[] }> {
+  if (!Array.isArray(items) || !items.length) return { error: "Isi minimal satu barang" };
+  const lines = items.map((i: any) => ({ barang_kode: String(i?.barang_kode ?? ""), qty: Number(i?.qty), harga: Number(i?.harga ?? 0) }));
+  if (lines.some((l) => !l.barang_kode || !(l.qty > 0) || !(l.harga >= 0))) return { error: "Jumlah harus lebih dari 0 dan harga tidak boleh minus" };
+  if (new Set(lines.map((l) => l.barang_kode)).size !== lines.length) return { error: "Barang yang sama diisi dua kali; gabungkan jumlahnya" };
+  const barang = await queryMany<{ kode: string; nama: string; lacak_stok: boolean }>(
+    "SELECT kode, nama, lacak_stok FROM koperasi_barang WHERE kode = ANY(@kode::text[]) AND koperasi = @k FOR UPDATE",
+    { kode: lines.map((l) => l.barang_kode), k: KOPERASI },
+    client
+  );
+  const by = new Map(barang.map((b) => [b.kode, b]));
+  const missing = lines.find((l) => !by.has(l.barang_kode));
+  if (missing) return { error: `Barang ${missing.barang_kode} tidak ada di master koperasi` };
+  return { lines: lines.map((l) => ({ ...l, nama: by.get(l.barang_kode)!.nama, lacak_stok: by.get(l.barang_kode)!.lacak_stok })) };
+}
+
+// Stock now of these barang (rows locked by kopLines' FOR UPDATE, so two sales can't both take the last one).
+async function kopStok(kode: string[], client: PoolClient) {
+  const rows = await queryMany<{ kode: string; stok: number }>(
+    `SELECT barang_kode AS kode, ${kopStokSql}::float8 AS stok FROM koperasi_tx t WHERE barang_kode = ANY(@kode::text[]) GROUP BY barang_kode`,
+    { kode },
+    client
+  );
+  return new Map(rows.map((r) => [r.kode, r.stok]));
+}
+const kopQty = (n: number) => n.toLocaleString("id-ID", { maximumFractionDigits: 2 });
+
+// Pengambilan: one bon of an anggota, several barang. bayar POTONG_GAJI (deducted in the month of the
+// tanggal) or TUNAI; an INSTANSI (Kantor, Mess Tamu) is billed to the company.
+app.post("/api/koperasi/jual", async (req, res) => {
+  const b = req.body ?? {};
+  if (!isIsoDate(b.tanggal) || b.tanggal > jakartaToday()) return res.status(400).json({ error: "Tanggal tidak valid (tidak boleh setelah hari ini)" });
+  const kode = String(b.anggota_kode ?? "").trim().toUpperCase();
+  if (!kode) return res.status(400).json({ error: "Pilih anggota / karyawan" });
+  const evidence = b.evidence_id ? await claimEvidence(req, res) : null;
+  if (evidence === undefined) return;
+  try {
+    const result = await withTransaction(async (client) => {
+      let anggota = await queryOne<{ kode: string; jenis: string; nama: string; aktif: boolean }>(
+        "SELECT kode, jenis, nama, aktif FROM koperasi_anggota WHERE kode = @kode AND koperasi = @k",
+        { kode, k: KOPERASI },
+        client
+      );
+      if (!anggota) {
+        // A karyawan's first pengambilan makes them anggota.
+        const k = await queryOne("SELECT nama, estate, lokasi_kerja FROM karyawan WHERE UPPER(REPLACE(nik, ' ', '')) = @kode", { kode }, client);
+        if (!k) return { error: "NIK tidak ada di master karyawan maupun anggota koperasi" };
+        await execute(
+          "INSERT INTO koperasi_anggota (kode, koperasi, jenis, nama, estate, divisi) VALUES (@kode, @k, 'KARYAWAN', @nama, @estate, @divisi) ON CONFLICT (kode) DO NOTHING",
+          { kode, k: KOPERASI, nama: k.nama, estate: k.estate ?? "", divisi: k.lokasi_kerja ?? "" },
+          client
+        );
+        anggota = { kode, jenis: "KARYAWAN", nama: k.nama, aktif: true };
+      }
+      if (!anggota.aktif) return { error: `${anggota.nama || kode} sudah tidak aktif sebagai anggota koperasi` };
+      const bayar = anggota.jenis === "INSTANSI" ? "INSTANSI" : b.bayar === "TUNAI" ? "TUNAI" : "POTONG_GAJI";
+      const v = await kopLines(b.items, client);
+      if ("error" in v) return v;
+      const stok = await kopStok(v.lines.map((l) => l.barang_kode), client);
+      const short = v.lines.find((l) => l.lacak_stok && (stok.get(l.barang_kode) ?? 0) + 1e-9 < l.qty);
+      if (short) return { error: `Stok ${short.nama} tinggal ${kopQty(stok.get(short.barang_kode) ?? 0)}, tidak cukup untuk ${kopQty(short.qty)}` };
+      const bon = `KOP-${b.tanggal.replace(/-/g, "")}-${Date.now().toString(36).toUpperCase()}`;
+      await execute(
+        `INSERT INTO koperasi_tx (koperasi, jenis, tanggal_iso, periode, bon, barang_kode, qty, harga, total, anggota_kode, bayar, keterangan, evidence_id, user_id)
+         SELECT @k, 'JUAL', @tanggal, @periode, @bon, x.kode, x.qty, x.harga, ROUND((x.qty * x.harga)::numeric, 2), @anggota, @bayar, @ket, @evidence::uuid, @uid
+           FROM json_to_recordset(@rows::json) AS x(kode text, qty float8, harga float8)`,
+        {
+          k: KOPERASI,
+          tanggal: b.tanggal,
+          periode: kopMonth(b.tanggal),
+          bon,
+          anggota: kode,
+          bayar,
+          ket: String(b.keterangan ?? "").trim(),
+          evidence,
+          uid: req.user!.id,
+          rows: JSON.stringify(v.lines.map((l) => ({ kode: l.barang_kode, qty: l.qty, harga: l.harga }))),
+        },
+        client
+      );
+      const total = v.lines.reduce((s, l) => s + l.qty * l.harga, 0);
+      return { bon, total, nama: anggota.nama, bayar, lines: v.lines };
+    });
+    if ("error" in result) return res.status(400).json(result);
+    await logActivity(req, {
+      module: "KOPERASI",
+      estate: KOPERASI,
+      aksi: "Pengambilan",
+      objek: `${result.bon} ${kode} ${result.nama}`,
+      detail: `${result.lines.map((l) => `${l.nama} ${kopQty(l.qty)}`).join(", ")} · Rp ${Math.round(result.total).toLocaleString("id-ID")} (${result.bayar === "POTONG_GAJI" ? "potong gaji" : result.bayar.toLowerCase()})`,
+    });
+    res.json({ bon: result.bon, total: result.total });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Gagal menyimpan pengambilan" });
+  }
+});
+
+// Pembelian: barang bought in. harga = harga beli; with update_harga the barang's harga beli and
+// harga jual become this price (the koperasi sells at cost).
+app.post("/api/koperasi/beli", async (req, res) => {
+  const b = req.body ?? {};
+  if (!isIsoDate(b.tanggal) || b.tanggal > jakartaToday()) return res.status(400).json({ error: "Tanggal tidak valid (tidak boleh setelah hari ini)" });
+  const evidence = b.evidence_id ? await claimEvidence(req, res) : null;
+  if (evidence === undefined) return;
+  try {
+    const result = await withTransaction(async (client) => {
+      const v = await kopLines(b.items, client);
+      if ("error" in v) return v;
+      await execute(
+        `INSERT INTO koperasi_tx (koperasi, jenis, tanggal_iso, periode, barang_kode, qty, harga, total, no_po, keterangan, evidence_id, user_id)
+         SELECT @k, 'BELI', @tanggal, @periode, x.kode, x.qty, x.harga, ROUND((x.qty * x.harga)::numeric, 2), @po, @ket, @evidence::uuid, @uid
+           FROM json_to_recordset(@rows::json) AS x(kode text, qty float8, harga float8)`,
+        {
+          k: KOPERASI,
+          tanggal: b.tanggal,
+          periode: kopMonth(b.tanggal),
+          po: String(b.no_po ?? "").trim(),
+          ket: String(b.keterangan ?? "").trim(),
+          evidence,
+          uid: req.user!.id,
+          rows: JSON.stringify(v.lines.map((l) => ({ kode: l.barang_kode, qty: l.qty, harga: l.harga }))),
+        },
+        client
+      );
+      for (const l of v.lines.filter((l) => l.harga > 0))
+        await execute(
+          `UPDATE koperasi_barang SET harga_beli = @harga${b.update_harga !== false ? ", harga_jual = @harga" : ""} WHERE kode = @kode`,
+          { harga: l.harga, kode: l.barang_kode },
+          client
+        );
+      return { lines: v.lines, total: v.lines.reduce((s, l) => s + l.qty * l.harga, 0) };
+    });
+    if ("error" in result) return res.status(400).json(result);
+    await logActivity(req, {
+      module: "KOPERASI",
+      estate: KOPERASI,
+      aksi: "Pembelian",
+      objek: String(b.no_po ?? "").trim() || `${result.lines.length} barang`,
+      detail: `${result.lines.map((l) => `${l.nama} ${kopQty(l.qty)} @ ${l.harga.toLocaleString("id-ID")}`).join(", ")} · Rp ${Math.round(result.total).toLocaleString("id-ID")}`,
+    });
+    res.json({ success: true });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Gagal menyimpan pembelian" });
+  }
+});
+
+app.post("/api/koperasi/rusak", async (req, res) => {
+  const b = req.body ?? {};
+  if (!isIsoDate(b.tanggal) || b.tanggal > jakartaToday()) return res.status(400).json({ error: "Tanggal tidak valid (tidak boleh setelah hari ini)" });
+  const ket = String(b.keterangan ?? "").trim();
+  if (!ket) return res.status(400).json({ error: "Tulis kenapa barangnya rusak / dibuang" });
+  const evidence = b.evidence_id ? await claimEvidence(req, res) : null;
+  if (evidence === undefined) return;
+  const result = await withTransaction(async (client) => {
+    const v = await kopLines([{ barang_kode: b.barang_kode, qty: b.qty, harga: 0 }], client);
+    if ("error" in v) return v;
+    const l = v.lines[0];
+    const stok = (await kopStok([l.barang_kode], client)).get(l.barang_kode) ?? 0;
+    if (l.lacak_stok && stok + 1e-9 < l.qty) return { error: `Stok ${l.nama} tinggal ${kopQty(stok)}` };
+    await execute(
+      `INSERT INTO koperasi_tx (koperasi, jenis, tanggal_iso, periode, barang_kode, qty, keterangan, evidence_id, user_id)
+       VALUES (@k, 'RUSAK', @tanggal, @periode, @kode, @qty, @ket, @evidence::uuid, @uid)`,
+      { k: KOPERASI, tanggal: b.tanggal, periode: kopMonth(b.tanggal), kode: l.barang_kode, qty: l.qty, ket, evidence, uid: req.user!.id },
+      client
+    );
+    return { l };
+  });
+  if ("error" in result) return res.status(400).json(result);
+  await logActivity(req, { module: "KOPERASI", estate: KOPERASI, aksi: "Barang Rusak", objek: `${result.l.barang_kode} ${result.l.nama}`, detail: `${kopQty(result.l.qty)} · ${ket}` });
+  res.json({ success: true });
+});
+
+// Hapus one line (any jenis) or, with ?bon=1 on a JUAL line, its whole bon. Removing a pembelian that
+// was already sold on (stock would go below 0) is refused.
+app.delete("/api/koperasi/tx/:id", async (req, res) => {
+  const t = await queryOne("SELECT t.*, b.nama AS barang_nama, b.lacak_stok FROM koperasi_tx t JOIN koperasi_barang b ON b.kode = t.barang_kode WHERE t.id = @id AND t.koperasi = @k", {
+    id: req.params.id,
+    k: KOPERASI,
+  });
+  if (!t) return res.status(404).json({ error: "Transaksi tidak ditemukan" });
+  const whole = req.query.bon === "1" && t.jenis === "JUAL" && t.bon;
+  const result = await withTransaction(async (client) => {
+    if (t.jenis === "BELI" && t.lacak_stok) {
+      await queryOne("SELECT kode FROM koperasi_barang WHERE kode = @kode FOR UPDATE", { kode: t.barang_kode }, client);
+      const stok = (await kopStok([t.barang_kode], client)).get(t.barang_kode) ?? 0;
+      if (stok + 1e-9 < t.qty) return { error: `Pembelian ini sudah terpakai: stok ${t.barang_nama} tinggal ${kopQty(stok)}, kurang dari ${kopQty(t.qty)}` };
+    }
+    const r = await execute(whole ? "DELETE FROM koperasi_tx WHERE bon = @bon AND jenis = 'JUAL' RETURNING evidence_id" : "DELETE FROM koperasi_tx WHERE id = @id RETURNING evidence_id", { bon: t.bon, id: t.id }, client);
+    return { n: r.rowCount };
+  });
+  if ("error" in result) return res.status(400).json(result);
+  if (t.evidence_id) await releaseEvidence(t.evidence_id).catch(() => {});
+  const jenis: Record<string, string> = { JUAL: "Pengambilan", BELI: "Pembelian", RUSAK: "Barang Rusak" };
+  await logActivity(req, {
+    module: "KOPERASI",
+    estate: KOPERASI,
+    aksi: `Hapus ${jenis[t.jenis] ?? t.jenis}`,
+    objek: whole ? `${t.bon} ${t.anggota_kode}` : `${t.barang_kode} ${t.barang_nama}`,
+    detail: whole ? `${result.n} baris` : `${t.tanggal_iso} · ${kopQty(t.qty)} @ ${Number(t.harga).toLocaleString("id-ID")}${t.anggota_kode ? ` · ${t.anggota_kode}` : ""}`,
+  });
+  res.json({ success: true, n: result.n });
+});
+
+// Rekap Potong Gaji: per anggota, what they took in the periode, split by how it is paid.
+app.get("/api/koperasi/rekap", async (req, res) => {
+  const periode = isPeriode(req.query.periode) ? req.query.periode : kopMonth(jakartaToday());
+  const data = await queryMany(
+    `SELECT ${KOP_ANGGOTA_COLS}, COUNT(DISTINCT t.bon)::int AS n_bon, MIN(t.tanggal_iso) AS dari, MAX(t.tanggal_iso) AS sampai,
+            COALESCE(SUM(t.total) FILTER (WHERE t.bayar = 'POTONG_GAJI'), 0)::float8 AS potong_gaji,
+            COALESCE(SUM(t.total) FILTER (WHERE t.bayar = 'TUNAI'), 0)::float8 AS tunai,
+            COALESCE(SUM(t.total) FILTER (WHERE t.bayar = 'INSTANSI'), 0)::float8 AS instansi,
+            COALESCE(SUM(t.total), 0)::float8 AS total
+       FROM koperasi_tx t JOIN koperasi_anggota a ON a.kode = t.anggota_kode ${KOP_ANGGOTA_JOIN}
+      WHERE t.koperasi = @k AND t.jenis = 'JUAL' AND t.periode = @periode
+      GROUP BY a.kode, a.jenis, a.nama, a.jabatan, a.estate, a.divisi, a.aktif, a.catatan, k.nik, k.nama, k.estate, k.lokasi_kerja
+      ORDER BY a.jenis DESC, COALESCE(NULLIF(k.nama, ''), NULLIF(a.nama, ''), a.kode)`,
+    { k: KOPERASI, periode }
+  );
+  res.json({ periode, data });
+});
+
 // ---- Status Update: how current each estate's data is, per module ----
 // The latest date with data (transaction date, so a back-entered day counts) and how many days ago
 // that is, against a limit per module. The Dashboard panel and the admins' reminder banner read it.
@@ -7547,7 +8000,7 @@ app.get("/api/evidence/:id", async (req, res) => {
 // photo storage isn't set up on this server (SUPABASE_URL / SUPABASE_SERVICE_KEY), so no photo is
 // asked and transactions keep working until it is.
 // Every table whose rows keep a foto bukti (schema.sql evidence_id columns).
-const EVIDENCE_HOLDERS = ["transactions", "stock_in_log", "stock_out_log", "gudang_stock_tx", "klinik_stock_tx", "bbm_log", "pupuk_log", "oli_log", "pinjaman", "pinjaman_kembali", "klinik_kunjungan"];
+const EVIDENCE_HOLDERS = ["transactions", "stock_in_log", "stock_out_log", "gudang_stock_tx", "klinik_stock_tx", "bbm_log", "pupuk_log", "oli_log", "pinjaman", "pinjaman_kembali", "klinik_kunjungan", "koperasi_tx"];
 
 async function claimEvidence(req: express.Request, res: express.Response): Promise<string | null | undefined> {
   if (!evidenceEnabled()) return null;

@@ -674,3 +674,62 @@ CREATE TABLE IF NOT EXISTS peta_legend (
   warna TEXT NOT NULL
 );
 ALTER TABLE master_oli ADD COLUMN IF NOT EXISTS estates TEXT NOT NULL DEFAULT '';
+
+-- ---- Koperasi karyawan (for now Nilam only; `koperasi` = the estate running it) ----
+-- Barang the koperasi sells, kode K0001... from the koperasi sheet. harga_jual = price to members,
+-- harga_beli = last purchase price. lacak_stok = false for what isn't bought in (AIR GALON from the
+-- depo air): it is sold, but has no stock.
+CREATE TABLE IF NOT EXISTS koperasi_barang (
+  kode TEXT PRIMARY KEY,
+  koperasi TEXT NOT NULL DEFAULT 'NILAM',
+  nama TEXT NOT NULL,
+  satuan TEXT NOT NULL DEFAULT '',
+  harga_jual DOUBLE PRECISION NOT NULL DEFAULT 0,
+  harga_beli DOUBLE PRECISION NOT NULL DEFAULT 0,
+  stok_min DOUBLE PRECISION NOT NULL DEFAULT 0,
+  lacak_stok BOOLEAN NOT NULL DEFAULT true,
+  aktif BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+-- Anggota: who takes goods. kode = the karyawan's NIK (TBL1234...), so name / jabatan / estate come
+-- from master karyawan while the employee is there; nama / jabatan / estate / divisi here are the
+-- last known values, kept for one who has left (the history and what is still owed stay readable).
+-- jenis INSTANSI = not a person (KANTOR, MESS TAMU, ...): paid by the company, not potong gaji.
+CREATE TABLE IF NOT EXISTS koperasi_anggota (
+  kode TEXT PRIMARY KEY,
+  koperasi TEXT NOT NULL DEFAULT 'NILAM',
+  jenis TEXT NOT NULL DEFAULT 'KARYAWAN',
+  nama TEXT NOT NULL DEFAULT '',
+  jabatan TEXT NOT NULL DEFAULT '',
+  estate TEXT NOT NULL DEFAULT '',
+  divisi TEXT NOT NULL DEFAULT '',
+  aktif BOOLEAN NOT NULL DEFAULT true,
+  catatan TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+-- Every movement: JUAL (an anggota takes goods; bon groups the lines of one pengambilan), BELI
+-- (bought in), RUSAK (thrown away). periode = the payroll month ('YYYY-MM') a JUAL is deducted in.
+-- Stock of a barang = BELI - JUAL - RUSAK. sumber 'IMPORT' = from the koperasi Google Sheet.
+CREATE TABLE IF NOT EXISTS koperasi_tx (
+  id SERIAL PRIMARY KEY,
+  koperasi TEXT NOT NULL DEFAULT 'NILAM',
+  jenis TEXT NOT NULL,
+  tanggal_iso TEXT NOT NULL,
+  periode TEXT NOT NULL,
+  bon TEXT,
+  barang_kode TEXT NOT NULL REFERENCES koperasi_barang(kode),
+  qty DOUBLE PRECISION NOT NULL,
+  harga DOUBLE PRECISION NOT NULL DEFAULT 0,
+  total DOUBLE PRECISION NOT NULL DEFAULT 0,
+  anggota_kode TEXT REFERENCES koperasi_anggota(kode),
+  bayar TEXT NOT NULL DEFAULT 'POTONG_GAJI',
+  no_po TEXT NOT NULL DEFAULT '',
+  keterangan TEXT NOT NULL DEFAULT '',
+  evidence_id UUID,
+  sumber TEXT,
+  user_id INTEGER,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_koperasi_tx_periode ON koperasi_tx(koperasi, jenis, periode);
+CREATE INDEX IF NOT EXISTS idx_koperasi_tx_anggota ON koperasi_tx(anggota_kode, tanggal_iso);
+CREATE INDEX IF NOT EXISTS idx_koperasi_tx_barang ON koperasi_tx(barang_kode);

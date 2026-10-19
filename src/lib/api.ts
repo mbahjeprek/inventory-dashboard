@@ -388,7 +388,7 @@ export type PupukSummary = {
 export type ActivityLog = {
   id: number;
   created_at: string;
-  module: "BARANG" | "BBM" | "PUPUK" | "KLINIK" | "OLI";
+  module: "BARANG" | "BBM" | "PUPUK" | "KLINIK" | "OLI" | "KOPERASI";
   estate: string | null;
   aksi: string;
   objek: string | null;
@@ -464,6 +464,72 @@ export type Pinjaman = {
   evidence_id: string | null;
   kembali: { qty: number; tanggal_iso: string; created_at?: string | null; note: string; batal: boolean; oleh: string; evidence_id: string | null }[];
 };
+// ---- Koperasi karyawan (Nilam) ----
+export type KopBarang = {
+  kode: string;
+  nama: string;
+  satuan: string;
+  harga_jual: number;
+  harga_beli: number;
+  stok_min: number;
+  lacak_stok: boolean;
+  aktif: boolean;
+  stok: number;
+  terakhir: string | null;
+};
+export type KopAnggota = {
+  kode: string;
+  jenis: "KARYAWAN" | "INSTANSI";
+  nama: string;
+  jabatan: string;
+  estate: string;
+  divisi: string;
+  aktif: boolean;
+  catatan: string;
+  di_master: boolean;
+  baru?: boolean;
+  n_bon?: number;
+  terakhir?: string | null;
+  total_bulan_ini?: number;
+};
+export type KopBayar = "POTONG_GAJI" | "TUNAI" | "INSTANSI";
+export type KopTx = {
+  id: number;
+  jenis: "JUAL" | "BELI" | "RUSAK";
+  tanggal_iso: string;
+  periode: string;
+  bon: string | null;
+  barang_kode: string;
+  barang_nama: string;
+  satuan: string;
+  qty: number;
+  harga: number;
+  total: number;
+  anggota_kode: string | null;
+  anggota_nama: string | null;
+  anggota_jenis: string | null;
+  bayar: KopBayar;
+  no_po: string;
+  keterangan: string;
+  evidence_id: string | null;
+  sumber: string | null;
+  created_at: string;
+  oleh: string;
+};
+export type KopRingkasan = {
+  periode: string;
+  jual: number;
+  potong_gaji: number;
+  tunai: number;
+  instansi: number;
+  anggota: number;
+  beli: number;
+  nilai_stok: number;
+  menipis: number;
+};
+export type KopRekap = KopAnggota & { n_bon: number; dari: string; sampai: string; potong_gaji: number; tunai: number; instansi: number; total: number };
+export type KopLineInput = { barang_kode: string; qty: number; harga: number };
+
 export type PinjamanLogAksi = "PINJAM" | "TRANSFER" | "KEMBALI" | "LUNAS" | "BATAL";
 export type PinjamanLog = {
   pinjaman_id: number;
@@ -1219,6 +1285,25 @@ export const api = {
 
   pinjamanList: (params: Record<string, string | number>) =>
     req<{ data: Pinjaman[]; total: number }>(`/api/pinjaman?${new URLSearchParams(params as any)}`),
+  kopPeriode: () => req<string[]>("/api/koperasi/periode"),
+  kopRingkasan: (periode: string) => req<KopRingkasan>(`/api/koperasi/ringkasan?periode=${periode}`),
+  kopBarang: (params: { search?: string; aktif?: string } = {}) => req<KopBarang[]>(`/api/koperasi/barang?${new URLSearchParams(params as any)}`),
+  kopSaveBarang: (kode: string | null, body: Partial<KopBarang>) =>
+    req<{ kode?: string }>(kode ? `/api/koperasi/barang/${encodeURIComponent(kode)}` : "/api/koperasi/barang", { method: kode ? "PUT" : "POST", body: JSON.stringify(body) }),
+  kopAnggota: (params: { search?: string; status?: string; jenis?: string } = {}) => req<KopAnggota[]>(`/api/koperasi/anggota?${new URLSearchParams(params as any)}`),
+  kopPickAnggota: (search: string) => req<KopAnggota[]>(`/api/koperasi/anggota/pick?${new URLSearchParams({ search })}`),
+  kopAddAnggota: (body: Partial<KopAnggota>) => req<{ kode: string }>("/api/koperasi/anggota", { method: "POST", body: JSON.stringify(body) }),
+  kopSaveAnggota: (kode: string, body: Partial<KopAnggota>) => req<{ success: boolean }>(`/api/koperasi/anggota/${encodeURIComponent(kode)}`, { method: "PUT", body: JSON.stringify(body) }),
+  kopTx: (params: Record<string, string | number>) =>
+    req<{ data: KopTx[]; total: number; sum_total: number; sum_qty: number }>(`/api/koperasi/tx?${new URLSearchParams(params as any)}`),
+  kopJual: (body: { tanggal: string; anggota_kode: string; bayar: KopBayar; keterangan: string; evidence_id: string | null; items: KopLineInput[] }) =>
+    req<{ bon: string; total: number }>("/api/koperasi/jual", { method: "POST", body: JSON.stringify(body) }),
+  kopBeli: (body: { tanggal: string; no_po: string; keterangan: string; evidence_id: string | null; update_harga: boolean; items: KopLineInput[] }) =>
+    req<{ success: boolean }>("/api/koperasi/beli", { method: "POST", body: JSON.stringify(body) }),
+  kopRusak: (body: { tanggal: string; barang_kode: string; qty: number; keterangan: string; evidence_id: string | null }) =>
+    req<{ success: boolean }>("/api/koperasi/rusak", { method: "POST", body: JSON.stringify(body) }),
+  kopHapus: (id: number, bon = false) => req<{ success: boolean; n: number }>(`/api/koperasi/tx/${id}${bon ? "?bon=1" : ""}`, { method: "DELETE" }),
+  kopRekap: (periode: string) => req<{ periode: string; data: KopRekap[] }>(`/api/koperasi/rekap?periode=${periode}`),
   pinjamanLog: (params: Record<string, string | number>) =>
     req<{ data: PinjamanLog[]; total: number; ringkasan: PinjamanRingkasan }>(`/api/pinjaman/log?${new URLSearchParams(params as any)}`),
   pinjamanBarang: (module: OpnameModule, estate: string, search: string, all = false) =>

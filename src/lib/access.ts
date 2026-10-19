@@ -45,6 +45,14 @@ export const OTHER_PERMS: { group: string; items: { key: string; label: string }
     ],
   },
   { group: "Monitoring", items: [{ key: "monitor.log_user", label: "Log Aktivitas User" }] },
+  {
+    group: "Koperasi (Nilam)",
+    items: [
+      { key: "koperasi.view", label: "Lihat Koperasi" },
+      { key: "koperasi.input", label: "Input Koperasi (pengambilan, pembelian, rusak)" },
+      { key: "koperasi.edit", label: "Edit Koperasi (hapus transaksi, barang, anggota)" },
+    ],
+  },
 ];
 
 export const ALL_PERMS: string[] = [
@@ -158,6 +166,10 @@ export const PINJAMAN_PATH = "/pinjaman";
 // Master Pasien: the patients of the account's clinics, with Klinik Lihat (Input / Edit / Hapus to change).
 export const PASIEN_PATH = "/master-pasien";
 
+// Koperasi karyawan: only Nilam runs one for now; seen with Lihat Koperasi by an account with Nilam.
+export const KOPERASI_PATH = "/koperasi";
+export const KOPERASI_ESTATE = "NILAM";
+
 // Whether a non-inventory page (sidebar / router) may be opened.
 export function pageAllowed(user: AuthUser | null, path: string): boolean {
   if (!user) return false;
@@ -165,6 +177,7 @@ export function pageAllowed(user: AuthUser | null, path: string): boolean {
   if (path === OPNAME_PATH || path.startsWith(`${OPNAME_PATH}/`)) return hasOpnameAccess(user);
   if (path === PINJAMAN_PATH) return MODULES.some((m) => canModule(user, m));
   if (path === PASIEN_PATH) return canModule(user, "KLINIK");
+  if (path === KOPERASI_PATH) return can(user, "koperasi.view") && userEstates(user).includes(KOPERASI_ESTATE);
   // Peta Blok: seen with Lihat Peta Blok, Ubah Peta Blok or Master Blok.
   if (path === "/peta-blok") return ["master.peta", "master.peta_edit", "master.blok"].some((p) => can(user, p));
   return !!PAGE_PERMS[path] && can(user, PAGE_PERMS[path]);
