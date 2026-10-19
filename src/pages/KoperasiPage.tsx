@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Banknote, Boxes, HandCoins, Package, PackageX, Pencil, Plus, Search, ShoppingBasket, Trash2, Truck, UserPlus, Users, X } from "lucide-react";
+import { Banknote, Boxes, HandCoins, ListPlus, Package, PackageX, Pencil, Plus, Search, ShoppingBasket, Trash2, Truck, UserPlus, Users, X } from "lucide-react";
 import {
   api,
   errorText,
@@ -17,6 +17,7 @@ import { ExportButtons } from "../components/ExportButtons";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { EvidenceInput, EvidenceLink } from "../components/EvidenceInput";
 import { fmtQty, isoDisplay, localToday } from "../lib/opname";
+import { KopBeliBatchModal, KopJualBatchModal } from "../components/KoperasiBatchModal";
 
 // Koperasi karyawan Nilam: anggota (karyawan) take goods, deducted from the salary of the month taken
 // (periode = calendar month), up to Rp 1,5 juta a month, no cicilan; Kantor / Mess Tamu are billed to the company. The koperasi
@@ -64,7 +65,7 @@ export function KoperasiPage() {
   const [periode, setPeriode] = useState(localToday().slice(0, 7));
   const [ringkasan, setRingkasan] = useState<KopRingkasan | null>(null);
   const [reload, setReload] = useState(0);
-  const [modal, setModal] = useState<"" | "jual" | "beli" | "rusak">("");
+  const [modal, setModal] = useState<"" | "jual" | "beli" | "rusak" | "jualBatch" | "beliBatch">("");
 
   useEffect(() => {
     api.kopPeriode().then(setPeriodes).catch(() => setPeriodes([]));
@@ -91,6 +92,12 @@ export function KoperasiPage() {
             </button>
             <button onClick={() => setModal("beli")} className={btnOutline}>
               <Truck size={16} /> Catat Pembelian
+            </button>
+            <button onClick={() => setModal("beliBatch")} className={btnOutline}>
+              <ListPlus size={16} /> Input Banyak Pembelian
+            </button>
+            <button onClick={() => setModal("jualBatch")} className={btnOutline}>
+              <ListPlus size={16} /> Input Banyak Pengambilan
             </button>
             <button onClick={() => setModal("jual")} className={btnPrimary}>
               <Plus size={16} /> Input Pengambilan
@@ -174,6 +181,8 @@ export function KoperasiPage() {
       {modal === "jual" && <JualModal onClose={() => setModal("")} onSuccess={done} />}
       {modal === "beli" && <BeliModal onClose={() => setModal("")} onSuccess={done} />}
       {modal === "rusak" && <RusakModal onClose={() => setModal("")} onSuccess={done} />}
+      {modal === "jualBatch" && <KopJualBatchModal onClose={() => setModal("")} onSuccess={done} />}
+      {modal === "beliBatch" && <KopBeliBatchModal onClose={() => setModal("")} onSuccess={done} />}
     </div>
   );
 }

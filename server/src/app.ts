@@ -193,7 +193,7 @@ function requiredPerms(req: express.Request): Need {
   if (is(/^\/users(\/|$)/)) return ["master.users"];
   if (is(/^\/user-activity$/)) return ["monitor.log_user"];
   // Koperasi: Lihat; Input = pengambilan / pembelian / barang rusak; Edit = hapus transaksi and the master barang / anggota.
-  if (is(/^\/koperasi(\/|$)/)) return m === "GET" ? ["koperasi.view"] : m === "POST" && is(/^\/koperasi\/(jual|beli|rusak)$/) ? ["koperasi.input"] : ["koperasi.edit"];
+  if (is(/^\/koperasi(\/|$)/)) return m === "GET" ? ["koperasi.view"] : m === "POST" && is(/^\/koperasi\/(jual|beli|rusak)(\/batch)?$/) ? ["koperasi.input"] : ["koperasi.edit"];
   return "super";
 }
 
@@ -7761,6 +7761,196 @@ app.post("/api/koperasi/beli", async (req, res) => {
       detail: `${result.lines.map((l) => `${l.nama} ${kopQty(l.qty)} @ ${l.harga.toLocaleString("id-ID")}`).join(", ")} · Rp ${Math.round(result.total).toLocaleString("id-ID")}`,
     });
     res.json({ success: true });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Gagal menyimpan pembelian" });
+  }
+});
+
+// Input Banyak Pengambilan: many anggota's pengambilan of one day typed as a table. Each row = one
+// barang of one anggota; an anggota's rows become one bon. All rows are saved or none; a refused row
+// comes back as { row } (its index) so the table marks it.
+app.post("/api/koperasi/jual/batch", async (req, res) => {
+  const b = req.body ?? {};
+  if (!isIsoDate(b.tanggal) || b.tanggal > jakartaToday()) return res.status(400).json({ error: "Tanggal tidak valid (tidak boleh setelah hari ini)" });
+  const rows: { anggota_kode: string; barang_kode: string; qty: number; harga: number }[] = (Array.isArray(b.rows) ? b.rows : []).map((r: any) => ({
+    anggota_kode: String(r?.anggota_kode ?? "").trim().toUpperCase(),
+    barang_kode: String(r?.barang_kode ?? "").trim().toUpperCase(),
+    qty: Number(r?.qty),
+    harga: Number(r?.harga ?? 0),
+  }));
+  if (!rows.length) return res.status(400).json({ error: "Belum ada baris" });
+  if (rows.length > 500) return res.status(400).json({ error: "Maksimal 500 baris sekali simpan" });
+  const evidence = b.evidence_id ? await claimEvidence(req, res) : null;
+  if (evidence === undefined) return;
+  const periode = kopMonth(b.tanggal);
+  const rpText = (n: number) => `Rp ${Math.round(n).toLocaleString("id-ID")}`;
+  type Refused = { error: string; row: number };
+  try {
+    const result = await withTransaction<Refused | { bons: number; total: number }>(async (client) => {
+      const refuse = (i: number, error: string): Refused => ({ error: `Baris ${i + 1}: ${error}`, row: i });
+      const bad = rows.findIndex((r) => !r.anggota_kode || !r.barang_kode || !(r.qty > 0) || !(r.harga >= 0));
+      if (bad >= 0) return refuse(bad, "anggota, barang, jumlah (> 0) dan harga wajib diisi");
+      // Anggota: existing and active, or a karyawan who becomes anggota now.
+      const kodes = [...new Set(rows.map((r) => r.anggota_kode))];
+      const anggota = new Map(
+        (
+          await queryMany<{ kode: string; jenis: string; nama: string; aktif: boolean }>(
+            "SELECT kode, jenis, nama, aktif FROM koperasi_anggota WHERE kode = ANY(@k::text[]) AND koperasi = @kop FOR UPDATE",
+            { k: kodes, kop: KOPERASI },
+            client
+          )
+        ).map((a) => [a.kode, a])
+      );
+      const missing = kodes.filter((k) => !anggota.has(k));
+      const karyawan = new Map(
+        (
+          await queryMany<{ kode: string; nama: string; estate: string; lokasi_kerja: string }>(
+            "SELECT UPPER(REPLACE(nik, ' ', '')) AS kode, nama, estate, lokasi_kerja FROM karyawan WHERE UPPER(REPLACE(nik, ' ', '')) = ANY(@k::text[])",
+            { k: missing },
+            client
+          )
+        ).map((k) => [k.kode, k])
+      );
+      for (const [i, r] of rows.entries()) {
+        const a = anggota.get(r.anggota_kode);
+        if (a && !a.aktif) return refuse(i, `${a.nama || r.anggota_kode} sudah tidak aktif sebagai anggota`);
+        if (!a && !karyawan.has(r.anggota_kode)) return refuse(i, `NIK ${r.anggota_kode} tidak ada di master karyawan maupun anggota koperasi`);
+      }
+      const barang = new Map(
+        (
+          await queryMany<{ kode: string; nama: string; lacak_stok: boolean }>(
+            "SELECT kode, nama, lacak_stok FROM koperasi_barang WHERE kode = ANY(@k::text[]) AND koperasi = @kop FOR UPDATE",
+            { k: [...new Set(rows.map((r) => r.barang_kode))], kop: KOPERASI },
+            client
+          )
+        ).map((x) => [x.kode, x])
+      );
+      const noBarang = rows.findIndex((r) => !barang.has(r.barang_kode));
+      if (noBarang >= 0) return refuse(noBarang, `barang ${rows[noBarang].barang_kode} tidak ada di master koperasi`);
+      // Stock and the monthly limit, row after row.
+      const stok = await kopStok([...barang.keys()], client);
+      const terpakai = new Map<string, number>();
+      for (const [i, r] of rows.entries()) {
+        const br = barang.get(r.barang_kode)!;
+        if (br.lacak_stok) {
+          const left = (stok.get(r.barang_kode) ?? 0) - r.qty;
+          if (left < -1e-9) return refuse(i, `stok ${br.nama} tidak cukup (tinggal ${kopQty(stok.get(r.barang_kode) ?? 0)})`);
+          stok.set(r.barang_kode, left);
+        }
+        const a = anggota.get(r.anggota_kode);
+        if (a?.jenis === "INSTANSI") continue;
+        if (!terpakai.has(r.anggota_kode)) terpakai.set(r.anggota_kode, await kopTerpakai(r.anggota_kode, periode, client));
+        const before = terpakai.get(r.anggota_kode)!;
+        const now = before + r.qty * r.harga;
+        if (now > KOP_LIMIT + 0.005) {
+          const nama = a?.nama || karyawan.get(r.anggota_kode)?.nama || r.anggota_kode;
+          return refuse(i, `${nama} melebihi limit ${rpText(KOP_LIMIT)} per bulan (sudah ${rpText(before)}, sisa ${rpText(Math.max(KOP_LIMIT - before, 0))})`);
+        }
+        terpakai.set(r.anggota_kode, now);
+      }
+      for (const k of missing) {
+        const kr = karyawan.get(k)!;
+        await execute(
+          "INSERT INTO koperasi_anggota (kode, koperasi, jenis, nama, estate, divisi) VALUES (@kode, @kop, 'KARYAWAN', @nama, @estate, @divisi) ON CONFLICT (kode) DO NOTHING",
+          { kode: k, kop: KOPERASI, nama: kr.nama, estate: kr.estate ?? "", divisi: kr.lokasi_kerja ?? "" },
+          client
+        );
+      }
+      const stamp = Date.now().toString(36).toUpperCase();
+      const bonOf = new Map(kodes.map((k, i) => [k, `KOP-${b.tanggal.replace(/-/g, "")}-${stamp}-${i + 1}`]));
+      await execute(
+        `INSERT INTO koperasi_tx (koperasi, jenis, tanggal_iso, periode, bon, barang_kode, qty, harga, total, anggota_kode, bayar, keterangan, evidence_id, user_id)
+         SELECT @kop, 'JUAL', @tanggal, @periode, x.bon, x.kode, x.qty, x.harga, ROUND((x.qty * x.harga)::numeric, 2), x.anggota, x.bayar, 'Input banyak', @evidence::uuid, @uid
+           FROM json_to_recordset(@rows::json) AS x(bon text, kode text, qty float8, harga float8, anggota text, bayar text)`,
+        {
+          kop: KOPERASI,
+          tanggal: b.tanggal,
+          periode,
+          evidence,
+          uid: req.user!.id,
+          rows: JSON.stringify(
+            rows.map((r) => ({
+              bon: bonOf.get(r.anggota_kode),
+              kode: r.barang_kode,
+              qty: r.qty,
+              harga: r.harga,
+              anggota: r.anggota_kode,
+              bayar: anggota.get(r.anggota_kode)?.jenis === "INSTANSI" ? "INSTANSI" : "POTONG_GAJI",
+            }))
+          ),
+        },
+        client
+      );
+      return { bons: kodes.length, total: rows.reduce((s, r) => s + r.qty * r.harga, 0) };
+    });
+    if ("error" in result) return res.status(400).json(result);
+    await logActivity(req, {
+      module: "KOPERASI",
+      estate: KOPERASI,
+      aksi: "Input Banyak Pengambilan",
+      objek: `${result.bons} anggota · ${b.tanggal}`,
+      detail: `${rows.length} baris · ${rpText(result.total)}`,
+    });
+    res.json({ count: rows.length, bons: result.bons });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Gagal menyimpan pengambilan" });
+  }
+});
+
+// Input Banyak Pembelian: many barang bought on one day, each row with its own No PO / nota.
+app.post("/api/koperasi/beli/batch", async (req, res) => {
+  const b = req.body ?? {};
+  if (!isIsoDate(b.tanggal) || b.tanggal > jakartaToday()) return res.status(400).json({ error: "Tanggal tidak valid (tidak boleh setelah hari ini)" });
+  const rows: { barang_kode: string; qty: number; harga: number; no_po: string }[] = (Array.isArray(b.rows) ? b.rows : []).map((r: any) => ({
+    barang_kode: String(r?.barang_kode ?? "").trim().toUpperCase(),
+    qty: Number(r?.qty),
+    harga: Number(r?.harga ?? 0),
+    no_po: String(r?.no_po ?? "").trim(),
+  }));
+  if (!rows.length) return res.status(400).json({ error: "Belum ada baris" });
+  if (rows.length > 500) return res.status(400).json({ error: "Maksimal 500 baris sekali simpan" });
+  const bad = rows.findIndex((r) => !r.barang_kode || !(r.qty > 0) || !(r.harga >= 0));
+  if (bad >= 0) return res.status(400).json({ error: `Baris ${bad + 1}: barang, jumlah (> 0) dan harga wajib diisi`, row: bad });
+  const known = new Set(
+    (await queryMany<{ kode: string }>("SELECT kode FROM koperasi_barang WHERE kode = ANY(@k::text[]) AND koperasi = @kop", { k: rows.map((r) => r.barang_kode), kop: KOPERASI })).map(
+      (x) => x.kode
+    )
+  );
+  const unknown = rows.findIndex((r) => !known.has(r.barang_kode));
+  if (unknown >= 0) return res.status(400).json({ error: `Baris ${unknown + 1}: barang ${rows[unknown].barang_kode} tidak ada di master koperasi`, row: unknown });
+  const evidence = b.evidence_id ? await claimEvidence(req, res) : null;
+  if (evidence === undefined) return;
+  try {
+    await withTransaction(async (client) => {
+      await execute(
+        `INSERT INTO koperasi_tx (koperasi, jenis, tanggal_iso, periode, barang_kode, qty, harga, total, no_po, keterangan, evidence_id, user_id)
+         SELECT @kop, 'BELI', @tanggal, @periode, x.kode, x.qty, x.harga, ROUND((x.qty * x.harga)::numeric, 2), x.po, 'Input banyak', @evidence::uuid, @uid
+           FROM json_to_recordset(@rows::json) AS x(kode text, qty float8, harga float8, po text)`,
+        {
+          kop: KOPERASI,
+          tanggal: b.tanggal,
+          periode: kopMonth(b.tanggal),
+          evidence,
+          uid: req.user!.id,
+          rows: JSON.stringify(rows.map((r) => ({ kode: r.barang_kode, qty: r.qty, harga: r.harga, po: r.no_po }))),
+        },
+        client
+      );
+      // The last row of a barang sets its harga beli (and harga jual, unless switched off).
+      for (const r of rows.filter((r) => r.harga > 0))
+        await execute(`UPDATE koperasi_barang SET harga_beli = @harga${b.update_harga !== false ? ", harga_jual = @harga" : ""} WHERE kode = @kode`, { harga: r.harga, kode: r.barang_kode }, client);
+    });
+    const total = rows.reduce((s, r) => s + r.qty * r.harga, 0);
+    await logActivity(req, {
+      module: "KOPERASI",
+      estate: KOPERASI,
+      aksi: "Input Banyak Pembelian",
+      objek: `${rows.length} baris · ${b.tanggal}`,
+      detail: `Rp ${Math.round(total).toLocaleString("id-ID")}`,
+    });
+    res.json({ count: rows.length });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: "Gagal menyimpan pembelian" });

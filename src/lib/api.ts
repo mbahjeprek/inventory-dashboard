@@ -1300,6 +1300,10 @@ export const api = {
     req<{ bon: string; total: number }>("/api/koperasi/jual", { method: "POST", body: JSON.stringify(body) }),
   kopBeli: (body: { tanggal: string; no_po: string; keterangan: string; evidence_id: string | null; update_harga: boolean; items: KopLineInput[] }) =>
     req<{ success: boolean }>("/api/koperasi/beli", { method: "POST", body: JSON.stringify(body) }),
+  kopJualBatch: (body: { tanggal: string; evidence_id: string | null; rows: { anggota_kode: string; barang_kode: string; qty: number; harga: number }[] }) =>
+    req<{ count: number; bons: number }>("/api/koperasi/jual/batch", { method: "POST", body: JSON.stringify(body) }),
+  kopBeliBatch: (body: { tanggal: string; evidence_id: string | null; update_harga: boolean; rows: { barang_kode: string; qty: number; harga: number; no_po: string }[] }) =>
+    req<{ count: number }>("/api/koperasi/beli/batch", { method: "POST", body: JSON.stringify(body) }),
   kopRusak: (body: { tanggal: string; barang_kode: string; qty: number; keterangan: string; evidence_id: string | null }) =>
     req<{ success: boolean }>("/api/koperasi/rusak", { method: "POST", body: JSON.stringify(body) }),
   kopHapus: (id: number, bon = false) => req<{ success: boolean; n: number }>(`/api/koperasi/tx/${id}${bon ? "?bon=1" : ""}`, { method: "DELETE" }),

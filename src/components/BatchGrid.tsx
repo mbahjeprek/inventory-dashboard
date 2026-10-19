@@ -67,6 +67,8 @@ export function BatchGrid({
   submit,
   onClose,
   onSuccess,
+  evidenceOptional = false,
+  evidenceLabel = "Foto Bukti (satu untuk semua baris)",
 }: {
   title: string;
   subtitle?: string;
@@ -87,6 +89,9 @@ export function BatchGrid({
   submit: (rows: Cells[], evidenceId: string) => Promise<number>;
   onClose: () => void;
   onSuccess: (count: number) => void;
+  // Koperasi: the photo may be left out.
+  evidenceOptional?: boolean;
+  evidenceLabel?: string;
 }) {
   const typed = columns.filter((c) => c.type !== "select" && !c.carry).map((c) => c.key);
   const isBlank = (c: Cells) => typed.every((k) => !(c[k] ?? "").trim());
@@ -206,7 +211,7 @@ export function BatchGrid({
     }
     setRowErrors(errs);
     if (Object.keys(errs).length) return setError(`${Object.keys(errs).length} baris belum lengkap / salah (ditandai merah)`);
-    if (evidenceOn && !evidenceId) return setError("Foto bukti wajib diupload");
+    if (evidenceOn && !evidenceId && !evidenceOptional) return setError("Foto bukti wajib diupload");
     setSubmitting(true);
     try {
       const count = await submit(
@@ -387,7 +392,7 @@ export function BatchGrid({
               <b className="text-[var(--text-primary)]">{filled.length}</b> baris{summary && <> · {summary(filled)}</>}
             </div>
             <div className="w-full sm:w-80">
-              <EvidenceInput value={evidenceId} onChange={setEvidenceId} label="Foto Bukti (satu untuk semua baris)" />
+              <EvidenceInput value={evidenceId} onChange={setEvidenceId} label={evidenceLabel} />
             </div>
           </div>
           {error && <p className="text-xs text-[var(--accent-red)]">{error}</p>}
