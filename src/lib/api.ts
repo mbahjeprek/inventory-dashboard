@@ -528,6 +528,19 @@ export type KopRingkasan = {
   menipis: number;
 };
 export type KopRekap = KopAnggota & { n_bon: number; dari: string; sampai: string; potong_gaji: number; tunai: number; instansi: number; total: number };
+export type KopDashboard = {
+  dari: string;
+  sampai: string;
+  limit: number;
+  kpi: { jual: number; bon: number; pengebon: number; potong_gaji: number; instansi: number; jenis_barang: number; beli: number };
+  perBulan: { periode: string; jual: number; beli: number; pengebon: number }[];
+  perHari: { tanggal: string; jual: number; orang: number }[];
+  topBarang: { kode: string; nama: string; satuan: string; qty: number; nilai: number; orang: number }[];
+  topPengebon: { kode: string; nama: string; jabatan: string; estate: string; divisi: string; total: number; bon: number; bulan: number }[];
+  perDivisi: { grup: string; total: number; orang: number }[];
+  perluBeli: { kode: string; nama: string; satuan: string; harga_beli: number; stok: number; rata: number }[];
+  dekatLimit: { kode: string; nama: string; total: number }[];
+};
 export type KopLineInput = { barang_kode: string; qty: number; harga: number };
 
 export type PinjamanLogAksi = "PINJAM" | "TRANSFER" | "KEMBALI" | "LUNAS" | "BATAL";
@@ -1307,6 +1320,7 @@ export const api = {
   kopRusak: (body: { tanggal: string; barang_kode: string; qty: number; keterangan: string; evidence_id: string | null }) =>
     req<{ success: boolean }>("/api/koperasi/rusak", { method: "POST", body: JSON.stringify(body) }),
   kopHapus: (id: number, bon = false) => req<{ success: boolean; n: number }>(`/api/koperasi/tx/${id}${bon ? "?bon=1" : ""}`, { method: "DELETE" }),
+  kopDashboard: (dari: string, sampai: string) => req<KopDashboard>(`/api/koperasi/dashboard?dari=${dari}&sampai=${sampai}`),
   kopRekap: (periode: string) => req<{ periode: string; limit: number; data: KopRekap[] }>(`/api/koperasi/rekap?periode=${periode}`),
   kopLimit: (kode: string, periode: string) =>
     req<{ periode: string; limit: number; terpakai: number; sisa: number }>(`/api/koperasi/limit/${encodeURIComponent(kode)}?periode=${periode}`),

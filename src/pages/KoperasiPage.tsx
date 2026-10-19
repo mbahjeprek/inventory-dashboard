@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Banknote, Boxes, HandCoins, ListPlus, Package, PackageX, Pencil, Plus, Search, ShoppingBasket, Trash2, Truck, UserPlus, Users, X } from "lucide-react";
+import { Banknote, Boxes, HandCoins, LayoutDashboard, ListPlus, Package, PackageX, Pencil, Plus, Search, ShoppingBasket, Trash2, Truck, UserPlus, Users, X } from "lucide-react";
 import {
   api,
   errorText,
@@ -18,6 +18,7 @@ import { ConfirmDialog } from "../components/ConfirmDialog";
 import { EvidenceInput, EvidenceLink } from "../components/EvidenceInput";
 import { fmtQty, isoDisplay, localToday } from "../lib/opname";
 import { KopBeliBatchModal, KopJualBatchModal } from "../components/KoperasiBatchModal";
+import { KoperasiDashboard } from "../components/KoperasiDashboard";
 
 // Koperasi karyawan Nilam: anggota (karyawan) take goods, deducted from the salary of the month taken
 // (periode = calendar month), up to Rp 1,5 juta a month, no cicilan; Kantor / Mess Tamu are billed to the company. The koperasi
@@ -47,8 +48,9 @@ const BAYAR_CLS: Record<KopBayar, string> = {
 // Number typed the Indonesian way ("1.500" or "2,5").
 const parseNum = (s: string) => Number(s.replace(/\./g, "").replace(",", "."));
 
-type Tab = "jual" | "rekap" | "stok" | "beli" | "anggota";
+type Tab = "dashboard" | "jual" | "rekap" | "stok" | "beli" | "anggota";
 const TABS: { key: Tab; label: string; icon: typeof Package }[] = [
+  { key: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { key: "jual", label: "Pengambilan", icon: ShoppingBasket },
   { key: "rekap", label: "Rekap Potong Gaji", icon: HandCoins },
   { key: "stok", label: "Stok Barang", icon: Boxes },
@@ -60,7 +62,7 @@ export function KoperasiPage() {
   const { user } = useAuth();
   const canInput = can(user, "koperasi.input");
   const canEdit = can(user, "koperasi.edit");
-  const [tab, setTab] = useState<Tab>("jual");
+  const [tab, setTab] = useState<Tab>("dashboard");
   const [periodes, setPeriodes] = useState<string[]>([]);
   const [periode, setPeriode] = useState(localToday().slice(0, 7));
   const [ringkasan, setRingkasan] = useState<KopRingkasan | null>(null);
@@ -117,7 +119,7 @@ export function KoperasiPage() {
         </select>
       </div>
 
-      {ringkasan && (
+      {ringkasan && tab !== "dashboard" && (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <StatCard
             label={`Pengambilan ${periodeLabel(periode)}`}
@@ -166,6 +168,7 @@ export function KoperasiPage() {
         ))}
       </div>
 
+      {tab === "dashboard" && <KoperasiDashboard periode={periode} reload={reload} />}
       {tab === "jual" && <TxTable jenis="JUAL" periode={periode} reload={reload} canEdit={canEdit} onChanged={done} />}
       {tab === "rekap" && <RekapTab periode={periode} reload={reload} />}
       {tab === "stok" && <StokTab reload={reload} canEdit={canEdit} onChanged={done} />}

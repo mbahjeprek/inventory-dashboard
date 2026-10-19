@@ -7416,6 +7416,86 @@ app.get("/api/koperasi/ringkasan", async (req, res) => {
   res.json({ periode, ...r, ...stok });
 });
 
+// Dashboard koperasi over the payroll months dari..sampai: totals, sales per month (the 12 months up to
+// sampai), per day (when the range is one month), top 15 barang and pengebon, per estate / divisi,
+// barang that sell but are running out, and karyawan close to their limit in sampai.
+app.get("/api/koperasi/dashboard", async (req, res) => {
+  const sampai = isPeriode(req.query.sampai) ? req.query.sampai : kopMonth(jakartaToday());
+  const dari = isPeriode(req.query.dari) && req.query.dari <= sampai ? req.query.dari : sampai;
+  const p = { k: KOPERASI, dari, sampai };
+  const jual = "t.koperasi = @k AND t.jenis = 'JUAL' AND t.periode BETWEEN @dari AND @sampai";
+  const [y, m] = sampai.split("-").map(Number);
+  const awal12 = `${m === 12 ? y : y - 1}-${String((m % 12) + 1).padStart(2, "0")}`;
+  const anggotaNama = `COALESCE(NULLIF(k.nama, ''), NULLIF(a.nama, ''), a.kode)`;
+  // One after another on one connection: nine at once can exceed the database pooler's connections.
+  const steps: (() => Promise<any>)[] = [
+    () => queryOne(
+      `SELECT COALESCE(SUM(total), 0)::float8 AS jual, COUNT(DISTINCT COALESCE(bon, id::text))::int AS bon,
+              COUNT(DISTINCT anggota_kode) FILTER (WHERE bayar = 'POTONG_GAJI')::int AS pengebon,
+              COALESCE(SUM(total) FILTER (WHERE bayar = 'POTONG_GAJI'), 0)::float8 AS potong_gaji,
+              COALESCE(SUM(total) FILTER (WHERE bayar = 'INSTANSI'), 0)::float8 AS instansi,
+              COUNT(DISTINCT barang_kode)::int AS jenis_barang
+         FROM koperasi_tx t WHERE ${jual}`,
+      p
+    ),
+    () => queryOne(`SELECT COALESCE(SUM(total), 0)::float8 AS beli FROM koperasi_tx WHERE koperasi = @k AND jenis = 'BELI' AND periode BETWEEN @dari AND @sampai`, p),
+    () => queryMany(
+      `SELECT periode, COALESCE(SUM(total) FILTER (WHERE jenis = 'JUAL'), 0)::float8 AS jual, COALESCE(SUM(total) FILTER (WHERE jenis = 'BELI'), 0)::float8 AS beli,
+              COUNT(DISTINCT anggota_kode) FILTER (WHERE jenis = 'JUAL' AND bayar = 'POTONG_GAJI')::int AS pengebon
+         FROM koperasi_tx WHERE koperasi = @k AND periode BETWEEN @awal AND @sampai GROUP BY periode ORDER BY periode`,
+      { ...p, awal: awal12 }
+    ),
+    () => dari === sampai
+      ? queryMany(`SELECT tanggal_iso AS tanggal, SUM(total)::float8 AS jual, COUNT(DISTINCT anggota_kode)::int AS orang FROM koperasi_tx t WHERE ${jual} GROUP BY 1 ORDER BY 1`, p)
+      : Promise.resolve([]),
+    () => queryMany(
+      `SELECT t.barang_kode AS kode, b.nama, b.satuan, SUM(t.qty)::float8 AS qty, SUM(t.total)::float8 AS nilai, COUNT(DISTINCT t.anggota_kode)::int AS orang
+         FROM koperasi_tx t JOIN koperasi_barang b ON b.kode = t.barang_kode WHERE ${jual}
+        GROUP BY 1, 2, 3 ORDER BY nilai DESC LIMIT 15`,
+      p
+    ),
+    () => queryMany(
+      `SELECT a.kode, ${anggotaNama} AS nama, a.jabatan, COALESCE(NULLIF(k.estate, ''), a.estate) AS estate, COALESCE(NULLIF(k.lokasi_kerja, ''), a.divisi) AS divisi,
+              SUM(t.total)::float8 AS total, COUNT(DISTINCT t.bon)::int AS bon, COUNT(DISTINCT t.periode)::int AS bulan
+         FROM koperasi_tx t JOIN koperasi_anggota a ON a.kode = t.anggota_kode ${KOP_ANGGOTA_JOIN}
+        WHERE ${jual} AND t.bayar = 'POTONG_GAJI'
+        GROUP BY a.kode, a.nama, a.jabatan, a.estate, a.divisi, k.nama, k.estate, k.lokasi_kerja ORDER BY total DESC LIMIT 15`,
+      p
+    ),
+    () => queryMany(
+      `SELECT CASE WHEN a.jenis = 'INSTANSI' THEN 'Instansi' WHEN COALESCE(NULLIF(k.estate, ''), NULLIF(a.estate, '')) IS NULL THEN 'Tidak tercatat'
+                  ELSE INITCAP(COALESCE(NULLIF(k.estate, ''), a.estate)) || ' · ' || COALESCE(NULLIF(INITCAP(COALESCE(NULLIF(k.lokasi_kerja, ''), a.divisi)), ''), '-') END AS grup,
+              SUM(t.total)::float8 AS total, COUNT(DISTINCT t.anggota_kode)::int AS orang
+         FROM koperasi_tx t JOIN koperasi_anggota a ON a.kode = t.anggota_kode ${KOP_ANGGOTA_JOIN}
+        WHERE ${jual} GROUP BY 1 ORDER BY total DESC LIMIT 12`,
+      p
+    ),
+    // Sold in the last 3 months up to sampai, with stock left for less than a month of that pace.
+    () => queryMany(
+      `WITH laku AS (
+         SELECT barang_kode, SUM(qty) / 3.0 AS rata FROM koperasi_tx
+          WHERE koperasi = @k AND jenis = 'JUAL' AND periode BETWEEN @awal3 AND @sampai AND sumber IS DISTINCT FROM 'IMPORT-REKAP2023' GROUP BY 1
+       ), stok AS (SELECT barang_kode, ${kopStokSql} AS stok FROM koperasi_tx t GROUP BY 1)
+       SELECT b.kode, b.nama, b.satuan, b.harga_beli, COALESCE(s.stok, 0)::float8 AS stok, l.rata::float8 AS rata
+         FROM laku l JOIN koperasi_barang b ON b.kode = l.barang_kode LEFT JOIN stok s ON s.barang_kode = b.kode
+        WHERE b.lacak_stok AND b.aktif AND COALESCE(s.stok, 0) < l.rata
+        ORDER BY COALESCE(s.stok, 0) / NULLIF(l.rata, 0), l.rata DESC LIMIT 15`,
+      { ...p, awal3: (() => { const d = new Date(Date.UTC(y, m - 3, 1)); return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`; })() }
+    ),
+    () => queryMany(
+      `SELECT a.kode, ${anggotaNama} AS nama, SUM(t.total)::float8 AS total
+         FROM koperasi_tx t JOIN koperasi_anggota a ON a.kode = t.anggota_kode ${KOP_ANGGOTA_JOIN}
+        WHERE t.koperasi = @k AND t.jenis = 'JUAL' AND t.bayar = 'POTONG_GAJI' AND t.periode = @sampai
+        GROUP BY a.kode, a.nama, k.nama HAVING SUM(t.total) >= @batas ORDER BY total DESC LIMIT 20`,
+      { ...p, batas: KOP_LIMIT * 0.8 }
+    ),
+  ];
+  const out: any[] = [];
+  for (const step of steps) out.push(await step());
+  const [kpi, beli, perBulan, perHari, topBarang, topPengebon, perDivisi, perluBeli, dekatLimit] = out;
+  res.json({ dari, sampai, limit: KOP_LIMIT, kpi: { ...kpi, ...beli }, perBulan, perHari, topBarang, topPengebon, perDivisi, perluBeli, dekatLimit });
+});
+
 // ---- Barang ----
 app.get("/api/koperasi/barang", async (req, res) => {
   const { search = "", aktif = "1" } = req.query as Record<string, string>;
