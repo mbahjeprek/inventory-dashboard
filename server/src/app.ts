@@ -7411,13 +7411,17 @@ app.get("/api/koperasi/ringkasan", async (req, res) => {
        FROM koperasi_tx WHERE koperasi = @k AND periode = @periode`,
     { k: KOPERASI, periode }
   );
+  // Stock at the end of the periode (every movement up to that month), valued at the last harga beli
+  // up to then (the barang's harga beli when it wasn't bought by then).
   const stok = await queryOne(
-    `SELECT COALESCE(SUM(GREATEST(s.stok, 0) * b.harga_beli), 0)::float8 AS nilai_stok,
-            COUNT(*) FILTER (WHERE b.aktif AND b.lacak_stok AND s.stok <= b.stok_min)::int AS menipis
+    `SELECT COALESCE(SUM(GREATEST(s.stok, 0) * COALESCE(h.harga, b.harga_beli)), 0)::float8 AS nilai_stok,
+            COUNT(*) FILTER (WHERE b.aktif AND s.stok IS NOT NULL AND s.stok <= b.stok_min)::int AS menipis
        FROM koperasi_barang b
-       LEFT JOIN (SELECT barang_kode, ${kopStokSql} AS stok FROM koperasi_tx t GROUP BY barang_kode) s ON s.barang_kode = b.kode
+       LEFT JOIN (SELECT barang_kode, ${kopStokSql} AS stok FROM koperasi_tx t WHERE t.periode <= @periode GROUP BY barang_kode) s ON s.barang_kode = b.kode
+       LEFT JOIN LATERAL (SELECT harga FROM koperasi_tx x WHERE x.barang_kode = b.kode AND x.jenis = 'BELI' AND x.harga > 0 AND x.periode <= @periode
+                           ORDER BY x.tanggal_iso DESC, x.id DESC LIMIT 1) h ON true
       WHERE b.koperasi = @k AND b.lacak_stok`,
-    { k: KOPERASI }
+    { k: KOPERASI, periode }
   );
   res.json({ periode, ...r, ...stok });
 });

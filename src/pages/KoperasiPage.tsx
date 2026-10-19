@@ -201,13 +201,13 @@ export function KoperasiPage() {
           />
           <StatCard label={`Stock In ${periodeLabel(periode)}`} value={rp(ringkasan.beli)} icon={Truck} tone="green" onClick={() => setTab("beli")} title="Buka Stock In" />
           <StatCard
-            label="Nilai Stok (harga beli)"
+            label={`Nilai Stok akhir ${periodeLabel(periode)}`}
             value={rp(ringkasan.nilai_stok)}
             icon={Boxes}
             tone={ringkasan.menipis ? "red" : "green"}
             onClick={() => setTab("stok")}
             title="Buka Stok Barang"
-            footer={<span className={`text-[11px] ${ringkasan.menipis ? "text-[var(--accent-red)]" : "text-[var(--text-muted)]"}`}>{ringkasan.menipis} barang stok menipis / habis</span>}
+            footer={<span className={`text-[11px] ${ringkasan.menipis ? "text-[var(--accent-red)]" : "text-[var(--text-muted)]"}`}>{ringkasan.menipis} barang stok menipis / habis · harga beli</span>}
           />
         </div>
       )}
