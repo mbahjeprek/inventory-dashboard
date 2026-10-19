@@ -6,6 +6,10 @@ import {
   type KopAnggota,
   type KopBarang,
   type KopBayar,
+  type KopBayarRow,
+  type KopCara,
+  type KopTagihan,
+  type KopTunggakan,
   type KopRekap,
   type KopRingkasan,
   type KopTx,
@@ -177,6 +181,8 @@ export function KoperasiPage() {
         </div>
       </div>
 
+      <TunggakanBanner reload={reload} canInput={canInput} canEdit={canEdit} onChanged={done} />
+
       {ringkasan && tab !== "dashboard" && (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <StatCard
@@ -228,7 +234,7 @@ export function KoperasiPage() {
 
       {tab === "dashboard" && <KoperasiDashboard periode={periode} reload={reload} />}
       {tab === "jual" && <TxTable jenis="JUAL" periode={periode} reload={reload} canEdit={canEdit} onChanged={done} />}
-      {tab === "rekap" && <RekapTab periode={periode} reload={reload} />}
+      {tab === "rekap" && <RekapTab periode={periode} reload={reload} canInput={canInput} canEdit={canEdit} onChanged={done} />}
       {tab === "stok" && <StokTab reload={reload} canEdit={canEdit} onChanged={done} />}
       {tab === "opname" && <KoperasiOpname canInput={canInput} canEdit={canEdit} isSuperuser={user?.role === "superuser"} onChanged={done} />}
       {tab === "beli" && (
@@ -469,22 +475,53 @@ function TxTable({
   );
 }
 
-// ---- Rekap Potong Gaji: per anggota for the periode, to send to HRD / payroll ----
-function RekapTab({ periode, reload }: { periode: string; reload: number }) {
+// ---- Rekap Potong Gaji: per anggota for the periode, sent to HRD on the 1st of the next month and
+// deducted on the 10th-15th. Each karyawan's bill shows what is paid; Tandai lunas books the rest as
+// potong gaji for the ticked ones, Bayar records a part / cash payment (gaji tidak cukup). ----
+type StatusBayar = "LUNAS" | "SEBAGIAN" | "MENUNGGU" | "BELUM";
+const STATUS_BAYAR: Record<StatusBayar, { label: string; cls: string }> = {
+  LUNAS: { label: "Lunas", cls: "bg-[var(--accent-green-bg)] border-[var(--accent-green-border)] text-[var(--accent-green)]" },
+  SEBAGIAN: { label: "Kurang bayar", cls: "bg-[var(--accent-red-bg)] border-[var(--accent-red-border)] text-[var(--accent-red)]" },
+  MENUNGGU: { label: "Menunggu potong gaji", cls: "bg-[var(--accent-amber-bg)] border-[var(--accent-amber-border)] text-[var(--accent-amber)]" },
+  BELUM: { label: "Belum lunas", cls: "bg-[var(--accent-red-bg)] border-[var(--accent-red-border)] text-[var(--accent-red)]" },
+};
+const statusBayar = (r: { potong_gaji: number; dibayar: number }, jatuhTempo: string, today: string): StatusBayar | null => {
+  if (r.potong_gaji <= 0.5) return null;
+  const sisa = r.potong_gaji - r.dibayar;
+  if (sisa <= 0.5) return "LUNAS";
+  if (r.dibayar > 0.5) return "SEBAGIAN";
+  return today <= jatuhTempo ? "MENUNGGU" : "BELUM";
+};
+
+function RekapTab({ periode, reload, canInput, canEdit, onChanged }: { periode: string; reload: number; canInput: boolean; canEdit: boolean; onChanged: () => void }) {
   const [rows, setRows] = useState<KopRekap[] | null>(null);
   const [limit, setLimit] = useState(0);
+  const [jatuhTempo, setJatuhTempo] = useState("");
+  const [today, setToday] = useState(localToday());
   const [detail, setDetail] = useState<KopRekap | null>(null);
+  const [bayar, setBayar] = useState<KopRekap | null>(null);
   const [filter, setFilter] = useState<"" | "POTONG_GAJI" | "INSTANSI">("POTONG_GAJI");
+  const [statusF, setStatusF] = useState<"" | "LUNAS" | "BELUM">("");
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [confirmLunas, setConfirmLunas] = useState(false);
+  const [msg, setMsg] = useState("");
   useEffect(() => {
     setRows(null);
+    setPicked(new Set());
     api
       .kopRekap(periode)
-      .then((r) => (setRows(r.data), setLimit(r.limit)))
+      .then((r) => (setRows(r.data), setLimit(r.limit), setJatuhTempo(r.jatuh_tempo), setToday(r.today)))
       .catch(() => setRows([]));
   }, [periode, reload]);
   const [sort, setSort] = useState<Sort>({ key: "", dir: "asc" });
+  const st = (r: KopRekap) => statusBayar(r, jatuhTempo, today);
+  const sisaOf = (r: KopRekap) => Math.max(r.potong_gaji - r.dibayar, 0);
   const shown = sortBy(
-    (rows ?? []).filter((r) => (filter === "POTONG_GAJI" ? r.potong_gaji > 0 : filter === "INSTANSI" ? r.instansi > 0 : true)),
+    (rows ?? []).filter(
+      (r) =>
+        (filter === "POTONG_GAJI" ? r.potong_gaji > 0 : filter === "INSTANSI" ? r.instansi > 0 : true) &&
+        (statusF === "LUNAS" ? st(r) === "LUNAS" : statusF === "BELUM" ? !!st(r) && st(r) !== "LUNAS" : true)
+    ),
     sort,
     {
       kode: (r) => r.kode,
@@ -493,17 +530,42 @@ function RekapTab({ periode, reload }: { periode: string; reload: number }) {
       estate: (r) => [r.estate, r.divisi].filter(Boolean).join(" / "),
       n_bon: (r) => r.n_bon,
       potong_gaji: (r) => r.potong_gaji,
-      tunai: (r) => r.tunai,
+      dibayar: (r) => r.dibayar,
+      sisa: (r) => sisaOf(r),
+      status: (r) => ["BELUM", "SEBAGIAN", "MENUNGGU", "LUNAS"].indexOf(st(r) ?? "z"),
       instansi: (r) => r.instansi,
       total: (r) => r.total,
     }
   );
-  const sum = (k: "potong_gaji" | "tunai" | "instansi" | "total") => shown.reduce((s, r) => s + r[k], 0);
+  const sum = (f: (r: KopRekap) => number) => shown.reduce((s, r) => s + f(r), 0);
   const lewat = (r: KopRekap) => limit > 0 && r.potong_gaji > limit;
   const nLewat = shown.filter(lewat).length;
+  const openRows = shown.filter((r) => sisaOf(r) > 0.5);
+  const nBelum = (rows ?? []).filter((r) => st(r) === "BELUM" || st(r) === "SEBAGIAN").length;
+  const pickedRows = openRows.filter((r) => picked.has(r.kode));
+  const toggle = (kode: string) => setPicked((p) => (p.has(kode) ? new Set([...p].filter((x) => x !== kode)) : new Set([...p, kode])));
+  const allPicked = openRows.length > 0 && openRows.every((r) => picked.has(r.kode));
+  const tandaiLunas = async () => {
+    setConfirmLunas(false);
+    try {
+      const r = await api.kopBayarLunas(
+        periode,
+        pickedRows.map((x) => x.kode)
+      );
+      setMsg(`${r.count} orang ditandai lunas (${rp(r.total)})`);
+      setPicked(new Set());
+      onChanged();
+    } catch (e) {
+      setMsg(errorText(e, "Gagal menandai lunas"));
+    }
+  };
   const buildReport = async () => ({
     title: `Rekap Potong Gaji Koperasi Nilam - ${periodeLabel(periode)}`,
-    subtitle: [filter === "POTONG_GAJI" ? "Karyawan dengan potong gaji" : filter === "INSTANSI" ? "Instansi (ditagih ke kantor)" : "Semua anggota"],
+    subtitle: [
+      filter === "POTONG_GAJI" ? "Karyawan dengan potong gaji" : filter === "INSTANSI" ? "Instansi (ditagih ke kantor)" : "Semua anggota",
+      ...(jatuhTempo ? [`Disetor ke HRD tgl 1, potong gaji paling lambat ${isoDisplay(jatuhTempo)}`] : []),
+    ],
+    landscape: true,
     columns: [
       { label: "No" },
       { label: "NIK" },
@@ -512,13 +574,28 @@ function RekapTab({ periode, reload }: { periode: string; reload: number }) {
       { label: "Estate / Divisi" },
       { label: "Jml Bon", align: "right" as const },
       { label: "Potong Gaji (Rp)", align: "right" as const },
-      { label: "Tunai (Rp)", align: "right" as const },
+      { label: "Dibayar (Rp)", align: "right" as const },
+      { label: "Sisa (Rp)", align: "right" as const },
+      { label: "Status" },
       { label: "Instansi (Rp)", align: "right" as const },
       { label: "Total (Rp)", align: "right" as const },
     ],
     rows: [
-      ...shown.map((r, i) => [i + 1, r.kode, r.nama || "-", r.jabatan, [r.estate, r.divisi].filter(Boolean).join(" / "), r.n_bon, r.potong_gaji, r.tunai, r.instansi, r.total]),
-      ["", "", "TOTAL", "", "", shown.reduce((s, r) => s + r.n_bon, 0), sum("potong_gaji"), sum("tunai"), sum("instansi"), sum("total")],
+      ...shown.map((r, i) => [
+        i + 1,
+        r.kode,
+        r.nama || "-",
+        r.jabatan,
+        [r.estate, r.divisi].filter(Boolean).join(" / "),
+        r.n_bon,
+        r.potong_gaji,
+        r.dibayar,
+        sisaOf(r),
+        st(r) ? STATUS_BAYAR[st(r)!].label : "-",
+        r.instansi,
+        r.total,
+      ]),
+      ["", "", "TOTAL", "", "", sum((r) => r.n_bon), sum((r) => r.potong_gaji), sum((r) => r.dibayar), sum(sisaOf), "", sum((r) => r.instansi), sum((r) => r.total)],
     ],
   });
 
@@ -530,19 +607,52 @@ function RekapTab({ periode, reload }: { periode: string; reload: number }) {
           <option value="INSTANSI">Instansi (Kantor, Mess)</option>
           <option value="">Semua</option>
         </select>
+        <select value={statusF} onChange={(e) => setStatusF(e.target.value as typeof statusF)} className={selectCls} aria-label="Status">
+          <option value="">Semua status</option>
+          <option value="BELUM">Belum lunas</option>
+          <option value="LUNAS">Lunas</option>
+        </select>
         <span className="text-xs text-[var(--text-muted)]">
-          {shown.length} orang · Potong gaji <b className="text-[var(--text-primary)]">{rp(sum("potong_gaji"))}</b>
+          {shown.length} orang · Potong gaji <b className="text-[var(--text-primary)]">{rp(sum((r) => r.potong_gaji))}</b> · sisa{" "}
+          <b className={sum(sisaOf) > 0.5 ? "text-[var(--accent-red)]" : "text-[var(--text-primary)]"}>{rp(sum(sisaOf))}</b>
           {limit > 0 && ` · limit ${rp(limit)}/orang`}
           {nLewat > 0 && <b className="text-[var(--accent-red)]"> · {nLewat} melebihi limit</b>}
         </span>
-        <div className="ml-auto flex gap-2">
+        <div className="ml-auto flex flex-wrap gap-2">
+          {canInput && pickedRows.length > 0 && (
+            <button onClick={() => setConfirmLunas(true)} className={btnPrimary}>
+              Tandai lunas ({pickedRows.length})
+            </button>
+          )}
           <ExportButtons total={shown.length} buildReport={buildReport} fileName={`koperasi-potong-gaji-${periode}`} />
         </div>
       </div>
+      {jatuhTempo && (
+        <div className={`px-3 py-2 text-xs border-b border-[var(--border)] ${nBelum ? "bg-[var(--accent-red-bg)] text-[var(--accent-red)]" : "bg-[#f8fafc] text-[var(--text-secondary)]"}`}>
+          Rekap {periodeLabel(periode)} disetor ke HRD tgl 1, dipotong dari gaji tgl 10–{isoDisplay(jatuhTempo)}.{" "}
+          {today <= jatuhTempo
+            ? "Setelah gaji dipotong, centang yang sudah terpotong lalu tekan Tandai lunas. Yang gajinya tidak cukup: tekan Bayar dan isi yang terpotong saja."
+            : nBelum
+              ? `${nBelum} orang belum lunas: mereka tidak bisa ngebon lagi sampai tagihannya dilunasi.`
+              : "Semua sudah lunas."}
+          {msg && <b className="ml-2">{msg}</b>}
+        </div>
+      )}
       <div className="table-scroll">
         <table className="data-table text-sm">
           <thead>
             <tr className="bg-[#d5edc9] text-left text-xs text-[var(--text-primary)]">
+              {canInput && (
+                <th className="px-2 py-2.5">
+                  <input
+                    type="checkbox"
+                    checked={allPicked}
+                    disabled={!openRows.length}
+                    onChange={() => setPicked(allPicked ? new Set() : new Set(openRows.map((r) => r.kode)))}
+                    title="Pilih semua yang belum lunas"
+                  />
+                </th>
+              )}
               <th className="px-3 py-2.5">No</th>
               <SortTh label="NIK" k="kode" sort={sort} setSort={setSort} />
               <SortTh label="Nama" k="nama" sort={sort} setSort={setSort} />
@@ -550,65 +660,316 @@ function RekapTab({ periode, reload }: { periode: string; reload: number }) {
               <SortTh label="Estate / Divisi" k="estate" sort={sort} setSort={setSort} />
               <SortTh label="Jml Bon" k="n_bon" sort={sort} setSort={setSort} num />
               <SortTh label="Potong Gaji" k="potong_gaji" sort={sort} setSort={setSort} num />
-              <SortTh label="Tunai" k="tunai" sort={sort} setSort={setSort} num />
-              <SortTh label="Instansi" k="instansi" sort={sort} setSort={setSort} num />
-              <SortTh label="Total" k="total" sort={sort} setSort={setSort} num />
+              <SortTh label="Dibayar" k="dibayar" sort={sort} setSort={setSort} num />
+              <SortTh label="Sisa" k="sisa" sort={sort} setSort={setSort} num />
+              <SortTh label="Status" k="status" sort={sort} setSort={setSort} />
+              {filter !== "POTONG_GAJI" && <SortTh label="Instansi" k="instansi" sort={sort} setSort={setSort} num />}
+              <th className="px-3 py-2.5" />
             </tr>
           </thead>
           <tbody className="divide-y divide-[var(--border)]">
             {rows === null ? (
               <tr>
-                <td colSpan={10} className="px-4 py-8 text-center text-[var(--text-muted)]">
+                <td colSpan={13} className="px-4 py-8 text-center text-[var(--text-muted)]">
                   Memuat...
                 </td>
               </tr>
             ) : !shown.length ? (
               <tr>
-                <td colSpan={10} className="px-4 py-10 text-center text-[var(--text-muted)]">
-                  Belum ada stock out di {periodeLabel(periode)}.
+                <td colSpan={13} className="px-4 py-10 text-center text-[var(--text-muted)]">
+                  Tidak ada data di {periodeLabel(periode)}.
                 </td>
               </tr>
             ) : (
               <>
-                {shown.map((r, i) => (
-                  <tr key={r.kode} onClick={() => setDetail(r)} className="cursor-pointer hover:bg-[#f8fafc]" title="Lihat rincian">
-                    <td className="px-3 py-2 text-[var(--text-muted)]">{i + 1}</td>
-                    <td className="px-3 py-2 whitespace-nowrap">{r.kode}</td>
-                    <td className="px-3 py-2 font-medium text-[var(--text-primary)]">
-                      {r.nama || <span className="italic text-[var(--text-muted)]">nama tidak tercatat</span>}
-                      {r.jenis === "KARYAWAN" && !r.di_master && <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded bg-[var(--accent-amber-bg)] text-[var(--accent-amber)]">tidak di master karyawan</span>}
-                    </td>
-                    <td className="px-3 py-2 text-xs">{r.jabatan || "-"}</td>
-                    <td className="px-3 py-2 text-xs whitespace-nowrap">{[r.estate, r.divisi].filter(Boolean).join(" / ") || "-"}</td>
-                    <td className="px-3 py-2 text-right">{r.n_bon}</td>
-                    <td className={`px-3 py-2 text-right whitespace-nowrap font-semibold ${lewat(r) ? "text-[var(--accent-red)]" : ""}`} title={lewat(r) ? "Melebihi limit per bulan" : undefined}>
-                      {r.potong_gaji ? rp(r.potong_gaji) : "-"}
-                    </td>
-                    <td className="px-3 py-2 text-right whitespace-nowrap">{r.tunai ? rp(r.tunai) : "-"}</td>
-                    <td className="px-3 py-2 text-right whitespace-nowrap">{r.instansi ? rp(r.instansi) : "-"}</td>
-                    <td className="px-3 py-2 text-right whitespace-nowrap">{rp(r.total)}</td>
-                  </tr>
-                ))}
+                {shown.map((r, i) => {
+                  const s = st(r);
+                  const sisa = sisaOf(r);
+                  return (
+                    <tr key={r.kode} className={s === "BELUM" || s === "SEBAGIAN" ? "bg-[#fff7f7]" : ""}>
+                      {canInput && (
+                        <td className="px-2 py-2">{sisa > 0.5 && <input type="checkbox" checked={picked.has(r.kode)} onChange={() => toggle(r.kode)} aria-label={`Pilih ${r.nama}`} />}</td>
+                      )}
+                      <td className="px-3 py-2 text-[var(--text-muted)]">{i + 1}</td>
+                      <td className="px-3 py-2 whitespace-nowrap">{r.kode}</td>
+                      <td className="px-3 py-2 font-medium text-[var(--text-primary)]">
+                        <button onClick={() => setDetail(r)} className="text-left hover:underline" title="Lihat rincian bon">
+                          {r.nama || <span className="italic text-[var(--text-muted)]">nama tidak tercatat</span>}
+                        </button>
+                        {r.jenis === "KARYAWAN" && !r.di_master && <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded bg-[var(--accent-amber-bg)] text-[var(--accent-amber)]">tidak di master karyawan</span>}
+                      </td>
+                      <td className="px-3 py-2 text-xs">{r.jabatan || "-"}</td>
+                      <td className="px-3 py-2 text-xs whitespace-nowrap">{[r.estate, r.divisi].filter(Boolean).join(" / ") || "-"}</td>
+                      <td className="px-3 py-2 text-right">{r.n_bon}</td>
+                      <td className={`px-3 py-2 text-right whitespace-nowrap font-semibold ${lewat(r) ? "text-[var(--accent-red)]" : ""}`} title={lewat(r) ? "Melebihi limit per bulan" : undefined}>
+                        {r.potong_gaji ? rp(r.potong_gaji) : "-"}
+                      </td>
+                      <td className="px-3 py-2 text-right whitespace-nowrap">{r.dibayar ? rp(r.dibayar) : "-"}</td>
+                      <td className={`px-3 py-2 text-right whitespace-nowrap ${sisa > 0.5 ? "font-semibold text-[var(--accent-red)]" : "text-[var(--text-muted)]"}`}>{s ? (sisa > 0.5 ? rp(sisa) : "-") : "-"}</td>
+                      <td className="px-3 py-2">
+                        {s ? (
+                          <span className={`text-[11px] px-2 py-0.5 rounded-full border whitespace-nowrap ${STATUS_BAYAR[s].cls}`}>{STATUS_BAYAR[s].label}</span>
+                        ) : (
+                          <span className="text-[11px] text-[var(--text-muted)]">ditagih ke kantor</span>
+                        )}
+                      </td>
+                      {filter !== "POTONG_GAJI" && <td className="px-3 py-2 text-right whitespace-nowrap">{r.instansi ? rp(r.instansi) : "-"}</td>}
+                      <td className="px-3 py-2 text-right whitespace-nowrap">
+                        {s && (canInput || canEdit) && (
+                          <button onClick={() => setBayar(r)} className="text-xs text-[var(--accent-blue)] hover:underline">
+                            {sisa > 0.5 ? "Bayar" : "Pembayaran"}
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
                 <tr className="bg-[#f8fafc] font-semibold">
-                  <td colSpan={5} className="px-3 py-2 text-right">
+                  <td colSpan={canInput ? 6 : 5} className="px-3 py-2 text-right">
                     TOTAL
                   </td>
-                  <td className="px-3 py-2 text-right">{shown.reduce((s, r) => s + r.n_bon, 0)}</td>
-                  <td className="px-3 py-2 text-right whitespace-nowrap">{rp(sum("potong_gaji"))}</td>
-                  <td className="px-3 py-2 text-right whitespace-nowrap">{rp(sum("tunai"))}</td>
-                  <td className="px-3 py-2 text-right whitespace-nowrap">{rp(sum("instansi"))}</td>
-                  <td className="px-3 py-2 text-right whitespace-nowrap">{rp(sum("total"))}</td>
+                  <td className="px-3 py-2 text-right">{sum((r) => r.n_bon)}</td>
+                  <td className="px-3 py-2 text-right whitespace-nowrap">{rp(sum((r) => r.potong_gaji))}</td>
+                  <td className="px-3 py-2 text-right whitespace-nowrap">{rp(sum((r) => r.dibayar))}</td>
+                  <td className="px-3 py-2 text-right whitespace-nowrap text-[var(--accent-red)]">{rp(sum(sisaOf))}</td>
+                  <td />
+                  {filter !== "POTONG_GAJI" && <td className="px-3 py-2 text-right whitespace-nowrap">{rp(sum((r) => r.instansi))}</td>}
+                  <td />
                 </tr>
               </>
             )}
           </tbody>
         </table>
       </div>
+      {confirmLunas && (
+        <ConfirmDialog
+          title="Tandai lunas?"
+          message={`${pickedRows.length} orang ditandai lunas lewat potong gaji ${periodeLabel(periode)}, total ${rp(pickedRows.reduce((s, r) => s + sisaOf(r), 0))}. Yang gajinya tidak cukup jangan dicentang - pakai tombol Bayar.`}
+          confirmLabel="Ya, Tandai Lunas"
+          onConfirm={tandaiLunas}
+          onCancel={() => setConfirmLunas(false)}
+        />
+      )}
+      {bayar && <BayarModal kode={bayar.kode} nama={bayar.nama} periode={periode} canInput={canInput} canEdit={canEdit} onClose={() => setBayar(null)} onChanged={onChanged} />}
       {detail && (
         <Modal title={`${detail.nama || detail.kode} · ${periodeLabel(periode)}`} subtitle={`${detail.kode} · total ${rp(detail.total)}`} onClose={() => setDetail(null)} wide>
           <TxTable jenis="JUAL" periode={periode} anggota={detail.kode} reload={reload} canEdit={false} onChanged={() => {}} />
         </Modal>
       )}
+    </div>
+  );
+}
+
+const CARA_LABEL: Record<KopCara, string> = { POTONG_GAJI: "Potong gaji", TUNAI: "Tunai", LAINNYA: "Lainnya" };
+
+// Payments of one karyawan's bill of one periode: the list (Hapus with Edit) and a new payment (Input).
+function BayarModal({
+  kode,
+  nama,
+  periode,
+  canInput,
+  canEdit,
+  onClose,
+  onChanged,
+}: {
+  kode: string;
+  nama: string;
+  periode: string;
+  canInput: boolean;
+  canEdit: boolean;
+  onClose: () => void;
+  onChanged: () => void;
+}) {
+  const [data, setData] = useState<{ tagihan: KopTagihan; data: KopBayarRow[] } | null>(null);
+  const [jumlah, setJumlah] = useState("");
+  const [cara, setCara] = useState<KopCara>("POTONG_GAJI");
+  const [tanggal, setTanggal] = useState(localToday());
+  const [ket, setKet] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [hapus, setHapus] = useState<KopBayarRow | null>(null);
+  const load = () =>
+    api
+      .kopBayarList(kode, periode)
+      .then((d) => (setData(d), setJumlah(rpText(Math.max(d.tagihan.sisa, 0)))))
+      .catch((e) => setError(errorText(e, "Gagal memuat tagihan")));
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kode, periode]);
+  const t = data?.tagihan;
+  const save = async () => {
+    const n = parseNum(jumlah || "0");
+    if (!(n > 0)) return setError("Isi jumlah yang dibayar");
+    setBusy(true);
+    setError("");
+    try {
+      await api.kopBayar({ anggota_kode: kode, periode, jumlah: n, tanggal, cara, keterangan: ket });
+      setKet("");
+      await load();
+      onChanged();
+    } catch (e) {
+      setError(errorText(e, "Gagal menyimpan pembayaran"));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const doHapus = async () => {
+    if (!hapus) return;
+    try {
+      await api.kopBayarHapus(hapus.id);
+      setHapus(null);
+      await load();
+      onChanged();
+    } catch (e) {
+      setHapus(null);
+      setError(errorText(e, "Gagal menghapus pembayaran"));
+    }
+  };
+  return (
+    <Modal title={`Pelunasan ${nama || kode}`} subtitle={`${kode} · tagihan ${periodeLabel(periode)}${t ? ` · jatuh tempo ${isoDisplay(t.jatuh_tempo)}` : ""}`} onClose={onClose}>
+      {!t ? (
+        <p className="text-sm text-[var(--text-muted)]">{error || "Memuat..."}</p>
+      ) : (
+        <div className="space-y-3">
+          <div className="grid grid-cols-3 gap-2 text-center">
+            {[
+              ["Tagihan", t.tagihan, ""],
+              ["Dibayar", t.dibayar, "text-[var(--accent-green)]"],
+              ["Sisa", Math.max(t.sisa, 0), t.sisa > 0.5 ? "text-[var(--accent-red)]" : "text-[var(--accent-green)]"],
+            ].map(([l, v, c]) => (
+              <div key={l as string} className="rounded-md border border-[var(--border)] px-2 py-2">
+                <div className="text-[11px] text-[var(--text-secondary)]">{l}</div>
+                <div className={`font-semibold ${c}`}>{rp(v as number)}</div>
+              </div>
+            ))}
+          </div>
+          {data!.data.length > 0 && (
+            <div className="border border-[var(--border)] rounded-md divide-y divide-[var(--border)] text-sm">
+              {data!.data.map((p) => (
+                <div key={p.id} className="flex items-start gap-2 px-3 py-2">
+                  <div className="flex-1 min-w-0">
+                    <div>
+                      <b>{rp(p.jumlah)}</b> · {CARA_LABEL[p.cara] ?? p.cara} · {isoDisplay(p.tanggal_iso)}
+                    </div>
+                    <div className="text-[11px] text-[var(--text-muted)]">
+                      {p.keterangan || "-"}
+                      {p.oleh && ` · oleh ${p.oleh}`}
+                    </div>
+                  </div>
+                  {canEdit && (
+                    <button onClick={() => setHapus(p)} title="Hapus pembayaran ini" className="p-1 rounded text-[var(--accent-red)] hover:bg-[var(--accent-red-bg)]">
+                      <Trash2 size={14} />
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+          {canInput && t.sisa > 0.5 && (
+            <div className="space-y-2 rounded-md border border-[var(--accent-blue-border)] p-3">
+              <div className="text-xs font-medium text-[var(--text-primary)]">Catat pembayaran</div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className={labelCls}>Jumlah</label>
+                  <RpInput value={jumlah} onChange={setJumlah} />
+                </div>
+                <div>
+                  <label className={labelCls}>Cara</label>
+                  <select value={cara} onChange={(e) => setCara(e.target.value as KopCara)} className={`${selectCls} w-full`}>
+                    <option value="POTONG_GAJI">Potong gaji</option>
+                    <option value="TUNAI">Tunai</option>
+                    <option value="LAINNYA">Lainnya</option>
+                  </select>
+                </div>
+                <div>
+                  <label className={labelCls}>Tanggal</label>
+                  <input type="date" value={tanggal} max={localToday()} onChange={(e) => setTanggal(e.target.value)} className={inputCls} />
+                </div>
+                <div>
+                  <label className={labelCls}>Keterangan</label>
+                  <input value={ket} onChange={(e) => setKet(e.target.value)} className={inputCls} placeholder="mis. gaji tidak cukup" />
+                </div>
+              </div>
+              <p className="text-[11px] text-[var(--text-muted)]">Gaji tidak cukup? Isi yang terpotong saja; sisanya tetap tagihan dan orang ini tidak bisa ngebon sampai lunas.</p>
+              {error && <p className="text-xs text-[var(--accent-red)]">{error}</p>}
+              <div className="flex justify-end">
+                <button onClick={save} disabled={busy} className={btnPrimary}>
+                  {busy ? "Menyimpan..." : "Simpan pembayaran"}
+                </button>
+              </div>
+            </div>
+          )}
+          {t.sisa <= 0.5 && <p className="text-sm text-[var(--accent-green)] font-medium">Tagihan periode ini sudah lunas.</p>}
+        </div>
+      )}
+      {hapus && (
+        <ConfirmDialog
+          message={`Hapus pembayaran ${rp(hapus.jumlah)} (${isoDisplay(hapus.tanggal_iso)})? Tagihannya kembali belum lunas sebesar itu.`}
+          onConfirm={doHapus}
+          onCancel={() => setHapus(null)}
+        />
+      )}
+    </Modal>
+  );
+}
+
+// Top of the page: karyawan with a bill still open after its due date - they can't take goods.
+function TunggakanBanner({ reload, canInput, canEdit, onChanged }: { reload: number; canInput: boolean; canEdit: boolean; onChanged: () => void }) {
+  const [list, setList] = useState<KopTunggakan[]>([]);
+  const [open, setOpen] = useState(false);
+  const [bayar, setBayar] = useState<{ kode: string; nama: string; periode: string } | null>(null);
+  useEffect(() => {
+    api.kopTunggakan().then(setList).catch(() => setList([]));
+  }, [reload]);
+  if (!list.length) return null;
+  const total = list.reduce((s, t) => s + t.sisa, 0);
+  return (
+    <div className="rounded-lg border border-[var(--accent-red-border)] bg-[var(--accent-red-bg)] text-[var(--accent-red)]">
+      <button onClick={() => setOpen((o) => !o)} className="w-full flex items-start gap-3 px-4 py-3 text-left">
+        <PackageX size={18} className="shrink-0 mt-0.5" />
+        <div className="flex-1 min-w-0">
+          <div className="font-semibold text-sm">
+            {list.length} karyawan belum melunasi tagihan koperasi · total {rp(total)}
+          </div>
+          <div className="text-xs">
+            Mereka tidak bisa ngebon sampai tagihannya lunas.{" "}
+            {open ? "Klik untuk menutup." : `${list.slice(0, 4).map((t) => t.nama).join(", ")}${list.length > 4 ? ", ..." : ""} - klik untuk melihat semua.`}
+          </div>
+        </div>
+      </button>
+      {open && (
+        <div className="px-4 pb-3">
+          <div className="bg-white rounded-md border border-[var(--accent-red-border)] divide-y divide-[var(--border)] text-sm text-[var(--text-primary)]">
+            {list.map((t) => (
+              <div key={t.kode} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2">
+                <div className="flex-1 min-w-[180px]">
+                  <div className="font-medium">{t.nama}</div>
+                  <div className="text-[11px] text-[var(--text-muted)]">
+                    {t.kode}
+                    {t.jabatan && ` · ${t.jabatan}`}
+                    {t.divisi && ` · ${t.divisi}`}
+                  </div>
+                </div>
+                <div className="font-semibold text-[var(--accent-red)] whitespace-nowrap">{rp(t.sisa)}</div>
+                <div className="flex flex-wrap gap-1">
+                  {t.periode.map((p) => (
+                    <button
+                      key={p}
+                      onClick={() => setBayar({ kode: t.kode, nama: t.nama, periode: p })}
+                      className="text-xs px-2 py-0.5 rounded border border-[var(--accent-blue-border)] text-[var(--accent-blue)] hover:bg-[var(--accent-blue-bg)]"
+                      title="Catat pembayaran tagihan bulan ini"
+                    >
+                      {periodeLabel(p)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {bayar && <BayarModal {...bayar} canInput={canInput} canEdit={canEdit} onClose={() => setBayar(null)} onChanged={onChanged} />}
     </div>
   );
 }
@@ -1337,7 +1698,7 @@ function JualModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: () 
   const [tanggal, setTanggal] = useState(localToday());
   const [anggota, setAnggota] = useState<KopAnggota | null>(null);
   const [lines, setLines] = useState<Line[]>([]);
-  const [limit, setLimit] = useState<{ limit: number; terpakai: number; sisa: number } | null>(null);
+  const [limit, setLimit] = useState<{ limit: number; terpakai: number; sisa: number; tunggakan: { sisa: number; periode: string[]; pesan: string } | null } | null>(null);
   const periode = tanggal.slice(0, 7);
   useEffect(() => {
     setLimit(null);
@@ -1346,6 +1707,7 @@ function JualModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: () 
   }, [anggota, periode]);
   const total = lines.reduce((s, l) => s + (parseNum(l.qty) || 0) * (parseNum(l.harga) || 0), 0);
   const lewat = !!limit && total > limit.sisa + 0.005;
+  const nunggak = limit?.tunggakan ?? null;
   const [keterangan, setKeterangan] = useState("");
   const [evidence, setEvidence] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -1354,6 +1716,7 @@ function JualModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: () 
     if (!anggota) return setError("Pilih anggota / karyawan");
     const le = linesError(lines);
     if (le) return setError(le);
+    if (nunggak) return setError(nunggak.pesan);
     if (lewat) return setError(`Melebihi limit: sisa ${rp(limit!.sisa)} di ${periodeLabel(periode)}`);
     setBusy(true);
     setError("");
@@ -1376,7 +1739,12 @@ function JualModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: () 
             <input type="date" value={tanggal} max={localToday()} onChange={(e) => setTanggal(e.target.value)} className={inputCls} />
           </div>
         </div>
-        {limit && (
+        {nunggak && (
+          <div className="rounded-md border border-[var(--accent-red-border)] bg-[var(--accent-red-bg)] px-3 py-2 text-sm text-[var(--accent-red)] font-medium">
+            Tidak bisa ngebon: {nunggak.pesan}
+          </div>
+        )}
+        {limit && !nunggak && (
           <div className={`rounded-md border px-3 py-2 text-xs ${lewat ? "border-[var(--accent-red-border)] bg-[var(--accent-red-bg)] text-[var(--accent-red)]" : "border-[var(--border)] bg-[#f8fafc] text-[var(--text-secondary)]"}`}>
             <div className="flex flex-wrap justify-between gap-2">
               <span>
@@ -1406,7 +1774,7 @@ function JualModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: () 
           <button onClick={onClose} className="px-4 py-2 text-sm rounded-md border border-[var(--border)] text-[var(--text-secondary)]">
             Batal
           </button>
-          <button onClick={save} disabled={busy || lewat} className={btnPrimary}>
+          <button onClick={save} disabled={busy || lewat || !!nunggak} className={btnPrimary}>
             <Banknote size={16} /> {busy ? "Menyimpan..." : "Simpan Stock Out"}
           </button>
         </div>

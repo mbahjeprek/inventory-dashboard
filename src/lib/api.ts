@@ -527,7 +527,11 @@ export type KopRingkasan = {
   nilai_stok: number;
   menipis: number;
 };
-export type KopRekap = KopAnggota & { n_bon: number; dari: string; sampai: string; potong_gaji: number; tunai: number; instansi: number; total: number };
+export type KopRekap = KopAnggota & { n_bon: number; dari: string; sampai: string; potong_gaji: number; tunai: number; instansi: number; total: number; dibayar: number };
+export type KopTunggakan = { kode: string; nama: string; jabatan: string; divisi: string; sisa: number; periode: string[] };
+export type KopCara = "POTONG_GAJI" | "TUNAI" | "LAINNYA";
+export type KopTagihan = { kode: string; periode: string; tagihan: number; dibayar: number; sisa: number; jatuh_tempo: string };
+export type KopBayarRow = { id: number; jumlah: number; tanggal_iso: string; cara: KopCara; keterangan: string; sumber: string | null; created_at: string; oleh: string };
 export type KopDashboard = {
   dari: string;
   sampai: string;
@@ -1348,9 +1352,16 @@ export const api = {
   kopOpnameBatal: (id: number) => req<{ success: boolean }>(`/api/koperasi/opname/${id}/batal`, { method: "POST" }),
   kopKoreksi: (body: { tanggal: string; barang_kode: string; stok_fisik: number; keterangan: string }) =>
     req<{ success: boolean; selisih: number }>("/api/koperasi/koreksi", { method: "POST", body: JSON.stringify(body) }),
-  kopRekap: (periode: string) => req<{ periode: string; limit: number; data: KopRekap[] }>(`/api/koperasi/rekap?periode=${periode}`),
+  kopRekap: (periode: string) => req<{ periode: string; limit: number; jatuh_tempo: string; today: string; data: KopRekap[] }>(`/api/koperasi/rekap?periode=${periode}`),
+  kopTunggakan: () => req<KopTunggakan[]>("/api/koperasi/tunggakan"),
+  kopBayarList: (anggota: string, periode: string) =>
+    req<{ tagihan: KopTagihan; data: KopBayarRow[] }>(`/api/koperasi/bayar?${new URLSearchParams({ anggota, periode })}`),
+  kopBayar: (body: { anggota_kode: string; periode: string; jumlah: number; tanggal: string; cara: KopCara; keterangan: string }) =>
+    req<{ success: boolean; sisa: number }>("/api/koperasi/bayar", { method: "POST", body: JSON.stringify(body) }),
+  kopBayarLunas: (periode: string, kode: string[]) => req<{ count: number; total: number }>("/api/koperasi/bayar/lunas", { method: "POST", body: JSON.stringify({ periode, kode }) }),
+  kopBayarHapus: (id: number) => req<{ success: boolean }>(`/api/koperasi/bayar/${id}`, { method: "DELETE" }),
   kopLimit: (kode: string, periode: string) =>
-    req<{ periode: string; limit: number; terpakai: number; sisa: number }>(`/api/koperasi/limit/${encodeURIComponent(kode)}?periode=${periode}`),
+    req<{ periode: string; limit: number; terpakai: number; sisa: number; tunggakan: { sisa: number; periode: string[]; pesan: string } | null }>(`/api/koperasi/limit/${encodeURIComponent(kode)}?periode=${periode}`),
   pinjamanLog: (params: Record<string, string | number>) =>
     req<{ data: PinjamanLog[]; total: number; ringkasan: PinjamanRingkasan }>(`/api/pinjaman/log?${new URLSearchParams(params as any)}`),
   pinjamanBarang: (module: OpnameModule, estate: string, search: string, all = false) =>

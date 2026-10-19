@@ -196,7 +196,8 @@ function requiredPerms(req: express.Request): Need {
   // Stok opname: start / fill in the counts with Input; Selesai / Batal and Koreksi Stok with Edit.
   if (is(/^\/koperasi(\/|$)/)) {
     if (m === "GET") return ["koperasi.view"];
-    const input = (m === "POST" && is(/^\/koperasi\/((jual|beli|rusak)(\/batch)?|opname)$/)) || (m === "PUT" && is(/^\/koperasi\/opname\/\d+\/lines$/));
+    const input =
+      (m === "POST" && is(/^\/koperasi\/((jual|beli|rusak)(\/batch)?|opname|bayar(\/lunas)?)$/)) || (m === "PUT" && is(/^\/koperasi\/opname\/\d+\/lines$/));
     return input ? ["koperasi.input"] : ["koperasi.edit"];
   }
   return "super";
@@ -7664,8 +7665,10 @@ async function kopTerpakai(kode: string, periode: string, client?: PoolClient) {
 }
 app.get("/api/koperasi/limit/:kode", async (req, res) => {
   const periode = isPeriode(req.query.periode) ? req.query.periode : kopMonth(jakartaToday());
-  const terpakai = await kopTerpakai(String(req.params.kode).toUpperCase(), periode);
-  res.json({ periode, limit: KOP_LIMIT, terpakai, sisa: Math.max(KOP_LIMIT - terpakai, 0) });
+  const kode = String(req.params.kode).toUpperCase();
+  const terpakai = await kopTerpakai(kode, periode);
+  const [t] = await kopTunggakan([kode]);
+  res.json({ periode, limit: KOP_LIMIT, terpakai, sisa: Math.max(KOP_LIMIT - terpakai, 0), tunggakan: t ? { sisa: t.sisa, periode: t.periode, pesan: kopTunggakanText(t) } : null });
 });
 
 // ---- Transaksi ----
@@ -7753,6 +7756,10 @@ app.post("/api/koperasi/jual", async (req, res) => {
       }
       if (!anggota.aktif) return { error: `${anggota.nama || kode} sudah tidak aktif sebagai anggota koperasi` };
       const bayar = anggota.jenis === "INSTANSI" ? "INSTANSI" : "POTONG_GAJI";
+      if (bayar === "POTONG_GAJI") {
+        const [t] = await kopTunggakan([kode], client);
+        if (t) return { error: kopTunggakanText(t) };
+      }
       const v = await kopLines(b.items, client);
       if ("error" in v) return v;
       const stok = await kopStok(v.lines.map((l) => l.barang_kode), client);
@@ -7918,6 +7925,10 @@ app.post("/api/koperasi/jual/batch", async (req, res) => {
       );
       const noBarang = rows.findIndex((r) => !barang.has(r.barang_kode));
       if (noBarang >= 0) return refuse(noBarang, `barang ${rows[noBarang].barang_kode} tidak ada di master koperasi`);
+      // Karyawan with an unpaid bill past its due date can't take goods.
+      const nunggak = new Map((await kopTunggakan(kodes, client)).map((t) => [t.kode, t]));
+      const blocked = rows.findIndex((r) => anggota.get(r.anggota_kode)?.jenis !== "INSTANSI" && nunggak.has(r.anggota_kode));
+      if (blocked >= 0) return refuse(blocked, kopTunggakanText(nunggak.get(rows[blocked].anggota_kode)!));
       // Stock and the monthly limit, row after row.
       const stok = await kopStok([...barang.keys()], client);
       const terpakai = new Map<string, number>();
@@ -8362,6 +8373,136 @@ app.post("/api/koperasi/koreksi", async (req, res) => {
   res.json({ success: true, selisih: result.selisih });
 });
 
+// ---- Pelunasan (see schema.sql koperasi_bayar) ----
+// Bill of an anggota in a periode = its potong gaji there; dibayar = its payments; due on the 15th of
+// the next month (KOP_JATUH_TEMPO). Open after that = tunggakan, which blocks new Stock Out.
+const KOP_JATUH_TEMPO = 15;
+const kopJatuhTempo = (periode: string) => {
+  const [y, m] = periode.split("-").map(Number);
+  const d = new Date(Date.UTC(y, m, KOP_JATUH_TEMPO));
+  return d.toISOString().slice(0, 10);
+};
+const KOP_TAGIHAN_SQL = `
+  WITH t AS (SELECT anggota_kode AS kode, periode, SUM(total) AS tagihan FROM koperasi_tx
+              WHERE koperasi = @k AND jenis = 'JUAL' AND bayar = 'POTONG_GAJI' GROUP BY 1, 2),
+       b AS (SELECT anggota_kode AS kode, periode, SUM(jumlah) AS dibayar FROM koperasi_bayar WHERE koperasi = @k GROUP BY 1, 2)
+  SELECT t.kode, t.periode, t.tagihan::float8 AS tagihan, COALESCE(b.dibayar, 0)::float8 AS dibayar,
+         (t.tagihan - COALESCE(b.dibayar, 0))::float8 AS sisa,
+         (to_date(t.periode || '-01', 'YYYY-MM-DD') + interval '1 month' + interval '${KOP_JATUH_TEMPO - 1} days')::date::text AS jatuh_tempo
+    FROM t LEFT JOIN b ON b.kode = t.kode AND b.periode = t.periode`;
+
+// Open bills past their due date, per anggota (optionally only these kode).
+async function kopTunggakan(kodes: string[] | null, client?: PoolClient) {
+  return queryMany<{ kode: string; nama: string; jabatan: string; divisi: string; sisa: number; periode: string[] }>(
+    `SELECT x.kode, COALESCE(NULLIF(k.nama, ''), NULLIF(a.nama, ''), x.kode) AS nama, a.jabatan, COALESCE(NULLIF(k.lokasi_kerja, ''), a.divisi) AS divisi,
+            SUM(x.sisa)::float8 AS sisa, array_agg(x.periode ORDER BY x.periode) AS periode
+       FROM (${KOP_TAGIHAN_SQL}) x JOIN koperasi_anggota a ON a.kode = x.kode ${KOP_ANGGOTA_JOIN}
+      WHERE x.sisa > 0.5 AND x.jatuh_tempo < @today AND (@all OR x.kode = ANY(@kodes::text[]))
+      GROUP BY x.kode, a.nama, a.jabatan, a.divisi, k.nama, k.lokasi_kerja ORDER BY sisa DESC`,
+    { k: KOPERASI, today: jakartaToday(), all: kodes === null, kodes: kodes ?? [] },
+    client
+  );
+}
+const kopTunggakanText = (t: { nama: string; sisa: number; periode: string[] }) => {
+  const bln = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
+  const p = t.periode.map((x) => `${bln[Number(x.slice(5, 7)) - 1]} ${x.slice(0, 4)}`).join(", ");
+  return `${t.nama} masih punya tagihan koperasi belum lunas Rp ${Math.round(t.sisa).toLocaleString("id-ID")} (${p}). Lunasi dulu sebelum ngebon lagi.`;
+};
+
+app.get("/api/koperasi/tunggakan", async (_req, res) => {
+  res.json(await kopTunggakan(null));
+});
+
+// Payments of one anggota in one periode, with the bill.
+app.get("/api/koperasi/bayar", async (req, res) => {
+  const kode = String(req.query.anggota ?? "").toUpperCase();
+  const periode = String(req.query.periode ?? "");
+  if (!kode || !isPeriode(periode)) return res.status(400).json({ error: "Anggota / periode tidak valid" });
+  const tagihan = await queryOne(`SELECT * FROM (${KOP_TAGIHAN_SQL}) x WHERE x.kode = @kode AND x.periode = @periode`, { k: KOPERASI, kode, periode });
+  const data = await queryMany(
+    `SELECT p.id, p.jumlah, p.tanggal_iso, p.cara, p.keterangan, p.sumber, p.created_at, COALESCE(u.nama, u.username, '') AS oleh
+       FROM koperasi_bayar p LEFT JOIN users u ON u.id = p.user_id WHERE p.anggota_kode = @kode AND p.periode = @periode ORDER BY p.id`,
+    { kode, periode }
+  );
+  res.json({ tagihan: tagihan ?? { kode, periode, tagihan: 0, dibayar: 0, sisa: 0, jatuh_tempo: kopJatuhTempo(periode) }, data });
+});
+
+const KOP_CARA = ["POTONG_GAJI", "TUNAI", "LAINNYA"];
+const KOP_CARA_LABEL: Record<string, string> = { POTONG_GAJI: "potong gaji", TUNAI: "tunai", LAINNYA: "lainnya" };
+app.post("/api/koperasi/bayar", async (req, res) => {
+  const b = req.body ?? {};
+  const kode = String(b.anggota_kode ?? "").toUpperCase();
+  const jumlah = Number(b.jumlah);
+  const cara = KOP_CARA.includes(b.cara) ? b.cara : "POTONG_GAJI";
+  if (!kode || !isPeriode(b.periode)) return res.status(400).json({ error: "Anggota / periode tidak valid" });
+  if (!isIsoDate(b.tanggal) || b.tanggal > jakartaToday()) return res.status(400).json({ error: "Tanggal tidak valid (tidak boleh setelah hari ini)" });
+  if (!(jumlah > 0)) return res.status(400).json({ error: "Jumlah bayar harus lebih dari 0" });
+  const result = await withTransaction(async (client) => {
+    await queryOne("SELECT kode FROM koperasi_anggota WHERE kode = @kode FOR UPDATE", { kode }, client);
+    const t = await queryOne<{ tagihan: number; sisa: number }>(`SELECT * FROM (${KOP_TAGIHAN_SQL}) x WHERE x.kode = @kode AND x.periode = @periode`, { k: KOPERASI, kode, periode: b.periode }, client);
+    if (!t || t.sisa <= 0.5) return { error: "Tidak ada tagihan yang belum lunas di periode ini" };
+    if (jumlah > t.sisa + 0.5) return { error: `Jumlah lebih besar dari sisa tagihan (Rp ${Math.round(t.sisa).toLocaleString("id-ID")})` };
+    await execute(
+      `INSERT INTO koperasi_bayar (koperasi, anggota_kode, periode, jumlah, tanggal_iso, cara, keterangan, user_id)
+       VALUES (@k, @kode, @periode, @jumlah, @tanggal, @cara, @ket, @uid)`,
+      { k: KOPERASI, kode, periode: b.periode, jumlah, tanggal: b.tanggal, cara, ket: String(b.keterangan ?? "").trim(), uid: req.user!.id },
+      client
+    );
+    return { sisa: Math.max(t.sisa - jumlah, 0) };
+  });
+  if ("error" in result) return res.status(400).json(result);
+  const nama = (await queryOne<{ nama: string }>(`SELECT COALESCE(NULLIF(k.nama, ''), a.nama) AS nama FROM koperasi_anggota a ${KOP_ANGGOTA_JOIN} WHERE a.kode = @kode`, { kode }))?.nama ?? kode;
+  await logActivity(req, {
+    module: "KOPERASI",
+    estate: KOPERASI,
+    aksi: "Pelunasan",
+    objek: `${kode} ${nama}`,
+    detail: `Periode ${b.periode} · Rp ${Math.round(jumlah).toLocaleString("id-ID")} (${KOP_CARA_LABEL[cara]})${result.sisa > 0.5 ? ` · sisa Rp ${Math.round(result.sisa).toLocaleString("id-ID")}` : " · lunas"}`,
+  });
+  res.json({ success: true, sisa: result.sisa });
+});
+
+// Tandai lunas: the whole rest of these anggota's bill of the periode, deducted from the salary.
+app.post("/api/koperasi/bayar/lunas", async (req, res) => {
+  const b = req.body ?? {};
+  const kodes: string[] = (Array.isArray(b.kode) ? b.kode : []).map((x: unknown) => String(x).toUpperCase());
+  if (!isPeriode(b.periode) || !kodes.length) return res.status(400).json({ error: "Pilih anggota dan periode" });
+  const tanggal = isIsoDate(b.tanggal) && b.tanggal <= jakartaToday() ? b.tanggal : jakartaToday();
+  const r = await execute(
+    `INSERT INTO koperasi_bayar (koperasi, anggota_kode, periode, jumlah, tanggal_iso, cara, keterangan, user_id)
+     SELECT @k, x.kode, x.periode, x.sisa, @tanggal, 'POTONG_GAJI', 'Lunas potong gaji', @uid
+       FROM (${KOP_TAGIHAN_SQL}) x WHERE x.periode = @periode AND x.kode = ANY(@kodes::text[]) AND x.sisa > 0.5
+     RETURNING jumlah`,
+    { k: KOPERASI, periode: b.periode, kodes, tanggal, uid: req.user!.id }
+  );
+  const total = r.rows.reduce((s: number, x: { jumlah: number }) => s + Number(x.jumlah), 0);
+  if (r.rowCount)
+    await logActivity(req, {
+      module: "KOPERASI",
+      estate: KOPERASI,
+      aksi: "Tandai Lunas",
+      objek: `Periode ${b.periode}`,
+      detail: `${r.rowCount} orang · Rp ${Math.round(total).toLocaleString("id-ID")} (potong gaji)`,
+    });
+  res.json({ count: r.rowCount, total });
+});
+
+app.delete("/api/koperasi/bayar/:id", async (req, res) => {
+  const p = await queryOne<{ anggota_kode: string; periode: string; jumlah: number; cara: string }>(
+    "DELETE FROM koperasi_bayar WHERE id = @id AND koperasi = @k RETURNING anggota_kode, periode, jumlah, cara",
+    { id: req.params.id, k: KOPERASI }
+  );
+  if (!p) return res.status(404).json({ error: "Pembayaran tidak ditemukan" });
+  await logActivity(req, {
+    module: "KOPERASI",
+    estate: KOPERASI,
+    aksi: "Hapus Pelunasan",
+    objek: p.anggota_kode,
+    detail: `Periode ${p.periode} · Rp ${Math.round(p.jumlah).toLocaleString("id-ID")} (${KOP_CARA_LABEL[p.cara] ?? p.cara})`,
+  });
+  res.json({ success: true });
+});
+
 // Rekap Potong Gaji: per anggota, what they took in the periode, split by how it is paid.
 app.get("/api/koperasi/rekap", async (req, res) => {
   const periode = isPeriode(req.query.periode) ? req.query.periode : kopMonth(jakartaToday());
@@ -8370,14 +8511,15 @@ app.get("/api/koperasi/rekap", async (req, res) => {
             COALESCE(SUM(t.total) FILTER (WHERE t.bayar = 'POTONG_GAJI'), 0)::float8 AS potong_gaji,
             COALESCE(SUM(t.total) FILTER (WHERE t.bayar = 'TUNAI'), 0)::float8 AS tunai,
             COALESCE(SUM(t.total) FILTER (WHERE t.bayar = 'INSTANSI'), 0)::float8 AS instansi,
-            COALESCE(SUM(t.total), 0)::float8 AS total
+            COALESCE(SUM(t.total), 0)::float8 AS total,
+            COALESCE((SELECT SUM(p.jumlah) FROM koperasi_bayar p WHERE p.anggota_kode = a.kode AND p.periode = @periode), 0)::float8 AS dibayar
        FROM koperasi_tx t JOIN koperasi_anggota a ON a.kode = t.anggota_kode ${KOP_ANGGOTA_JOIN}
       WHERE t.koperasi = @k AND t.jenis = 'JUAL' AND t.periode = @periode
       GROUP BY a.kode, a.jenis, a.nama, a.jabatan, a.estate, a.divisi, a.aktif, a.catatan, k.nik, k.nama, k.estate, k.lokasi_kerja
       ORDER BY a.jenis DESC, COALESCE(NULLIF(k.nama, ''), NULLIF(a.nama, ''), a.kode)`,
     { k: KOPERASI, periode }
   );
-  res.json({ periode, limit: KOP_LIMIT, data });
+  res.json({ periode, limit: KOP_LIMIT, jatuh_tempo: kopJatuhTempo(periode), today: jakartaToday(), data });
 });
 
 // ---- Status Update: how current each estate's data is, per module ----

@@ -758,3 +758,22 @@ CREATE TABLE IF NOT EXISTS koperasi_opname_line (
   PRIMARY KEY (opname_id, barang_kode)
 );
 ALTER TABLE koperasi_tx ADD COLUMN IF NOT EXISTS opname_id INTEGER;
+
+-- Pelunasan bon koperasi: a karyawan's potong gaji of a periode (sum of its JUAL rows) is sent to HRD
+-- on the 1st of the next month and deducted on the 10th-15th. Each payment of that bill is a row here
+-- (cara POTONG_GAJI / TUNAI / LAINNYA; part payments allowed). A bill still open after the 15th of the
+-- next month is a tunggakan: that karyawan can't take goods until it is paid.
+CREATE TABLE IF NOT EXISTS koperasi_bayar (
+  id SERIAL PRIMARY KEY,
+  koperasi TEXT NOT NULL DEFAULT 'NILAM',
+  anggota_kode TEXT NOT NULL REFERENCES koperasi_anggota(kode),
+  periode TEXT NOT NULL,
+  jumlah DOUBLE PRECISION NOT NULL,
+  tanggal_iso TEXT NOT NULL,
+  cara TEXT NOT NULL DEFAULT 'POTONG_GAJI',
+  keterangan TEXT NOT NULL DEFAULT '',
+  sumber TEXT,
+  user_id INTEGER,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_koperasi_bayar ON koperasi_bayar(anggota_kode, periode);

@@ -42,8 +42,14 @@ export function KopJualBatchModal({ onClose, onSuccess }: { onClose: () => void;
   const [extra, setExtra] = useState<Map<string, KopAnggota | null>>(new Map());
   const asked = useRef(new Set<string>());
 
+  // Karyawan with a bill still open after its due date can't take goods.
+  const [nunggak, setNunggak] = useState<Map<string, number>>(new Map());
   useEffect(() => {
     api.kopAnggota({ status: "aktif" }).then(setAnggota).catch(() => setAnggota([]));
+    api
+      .kopTunggakan()
+      .then((l) => setNunggak(new Map(l.map((t) => [t.kode.toUpperCase(), t.sisa]))))
+      .catch(() => setNunggak(new Map()));
   }, []);
   useEffect(() => {
     api
@@ -149,6 +155,8 @@ export function KopJualBatchModal({ onClose, onSuccess }: { onClose: () => void;
     const missing = [!a && "Anggota (NIK yang terdaftar)", !itemOf(c) && "Barang (pilih dari daftar)", !(q > 0) && "Jumlah", !(h >= 0) && "Harga"].filter(Boolean);
     if (missing.length) return `Wajib diisi: ${missing.join(", ")}`;
     if (!a!.aktif) return `${a!.nama} sudah tidak aktif`;
+    if (a!.jenis === "KARYAWAN" && nunggak.has(a!.kode.toUpperCase()))
+      return `${a!.nama} tidak bisa ngebon: tagihan belum lunas ${rp(nunggak.get(a!.kode.toUpperCase())!)}`;
     const s = stock(rows)[i];
     if (s && s.after < 0) return `Stok ${itemOf(c)!.nama} tidak cukup (tinggal ${fmtNum(s.before)})`;
     const l = sisa(rows)[i];
