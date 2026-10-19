@@ -7300,7 +7300,7 @@ app.get("/api/pemakaian/detail", async (req, res) => {
 // A module / estate that has never had data isn't late, it just isn't used there (yet).
 // Pupuk is seasonal (pemupukan rounds) and oli goes out at service intervals, so both get a month;
 // pupuk also stays out of the reminder banner.
-const UPDATE_LIMIT: Record<string, number> = { BBM: 1, LAPORAN: 1, KLINIK: 3, OLI: 30, PUPUK: 30, GUDANG: 7 };
+const UPDATE_LIMIT: Record<string, number> = { BBM: 3, LAPORAN: 3, KLINIK: 3, OLI: 30, PUPUK: 30, GUDANG: 7 };
 const UPDATE_MODULE: Record<string, LoanModule> = { GUDANG: "GUDANG", BBM: "BBM", OLI: "OLI", PUPUK: "PUPUK", KLINIK: "KLINIK", LAPORAN: "KLINIK" };
 app.get("/api/status-update", async (req, res) => {
   const jak = (col: string) => `to_char((${col} AT TIME ZONE 'Asia/Jakarta')::date, 'YYYY-MM-DD')`;
