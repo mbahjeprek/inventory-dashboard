@@ -89,7 +89,12 @@ export function KopJualBatchModal({ onClose, onSuccess }: { onClose: () => void;
       placeholder: "ketik nama / NIK",
       hint: (c) => {
         const a = anggotaOf(c);
-        if (a) return `${a.nama}${a.jenis === "INSTANSI" ? " · instansi" : ""}${a.baru ? " · anggota baru" : ""}`;
+        if (a?.jenis === "INSTANSI") return `${a.nama} · instansi (tanpa limit)`;
+        if (a) {
+          // What this person already took this month (saved bon), and the rest of the limit before these rows.
+          const sudah = terpakai.get(a.kode.toUpperCase()) ?? 0;
+          return `${a.nama}${a.baru ? " · anggota baru" : ""} · bulan ini ${rp(sudah)}, sisa ${rp(Math.max(limit - sudah, 0))}`;
+        }
         if (!norm(c.anggota)) return undefined;
         return extra.has(norm(c.anggota).replace(/\s/g, "")) ? "tidak ada di master karyawan" : "mencari...";
       },
@@ -192,7 +197,7 @@ export function KopJualBatchModal({ onClose, onSuccess }: { onClose: () => void;
       blankRow={blankRow}
       problem={problem}
       saldo={(rows) => sisa(rows).map((s) => (s ? { text: rp(s.after), bad: s.after < -0.005 } : null))}
-      saldoLabel="Sisa limit"
+      saldoLabel="Sisa limit setelah baris"
       summary={(rows) => {
         const total = rows.reduce((s, c) => {
           const q = parseNum(c.jumlah);
