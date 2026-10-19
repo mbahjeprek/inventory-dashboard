@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Camera, ClipboardPaste, Download, Image as ImageIcon, Loader2, RefreshCw, RotateCcw, RotateCw, Save, Trash2, X, ZoomIn } from "lucide-react";
+import { Camera, ClipboardPaste, Download, Image as ImageIcon, Loader2, RefreshCw, RotateCcw, RotateCw, Save, Trash2, X, ZoomIn, ZoomOut } from "lucide-react";
 import { api, errorText } from "../lib/api";
 
 // Photos are shrunk in the browser before upload: longest side at most 1280 px, JPEG at 70% - about
@@ -8,6 +8,7 @@ import { api, errorText } from "../lib/api";
 // the phone at full size.
 const MAX_SIDE = 1280;
 const QUALITY = 0.7;
+const MAX_ZOOM = 6;
 
 async function shrink(file: File): Promise<string> {
   const url = URL.createObjectURL(file);
@@ -97,6 +98,8 @@ export function EvidenceLink({ id, label }: { id: string | null | undefined; lab
 // Pop-up with the photo on the page itself (no new tab); Download saves the original file. With `src`
 // (a form's photo not saved yet) it shows that picture, without Download. A photo taken sideways or
 // upside down is turned with the rotate buttons; for a stored one "Simpan arah" keeps that for everyone.
+// Zoom (to read a nota): + / - buttons, mouse wheel, pinch on a phone or double-click; zoomed in, the
+// picture is dragged around. The percentage button goes back to fit.
 function EvidenceViewer({ id, src, onClose }: { id?: string; src?: string; onClose: () => void }) {
   const [state, setState] = useState<"loading" | "ok" | "error">("loading");
   const [rotation, setRotation] = useState(0);
@@ -126,6 +129,73 @@ function EvidenceViewer({ id, src, onClose }: { id?: string; src?: string; onClo
   };
   // Turned a quarter, the picture's width is limited by the screen's height and the other way round.
   const sideways = rotation % 180 !== 0;
+  const [zoom, setZoom] = useState(1);
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const [dragging, setDragging] = useState(false);
+  const img = useRef<HTMLImageElement>(null);
+  const stage = useRef<HTMLDivElement>(null);
+  const view = useRef({ zoom: 1, offset: { x: 0, y: 0 } });
+  view.current = { zoom, offset };
+  // Zoom to `next`, keeping the point (px, py) on the screen where it is (the picture's centre when not given).
+  const zoomTo = (next: number, px?: number, py?: number) => {
+    const { zoom: z, offset: o } = view.current;
+    const n = Math.min(MAX_ZOOM, Math.max(1, next));
+    if (n === 1) return (setZoom(1), setOffset({ x: 0, y: 0 }));
+    const r = img.current?.getBoundingClientRect();
+    if (!r || px === undefined || py === undefined) return (setZoom(n), setOffset({ x: (o.x * n) / z, y: (o.y * n) / z }));
+    const k = 1 - n / z;
+    setZoom(n);
+    setOffset({ x: o.x + k * (px - (r.left + r.width / 2)), y: o.y + k * (py - (r.top + r.height / 2)) });
+  };
+  const zoomRef = useRef(zoomTo);
+  zoomRef.current = zoomTo;
+  // Wheel listener added by hand: React's is passive, so it could not stop the page behind from scrolling.
+  useEffect(() => {
+    const el = stage.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      zoomRef.current(view.current.zoom * Math.exp(-e.deltaY * 0.0015), e.clientX, e.clientY);
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, []);
+  // Pointers down on the picture: one drags it, two pinch. `moved` keeps the click after a drag from closing the viewer.
+  const pointers = useRef(new Map<number, { x: number; y: number }>());
+  const pinch = useRef<{ dist: number; zoom: number } | null>(null);
+  const moved = useRef(false);
+  const onPointerDown = (e: React.PointerEvent) => {
+    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    moved.current = false;
+    if (pointers.current.size === 2) {
+      const [a, b] = [...pointers.current.values()];
+      pinch.current = { dist: Math.hypot(a.x - b.x, a.y - b.y), zoom: view.current.zoom };
+    }
+    setDragging(true);
+  };
+  const onPointerMove = (e: React.PointerEvent) => {
+    const prev = pointers.current.get(e.pointerId);
+    if (!prev) return;
+    const cur = { x: e.clientX, y: e.clientY };
+    pointers.current.set(e.pointerId, cur);
+    if (pointers.current.size === 2 && pinch.current) {
+      const [a, b] = [...pointers.current.values()];
+      moved.current = true;
+      zoomTo((pinch.current.zoom * Math.hypot(a.x - b.x, a.y - b.y)) / pinch.current.dist, (a.x + b.x) / 2, (a.y + b.y) / 2);
+    } else if (pointers.current.size === 1 && view.current.zoom > 1) {
+      const dx = cur.x - prev.x;
+      const dy = cur.y - prev.y;
+      if (Math.abs(dx) + Math.abs(dy) > 0) moved.current = true;
+      setOffset((o) => ({ x: o.x + dx, y: o.y + dy }));
+    }
+  };
+  const onPointerUp = (e: React.PointerEvent) => {
+    pointers.current.delete(e.pointerId);
+    if (pointers.current.size < 2) pinch.current = null;
+    if (pointers.current.size === 0) setDragging(false);
+  };
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     window.addEventListener("keydown", onKey);
@@ -143,6 +213,15 @@ function EvidenceViewer({ id, src, onClose }: { id?: string; src?: string; onClo
           </button>
           <button onClick={() => turn(90)} title="Putar ke kanan" className="p-1.5 rounded-md bg-white/15 hover:bg-white/25">
             <RotateCw size={18} />
+          </button>
+          <button onClick={() => zoomTo(zoom / 1.5)} disabled={zoom <= 1} title="Perkecil" className="p-1.5 rounded-md bg-white/15 hover:bg-white/25 disabled:opacity-40">
+            <ZoomOut size={18} />
+          </button>
+          <button onClick={() => zoomTo(1)} title="Kembali ke ukuran pas layar" className="text-xs w-12 py-1.5 rounded-md bg-white/15 hover:bg-white/25 tabular-nums">
+            {Math.round(zoom * 100)}%
+          </button>
+          <button onClick={() => zoomTo(zoom * 1.5)} disabled={zoom >= MAX_ZOOM} title="Perbesar (juga scroll mouse / cubit layar)" className="p-1.5 rounded-md bg-white/15 hover:bg-white/25 disabled:opacity-40">
+            <ZoomIn size={18} />
           </button>
           {id && rotation !== saved && (
             <button
@@ -167,23 +246,35 @@ function EvidenceViewer({ id, src, onClose }: { id?: string; src?: string; onClo
           </button>
         </div>
       </div>
-      <div className="flex-1 min-h-0 flex items-center justify-center p-4 pt-0">
+      <div
+        ref={stage}
+        className="flex-1 min-h-0 flex items-center justify-center p-4 pt-0 overflow-hidden touch-none"
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerUp}
+        onClick={(e) => moved.current && e.stopPropagation()}
+      >
         {state === "loading" && <Loader2 size={28} className="animate-spin text-white/70 absolute" />}
         {state === "error" ? (
           <div className="text-sm text-white/80">Foto tidak bisa dimuat</div>
         ) : (
           <img
+            ref={img}
             src={src || evidenceUrl(id!)}
             alt="Foto bukti"
+            draggable={false}
             onClick={(e) => e.stopPropagation()}
+            onDoubleClick={(e) => zoomTo(zoom > 1 ? 1 : 2.5, e.clientX, e.clientY)}
             onLoad={() => setState("ok")}
             onError={() => setState("error")}
             style={{
-              transform: `rotate(${rotation}deg)`,
+              transform: `translate(${offset.x}px, ${offset.y}px) scale(${zoom}) rotate(${rotation}deg)`,
+              cursor: zoom > 1 ? (dragging ? "grabbing" : "grab") : "zoom-in",
               maxWidth: sideways ? "calc(100vh - 6rem)" : "100%",
               maxHeight: sideways ? "calc(100vw - 2rem)" : "100%",
             }}
-            className={`object-contain rounded shadow-2xl bg-white transition-transform ${state === "ok" ? "" : "invisible"}`}
+            className={`object-contain rounded shadow-2xl bg-white select-none ${dragging ? "" : "transition-transform"} ${state === "ok" ? "" : "invisible"}`}
           />
         )}
       </div>
