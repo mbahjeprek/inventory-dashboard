@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, CheckCircle2, ClipboardList, Plus, Save, Search, XCircle } from "lucide-react";
+import { ArrowLeft, CheckCircle2, ClipboardList, Pencil, Plus, Save, Search, Trash2, XCircle } from "lucide-react";
 import { api, errorText, type KopOpname, type KopOpnameLine } from "../lib/api";
 import { ExportButtons } from "./ExportButtons";
 import { ConfirmDialog } from "./ConfirmDialog";
@@ -23,7 +23,8 @@ const parseFisik = (s: string): number | null => {
   return Number.isFinite(n) ? n : NaN;
 };
 
-export function KoperasiOpname({ canInput, canEdit, onChanged }: { canInput: boolean; canEdit: boolean; onChanged: () => void }) {
+// A superuser may also edit any opname (a finished one is booked again) or delete it (its koreksi go too).
+export function KoperasiOpname({ canInput, canEdit, isSuperuser, onChanged }: { canInput: boolean; canEdit: boolean; isSuperuser: boolean; onChanged: () => void }) {
   const [list, setList] = useState<KopOpname[] | null>(null);
   const [open, setOpen] = useState<number | null>(null);
   const [starting, setStarting] = useState(false);
@@ -58,6 +59,7 @@ export function KoperasiOpname({ canInput, canEdit, onChanged }: { canInput: boo
         id={open}
         canInput={canInput}
         canEdit={canEdit}
+        isSuperuser={isSuperuser}
         onBack={() => (setOpen(null), setReload((n) => n + 1))}
         onDone={() => (setReload((n) => n + 1), onChanged())}
       />
@@ -161,7 +163,21 @@ export function KoperasiOpname({ canInput, canEdit, onChanged }: { canInput: boo
 
 type Row = KopOpnameLine & { input: string; ket: string };
 
-function OpnameDetail({ id, canInput, canEdit, onBack, onDone }: { id: number; canInput: boolean; canEdit: boolean; onBack: () => void; onDone: () => void }) {
+function OpnameDetail({
+  id,
+  canInput,
+  canEdit,
+  isSuperuser,
+  onBack,
+  onDone,
+}: {
+  id: number;
+  canInput: boolean;
+  canEdit: boolean;
+  isSuperuser: boolean;
+  onBack: () => void;
+  onDone: () => void;
+}) {
   const [head, setHead] = useState<KopOpname | null>(null);
   const [rows, setRows] = useState<Row[]>([]);
   const [dirty, setDirty] = useState(false);
@@ -170,7 +186,11 @@ function OpnameDetail({ id, canInput, canEdit, onBack, onDone }: { id: number; c
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [note, setNote] = useState("");
-  const [confirm, setConfirm] = useState<"" | "selesai" | "batal">("");
+  const [confirm, setConfirm] = useState<"" | "selesai" | "batal" | "hapus" | "simpanEdit">("");
+  // Superuser edit of an opname (any status): tanggal, catatan and the counts.
+  const [editMode, setEditMode] = useState(false);
+  const [eTanggal, setETanggal] = useState("");
+  const [eCatatan, setECatatan] = useState("");
   const load = () =>
     api
       .kopOpname(id)
@@ -192,7 +212,7 @@ function OpnameDetail({ id, canInput, canEdit, onBack, onDone }: { id: number; c
     return () => window.removeEventListener("beforeunload", warn);
   }, [dirty]);
 
-  const editable = head?.status === "DRAFT" && canInput;
+  const editable = (head?.status === "DRAFT" && canInput) || editMode;
   const fisikOf = (r: Row) => (editable ? parseFisik(r.input) : r.fisik);
   const selisihOf = (r: Row) => {
     const f = fisikOf(r);
@@ -257,6 +277,41 @@ function OpnameDetail({ id, canInput, canEdit, onBack, onDone }: { id: number; c
       setBusy(false);
     }
   };
+  const mulaiEdit = () => {
+    if (!head) return;
+    setETanggal(head.tanggal_iso);
+    setECatatan(head.catatan);
+    setEditMode(true);
+    setNote("");
+    setError("");
+  };
+  const simpanEdit = async () => {
+    setConfirm("");
+    if (invalid) return setError(`Stok fisik ${invalid.nama} bukan angka yang valid`);
+    setBusy(true);
+    setError("");
+    try {
+      const r = await api.kopOpnameEdit(id, { tanggal: eTanggal, catatan: eCatatan, lines: rows.map((x) => ({ barang_kode: x.kode, fisik: parseFisik(x.input), keterangan: x.ket })) });
+      setEditMode(false);
+      await load();
+      setNote(r.koreksi !== null ? `Perubahan tersimpan, koreksi stok dibukukan ulang (${r.koreksi} barang)` : "Perubahan tersimpan");
+      onDone();
+    } catch (e) {
+      setError(errorText(e, "Gagal menyimpan perubahan"));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const hapus = async () => {
+    setConfirm("");
+    try {
+      await api.kopOpnameHapus(id);
+      onDone();
+      onBack();
+    } catch (e) {
+      setError(errorText(e, "Gagal menghapus stok opname"));
+    }
+  };
   const batal = async () => {
     setConfirm("");
     try {
@@ -299,7 +354,44 @@ function OpnameDetail({ id, canInput, canEdit, onBack, onDone }: { id: number; c
         </h2>
         <span className={`text-xs px-2 py-0.5 rounded-full border ${STATUS[head.status].cls}`}>{STATUS[head.status].label}</span>
         {head.catatan && <span className="text-xs text-[var(--text-muted)]">{head.catatan}</span>}
+        {isSuperuser && !editMode && (
+          <div className="ml-auto flex gap-2">
+            <button onClick={mulaiEdit} className="inline-flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-md border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[#f1f5f9]">
+              <Pencil size={14} /> Edit
+            </button>
+            <button
+              onClick={() => setConfirm("hapus")}
+              className="inline-flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-md border border-[var(--accent-red-border)] text-[var(--accent-red)] hover:bg-[var(--accent-red-bg)]"
+            >
+              <Trash2 size={14} /> Hapus
+            </button>
+          </div>
+        )}
       </div>
+      {editMode && (
+        <div className="bg-[var(--accent-amber-bg)] border border-[var(--accent-amber-border)] rounded-lg p-3 space-y-2">
+          <div className="text-sm font-medium text-[var(--accent-amber)]">
+            Mode edit Super User{head.status === "SELESAI" ? " - saat disimpan, koreksi stok opname ini dibukukan ulang sesuai angka baru" : ""}
+          </div>
+          <div className="flex flex-wrap items-end gap-3">
+            <label className="text-xs text-[var(--text-secondary)]">
+              Tanggal
+              <input type="date" value={eTanggal} max={localToday()} onChange={(e) => setETanggal(e.target.value)} className="block mt-1 text-sm rounded-md border border-[var(--border)] px-3 py-1.5 bg-white" />
+            </label>
+            <label className="text-xs text-[var(--text-secondary)] flex-1 min-w-[200px]">
+              Catatan
+              <input value={eCatatan} onChange={(e) => setECatatan(e.target.value)} className="block w-full mt-1 text-sm rounded-md border border-[var(--border)] px-3 py-1.5 bg-white" />
+            </label>
+            <button onClick={() => (setEditMode(false), load())} disabled={busy} className="px-3.5 py-1.5 text-sm rounded-md border border-[var(--border)] bg-white text-[var(--text-secondary)]">
+              Batal edit
+            </button>
+            <button onClick={() => setConfirm("simpanEdit")} disabled={busy} className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-sm rounded-md bg-[var(--accent-blue)] text-white disabled:opacity-50">
+              <Save size={15} /> {busy ? "Menyimpan..." : "Simpan perubahan"}
+            </button>
+          </div>
+          {error && <p className="text-xs text-[var(--accent-red)]">{error}</p>}
+        </div>
+      )}
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[
@@ -387,7 +479,7 @@ function OpnameDetail({ id, canInput, canEdit, onBack, onDone }: { id: number; c
             </tbody>
           </table>
         </div>
-        {head.status === "DRAFT" && (canInput || canEdit) && (
+        {head.status === "DRAFT" && !editMode && (canInput || canEdit) && (
           <div className="flex flex-wrap items-center gap-2 p-3 border-t border-[var(--border)]">
             {error && <span className="text-xs text-[var(--accent-red)]">{error}</span>}
             {note && <span className="text-xs text-[var(--accent-green)]">{note}</span>}
@@ -420,6 +512,31 @@ function OpnameDetail({ id, canInput, canEdit, onBack, onDone }: { id: number; c
           message={`${withDiff} barang akan dikoreksi sesuai stok fisik (nilai selisih ${rp(nilai)}). ${rows.length - counted} barang yang belum dihitung tidak diubah. Ini tidak bisa diulang.`}
           confirmLabel="Ya, Selesai & Koreksi"
           onConfirm={selesai}
+          onCancel={() => setConfirm("")}
+        />
+      )}
+      {confirm === "hapus" && (
+        <ConfirmDialog
+          title={`Hapus stok opname #${id}?`}
+          message={
+            head.status === "SELESAI"
+              ? `Opname ini beserta ${withDiff} koreksi stoknya dihapus: stok barang kembali seperti sebelum opname. Tidak bisa dibatalkan.`
+              : "Opname ini dan hitungannya dihapus. Stok tidak berubah."
+          }
+          onConfirm={hapus}
+          onCancel={() => setConfirm("")}
+        />
+      )}
+      {confirm === "simpanEdit" && (
+        <ConfirmDialog
+          title="Simpan perubahan stok opname?"
+          message={
+            head.status === "SELESAI"
+              ? `Koreksi stok opname ini dibukukan ulang: ${withDiff} barang, nilai selisih ${rp(nilai)}. Stok barang ikut berubah.`
+              : "Tanggal, catatan dan hitungan disimpan."
+          }
+          confirmLabel="Ya, Simpan"
+          onConfirm={simpanEdit}
           onCancel={() => setConfirm("")}
         />
       )}

@@ -1342,6 +1342,9 @@ export const api = {
   kopOpnameSimpan: (id: number, lines: { barang_kode: string; fisik: number | null; keterangan: string }[]) =>
     req<{ success: boolean }>(`/api/koperasi/opname/${id}/lines`, { method: "PUT", body: JSON.stringify({ lines }) }),
   kopOpnameSelesai: (id: number) => req<{ id: number; koreksi: number; dihitung: number }>(`/api/koperasi/opname/${id}/selesai`, { method: "POST" }),
+  kopOpnameEdit: (id: number, body: { tanggal: string; catatan: string; lines: { barang_kode: string; fisik: number | null; keterangan: string }[] }) =>
+    req<{ success: boolean; koreksi: number | null }>(`/api/koperasi/opname/${id}`, { method: "PUT", body: JSON.stringify(body) }),
+  kopOpnameHapus: (id: number) => req<{ success: boolean; koreksi: number }>(`/api/koperasi/opname/${id}`, { method: "DELETE" }),
   kopOpnameBatal: (id: number) => req<{ success: boolean }>(`/api/koperasi/opname/${id}/batal`, { method: "POST" }),
   kopKoreksi: (body: { tanggal: string; barang_kode: string; stok_fisik: number; keterangan: string }) =>
     req<{ success: boolean; selisih: number }>("/api/koperasi/koreksi", { method: "POST", body: JSON.stringify(body) }),

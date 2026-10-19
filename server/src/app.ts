@@ -8195,17 +8195,9 @@ app.post("/api/koperasi/opname/:id/selesai", async (req, res) => {
     if (o.status !== "DRAFT") return { error: "Stok opname ini sudah selesai / dibatalkan", status: 409 };
     const counted = await queryOne<{ n: number }>("SELECT COUNT(fisik)::int AS n FROM koperasi_opname_line WHERE opname_id = @id", { id: o.id }, client);
     if (!counted!.n) return { error: "Belum ada stok fisik yang diisi", status: 400 };
-    const r = await execute(
-      `INSERT INTO koperasi_tx (koperasi, jenis, tanggal_iso, periode, barang_kode, qty, harga, total, keterangan, opname_id, user_id)
-       SELECT @k, 'KOREKSI', @tanggal, @periode, l.barang_kode, l.fisik - l.stok_sistem, b.harga_beli, ROUND(((l.fisik - l.stok_sistem) * b.harga_beli)::numeric, 2),
-              TRIM('Stok opname #' || @id::text || CASE WHEN l.keterangan <> '' THEN ': ' || l.keterangan ELSE '' END), @id::int, @uid
-         FROM koperasi_opname_line l JOIN koperasi_barang b ON b.kode = l.barang_kode
-        WHERE l.opname_id = @id::int AND l.fisik IS NOT NULL AND ABS(l.fisik - l.stok_sistem) > 1e-9`,
-      { k: KOPERASI, tanggal: o.tanggal_iso, periode: kopMonth(o.tanggal_iso), id: o.id, uid: req.user!.id },
-      client
-    );
+    const koreksi = await kopOpnameBook(o.id, o.tanggal_iso, req.user!.id, client);
     await execute("UPDATE koperasi_opname SET status = 'SELESAI', selesai_at = now(), selesai_oleh = @uid WHERE id = @id", { id: o.id, uid: req.user!.id }, client);
-    return { id: o.id, koreksi: r.rowCount, dihitung: counted!.n };
+    return { id: o.id, koreksi, dihitung: counted!.n };
   });
   if ("error" in result) return res.status(result.status ?? 400).json({ error: result.error });
   await logActivity(req, {
@@ -8223,6 +8215,109 @@ app.post("/api/koperasi/opname/:id/batal", async (req, res) => {
   if (!r.rowCount) return res.status(409).json({ error: "Hanya stok opname yang belum selesai yang bisa dibatalkan" });
   await logActivity(req, { module: "KOPERASI", estate: KOPERASI, aksi: "Batal Stok Opname", objek: `Opname #${req.params.id}` });
   res.json({ success: true });
+});
+
+// Superuser: change an opname after the fact (tanggal, catatan, counts) - a finished one gets its
+// KOREKSI movements booked again from the new counts - or delete it with its koreksi (the stock goes
+// back to before the opname).
+async function kopOpnameBook(id: number, tanggal: string, uid: number, client: PoolClient) {
+  await execute("DELETE FROM koperasi_tx WHERE opname_id = @id AND jenis = 'KOREKSI'", { id }, client);
+  const r = await execute(
+    `INSERT INTO koperasi_tx (koperasi, jenis, tanggal_iso, periode, barang_kode, qty, harga, total, keterangan, opname_id, user_id)
+     SELECT @k, 'KOREKSI', @tanggal, @periode, l.barang_kode, l.fisik - l.stok_sistem, b.harga_beli, ROUND(((l.fisik - l.stok_sistem) * b.harga_beli)::numeric, 2),
+            TRIM('Stok opname #' || @id::text || CASE WHEN l.keterangan <> '' THEN ': ' || l.keterangan ELSE '' END), @id::int, @uid
+       FROM koperasi_opname_line l JOIN koperasi_barang b ON b.kode = l.barang_kode
+      WHERE l.opname_id = @id::int AND l.fisik IS NOT NULL AND ABS(l.fisik - l.stok_sistem) > 1e-9`,
+    { k: KOPERASI, tanggal, periode: kopMonth(tanggal), id, uid },
+    client
+  );
+  return r.rowCount;
+}
+
+app.put("/api/koperasi/opname/:id", requireSuperuser, async (req, res) => {
+  const b = req.body ?? {};
+  if (!isIsoDate(b.tanggal) || b.tanggal > jakartaToday()) return res.status(400).json({ error: "Tanggal tidak valid (tidak boleh setelah hari ini)" });
+  const lines = (Array.isArray(b.lines) ? b.lines : []).map((l: any) => ({
+    kode: String(l?.barang_kode ?? ""),
+    fisik: l?.fisik === null || l?.fisik === "" || l?.fisik === undefined ? null : Number(l.fisik),
+    ket: String(l?.keterangan ?? "").trim(),
+  }));
+  if (lines.some((l: { fisik: number | null }) => l.fisik !== null && !(Number.isFinite(l.fisik) && l.fisik >= 0)))
+    return res.status(400).json({ error: "Stok fisik harus angka 0 atau lebih" });
+  const result = await withTransaction(async (client) => {
+    const o = await queryOne<{ id: number; status: string; tanggal_iso: string; catatan: string }>(
+      "SELECT id, status, tanggal_iso, catatan FROM koperasi_opname WHERE id = @id AND koperasi = @k FOR UPDATE",
+      { id: req.params.id, k: KOPERASI },
+      client
+    );
+    if (!o) return { error: "Stok opname tidak ditemukan" };
+    const before = await queryOne<{ n: number; nilai: number }>(
+      `SELECT COUNT(*) FILTER (WHERE l.fisik IS NOT NULL AND ABS(l.fisik - l.stok_sistem) > 1e-9)::int AS n,
+              COALESCE(SUM((l.fisik - l.stok_sistem) * b.harga_beli) FILTER (WHERE l.fisik IS NOT NULL), 0)::float8 AS nilai
+         FROM koperasi_opname_line l JOIN koperasi_barang b ON b.kode = l.barang_kode WHERE l.opname_id = @id`,
+      { id: o.id },
+      client
+    );
+    await execute("UPDATE koperasi_opname SET tanggal_iso = @tanggal, catatan = @catatan WHERE id = @id", { id: o.id, tanggal: b.tanggal, catatan: String(b.catatan ?? "").trim() }, client);
+    if (lines.length)
+      await execute(
+        `UPDATE koperasi_opname_line l SET fisik = x.fisik, keterangan = x.ket
+           FROM json_to_recordset(@rows::json) AS x(kode text, fisik float8, ket text)
+          WHERE l.opname_id = @id AND l.barang_kode = x.kode`,
+        { id: o.id, rows: JSON.stringify(lines) },
+        client
+      );
+    const koreksi = o.status === "SELESAI" ? await kopOpnameBook(o.id, b.tanggal, req.user!.id, client) : null;
+    const after = await queryOne<{ n: number; nilai: number }>(
+      `SELECT COUNT(*) FILTER (WHERE l.fisik IS NOT NULL AND ABS(l.fisik - l.stok_sistem) > 1e-9)::int AS n,
+              COALESCE(SUM((l.fisik - l.stok_sistem) * b.harga_beli) FILTER (WHERE l.fisik IS NOT NULL), 0)::float8 AS nilai
+         FROM koperasi_opname_line l JOIN koperasi_barang b ON b.kode = l.barang_kode WHERE l.opname_id = @id`,
+      { id: o.id },
+      client
+    );
+    return { o, before: before!, after: after!, koreksi };
+  });
+  if ("error" in result) return res.status(404).json(result);
+  const { o, before, after } = result;
+  const rpText = (n: number) => `Rp ${Math.round(n).toLocaleString("id-ID")}`;
+  const changes = [
+    o.tanggal_iso !== b.tanggal && `Tanggal: ${o.tanggal_iso} → ${b.tanggal}`,
+    o.catatan !== String(b.catatan ?? "").trim() && `Catatan: ${o.catatan || "-"} → ${String(b.catatan ?? "").trim() || "-"}`,
+    (before.n !== after.n || Math.round(before.nilai) !== Math.round(after.nilai)) &&
+      `Selisih: ${before.n} barang ${rpText(before.nilai)} → ${after.n} barang ${rpText(after.nilai)}`,
+  ].filter(Boolean);
+  await logActivity(req, {
+    module: "KOPERASI",
+    estate: KOPERASI,
+    aksi: "Edit Stok Opname",
+    objek: `Opname #${o.id}`,
+    detail: `${changes.join("; ") || "Tidak ada perubahan"}${result.koreksi !== null ? ` · koreksi stok dibukukan ulang (${result.koreksi} barang)` : ""}`,
+  });
+  res.json({ success: true, koreksi: result.koreksi });
+});
+
+app.delete("/api/koperasi/opname/:id", requireSuperuser, async (req, res) => {
+  const result = await withTransaction(async (client) => {
+    const o = await queryOne<{ id: number; status: string; tanggal_iso: string }>(
+      "SELECT id, status, tanggal_iso FROM koperasi_opname WHERE id = @id AND koperasi = @k FOR UPDATE",
+      { id: req.params.id, k: KOPERASI },
+      client
+    );
+    if (!o) return { error: "Stok opname tidak ditemukan" };
+    const tx = await execute("DELETE FROM koperasi_tx WHERE opname_id = @id AND jenis = 'KOREKSI'", { id: o.id }, client);
+    await execute("DELETE FROM koperasi_opname_line WHERE opname_id = @id", { id: o.id }, client);
+    await execute("DELETE FROM koperasi_opname WHERE id = @id", { id: o.id }, client);
+    return { o, koreksi: tx.rowCount };
+  });
+  if ("error" in result) return res.status(404).json(result);
+  await logActivity(req, {
+    module: "KOPERASI",
+    estate: KOPERASI,
+    aksi: "Hapus Stok Opname",
+    objek: `Opname #${result.o.id}`,
+    detail: `${result.o.tanggal_iso} · status ${result.o.status}${result.koreksi ? ` · ${result.koreksi} koreksi stok dibatalkan` : ""}`,
+  });
+  res.json({ success: true, koreksi: result.koreksi });
 });
 
 // Koreksi Stok of one barang: the stock becomes the counted stok_fisik (the difference is a KOREKSI).

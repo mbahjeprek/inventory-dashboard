@@ -178,7 +178,7 @@ export function KoperasiPage() {
       {tab === "jual" && <TxTable jenis="JUAL" periode={periode} reload={reload} canEdit={canEdit} onChanged={done} />}
       {tab === "rekap" && <RekapTab periode={periode} reload={reload} />}
       {tab === "stok" && <StokTab reload={reload} canEdit={canEdit} onChanged={done} />}
-      {tab === "opname" && <KoperasiOpname canInput={canInput} canEdit={canEdit} onChanged={done} />}
+      {tab === "opname" && <KoperasiOpname canInput={canInput} canEdit={canEdit} isSuperuser={user?.role === "superuser"} onChanged={done} />}
       {tab === "beli" && (
         <div className="space-y-4">
           <TxTable jenis="BELI" periode={periode} reload={reload} canEdit={canEdit} onChanged={done} />
