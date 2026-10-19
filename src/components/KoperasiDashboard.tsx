@@ -1,8 +1,10 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Bar, BarChart, CartesianGrid, Cell, LabelList, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { AlertTriangle, HandCoins, PackageSearch, Receipt, ShoppingBasket, Truck, Users } from "lucide-react";
 import { api, type KopDashboard } from "../lib/api";
 import { StatCard } from "./StatCard";
+import { ExportButtons } from "./ExportButtons";
+import { chartOf, type SectionReport } from "../lib/printTable";
 
 // Dashboard of the Koperasi page (its own tab, not the main Dashboard): totals over the chosen months,
 // sales per month and per day, top 15 barang and pengebon, per estate / divisi, barang that sell but
@@ -64,6 +66,106 @@ export function KoperasiDashboard({ periode, reload }: { periode: string; reload
 
   const rangeText = range === 1 ? bulanLabel(periode) : `${bulanLabel(dari)} – ${bulanLabel(periode)}`;
   const k = d?.kpi;
+  // The charts on screen go into the printout / Excel as pictures, above their figures.
+  const bulanRef = useRef<HTMLDivElement>(null);
+  const hariRef = useRef<HTMLDivElement>(null);
+  const barangRef = useRef<HTMLDivElement>(null);
+  const divisiRef = useRef<HTMLDivElement>(null);
+  const buildReport = async (): Promise<SectionReport> => {
+    if (!d || !k) throw new Error("belum dimuat");
+    const right = "right" as const;
+    return {
+      title: "Dashboard Koperasi Karyawan Nilam",
+      subtitle: [rangeText],
+      sections: [
+        {
+          heading: "Ringkasan",
+          columns: [{ label: "Keterangan" }, { label: "Nilai", align: right }],
+          rows: [
+            ["Total penjualan (Rp)", Math.round(k.jual)],
+            ["Potong gaji (Rp)", Math.round(k.potong_gaji)],
+            ["Instansi (Rp)", Math.round(k.instansi)],
+            ["Karyawan pengebon", k.pengebon],
+            ["Rata-rata per karyawan (Rp)", Math.round(k.pengebon ? k.potong_gaji / k.pengebon : 0)],
+            ["Jumlah bon", k.bon],
+            ["Rata-rata per bon (Rp)", Math.round(k.bon ? k.jual / k.bon : 0)],
+            ["Jenis barang terjual", k.jenis_barang],
+            ["Pembelian barang (Rp)", Math.round(k.beli)],
+          ],
+        },
+        ...(d.dekatLimit.length
+          ? [
+              {
+                heading: `Karyawan dengan pemakaian 80% limit ${rp(d.limit)} atau lebih - ${bulanLabel(d.sampai)}`,
+                columns: [{ label: "NIK" }, { label: "Nama" }, { label: "Potong gaji (Rp)", align: right }],
+                rows: d.dekatLimit.map((x) => [x.kode, x.nama, Math.round(x.total)]),
+              },
+            ]
+          : []),
+        {
+          heading: `Penjualan per bulan (12 bulan sampai ${bulanLabel(d.sampai)})`,
+          chart: chartOf(bulanRef.current),
+          columns: [{ label: "Bulan" }, { label: "Penjualan (Rp)", align: right }, { label: "Pengebon", align: right }, { label: "Pembelian (Rp)", align: right }],
+          rows: d.perBulan.map((r) => [bulanLabel(r.periode), Math.round(r.jual), r.pengebon, Math.round(r.beli)]),
+        },
+        ...(d.perHari.length
+          ? [
+              {
+                heading: `Penjualan harian ${bulanLabel(d.sampai)}`,
+                chart: chartOf(hariRef.current),
+                columns: [{ label: "Tanggal" }, { label: "Penjualan (Rp)", align: right }, { label: "Orang", align: right }],
+                rows: d.perHari.map((r) => [r.tanggal.split("-").reverse().join("/"), Math.round(r.jual), r.orang]),
+              },
+            ]
+          : []),
+        {
+          heading: "Top 15 barang terlaris",
+          chart: chartOf(barangRef.current),
+          columns: [
+            { label: "No" },
+            { label: "Kode" },
+            { label: "Barang" },
+            { label: "Jumlah", align: right },
+            { label: "Satuan" },
+            { label: "Orang", align: right },
+            { label: "Penjualan (Rp)", align: right },
+          ],
+          rows: d.topBarang.map((b, i) => [i + 1, b.kode, b.nama, b.qty, b.satuan, b.orang, Math.round(b.nilai)]),
+        },
+        {
+          heading: "Top 15 pengebon (potong gaji)",
+          columns: [
+            { label: "No" },
+            { label: "NIK" },
+            { label: "Nama" },
+            { label: "Jabatan" },
+            { label: "Estate / Divisi" },
+            { label: "Bon", align: right },
+            { label: "Total (Rp)", align: right },
+          ],
+          rows: d.topPengebon.map((p, i) => [i + 1, p.kode, p.nama, p.jabatan, [p.estate, p.divisi].filter(Boolean).join(" / "), p.bon, Math.round(p.total)]),
+        },
+        {
+          heading: "Penjualan per estate / divisi",
+          chart: chartOf(divisiRef.current),
+          columns: [{ label: "Estate / Divisi" }, { label: "Orang", align: right }, { label: "Penjualan (Rp)", align: right }],
+          rows: d.perDivisi.map((r) => [r.grup, r.orang, Math.round(r.total)]),
+        },
+        {
+          heading: "Perlu dibeli (stok kurang dari kebutuhan sebulan)",
+          columns: [
+            { label: "Kode" },
+            { label: "Barang" },
+            { label: "Stok", align: right },
+            { label: "Laku / bln", align: right },
+            { label: "Satuan" },
+            { label: "Harga beli (Rp)", align: right },
+          ],
+          rows: d.perluBeli.map((b) => [b.kode, b.nama, b.stok, Math.round(b.rata * 10) / 10, b.satuan, Math.round(b.harga_beli)]),
+        },
+      ],
+    };
+  };
 
   return (
     <div className="space-y-4">
@@ -80,6 +182,11 @@ export function KoperasiDashboard({ periode, reload }: { periode: string; reload
           ))}
         </div>
         <span className="text-xs text-[var(--text-muted)]">{rangeText} · sampai periode yang dipilih di atas</span>
+        {d && (
+          <div className="ml-auto flex gap-2">
+            <ExportButtons total={0} buildReport={buildReport} fileName={`dashboard-koperasi-${dari}-${periode}`} />
+          </div>
+        )}
       </div>
 
       {error && <p className="text-sm text-[var(--accent-red)]">{error}</p>}
@@ -117,7 +224,7 @@ export function KoperasiDashboard({ periode, reload }: { periode: string; reload
 
           <div className="grid lg:grid-cols-2 gap-4">
             <Panel title="Penjualan per bulan" note={`12 bulan sampai ${bulanLabel(d.sampai)} · batang gelap = bulan yang dipilih`}>
-              <div className="h-64">
+              <div ref={bulanRef} className="h-64">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={d.perBulan} margin={{ top: 18, right: 8, bottom: 0, left: 0 }}>
                     <CartesianGrid vertical={false} stroke={GRID} />
@@ -151,7 +258,7 @@ export function KoperasiDashboard({ periode, reload }: { periode: string; reload
 
             {d.perHari.length > 0 ? (
               <Panel title={`Penjualan harian ${bulanLabel(d.sampai)}`} note="Arahkan ke batang untuk jumlah orang yang mengambil">
-                <div className="h-64">
+                <div ref={hariRef} className="h-64">
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={d.perHari} margin={{ top: 18, right: 8, bottom: 0, left: 0 }}>
                       <CartesianGrid vertical={false} stroke={GRID} />
@@ -179,7 +286,7 @@ export function KoperasiDashboard({ periode, reload }: { periode: string; reload
               </Panel>
             ) : (
               <Panel title="Penjualan per estate / divisi" note={rangeText}>
-                <DivisiChart d={d} />
+                <DivisiChart d={d} chartRef={divisiRef} />
               </Panel>
             )}
           </div>
@@ -187,7 +294,7 @@ export function KoperasiDashboard({ periode, reload }: { periode: string; reload
           <div className="grid lg:grid-cols-2 gap-4">
             <Panel title="Top 15 barang terlaris" note={`Menurut nilai penjualan · ${rangeText}`}>
               {d.topBarang.length ? (
-                <div style={{ height: 30 + d.topBarang.length * 26 }}>
+                <div ref={barangRef} style={{ height: 30 + d.topBarang.length * 26 }}>
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={d.topBarang} layout="vertical" margin={{ top: 0, right: 104, bottom: 0, left: 0 }} barCategoryGap={4}>
                       <XAxis type="number" hide />
@@ -274,7 +381,7 @@ export function KoperasiDashboard({ periode, reload }: { periode: string; reload
           <div className="grid lg:grid-cols-2 gap-4">
             {d.perHari.length > 0 && (
               <Panel title="Penjualan per estate / divisi" note={rangeText}>
-                <DivisiChart d={d} />
+                <DivisiChart d={d} chartRef={divisiRef} />
               </Panel>
             )}
             <Panel title="Perlu dibeli" note="Barang laku 3 bulan terakhir yang stoknya kurang dari kebutuhan sebulan" className={d.perHari.length ? "" : "lg:col-span-2"}>
@@ -321,10 +428,10 @@ export function KoperasiDashboard({ periode, reload }: { periode: string; reload
   );
 }
 
-function DivisiChart({ d }: { d: KopDashboard }) {
+function DivisiChart({ d, chartRef }: { d: KopDashboard; chartRef: React.RefObject<HTMLDivElement | null> }) {
   if (!d.perDivisi.length) return <p className="text-sm text-[var(--text-muted)]">Belum ada penjualan.</p>;
   return (
-    <div style={{ height: 30 + d.perDivisi.length * 28 }}>
+    <div ref={chartRef} style={{ height: 30 + d.perDivisi.length * 28 }}>
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={d.perDivisi} layout="vertical" margin={{ top: 0, right: 104, bottom: 0, left: 0 }} barCategoryGap={4}>
           <XAxis type="number" hide />
