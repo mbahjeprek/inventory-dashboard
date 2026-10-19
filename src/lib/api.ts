@@ -464,6 +464,26 @@ export type Pinjaman = {
   evidence_id: string | null;
   kembali: { qty: number; tanggal_iso: string; created_at?: string | null; note: string; batal: boolean; oleh: string; evidence_id: string | null }[];
 };
+export type PinjamanLogAksi = "PINJAM" | "TRANSFER" | "KEMBALI" | "LUNAS" | "BATAL";
+export type PinjamanLog = {
+  pinjaman_id: number;
+  aksi: PinjamanLogAksi;
+  qty: number;
+  tanggal_iso: string;
+  created_at: string;
+  note: string;
+  evidence_id: string | null;
+  oleh: string;
+  module: OpnameModule;
+  kode: string;
+  nama: string;
+  satuan: string;
+  dari_estate: string;
+  ke_estate: string;
+  qty_pinjam: number;
+  tanggal_pinjam: string;
+};
+export type PinjamanRingkasan = { open: number; telat: number; lunas30: number; transfer30: number; rata_hari: number | null };
 export type PinjamanBarang = { kode: string; nama: string; satuan: string; stok: number };
 export type OpnameStatus = "DRAFT" | "SUBMITTED" | "APPROVED" | "BATAL";
 export type Opname = {
@@ -1199,6 +1219,8 @@ export const api = {
 
   pinjamanList: (params: Record<string, string | number>) =>
     req<{ data: Pinjaman[]; total: number }>(`/api/pinjaman?${new URLSearchParams(params as any)}`),
+  pinjamanLog: (params: Record<string, string | number>) =>
+    req<{ data: PinjamanLog[]; total: number; ringkasan: PinjamanRingkasan }>(`/api/pinjaman/log?${new URLSearchParams(params as any)}`),
   pinjamanBarang: (module: OpnameModule, estate: string, search: string, all = false) =>
     req<PinjamanBarang[]>(`/api/pinjaman/barang?${new URLSearchParams({ module, estate, search, ...(all ? { all: "1" } : {}) })}`),
   // Input Banyak: one Pinjaman per row, all saved or none (a refused row comes back as data.row).

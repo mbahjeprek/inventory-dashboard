@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { ArrowLeftRight, ArrowRight, Plus, ListPlus, X } from "lucide-react";
-import { api, errorText, type OpnameModule, type Pinjaman, type PinjamanBarang, type PinjamanStatus } from "../lib/api";
+import { api, errorText, type OpnameModule, type Pinjaman, type PinjamanBarang, type PinjamanLog, type PinjamanLogAksi, type PinjamanRingkasan, type PinjamanStatus } from "../lib/api";
 import { useSearchParams } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { EvidenceInput, EvidenceLink, useEvidenceEnabled } from "../components/EvidenceInput";
@@ -23,6 +23,15 @@ const STATUS: Record<PinjamanStatus, { label: string; cls: string }> = {
   TRANSFER: { label: "Transfer", cls: "bg-[var(--accent-blue-bg)] border-[var(--accent-blue-border)] text-[var(--accent-blue)]" },
 };
 
+// Log: what each event did, coloured like the statuses.
+const AKSI: Record<PinjamanLogAksi, { label: string; cls: string }> = {
+  PINJAM: { label: "Dipinjam", cls: STATUS.DIPINJAM.cls },
+  TRANSFER: { label: "Transfer", cls: STATUS.TRANSFER.cls },
+  KEMBALI: { label: "Kembali Sebagian", cls: "bg-[#ecfdf5] border-[var(--accent-green-border)] text-[var(--accent-green)]" },
+  LUNAS: { label: "Lunas / Clear", cls: "bg-[var(--accent-green)] border-[var(--accent-green)] text-white" },
+  BATAL: { label: "Dibatalkan", cls: STATUS.BATAL.cls },
+};
+
 // Nilam's gudang and Klinik are counted in whole units; BBM, pupuk, oli and the other gudang take decimals (as loanWhole on the server).
 const whole = (m: OpnameModule, a: string, b: string) => m === "KLINIK" || (m === "GUDANG" && (a === "NILAM" || b === "NILAM"));
 const inputPerm = (m: OpnameModule) => `${m.toLowerCase()}.input`;
@@ -42,6 +51,10 @@ export function PinjamanPage() {
   // ?status= (from a "Pinjaman #N" link in a history table) opens every status, not only the open ones.
   const [searchParams] = useSearchParams();
   const [status, setStatus] = useState(searchParams.get("status") ?? "OPEN");
+  // Daftar = the loans (one row each, open ones first); Log = every event in time order.
+  const [view, setView] = useState<"daftar" | "log">(() => (searchParams.get("view") === "log" ? "log" : "daftar"));
+  const [aksi, setAksi] = useState("");
+  const [ringkasan, setRingkasan] = useState<PinjamanRingkasan | null>(null);
   const [rows, setRows] = useState<Pinjaman[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -61,6 +74,12 @@ export function PinjamanPage() {
       })
       .finally(() => setLoading(false));
   }, [module, status, pickedEstates, reload]);
+  useEffect(() => {
+    api
+      .pinjamanLog({ module, estates: pickedEstates, pageSize: 1 })
+      .then((res) => setRingkasan(res.ringkasan))
+      .catch(() => setRingkasan(null));
+  }, [module, pickedEstates, reload]);
 
   const canAct = (l: Pinjaman) => l.status === "DIPINJAM" && can(user, inputPerm(l.module)) && (myEstates.includes(l.dari_estate) || myEstates.includes(l.ke_estate));
   const done = () => {
@@ -104,7 +123,38 @@ export function PinjamanPage() {
         )}
       </div>
 
+      {ringkasan && (
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <Kartu
+            label="Belum kembali"
+            value={ringkasan.open}
+            sub={ringkasan.telat ? `${ringkasan.telat} sudah ≥ ${LOAN_LATE_DAYS} hari` : "tidak ada yang lama"}
+            tone={ringkasan.telat ? "red" : ringkasan.open ? "amber" : "green"}
+            onClick={() => (setView("daftar"), setStatus("OPEN"))}
+          />
+          <Kartu label="Lunas / clear (30 hari)" value={ringkasan.lunas30} sub="pinjaman yang sudah kembali semua" tone="green" onClick={() => (setView("log"), setAksi("LUNAS"))} />
+          <Kartu
+            label="Rata-rata lama pinjam"
+            value={ringkasan.rata_hari === null ? "-" : `${ringkasan.rata_hari} hari`}
+            sub="sampai lunas (90 hari terakhir)"
+            tone="blue"
+          />
+          <Kartu label="Transfer (30 hari)" value={ringkasan.transfer30} sub="dikirim antar estate" tone="blue" onClick={() => (setView("log"), setAksi("TRANSFER"))} />
+        </div>
+      )}
+
       <div className="flex flex-wrap items-center gap-3 bg-[var(--bg-card)] border border-[var(--border)] rounded-lg p-3">
+        <div className="inline-flex rounded-md border border-[var(--border)] overflow-hidden text-sm">
+          {(["daftar", "log"] as const).map((v) => (
+            <button
+              key={v}
+              onClick={() => setView(v)}
+              className={`px-3.5 py-2 ${view === v ? "bg-[var(--accent-blue)] text-white" : "bg-white text-[var(--text-secondary)] hover:bg-[#f1f5f9]"}`}
+            >
+              {v === "daftar" ? "Daftar Pinjaman" : "Log Aktivitas"}
+            </button>
+          ))}
+        </div>
         <select value={module} onChange={(e) => setModule(e.target.value)} className={selectCls} aria-label="Modul">
           <option value="">Semua modul</option>
           {viewModules.map((m) => (
@@ -113,15 +163,30 @@ export function PinjamanPage() {
             </option>
           ))}
         </select>
-        <select value={status} onChange={(e) => setStatus(e.target.value)} className={selectCls} aria-label="Status">
-          <option value="OPEN">Belum kembali</option>
-          <option value="LUNAS">Lunas</option>
-          <option value="BATAL">Dibatalkan</option>
-          <option value="TRANSFER">Transfer</option>
-          <option value="">Semua status</option>
-        </select>
-        <span className="text-xs text-[var(--text-muted)] ml-auto">{total.toLocaleString("id-ID")} catatan</span>
+        {view === "daftar" ? (
+          <select value={status} onChange={(e) => setStatus(e.target.value)} className={selectCls} aria-label="Status">
+            <option value="OPEN">Belum kembali</option>
+            <option value="LUNAS">Lunas</option>
+            <option value="BATAL">Dibatalkan</option>
+            <option value="TRANSFER">Transfer</option>
+            <option value="">Semua status</option>
+          </select>
+        ) : (
+          <select value={aksi} onChange={(e) => setAksi(e.target.value)} className={selectCls} aria-label="Kejadian">
+            <option value="">Semua kejadian</option>
+            <option value="LUNAS">Lunas / clear</option>
+            <option value="KEMBALI">Kembali sebagian</option>
+            <option value="PINJAM">Dipinjam</option>
+            <option value="TRANSFER">Transfer</option>
+            <option value="BATAL">Dibatalkan</option>
+          </select>
+        )}
+        {view === "daftar" && <span className="text-xs text-[var(--text-muted)] ml-auto">{total.toLocaleString("id-ID")} catatan</span>}
       </div>
+
+      {view === "log" ? (
+        <PinjamanLogTable module={module} aksi={aksi} estates={pickedEstates} reload={reload} />
+      ) : (
 
       <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg table-scroll">
         <table className="data-table text-sm">
@@ -240,11 +305,150 @@ export function PinjamanPage() {
           </tbody>
         </table>
       </div>
+      )}
 
       {creating === "BATCH" && <PinjamanBatchModal modules={inputModules} myEstates={myEstates} onClose={() => setCreating("")} onSuccess={done} />}
       {creating && creating !== "BATCH" && <CreatePinjamanModal jenis={creating} modules={inputModules} myEstates={myEstates} onClose={() => setCreating("")} onSuccess={done} />}
       {returning && <KembaliModal loan={returning.loan} batal={returning.batal} onClose={() => setReturning(null)} onSuccess={done} />}
       {deleting && <HapusModal loan={deleting} onClose={() => setDeleting(null)} onSuccess={done} />}
+    </div>
+  );
+}
+
+const KARTU_TONE = {
+  red: "text-[var(--accent-red)]",
+  amber: "text-[var(--accent-amber)]",
+  green: "text-[var(--accent-green)]",
+  blue: "text-[var(--accent-blue)]",
+};
+function Kartu({ label, value, sub, tone, onClick }: { label: string; value: number | string; sub: string; tone: keyof typeof KARTU_TONE; onClick?: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={!onClick}
+      className="text-left bg-[var(--bg-card)] border border-[var(--border)] rounded-lg px-4 py-3 enabled:hover:border-[var(--accent-blue-border)] disabled:cursor-default"
+    >
+      <div className="text-xs text-[var(--text-secondary)]">{label}</div>
+      <div className={`text-2xl font-semibold ${KARTU_TONE[tone]}`}>{typeof value === "number" ? value.toLocaleString("id-ID") : value}</div>
+      <div className="text-[11px] text-[var(--text-muted)]">{sub}</div>
+    </button>
+  );
+}
+
+const isBack = (a: PinjamanLogAksi) => a === "KEMBALI" || a === "LUNAS" || a === "BATAL";
+
+// Log Aktivitas: one row per event (made, returned, cleared, cancelled), newest first, 50 per page.
+function PinjamanLogTable({ module, aksi, estates, reload }: { module: string; aksi: string; estates: string; reload: number }) {
+  const [rows, setRows] = useState<PinjamanLog[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [loading, setLoading] = useState(true);
+  const pageSize = 50;
+  useEffect(() => setPage(1), [module, aksi, estates]);
+  useEffect(() => {
+    setLoading(true);
+    api
+      .pinjamanLog({ module, aksi, estates, page, pageSize })
+      .then((res) => (setRows(res.data), setTotal(res.total)))
+      .catch(() => (setRows([]), setTotal(0)))
+      .finally(() => setLoading(false));
+  }, [module, aksi, estates, page, reload]);
+  const pages = Math.max(1, Math.ceil(total / pageSize));
+  const lama = (r: PinjamanLog) => Math.round((Date.parse(r.tanggal_iso) - Date.parse(r.tanggal_pinjam)) / 86400000);
+
+  return (
+    <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg">
+      <div className="table-scroll">
+        <table className="data-table text-sm">
+          <thead>
+            <tr className="bg-[#d5edc9] text-left text-xs text-[var(--text-primary)]">
+              <th className="px-4 py-2.5 whitespace-nowrap">Waktu</th>
+              <th className="px-4 py-2.5">Kejadian</th>
+              <th className="px-4 py-2.5">Barang</th>
+              <th className="px-4 py-2.5 whitespace-nowrap">Dari → Ke</th>
+              <th className="px-4 py-2.5 text-right whitespace-nowrap">Jumlah</th>
+              <th className="px-4 py-2.5">Keterangan</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-[var(--border)]">
+            {loading ? (
+              <tr>
+                <td colSpan={6} className="px-4 py-8 text-center text-[var(--text-muted)]">
+                  Memuat...
+                </td>
+              </tr>
+            ) : rows.length === 0 ? (
+              <tr>
+                <td colSpan={6} className="px-4 py-10 text-center text-[var(--text-muted)]">
+                  Belum ada kejadian.
+                </td>
+              </tr>
+            ) : (
+              rows.map((r, i) => {
+                // A return goes back the other way.
+                const [from, to] = isBack(r.aksi) ? [r.ke_estate, r.dari_estate] : [r.dari_estate, r.ke_estate];
+                return (
+                  <tr key={`${r.pinjaman_id}-${r.aksi}-${r.created_at}-${i}`} className="align-top">
+                    <td className="px-4 py-2.5 whitespace-nowrap">
+                      <div>{tanggalWaktu(r.tanggal_iso, r.created_at)}</div>
+                      <div className="text-[11px] text-[var(--text-muted)]">
+                        {r.aksi === "TRANSFER" ? "Transfer" : "Pinjaman"} #{r.pinjaman_id}
+                      </div>
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <span className={`text-xs px-2 py-0.5 rounded-full border whitespace-nowrap ${AKSI[r.aksi].cls}`}>{AKSI[r.aksi].label}</span>
+                      {r.aksi === "LUNAS" && <div className="text-[11px] text-[var(--text-muted)] mt-1">dipinjam {lama(r)} hari</div>}
+                    </td>
+                    <td className="col-grow px-4 py-2.5">
+                      <div className="font-medium text-[var(--text-primary)]">{r.nama}</div>
+                      <div className="text-[11px] text-[var(--text-muted)]">
+                        {OPNAME_MODULE_LABEL[r.module]}
+                        {r.kode !== r.nama && ` · ${r.kode}`}
+                      </div>
+                    </td>
+                    <td className="px-4 py-2.5 whitespace-nowrap font-medium">
+                      {from} <ArrowRight size={12} className="inline text-[var(--text-muted)]" /> {to}
+                    </td>
+                    <td className="px-4 py-2.5 text-right whitespace-nowrap">
+                      <div>
+                        {fmtQty(r.qty)} {r.satuan}
+                      </div>
+                      {(r.aksi === "KEMBALI" || r.aksi === "LUNAS") && (
+                        <div className="text-[11px] text-[var(--text-muted)]">
+                          dari {fmtQty(r.qty_pinjam)} {r.satuan}
+                        </div>
+                      )}
+                    </td>
+                    <td className="col-grow px-4 py-2.5 text-xs text-[var(--text-secondary)]">
+                      <div>
+                        {r.note || "-"} <EvidenceLink id={r.evidence_id} label="foto" />
+                      </div>
+                      <div className="text-[var(--text-muted)]">oleh {r.oleh || "-"}</div>
+                    </td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
+      <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-t border-[var(--border)] text-xs text-[var(--text-muted)]">
+        <span>{total.toLocaleString("id-ID")} kejadian</span>
+        {pages > 1 && (
+          <div className="flex items-center gap-2">
+            <button disabled={page <= 1} onClick={() => setPage((p) => p - 1)} className="px-2.5 py-1 rounded-md border border-[var(--border)] disabled:opacity-40">
+              Sebelumnya
+            </button>
+            <span>
+              {page} / {pages}
+            </span>
+            <button disabled={page >= pages} onClick={() => setPage((p) => p + 1)} className="px-2.5 py-1 rounded-md border border-[var(--border)] disabled:opacity-40">
+              Berikutnya
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

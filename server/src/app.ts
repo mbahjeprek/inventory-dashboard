@@ -6825,6 +6825,53 @@ app.get("/api/pinjaman", async (req, res) => {
   res.json({ data, total });
 });
 
+// Log Pinjaman: every event in time order, newest first - a loan or transfer made, a return (KEMBALI,
+// or LUNAS when it brings the loan's returns up to its qty) and a cancellation - so what got cleared
+// and when shows without opening each loan. `ringkasan` = the monitoring counts over the same filter.
+app.get("/api/pinjaman/log", async (req, res) => {
+  const { module = "", estates: picked = "", aksi = "", page = "1", pageSize = "50" } = req.query as Record<string, string>;
+  const u = req.user!;
+  const modules = OPNAME_MODULES_LIST.filter((m) => canLoan(u, m, "view") && (!module || m === module));
+  const estates = listEstates(u, "", picked);
+  const empty = { data: [], total: 0, ringkasan: { open: 0, telat: 0, lunas30: 0, transfer30: 0, rata_hari: null } };
+  if (!modules.length || !estates.length) return res.json(empty);
+  const scope = "p.module = ANY(@modules::text[]) AND (p.dari_estate = ANY(@estates::text[]) OR p.ke_estate = ANY(@estates::text[]))";
+  const events = `
+    SELECT p.id AS pinjaman_id, p.jenis AS aksi, p.qty, p.tanggal_iso, p.created_at, p.alasan AS note, p.evidence_id, p.user_id, 0 AS ord
+      FROM pinjaman p WHERE ${scope}
+    UNION ALL
+    SELECT k.pinjaman_id, CASE WHEN k.batal THEN 'BATAL' WHEN k.kumulatif >= p.qty - 0.0005 THEN 'LUNAS' ELSE 'KEMBALI' END,
+           k.qty, k.tanggal_iso, k.created_at, k.note, k.evidence_id, k.user_id, k.id
+      FROM (SELECT k.*, SUM(CASE WHEN k.batal THEN 0 ELSE k.qty END) OVER (PARTITION BY k.pinjaman_id ORDER BY k.id) AS kumulatif
+              FROM pinjaman_kembali k) k
+      JOIN pinjaman p ON p.id = k.pinjaman_id WHERE ${scope}`;
+  const where = ["PINJAM", "TRANSFER", "KEMBALI", "LUNAS", "BATAL"].includes(aksi) ? "WHERE e.aksi = @aksi" : "";
+  const params = { modules, estates, aksi };
+  const total = (await queryOne<{ c: number }>(`SELECT COUNT(*)::int c FROM (${events}) e ${where}`, params))!.c;
+  const limit = Math.min(parseInt(pageSize) || 50, 200);
+  const offset = (Math.max(parseInt(page) || 1, 1) - 1) * limit;
+  const data = await queryMany(
+    `SELECT e.*, p.module, p.kode, p.nama, p.satuan, p.dari_estate, p.ke_estate, p.qty AS qty_pinjam, p.tanggal_iso AS tanggal_pinjam,
+            COALESCE(us.nama, us.username, '') AS oleh
+       FROM (${events}) e JOIN pinjaman p ON p.id = e.pinjaman_id LEFT JOIN users us ON us.id = e.user_id ${where}
+      ORDER BY e.created_at DESC, e.pinjaman_id DESC, e.ord DESC LIMIT @limit OFFSET @offset`,
+    { ...params, limit, offset }
+  );
+  // Days a loan took to clear = from the loan's date to the date of the return that made it lunas.
+  const ringkasan = await queryOne(
+    `SELECT COUNT(*) FILTER (WHERE p.status = 'DIPINJAM')::int AS open,
+            COUNT(*) FILTER (WHERE p.status = 'DIPINJAM' AND p.tanggal_iso::date <= CURRENT_DATE - @late::int)::int AS telat,
+            COUNT(*) FILTER (WHERE p.status = 'LUNAS' AND l.tgl::date >= CURRENT_DATE - 30)::int AS lunas30,
+            COUNT(*) FILTER (WHERE p.status = 'TRANSFER' AND p.tanggal_iso::date >= CURRENT_DATE - 30)::int AS transfer30,
+            ROUND(AVG(l.tgl::date - p.tanggal_iso::date) FILTER (WHERE p.status = 'LUNAS' AND l.tgl::date >= CURRENT_DATE - 90))::int AS rata_hari
+       FROM pinjaman p
+       LEFT JOIN LATERAL (SELECT MAX(k.tanggal_iso) AS tgl FROM pinjaman_kembali k WHERE k.pinjaman_id = p.id AND NOT k.batal) l ON true
+      WHERE ${scope}`,
+    { modules, estates, late: 14 } // = LOAN_LATE_DAYS (useOpenPinjaman.ts)
+  );
+  res.json({ data, total, ringkasan });
+});
+
 // The items the lender can lend: its stock of that module (only stock > 0 for gudang / klinik).
 app.get("/api/pinjaman/barang", async (req, res) => {
   const { module = "", estate = "", search = "", all = "" } = req.query as Record<string, string>;
