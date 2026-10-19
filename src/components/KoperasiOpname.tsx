@@ -32,6 +32,20 @@ export function KoperasiOpname({ canInput, canEdit, isSuperuser, onChanged }: { 
   const [catatan, setCatatan] = useState("");
   const [error, setError] = useState("");
   const [reload, setReload] = useState(0);
+  const [hapus, setHapus] = useState<KopOpname | null>(null);
+  const doHapus = async () => {
+    if (!hapus) return;
+    setError("");
+    try {
+      await api.kopOpnameHapus(hapus.id);
+      setHapus(null);
+      setReload((n) => n + 1);
+      onChanged();
+    } catch (e) {
+      setHapus(null);
+      setError(errorText(e, "Gagal menghapus stok opname"));
+    }
+  };
   useEffect(() => {
     api
       .kopOpnameList()
@@ -102,6 +116,19 @@ export function KoperasiOpname({ canInput, canEdit, isSuperuser, onChanged }: { 
         </div>
       )}
 
+      {error && !starting && <p className="text-xs text-[var(--accent-red)]">{error}</p>}
+      {hapus && (
+        <ConfirmDialog
+          title={`Hapus stok opname #${hapus.id}?`}
+          message={
+            hapus.status === "SELESAI"
+              ? `Opname ini beserta ${hapus.n_selisih ?? 0} koreksi stoknya dihapus: stok barang kembali seperti sebelum opname. Tidak bisa dibatalkan.`
+              : "Opname ini dan hitungannya dihapus. Stok tidak berubah."
+          }
+          onConfirm={doHapus}
+          onCancel={() => setHapus(null)}
+        />
+      )}
       <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg table-scroll">
         <table className="data-table text-sm">
           <thead>
@@ -150,7 +177,18 @@ export function KoperasiOpname({ canInput, canEdit, isSuperuser, onChanged }: { 
                     {o.oleh || "-"}
                     {o.selesai_oleh_nama && o.status === "SELESAI" && <div className="text-[var(--text-muted)]">selesai: {o.selesai_oleh_nama}</div>}
                   </td>
-                  <td className="px-3 py-2 text-right text-xs text-[var(--accent-blue)] whitespace-nowrap">{o.status === "DRAFT" && canInput ? "Lanjut hitung" : "Lihat"}</td>
+                  <td className="px-3 py-2 text-right text-xs text-[var(--accent-blue)] whitespace-nowrap">
+                    {o.status === "DRAFT" && canInput ? "Lanjut hitung" : "Lihat"}
+                    {isSuperuser && (
+                      <button
+                        onClick={(e) => (e.stopPropagation(), setHapus(o))}
+                        title="Hapus stok opname"
+                        className="ml-2 p-1 rounded-md text-[var(--accent-red)] hover:bg-[var(--accent-red-bg)] align-middle"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    )}
+                  </td>
                 </tr>
               ))
             )}

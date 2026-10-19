@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Banknote, Boxes, ClipboardCheck, HandCoins, LayoutDashboard, ListPlus, Package, PackageX, Pencil, Plus, Search, ShoppingBasket, Trash2, Truck, UserPlus, Users, X } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, Banknote, Boxes, ClipboardCheck, HandCoins, LayoutDashboard, ListPlus, Package, PackageX, Pencil, Plus, Search, ShoppingBasket, Trash2, Truck, UserPlus, Users, X } from "lucide-react";
 import {
   api,
   errorText,
@@ -60,6 +60,58 @@ const TABS: { key: Tab; label: string; icon: typeof Package }[] = [
   { key: "beli", label: "Stock In & Rusak", icon: Truck },
   { key: "anggota", label: "Anggota", icon: Users },
 ];
+
+// Sortable columns (as in the other menus): click a title to sort by it, again for the other way. A
+// number / date column starts with the largest / newest. Empty values go last.
+type Sort = { key: string; dir: "asc" | "desc" };
+type SortVal = string | number | null | undefined;
+function sortBy<T>(rows: T[], sort: Sort, get: Record<string, (r: T) => SortVal>): T[] {
+  const f = get[sort.key];
+  if (!f) return rows;
+  const m = sort.dir === "asc" ? 1 : -1;
+  return [...rows].sort((a, b) => {
+    const x = f(a);
+    const y = f(b);
+    if (x === y) return 0;
+    if (x === null || x === undefined || x === "") return 1;
+    if (y === null || y === undefined || y === "") return -1;
+    return (typeof x === "number" && typeof y === "number" ? x - y : String(x).localeCompare(String(y), "id", { numeric: true })) * m;
+  });
+}
+function SortTh({
+  label,
+  k,
+  sort,
+  setSort,
+  num = false,
+  desc = num,
+  className = "",
+}: {
+  label: string;
+  k: string;
+  sort: Sort;
+  setSort: (s: Sort) => void;
+  num?: boolean;
+  // First click sorts largest / newest first (numbers and dates).
+  desc?: boolean;
+  className?: string;
+}) {
+  const active = sort.key === k;
+  const Icon = active ? (sort.dir === "asc" ? ArrowUp : ArrowDown) : ArrowUpDown;
+  return (
+    <th className={`px-3 py-2.5 whitespace-nowrap ${num ? "text-right" : ""} ${className}`}>
+      <button
+        type="button"
+        onClick={() => setSort(active ? { key: k, dir: sort.dir === "asc" ? "desc" : "asc" } : { key: k, dir: desc ? "desc" : "asc" })}
+        className={`inline-flex items-center gap-1 hover:text-[var(--accent-blue)] ${active ? "text-[var(--accent-blue)]" : ""}`}
+        title="Urutkan"
+      >
+        {label}
+        <Icon size={12} />
+      </button>
+    </th>
+  );
+}
 
 export function KoperasiPage() {
   const { user } = useAuth();
@@ -430,7 +482,22 @@ function RekapTab({ periode, reload }: { periode: string; reload: number }) {
       .then((r) => (setRows(r.data), setLimit(r.limit)))
       .catch(() => setRows([]));
   }, [periode, reload]);
-  const shown = (rows ?? []).filter((r) => (filter === "POTONG_GAJI" ? r.potong_gaji > 0 : filter === "INSTANSI" ? r.instansi > 0 : true));
+  const [sort, setSort] = useState<Sort>({ key: "", dir: "asc" });
+  const shown = sortBy(
+    (rows ?? []).filter((r) => (filter === "POTONG_GAJI" ? r.potong_gaji > 0 : filter === "INSTANSI" ? r.instansi > 0 : true)),
+    sort,
+    {
+      kode: (r) => r.kode,
+      nama: (r) => r.nama,
+      jabatan: (r) => r.jabatan,
+      estate: (r) => [r.estate, r.divisi].filter(Boolean).join(" / "),
+      n_bon: (r) => r.n_bon,
+      potong_gaji: (r) => r.potong_gaji,
+      tunai: (r) => r.tunai,
+      instansi: (r) => r.instansi,
+      total: (r) => r.total,
+    }
+  );
   const sum = (k: "potong_gaji" | "tunai" | "instansi" | "total") => shown.reduce((s, r) => s + r[k], 0);
   const lewat = (r: KopRekap) => limit > 0 && r.potong_gaji > limit;
   const nLewat = shown.filter(lewat).length;
@@ -477,15 +544,15 @@ function RekapTab({ periode, reload }: { periode: string; reload: number }) {
           <thead>
             <tr className="bg-[#d5edc9] text-left text-xs text-[var(--text-primary)]">
               <th className="px-3 py-2.5">No</th>
-              <th className="px-3 py-2.5">NIK</th>
-              <th className="px-3 py-2.5">Nama</th>
-              <th className="px-3 py-2.5">Jabatan</th>
-              <th className="px-3 py-2.5 whitespace-nowrap">Estate / Divisi</th>
-              <th className="px-3 py-2.5 text-right whitespace-nowrap">Jml Bon</th>
-              <th className="px-3 py-2.5 text-right whitespace-nowrap">Potong Gaji</th>
-              <th className="px-3 py-2.5 text-right">Tunai</th>
-              <th className="px-3 py-2.5 text-right">Instansi</th>
-              <th className="px-3 py-2.5 text-right">Total</th>
+              <SortTh label="NIK" k="kode" sort={sort} setSort={setSort} />
+              <SortTh label="Nama" k="nama" sort={sort} setSort={setSort} />
+              <SortTh label="Jabatan" k="jabatan" sort={sort} setSort={setSort} />
+              <SortTh label="Estate / Divisi" k="estate" sort={sort} setSort={setSort} />
+              <SortTh label="Jml Bon" k="n_bon" sort={sort} setSort={setSort} num />
+              <SortTh label="Potong Gaji" k="potong_gaji" sort={sort} setSort={setSort} num />
+              <SortTh label="Tunai" k="tunai" sort={sort} setSort={setSort} num />
+              <SortTh label="Instansi" k="instansi" sort={sort} setSort={setSort} num />
+              <SortTh label="Total" k="total" sort={sort} setSort={setSort} num />
             </tr>
           </thead>
           <tbody className="divide-y divide-[var(--border)]">
@@ -564,8 +631,20 @@ function StokTab({ reload, canEdit, onChanged }: { reload: number; canEdit: bool
   }, [aktif, reload]);
   const q = search.trim().toLowerCase();
   const menipis = (b: KopBarang) => b.lacak_stok && b.stok <= b.stok_min;
-  const shown = (rows ?? []).filter(
-    (b) => (!q || b.nama.toLowerCase().includes(q) || b.kode.toLowerCase().includes(q)) && (only === "ada" ? b.stok > 0 : only === "menipis" ? menipis(b) : true)
+  const [sort, setSort] = useState<Sort>({ key: "nama", dir: "asc" });
+  const shown = sortBy(
+    (rows ?? []).filter(
+      (b) => (!q || b.nama.toLowerCase().includes(q) || b.kode.toLowerCase().includes(q)) && (only === "ada" ? b.stok > 0 : only === "menipis" ? menipis(b) : true)
+    ),
+    sort,
+    {
+      kode: (b) => b.kode,
+      nama: (b) => b.nama,
+      stok: (b) => (b.lacak_stok ? b.stok : null),
+      harga_beli: (b) => b.harga_beli,
+      harga_jual: (b) => b.harga_jual,
+      terakhir: (b) => b.terakhir,
+    }
   );
   const buildReport = async () => ({
     title: "Stok Barang Koperasi Nilam",
@@ -613,12 +692,12 @@ function StokTab({ reload, canEdit, onChanged }: { reload: number; canEdit: bool
         <table className="data-table text-sm">
           <thead>
             <tr className="bg-[#d5edc9] text-left text-xs text-[var(--text-primary)]">
-              <th className="px-3 py-2.5">Kode</th>
-              <th className="px-3 py-2.5">Nama Barang</th>
-              <th className="px-3 py-2.5 text-right">Stok</th>
-              <th className="px-3 py-2.5 text-right whitespace-nowrap">Harga Beli</th>
-              <th className="px-3 py-2.5 text-right whitespace-nowrap">Harga Jual</th>
-              <th className="px-3 py-2.5 whitespace-nowrap">Terakhir Bergerak</th>
+              <SortTh label="Kode" k="kode" sort={sort} setSort={setSort} />
+              <SortTh label="Nama Barang" k="nama" sort={sort} setSort={setSort} />
+              <SortTh label="Stok" k="stok" sort={sort} setSort={setSort} num />
+              <SortTh label="Harga Beli" k="harga_beli" sort={sort} setSort={setSort} num />
+              <SortTh label="Harga Jual" k="harga_jual" sort={sort} setSort={setSort} num />
+              <SortTh label="Terakhir Bergerak" k="terakhir" sort={sort} setSort={setSort} desc />
               <th className="px-3 py-2.5" />
             </tr>
           </thead>
@@ -835,7 +914,19 @@ function AnggotaTab({ reload, canEdit, onChanged }: { reload: number; canEdit: b
       .catch(() => setRows([]));
   }, [status, reload]);
   const q = search.trim().toLowerCase();
-  const shown = (rows ?? []).filter((a) => !q || a.kode.toLowerCase().includes(q) || a.nama.toLowerCase().includes(q) || a.jabatan.toLowerCase().includes(q));
+  const [sort, setSort] = useState<Sort>({ key: "", dir: "asc" });
+  const shown = sortBy(
+    (rows ?? []).filter((a) => !q || a.kode.toLowerCase().includes(q) || a.nama.toLowerCase().includes(q) || a.jabatan.toLowerCase().includes(q)),
+    sort,
+    {
+      kode: (a) => a.kode,
+      nama: (a) => a.nama,
+      jabatan: (a) => a.jabatan,
+      estate: (a) => [a.estate, a.divisi].filter(Boolean).join(" / "),
+      terakhir: (a) => a.terakhir,
+      bulan_ini: (a) => a.total_bulan_ini || null,
+    }
+  );
   const keluar = (rows ?? []).filter((a) => a.jenis === "KARYAWAN" && !a.di_master).length;
   const buildReport = async () => ({
     title: "Anggota Koperasi Nilam",
@@ -882,12 +973,12 @@ function AnggotaTab({ reload, canEdit, onChanged }: { reload: number; canEdit: b
         <table className="data-table text-sm">
           <thead>
             <tr className="bg-[#d5edc9] text-left text-xs text-[var(--text-primary)]">
-              <th className="px-3 py-2.5 whitespace-nowrap">NIK / Kode</th>
-              <th className="px-3 py-2.5">Nama</th>
-              <th className="px-3 py-2.5">Jabatan</th>
-              <th className="px-3 py-2.5 whitespace-nowrap">Estate / Divisi</th>
-              <th className="px-3 py-2.5 whitespace-nowrap">Terakhir Ambil</th>
-              <th className="px-3 py-2.5 text-right whitespace-nowrap">Bulan Ini</th>
+              <SortTh label="NIK / Kode" k="kode" sort={sort} setSort={setSort} />
+              <SortTh label="Nama" k="nama" sort={sort} setSort={setSort} />
+              <SortTh label="Jabatan" k="jabatan" sort={sort} setSort={setSort} />
+              <SortTh label="Estate / Divisi" k="estate" sort={sort} setSort={setSort} />
+              <SortTh label="Terakhir Ambil" k="terakhir" sort={sort} setSort={setSort} desc />
+              <SortTh label="Bulan Ini" k="bulan_ini" sort={sort} setSort={setSort} num />
               <th className="px-3 py-2.5" />
             </tr>
           </thead>
