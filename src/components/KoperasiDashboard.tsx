@@ -52,19 +52,28 @@ function Tip({ lines }: { lines: ReactNode[] }) {
 }
 
 export function KoperasiDashboard({ periode, reload }: { periode: string; reload: number }) {
-  const [range, setRange] = useState(1);
+  // A preset counts back from the periode picked on the page; "custom" is any dari..sampai months.
+  const [range, setRange] = useState<number | "custom">(1);
+  const [custom, setCustom] = useState({ dari: periode, sampai: periode });
   const [d, setD] = useState<KopDashboard | null>(null);
   const [error, setError] = useState("");
-  const dari = monthsBack(periode, range - 1);
+  const sampai = range === "custom" ? custom.sampai : periode;
+  const dari = range === "custom" ? custom.dari : monthsBack(periode, range - 1);
+  const months = (Number(sampai.slice(0, 4)) - Number(dari.slice(0, 4))) * 12 + Number(sampai.slice(5, 7)) - Number(dari.slice(5, 7)) + 1;
+  const pickCustom = () => {
+    // Opens on the months the current preset shows, so it's a tweak rather than a fresh start.
+    if (range !== "custom") setCustom({ dari, sampai });
+    setRange("custom");
+  };
   useEffect(() => {
     setError("");
     api
-      .kopDashboard(dari, periode)
+      .kopDashboard(dari, sampai)
       .then(setD)
       .catch(() => setError("Dashboard gagal dimuat, coba muat ulang"));
-  }, [dari, periode, reload]);
+  }, [dari, sampai, reload]);
 
-  const rangeText = range === 1 ? bulanLabel(periode) : `${bulanLabel(dari)} – ${bulanLabel(periode)}`;
+  const rangeText = months === 1 ? bulanLabel(sampai) : `${bulanLabel(dari)} – ${bulanLabel(sampai)}`;
   const k = d?.kpi;
   // The charts on screen go into the printout / Excel as pictures, above their figures.
   const bulanRef = useRef<HTMLDivElement>(null);
@@ -180,11 +189,37 @@ export function KoperasiDashboard({ periode, reload }: { periode: string; reload
               {r.label}
             </button>
           ))}
+          <button
+            onClick={pickCustom}
+            className={`px-3 py-1.5 ${range === "custom" ? "bg-[var(--accent-blue)] text-white" : "text-[var(--text-secondary)] hover:bg-[#f1f5f9]"}`}
+          >
+            Custom
+          </button>
         </div>
-        <span className="text-xs text-[var(--text-muted)]">{rangeText} · sampai periode yang dipilih di atas</span>
+        {range === "custom" ? (
+          <div className="flex items-center gap-1.5 text-sm">
+            <input
+              type="month"
+              value={custom.dari}
+              max={custom.sampai}
+              onChange={(e) => e.target.value && setCustom((c) => ({ dari: e.target.value, sampai: e.target.value > c.sampai ? e.target.value : c.sampai }))}
+              className="px-2 py-1 rounded-md border border-[var(--border)] bg-white"
+            />
+            <span className="text-[var(--text-muted)]">s/d</span>
+            <input
+              type="month"
+              value={custom.sampai}
+              min={custom.dari}
+              onChange={(e) => e.target.value && setCustom((c) => ({ sampai: e.target.value, dari: e.target.value < c.dari ? e.target.value : c.dari }))}
+              className="px-2 py-1 rounded-md border border-[var(--border)] bg-white"
+            />
+          </div>
+        ) : (
+          <span className="text-xs text-[var(--text-muted)]">{rangeText} · sampai periode yang dipilih di atas</span>
+        )}
         {d && (
           <div className="ml-auto flex gap-2">
-            <ExportButtons total={0} buildReport={buildReport} fileName={`dashboard-koperasi-${dari}-${periode}`} />
+            <ExportButtons total={0} buildReport={buildReport} fileName={`dashboard-koperasi-${dari}-${sampai}`} />
           </div>
         )}
       </div>
@@ -343,7 +378,7 @@ export function KoperasiDashboard({ periode, reload }: { periode: string; reload
                     </thead>
                     <tbody>
                       {d.topPengebon.map((p, i) => {
-                        const perBulan = p.total / Math.max(range, 1);
+                        const perBulan = p.total / months;
                         return (
                           <tr key={p.kode} className="border-b border-[var(--border)] last:border-0 align-top">
                             <td className="px-1 py-1.5 text-[var(--text-muted)]">{i + 1}</td>
@@ -358,8 +393,8 @@ export function KoperasiDashboard({ periode, reload }: { periode: string; reload
                             <td className="px-1 py-1.5 text-right">{p.bon}</td>
                             <td className="px-1 py-1.5 text-right whitespace-nowrap">
                               <div className="font-semibold">{rp(p.total)}</div>
-                              {range > 1 && <div className="text-[11px] text-[var(--text-muted)]">± {rp(perBulan)}/bln</div>}
-                              {range === 1 && (
+                              {months > 1 && <div className="text-[11px] text-[var(--text-muted)]">± {rp(perBulan)}/bln</div>}
+                              {months === 1 && (
                                 <div className="mt-1 h-1 w-24 ml-auto rounded-full bg-[#eef2f6] overflow-hidden" title={`${Math.round((p.total / d.limit) * 100)}% dari limit`}>
                                   <div className="h-full" style={{ width: `${Math.min(100, (p.total / d.limit) * 100)}%`, background: p.total > d.limit ? "var(--accent-red)" : BAR }} />
                                 </div>
@@ -370,7 +405,7 @@ export function KoperasiDashboard({ periode, reload }: { periode: string; reload
                       })}
                     </tbody>
                   </table>
-                  {range === 1 && <p className="text-[10px] text-[var(--text-muted)] mt-1.5">Garis kecil = pemakaian limit {rp(d.limit)} bulan ini.</p>}
+                  {months === 1 && <p className="text-[10px] text-[var(--text-muted)] mt-1.5">Garis kecil = pemakaian limit {rp(d.limit)} bulan ini.</p>}
                 </div>
               ) : (
                 <p className="text-sm text-[var(--text-muted)]">Belum ada stock out potong gaji.</p>
