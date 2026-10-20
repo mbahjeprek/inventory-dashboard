@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { X } from "lucide-react";
 import { api, errorText, type GudangStockItem } from "../lib/api";
+import { useAuth } from "../context/AuthContext";
+import { can } from "../lib/access";
 
 export function EditGudangStockModal({
   item,
@@ -13,6 +15,9 @@ export function EditGudangStockModal({
 }) {
   const [bufferStock, setBufferStock] = useState(item.buffer_stock);
   const [stockTersedia, setStockTersedia] = useState(item.stock_tersedia);
+  // A changed stock is booked as a Koreksi Stok (server), so it needs the Koreksi Gudang tick.
+  const { user } = useAuth();
+  const bisaKoreksi = can(user, "gudang.koreksi");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
@@ -70,8 +75,10 @@ export function EditGudangStockModal({
                 value={stockTersedia}
                 step="any"
                 onChange={(e) => setStockTersedia(parseFloat(e.target.value) || 0)}
-                className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-2"
+                disabled={!bisaKoreksi}
+                className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-2 disabled:bg-[#f8fafc] disabled:text-[var(--text-muted)]"
               />
+              <p className="text-[11px] text-[var(--text-muted)] mt-0.5">{bisaKoreksi ? "Perubahan stok dicatat sebagai Koreksi Stok" : "Ubah stok perlu hak Koreksi Gudang"}</p>
             </div>
           </div>
 

@@ -753,7 +753,8 @@ app.post("/api/items", (req, res, next) => (req.user!.perms.includes("master.bar
   }
 });
 
-app.put("/api/items/:id", requireSuperuser, async (req, res) => {
+// Master barang is shared by every gudang: changed with Master Barang, or by Gudang Nilam (whose list it is).
+app.put("/api/items/:id", (req, res, next) => (req.user!.perms.includes("master.barang") ? next() : requireEstate("NILAM")(req, res, next)), async (req, res) => {
   const { kode, nama, satuan, buffer_stock } = req.body;
   const existing = await queryOne("SELECT * FROM items WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Not found" });
@@ -792,7 +793,7 @@ app.put("/api/items/:id", requireSuperuser, async (req, res) => {
   res.json({ success: true });
 });
 
-app.delete("/api/items/:id", requireSuperuser, async (req, res) => {
+app.delete("/api/items/:id", (req, res, next) => (req.user!.perms.includes("master.barang") ? next() : requireEstate("NILAM")(req, res, next)), async (req, res) => {
   const { id } = req.params;
   const existing = await queryOne("SELECT * FROM items WHERE id = @id", { id });
   if (!existing) return res.status(404).json({ error: "Not found" });
@@ -954,6 +955,42 @@ app.use(async (req, res, next) => {
   txTime.run(`${tanggal}T${time}+07:00`, () => next());
 });
 
+// The same rule for changing what is already there: a movement dated before the last approved stok opname
+// of its estate was counted by it, so editing / deleting it (or moving one there) would undo the count.
+// A Super User can still correct it.
+const jakDate = (col: string) => `to_char((${col} AT TIME ZONE 'Asia/Jakarta')::date, 'YYYY-MM-DD')`;
+const OPNAME_EDIT_LOCK: { re: RegExp; table: string; date: string; module: OpnameModule; estate: string }[] = [
+  { re: /^\/api\/transactions\/(\d+)$/, table: "transactions", date: jakDate("created_at"), module: "GUDANG", estate: "'NILAM'" },
+  { re: /^\/api\/stock-in\/(\d+)$/, table: "stock_in_log", date: "tanggal_terima_iso", module: "GUDANG", estate: "'NILAM'" },
+  { re: /^\/api\/stock-out\/(\d+)$/, table: "stock_out_log", date: "tanggal_keluar_iso", module: "GUDANG", estate: "'NILAM'" },
+  { re: /^\/api\/gudang-stock\/history\/(\d+)$/, table: "gudang_stock_tx", date: jakDate("created_at"), module: "GUDANG", estate: "gudang" },
+  { re: /^\/api\/klinik-stock\/history\/(\d+)$/, table: "klinik_stock_tx", date: jakDate("created_at"), module: "KLINIK", estate: "klinik" },
+  { re: /^\/api\/bbm\/(\d+)$/, table: "bbm_log", date: "tanggal_iso", module: "BBM", estate: "lokasi" },
+  { re: /^\/api\/pupuk\/(\d+)$/, table: "pupuk_log", date: "tanggal_iso", module: "PUPUK", estate: "estate" },
+  { re: /^\/api\/oli\/(\d+)$/, table: "oli_log", date: "tanggal_iso", module: "OLI", estate: "estate" },
+];
+app.use(async (req, res, next) => {
+  if ((req.method !== "PUT" && req.method !== "DELETE") || req.user?.role === "superuser") return next();
+  const lock = OPNAME_EDIT_LOCK.find((l) => l.re.test(req.path));
+  if (!lock) return next();
+  const id = Number(req.path.match(lock.re)![1]);
+  const row = await queryOne<{ d: string | null; e: string | null }>(`SELECT ${lock.date} d, ${lock.estate} e FROM ${lock.table} WHERE id = @id`, { id });
+  if (!row?.e) return next();
+  const opname = await queryOne<{ tanggal: string }>(
+    "SELECT tanggal FROM opname WHERE module = @module AND estate = @estate AND status = 'APPROVED' ORDER BY tanggal DESC LIMIT 1",
+    { module: lock.module, estate: row.e }
+  );
+  if (!opname) return next();
+  const b = req.body ?? {};
+  const moved = req.method === "PUT" ? String(b.tanggal_iso ?? b.tanggal_terima_iso ?? b.tanggal_keluar_iso ?? "") : "";
+  const before = (d: string | null | undefined) => !!d && ISO_DATE.test(d) && d < opname.tanggal;
+  if (before(row.d) || before(moved))
+    return res.status(400).json({
+      error: `Transaksi sebelum stok opname terakhir ${row.e} (${opname.tanggal.split("-").reverse().join("/")}) sudah tercakup hasil hitungnya, jadi tidak bisa diubah / dihapus. Minta Super User bila memang perlu dikoreksi.`,
+    });
+  next();
+});
+
 app.post("/api/gudang-stock", async (req, res) => {
   const { gudang, item_kode, buffer_stock, stock_tersedia } = req.body;
   if (!GUDANG_STOCK_OPTIONS.includes(gudang)) return res.status(400).json({ error: "Gudang tidak valid" });
@@ -991,12 +1028,18 @@ app.put("/api/gudang-stock/:id", requireSuperuser, async (req, res) => {
   if (!existing) return res.status(404).json({ error: "Not found" });
   if (!estateAllowed(req.user!, existing.gudang)) return res.status(403).json({ error: "Akses ditolak" });
 
-  const { buffer_stock, stock_tersedia } = req.body;
-  await execute("UPDATE gudang_stock SET buffer_stock = @buffer_stock, stock_tersedia = @stock_tersedia WHERE id = @id", {
-    buffer_stock: buffer_stock ?? 0,
-    stock_tersedia: stock_tersedia ?? 0,
-    id: req.params.id,
-  });
+  const { buffer_stock } = req.body;
+  // A changed stock is a Koreksi (Koreksi Gudang tick, a history row with the difference), like Klinik's
+  // edit: setting the number directly left the Riwayat saldo out of step with the stock.
+  const stockBaru = req.body.stock_tersedia === undefined || req.body.stock_tersedia === null || req.body.stock_tersedia === "" ? null : Number(req.body.stock_tersedia);
+  const stockBerubah = stockBaru !== null && round3(stockBaru) !== round3(Number(existing.stock_tersedia));
+  if (stockBerubah) {
+    if (req.user!.role !== "superuser" && !req.user!.perms.includes("gudang.koreksi")) return res.status(403).json({ error: "Mengubah stok perlu hak Koreksi Gudang (tercatat sebagai Koreksi Stok)" });
+    if (!validQty(GUDANG_LEDGER, stockBaru) || stockBaru! < 0) return res.status(400).json({ error: "Stok tidak valid" });
+  }
+  await execute("UPDATE gudang_stock SET buffer_stock = @buffer_stock WHERE id = @id", { buffer_stock: buffer_stock ?? 0, id: req.params.id });
+  if (stockBerubah) await recordCorrection(req, GUDANG_LEDGER, existing.gudang, existing.item_kode, stockBaru!, "Edit stok");
+  const stock_tersedia = stockBerubah ? stockBaru : existing.stock_tersedia;
   const master = await queryOne<any>("SELECT nama FROM items WHERE kode = @kode", { kode: existing.item_kode });
   await logActivity(req, {
     module: "BARANG",
@@ -1212,6 +1255,7 @@ app.post("/api/gudang-stock/transactions", async (req, res) => {
 app.post("/api/gudang-stock/correction", requireSuperuser, async (req, res) => {
   const { gudang, item_kode, actual_qty, note } = req.body;
   if (!GUDANG_STOCK_OPTIONS.includes(gudang)) return res.status(400).json({ error: "Gudang tidak valid" });
+  if (!estateAllowed(req.user!, gudang)) return res.status(403).json({ error: "Akses ditolak" });
   if (!validQty(GUDANG_LEDGER, actual_qty) || actual_qty < 0) return res.status(400).json({ error: "Invalid payload" });
 
   const item = await queryOne<any>("SELECT kode, nama FROM items WHERE kode = @item_kode", { item_kode });
@@ -1970,6 +2014,19 @@ function userAccess(body: any): { role: "superuser" | "estate"; estates: string;
   return { role, estates, perms: listValue(body.perms, ALL_PERMS) };
 }
 
+// A Pengguna admin who isn't a Super User hands out only what it has itself: estates and permissions
+// outside its own (or an account that holds more than it) are refused, so it can't raise its own access
+// or take over a wider account by resetting its password.
+function beyondActor(req: express.Request, estates: string | null | undefined, perms: string | null | undefined): string | null {
+  const u = req.user!;
+  if (u.role === "superuser") return null;
+  const e = String(estates ?? "").split(",").filter(Boolean).find((x) => !u.estates.includes(x));
+  if (e) return `Estate ${e} tidak termasuk akses akun Anda`;
+  const p = String(perms ?? "").split(",").filter(Boolean).find((x) => !u.perms.includes(x));
+  if (p) return `Hak ${p} tidak dimiliki akun Anda, jadi tidak bisa diberikan`;
+  return null;
+}
+
 // Login ignores case, so two accounts may not differ only in case (admin / Admin).
 const usernameTaken = async (username: string, exceptId = 0) =>
   !!(await queryOne("SELECT 1 FROM users WHERE LOWER(username) = LOWER(@username) AND id <> @exceptId", { username, exceptId }));
@@ -1982,6 +2039,8 @@ app.post("/api/users", requireSuperuser, async (req, res) => {
   const access = userAccess(req.body);
   if (access.error) return res.status(400).json({ error: access.error });
   if (access.role === "superuser" && req.user!.role !== "superuser") return res.status(403).json({ error: "Hanya Super User yang bisa membuat Super User" });
+  const lebih = beyondActor(req, access.estates, access.perms);
+  if (lebih) return res.status(403).json({ error: lebih });
   if (await usernameTaken(String(username).trim())) return res.status(409).json({ error: "Username sudah digunakan" });
 
   try {
@@ -2021,6 +2080,16 @@ app.put("/api/users/:id", requireSuperuser, async (req, res) => {
   if ((access.role === "superuser" || existing.role === "superuser") && req.user!.role !== "superuser") {
     return res.status(403).json({ error: "Hanya Super User yang bisa mengubah akun Super User" });
   }
+  if (req.user!.role !== "superuser") {
+    const wider = beyondActor(req, existing.estates ?? existing.estate, existing.perms);
+    if (wider) return res.status(403).json({ error: `Akun ini punya akses lebih luas dari akun Anda (${wider.toLowerCase()}); hanya Super User yang bisa mengubahnya` });
+    const lebih = beyondActor(req, access.estates, access.perms);
+    if (lebih) return res.status(403).json({ error: lebih });
+    const same = (a: string | null | undefined, b: string | null | undefined) =>
+      String(a ?? "").split(",").filter(Boolean).sort().join() === String(b ?? "").split(",").filter(Boolean).sort().join();
+    if (existing.id === req.user!.id && (!same(access.estates, existing.estates ?? existing.estate) || !same(access.perms, existing.perms)))
+      return res.status(403).json({ error: "Hak akses akun sendiri hanya bisa diubah oleh Super User" });
+  }
   if (await usernameTaken(String(username).trim(), existing.id)) return res.status(409).json({ error: "Username sudah digunakan" });
 
   try {
@@ -2051,6 +2120,8 @@ app.put("/api/users/:id", requireSuperuser, async (req, res) => {
 app.delete("/api/users/:id", requireSuperuser, async (req, res) => {
   const existing = await queryOne<any>("SELECT * FROM users WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Not found" });
+  if (req.user!.role !== "superuser" && (existing.role === "superuser" || beyondActor(req, existing.estates ?? existing.estate, existing.perms)))
+    return res.status(403).json({ error: "Akun ini punya akses lebih luas dari akun Anda; hanya Super User yang bisa menghapusnya" });
 
   const { c: userCount } = (await queryOne<{ c: number }>("SELECT COUNT(*) c FROM users"))!;
   if (Number(userCount) <= 1) {
@@ -4680,6 +4751,8 @@ for (const lr of LEDGER_ROUTES) {
   app.put(`/api/${lr.path}/history/:id`, requireSuperuser, async (req, res) => {
     const existing = await queryOne<any>(`SELECT * FROM ${l.tx} WHERE id = @id`, { id: req.params.id });
     if (!existing) return res.status(404).json({ error: "Not found" });
+    // Only the estates the account has: a KNS admin can't change WJA's movements by id.
+    if (!estateAllowed(req.user!, existing[l.scope])) return res.status(403).json({ error: "Akses ditolak" });
     if (editTooLate(req, res, l === KLINIK_LEDGER ? "klinik" : "gudang", existing)) return;
     if (existing.transfer_from_id) return res.status(400).json({ error: TRANSFER_LOCKED });
     const newEvidence = await checkEditEvidence(req, res, existing.evidence_id);
@@ -4762,6 +4835,8 @@ for (const lr of LEDGER_ROUTES) {
   app.delete(`/api/${lr.path}/history/:id`, requireSuperuser, async (req, res) => {
     const existing = await queryOne<any>(`SELECT * FROM ${l.tx} WHERE id = @id`, { id: req.params.id });
     if (!existing) return res.status(404).json({ error: "Not found" });
+    // Only the estates the account has: a KNS admin can't change WJA's movements by id.
+    if (!estateAllowed(req.user!, existing[l.scope])) return res.status(403).json({ error: "Akses ditolak" });
     if (editTooLate(req, res, l === KLINIK_LEDGER ? "klinik" : "gudang", existing)) return;
     if (existing.transfer_from_id) return res.status(400).json({ error: TRANSFER_LOCKED });
     try {
@@ -7243,6 +7318,19 @@ app.post("/api/pinjaman/:id/delete", async (req, res) => {
     const l = await queryOne<LoanRow>("SELECT * FROM pinjaman WHERE id = @id FOR UPDATE", { id: Number(req.params.id) || 0 }, client);
     if (!l) return refuse(res, 404, "Pinjaman tidak ditemukan");
     if (l.status === "DIPINJAM") return refuse(res, 400, "Pinjaman ini belum kembali. Batalkan atau kembalikan dulu, baru bisa dihapus.");
+    // A stok opname approved after the loan counted the stock with the loan in it: taking the loan's rows
+    // out afterwards would leave one side off by its qty (the count stays, the movement goes).
+    const counted = await queryOne<{ estate: string; tanggal: string }>(
+      "SELECT estate, tanggal FROM opname WHERE module = @module AND estate = ANY(@estates::text[]) AND status = 'APPROVED' AND tanggal >= @tgl ORDER BY tanggal DESC LIMIT 1",
+      { module: l.module, estates: [l.dari_estate, l.ke_estate], tgl: l.tanggal_iso },
+      client
+    );
+    if (counted)
+      return refuse(
+        res,
+        400,
+        `Sudah ada stok opname ${counted.estate} tanggal ${counted.tanggal.split("-").reverse().join("/")} setelah pinjaman ini, yang sudah menghitung stoknya. Menghapus pinjaman akan membuat saldo meleset; koreksi lewat stok opname / koreksi stok saja.`
+      );
     // A transfer never came back: send it back first (refused when the receiving estate has used
     // it), so removing every row of both sides below leaves the stock as before the transfer.
     if (l.jenis === "TRANSFER") {
@@ -7856,20 +7944,20 @@ app.get("/api/koperasi/tx", async (req, res) => {
 
 type KopLine = { barang_kode: string; qty: number; harga: number };
 // The lines of a pengambilan / pembelian: known barang, qty > 0, harga >= 0 (one barang once).
-async function kopLines(items: unknown, client: PoolClient): Promise<{ error: string } | { lines: (KopLine & { nama: string; lacak_stok: boolean })[] }> {
+async function kopLines(items: unknown, client: PoolClient): Promise<{ error: string } | { lines: (KopLine & { nama: string; lacak_stok: boolean; harga_jual: number })[] }> {
   if (!Array.isArray(items) || !items.length) return { error: "Isi minimal satu barang" };
   const lines = items.map((i: any) => ({ barang_kode: String(i?.barang_kode ?? ""), qty: Number(i?.qty), harga: Number(i?.harga ?? 0) }));
   if (lines.some((l) => !l.barang_kode || !(l.qty > 0) || !(l.harga >= 0))) return { error: "Jumlah harus lebih dari 0 dan harga tidak boleh minus" };
   if (new Set(lines.map((l) => l.barang_kode)).size !== lines.length) return { error: "Barang yang sama diisi dua kali; gabungkan jumlahnya" };
-  const barang = await queryMany<{ kode: string; nama: string; lacak_stok: boolean }>(
-    "SELECT kode, nama, lacak_stok FROM koperasi_barang WHERE kode = ANY(@kode::text[]) AND koperasi = @k FOR UPDATE",
+  const barang = await queryMany<{ kode: string; nama: string; lacak_stok: boolean; harga_jual: number }>(
+    "SELECT kode, nama, lacak_stok, harga_jual::float8 harga_jual FROM koperasi_barang WHERE kode = ANY(@kode::text[]) AND koperasi = @k FOR UPDATE",
     { kode: lines.map((l) => l.barang_kode), k: KOPERASI },
     client
   );
   const by = new Map(barang.map((b) => [b.kode, b]));
   const missing = lines.find((l) => !by.has(l.barang_kode));
   if (missing) return { error: `Barang ${missing.barang_kode} tidak ada di master koperasi` };
-  return { lines: lines.map((l) => ({ ...l, nama: by.get(l.barang_kode)!.nama, lacak_stok: by.get(l.barang_kode)!.lacak_stok })) };
+  return { lines: lines.map((l) => ({ ...l, nama: by.get(l.barang_kode)!.nama, lacak_stok: by.get(l.barang_kode)!.lacak_stok, harga_jual: by.get(l.barang_kode)!.harga_jual })) };
 }
 
 // Stock now of these barang (rows locked by kopLines' FOR UPDATE, so two sales can't both take the last one).
@@ -7920,6 +8008,8 @@ app.post("/api/koperasi/jual", async (req, res) => {
       }
       const v = await kopLines(b.items, client);
       if ("error" in v) return v;
+      // Stock Out sells at the master harga jual (a price typed in could slip a bon under the limit / out of the bill).
+      for (const l of v.lines) l.harga = l.harga_jual;
       const stok = await kopStok(v.lines.map((l) => l.barang_kode), client);
       const short = v.lines.find((l) => l.lacak_stok && (stok.get(l.barang_kode) ?? 0) + 1e-9 < l.qty);
       if (short) return { error: `Stok ${short.nama} tinggal ${kopQty(stok.get(short.barang_kode) ?? 0)}, tidak cukup untuk ${kopQty(short.qty)}` };
@@ -8077,8 +8167,8 @@ app.post("/api/koperasi/jual/batch", async (req, res) => {
       }
       const barang = new Map(
         (
-          await queryMany<{ kode: string; nama: string; lacak_stok: boolean }>(
-            "SELECT kode, nama, lacak_stok FROM koperasi_barang WHERE kode = ANY(@k::text[]) AND koperasi = @kop FOR UPDATE",
+          await queryMany<{ kode: string; nama: string; lacak_stok: boolean; harga_jual: number }>(
+            "SELECT kode, nama, lacak_stok, harga_jual::float8 harga_jual FROM koperasi_barang WHERE kode = ANY(@k::text[]) AND koperasi = @kop FOR UPDATE",
             { k: [...new Set(rows.map((r) => r.barang_kode))], kop: KOPERASI },
             client
           )
@@ -8086,6 +8176,8 @@ app.post("/api/koperasi/jual/batch", async (req, res) => {
       );
       const noBarang = rows.findIndex((r) => !barang.has(r.barang_kode));
       if (noBarang >= 0) return refuse(noBarang, `barang ${rows[noBarang].barang_kode} tidak ada di master koperasi`);
+      // At the master harga jual, as a single Stock Out.
+      for (const r of rows) r.harga = barang.get(r.barang_kode)!.harga_jual;
       // Karyawan with an unpaid bill past its due date can't take goods.
       const nunggak = new Map((await kopTunggakan(kodes, client)).map((t) => [t.kode, t]));
       const blocked = rows.findIndex((r) => anggota.get(r.anggota_kode)?.jenis !== "INSTANSI" && nunggak.has(r.anggota_kode));
@@ -8303,10 +8395,12 @@ app.put("/api/koperasi/tx/:id", async (req, res) => {
       if (t.jenis !== "JUAL") return { error: "Hanya baris Stock Out yang bisa diedit" };
       const kunci = kopKunci(req, t.periode);
       if (kunci) return { error: kunci, status: 403 };
-      const v = await kopLines([{ barang_kode: String(b.barang_kode ?? "").trim().toUpperCase(), qty: b.qty, harga: b.harga }], client);
+      const v = await kopLines([{ barang_kode: String(b.barang_kode ?? "").trim().toUpperCase(), qty: b.qty, harga: 0 }], client);
       if ("error" in v) return v;
       const l = v.lines[0];
       const sameBarang = l.barang_kode === t.barang_kode;
+      // The same barang keeps the price it was sold at; another barang takes its master harga jual.
+      l.harga = sameBarang ? Number(t.harga) : l.harga_jual;
       if (!sameBarang) {
         const dup = await queryOne("SELECT 1 FROM koperasi_tx WHERE bon = @bon AND jenis = 'JUAL' AND barang_kode = @kode AND id <> @id", { bon: t.bon, kode: l.barang_kode, id: t.id }, client);
         if (t.bon && dup) return { error: `${l.nama} sudah ada di bon ini; ubah jumlah baris itu saja` };
@@ -8490,7 +8584,7 @@ async function kopOpnameBook(id: number, tanggal: string, uid: number, client: P
   return r.rowCount;
 }
 
-app.put("/api/koperasi/opname/:id", requireSuperuser, async (req, res) => {
+app.put("/api/koperasi/opname/:id", (req, res, next) => (req.user!.role === "superuser" ? next() : res.status(403).json({ error: "Hanya Super User yang bisa mengubah / menghapus stok opname yang sudah selesai" })), async (req, res) => {
   const b = req.body ?? {};
   if (!isIsoDate(b.tanggal) || b.tanggal > jakartaToday()) return res.status(400).json({ error: "Tanggal tidak valid (tidak boleh setelah hari ini)" });
   const lines = (Array.isArray(b.lines) ? b.lines : []).map((l: any) => ({
@@ -8552,7 +8646,7 @@ app.put("/api/koperasi/opname/:id", requireSuperuser, async (req, res) => {
   res.json({ success: true, koreksi: result.koreksi });
 });
 
-app.delete("/api/koperasi/opname/:id", requireSuperuser, async (req, res) => {
+app.delete("/api/koperasi/opname/:id", (req, res, next) => (req.user!.role === "superuser" ? next() : res.status(403).json({ error: "Hanya Super User yang bisa mengubah / menghapus stok opname yang sudah selesai" })), async (req, res) => {
   const result = await withTransaction(async (client) => {
     const o = await queryOne<{ id: number; status: string; tanggal_iso: string }>(
       "SELECT id, status, tanggal_iso FROM koperasi_opname WHERE id = @id AND koperasi = @k FOR UPDATE",

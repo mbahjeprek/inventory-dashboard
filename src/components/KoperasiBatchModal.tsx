@@ -74,10 +74,8 @@ export function KopJualBatchModal({ onClose, onSuccess }: { onClose: () => void;
     }
     return undefined;
   };
-  const hargaOf = (c: Cells) => {
-    const typed = parseNum(c.harga);
-    return Number.isFinite(typed) ? typed : (itemOf(c)?.harga_jual ?? NaN);
-  };
+  // Stock Out sells at the master harga jual (the server applies it too); change it in Stok Barang.
+  const hargaOf = (c: Cells) => itemOf(c)?.harga_jual ?? NaN;
 
   const columns: GridCol[] = [
     {
@@ -110,19 +108,17 @@ export function KopJualBatchModal({ onClose, onSuccess }: { onClose: () => void;
         return i ? `${i.nama} · ${i.lacak_stok ? `stok ${fmtNum(i.stok)} ${i.satuan}` : "tanpa stok"}` : norm(c.barang) && !loading ? "tidak ada di daftar barang" : undefined;
       },
     },
-    { key: "jumlah", label: "Jumlah", width: 90, type: "number", align: "right", hint: (c) => itemOf(c)?.satuan || undefined },
     {
-      key: "harga",
-      label: "Harga (Rp)",
+      key: "jumlah",
+      label: "Jumlah",
       width: 130,
       type: "number",
       align: "right",
-      copy: false,
-      placeholder: (c) => (itemOf(c) ? fmtNum(itemOf(c)!.harga_jual) : ""),
       hint: (c) => {
+        const it = itemOf(c);
+        if (!it) return undefined;
         const q = parseNum(c.jumlah);
-        const h = hargaOf(c);
-        return q > 0 && Number.isFinite(h) ? `= ${rp(q * h)}` : undefined;
+        return q > 0 ? `${it.satuan} × ${rp(it.harga_jual)} = ${rp(q * it.harga_jual)}` : `${it.satuan} · ${rp(it.harga_jual)}`;
       },
     },
   ];

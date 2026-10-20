@@ -1884,8 +1884,8 @@ function EditTxModal({ tx, onClose, onSuccess }: { tx: KopTx; onClose: () => voi
             {pick.stok !== null && <p className={`text-[11px] mt-0.5 ${n > pick.stok ? "text-[var(--accent-red)]" : "text-[var(--text-muted)]"}`}>tersedia {fmtQty(pick.stok)} {pick.satuan}</p>}
           </div>
           <div>
-            <label className={labelCls}>Harga</label>
-            <RpInput value={harga} onChange={setHarga} />
+            <label className={labelCls}>Harga (dari master barang)</label>
+            <div className={`${inputCls} bg-[#f8fafc] text-right`}>{rp(h >= 0 ? h : 0)}</div>
           </div>
         </div>
         <p className="text-sm">
@@ -2004,7 +2004,7 @@ function BarangLines({ lines, setLines, harga, checkStok }: { lines: Line[]; set
                       <input value={l.qty} onChange={(e) => update(i, "qty", e.target.value)} inputMode="decimal" className="w-full text-sm rounded border border-[var(--border)] px-2 py-1" />
                     </td>
                     <td className="px-2 py-1.5">
-                      <RpInput small value={l.harga} onChange={(v) => update(i, "harga", v)} />
+                      {harga === "jual" ? <div className="text-right py-1 px-2 whitespace-nowrap">{rp(parseNum(l.harga) || 0)}</div> : <RpInput small value={l.harga} onChange={(v) => update(i, "harga", v)} />}
                     </td>
                     <td className="px-2 py-1.5 text-right whitespace-nowrap">{rp(qty * (parseNum(l.harga) || 0))}</td>
                     <td className="px-1 py-1.5">
