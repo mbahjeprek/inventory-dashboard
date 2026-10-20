@@ -84,7 +84,7 @@ export function KoperasiDashboard({ periode, reload }: { periode: string; reload
     if (!d || !k) throw new Error("belum dimuat");
     const right = "right" as const;
     return {
-      title: "Dashboard Koperasi Karyawan Nilam",
+      title: "Dashboard Koperasi PT.AKSS",
       subtitle: [rangeText],
       sections: [
         {

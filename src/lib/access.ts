@@ -47,7 +47,7 @@ export const OTHER_PERMS: { group: string; items: { key: string; label: string }
   },
   { group: "Monitoring", items: [{ key: "monitor.log_user", label: "Log Aktivitas User" }] },
   {
-    group: "Koperasi (Nilam)",
+    group: "Koperasi PT.AKSS",
     items: [
       { key: "koperasi.view", label: "Lihat Koperasi" },
       { key: "koperasi.input", label: "Input Koperasi (pengambilan, pembelian, rusak)" },

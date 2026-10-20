@@ -361,7 +361,7 @@ function OpnameDetail({
     }
   };
   const buildReport = async () => ({
-    title: `Stok Opname Koperasi Nilam #${id}`,
+    title: `Stok Opname Koperasi PT.AKSS #${id}`,
     subtitle: [`Tanggal ${head ? isoDisplay(head.tanggal_iso) : ""}${head?.catatan ? ` · ${head.catatan}` : ""}`, head?.status === "DRAFT" ? "Lembar hitung (isi kolom Fisik)" : `Status: ${head ? STATUS[head.status].label : ""}`],
     columns: [
       { label: "No" },

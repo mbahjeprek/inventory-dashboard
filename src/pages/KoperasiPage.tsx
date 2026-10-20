@@ -149,7 +149,7 @@ export function KoperasiPage() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold text-[var(--text-primary)]">Koperasi Karyawan Nilam</h1>
+          <h1 className="text-xl font-semibold text-[var(--text-primary)]">Koperasi PT.AKSS</h1>
           <p className="text-sm text-[var(--text-secondary)]">Stock Out barang ke karyawan, dipotong dari gaji bulan itu (limit Rp 1.500.000 per bulan)</p>
         </div>
         {canInput && (
@@ -367,7 +367,7 @@ function TxTable({
     let rows = all.data;
     for (let p = 2; rows.length < all.total && p <= 40; p++) rows = rows.concat((await api.kopTx({ ...params, page: p, pageSize: 500 })).data);
     return {
-      title: `Koperasi Nilam - ${jual ? "Stock Out" : beli ? "Stock In" : rusak ? "Barang Rusak" : "Riwayat"}`,
+      title: `Koperasi PT.AKSS - ${jual ? "Stock Out" : beli ? "Stock In" : rusak ? "Barang Rusak" : "Riwayat"}`,
       subtitle: [periode ? `Periode ${periodeLabel(periode)}` : "Semua periode", ...(q ? [`Cari: ${q}`] : [])],
       landscape: true,
       columns: cols.map((c) => ({ label: ["Harga", "Total"].includes(c) ? `${c} (Rp)` : c, align: ["Jumlah", "Harga", "Total"].includes(c) ? ("right" as const) : undefined })),
@@ -719,7 +719,7 @@ function RekapTab({ periode, reload, canBayar, onChanged }: { periode: string; r
     }
   };
   const buildReport = async () => ({
-    title: `Rekap Potong Gaji Koperasi Nilam - ${periodeLabel(periode)}`,
+    title: `Rekap Potong Gaji Koperasi PT.AKSS - ${periodeLabel(periode)}`,
     subtitle: [
       filter === "POTONG_GAJI" ? "Karyawan dengan potong gaji" : filter === "INSTANSI" ? "Instansi (ditagih ke kantor)" : "Semua anggota",
       ...(cari.trim() ? [`Cari: ${cari.trim()}`] : []),
@@ -1243,7 +1243,7 @@ function StokTab({ reload, canEdit, onChanged }: { reload: number; canEdit: bool
     }
   );
   const buildReport = async () => ({
-    title: "Stok Barang Koperasi Nilam",
+    title: "Stok Barang Koperasi PT.AKSS",
     subtitle: [`Per ${isoDisplay(localToday())}`],
     columns: [
       { label: "Kode" },
@@ -1525,7 +1525,7 @@ function AnggotaTab({ reload, canEdit, onChanged }: { reload: number; canEdit: b
   );
   const keluar = (rows ?? []).filter((a) => a.jenis === "KARYAWAN" && !a.di_master).length;
   const buildReport = async () => ({
-    title: "Anggota Koperasi Nilam",
+    title: "Anggota Koperasi PT.AKSS",
     subtitle: [status === "aktif" ? "Anggota aktif" : status === "nonaktif" ? "Anggota tidak aktif" : "Semua anggota"],
     columns: [
       { label: "NIK / Kode" },

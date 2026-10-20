@@ -77,7 +77,7 @@ const navSections: NavSection[] = [
       { to: PINJAMAN_PATH, label: "Pinjaman & Transfer", icon: ArrowLeftRight, subtitle: "Antar estate" },
     ],
   },
-  { title: "Koperasi", items: [{ to: KOPERASI_PATH, label: "Koperasi Karyawan", icon: ShoppingBasket, subtitle: "Nilam · Stock Out & Potong Gaji" }] },
+  { title: "Koperasi", items: [{ to: KOPERASI_PATH, label: "Koperasi PT.AKSS", icon: ShoppingBasket, subtitle: "Stock Out & Potong Gaji" }] },
   {
     title: "Master Data",
     collapsible: true,

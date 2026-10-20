@@ -29,7 +29,7 @@ export function printKopSlips(opts: { periode: string; jatuhTempo: string; limit
       .join("");
     return `<section class="slip">
       <div class="head">
-        <div><div class="org">KOPERASI KARYAWAN NILAM</div><div class="ttl">Slip Potong Gaji · ${esc(periodeText(periode))}</div></div>
+        <div><div class="org">KOPERASI PT.AKSS</div><div class="ttl">Slip Potong Gaji · ${esc(periodeText(periode))}</div></div>
         <div class="due">Dipotong dari gaji<br><b>tgl 10–${esc(tgl(jatuhTempo))}</b></div>
       </div>
       <table class="info"><tr>
