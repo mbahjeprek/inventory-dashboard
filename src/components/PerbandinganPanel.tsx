@@ -168,9 +168,10 @@ function BarangPicker({ module, value, onChange }: { module: OpnameModule; value
 // Dashboard "Perbandingan": how much each estate on screen used in a period, as bars per estate,
 // a trend line per estate and a table with the change against the period before.
 // onExport gets a function that builds the Cetak / Excel part of what the panel shows right now.
-export function PerbandinganPanel({ estates, onExport }: { estates: EstateLink[]; onExport?: (build: (() => ReportPart) | null) => void }) {
+// only: lock the panel to one module's sources (the all-estate page of that menu, e.g. BBM = Solar + Bensin).
+export function PerbandinganPanel({ estates, onExport, only }: { estates: EstateLink[]; onExport?: (build: (() => ReportPart) | null) => void; only?: OpnameModule }) {
   const { user } = useAuth();
-  const sources = SOURCES.filter((s) => canModule(user, s.module));
+  const sources = SOURCES.filter((s) => canModule(user, s.module) && (!only || s.module === only));
   const [sourceKey, setSourceKey] = useState(() => {
     try {
       const saved = localStorage.getItem("perbandingan.source");

@@ -47,22 +47,27 @@ const ESTATES = [
   { code: "FIRUS", label: "Firus", suffix: "-firus" },
 ];
 
-type ModuleLink = { key: Module; icon: typeof Package; title: string; base: string; subtitle: string };
+type ModuleLink = { key: Module; icon: typeof Package; title: string; base: string; subtitle: string; slug: string };
 
 const MODULE_LINKS: ModuleLink[] = [
-  { key: "GUDANG", icon: Package, title: "Gudang", base: "/inventory", subtitle: "Stok barang · In & Out" },
-  { key: "BBM", icon: Fuel, title: "BBM", base: "/inventory-bbm", subtitle: "Solar · Pemakaian" },
-  { key: "PUPUK", icon: Sprout, title: "Pupuk", base: "/inventory-pupuk", subtitle: "Stok & penyaluran" },
-  { key: "OLI", icon: Droplet, title: "Oli", base: "/inventory-oli", subtitle: "Stok & pemakaian" },
-  { key: "KLINIK", icon: Stethoscope, title: "Klinik", base: "/inventory-klinik", subtitle: "Obat · Pasien" },
+  { key: "GUDANG", icon: Package, title: "Gudang", base: "/inventory", subtitle: "Stok barang · In & Out", slug: "gudang" },
+  { key: "BBM", icon: Fuel, title: "BBM", base: "/inventory-bbm", subtitle: "Solar · Pemakaian", slug: "bbm" },
+  { key: "PUPUK", icon: Sprout, title: "Pupuk", base: "/inventory-pupuk", subtitle: "Stok & penyaluran", slug: "pupuk" },
+  { key: "OLI", icon: Droplet, title: "Oli", base: "/inventory-oli", subtitle: "Stok & pemakaian", slug: "oli" },
+  { key: "KLINIK", icon: Stethoscope, title: "Klinik", base: "/inventory-klinik", subtitle: "Obat · Pasien", slug: "klinik" },
 ];
 
-const pathFor = (m: ModuleLink, estate: string) => m.base + (ESTATES.find((e) => e.code === estate)?.suffix ?? "");
+// "Semua estate" in the picker: the module links open that menu's all-estate page (SemuaEstatePage).
+const ALL = "ALL";
+const pathFor = (m: ModuleLink, estate: string) =>
+  estate === ALL ? `/semua-estate/${m.slug}` : m.base + (ESTATES.find((e) => e.code === estate)?.suffix ?? "");
 
-// "/inventory-bbm-kns" -> { BBM, KNS }; null for any other page.
+// "/inventory-bbm-kns" -> { BBM, KNS }, "/semua-estate/bbm" -> { BBM, ALL }; null for any other page.
 function pageOf(pathname: string): { module: ModuleLink; estate: string } | null {
-  for (const m of MODULE_LINKS)
+  for (const m of MODULE_LINKS) {
+    if (pathFor(m, ALL) === pathname) return { module: m, estate: ALL };
     for (const e of ESTATES) if (pathFor(m, e.code) === pathname) return { module: m, estate: e.code };
+  }
   return null;
 }
 
@@ -227,13 +232,10 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: { mobileOpen?: bo
       return "";
     }
   });
-  const activeEstate =
-    current && shownEstates.includes(current.estate)
-      ? current.estate
-      : shownEstates.includes(chosenEstate)
-        ? chosenEstate
-        : shownEstateList[0]?.code;
-  const activeEstateLabel = ESTATES.find((e) => e.code === activeEstate)?.label ?? "";
+  const multi = shownEstateList.length > 1;
+  const usable = (code: string) => shownEstates.includes(code) || (code === ALL && multi);
+  const activeEstate = current && usable(current.estate) ? current.estate : usable(chosenEstate) ? chosenEstate : shownEstateList[0]?.code;
+  const activeEstateLabel = activeEstate === ALL ? "Semua estate" : (ESTATES.find((e) => e.code === activeEstate)?.label ?? "");
   const [estateMenuOpen, setEstateMenuOpen] = useState(false);
 
   useEffect(() => {
@@ -339,7 +341,7 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: { mobileOpen?: bo
                   >
                     <MapPin size={minimized ? 14 : 16} className="shrink-0 text-[#b9f0c9]" />
                     {minimized ? (
-                      <span className="text-[10px] font-semibold">{activeEstateLabel.slice(0, 3).toUpperCase()}</span>
+                      <span className="text-[10px] font-semibold">{activeEstate === ALL ? "ALL" : activeEstateLabel.slice(0, 3).toUpperCase()}</span>
                     ) : (
                       <>
                         <span className="flex-1 text-left text-sm">
@@ -352,7 +354,7 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: { mobileOpen?: bo
                   </button>
                   {estateMenuOpen && (
                     <div className="mt-1 py-1 rounded-md bg-black/15">
-                      {shownEstateList.map((e) => (
+                      {[{ code: ALL, label: "Semua estate" }, ...shownEstateList].map((e) => (
                         <button
                           key={e.code}
                           onClick={() => {
@@ -367,7 +369,9 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: { mobileOpen?: bo
                               : "text-white/65 hover:bg-white/10 hover:text-white"
                           }`}
                         >
-                          <span className={`flex-1 ${minimized ? "text-center" : "text-left"}`}>{minimized ? e.label.slice(0, 3).toUpperCase() : e.label}</span>
+                          <span className={`flex-1 ${minimized ? "text-center" : "text-left"} ${e.code === ALL && !minimized ? "italic" : ""}`}>
+                            {minimized ? (e.code === ALL ? "ALL" : e.label.slice(0, 3).toUpperCase()) : e.label}
+                          </span>
                           {!minimized && e.code === activeEstate && <Check size={14} className="text-[#b9f0c9]" />}
                         </button>
                       ))}

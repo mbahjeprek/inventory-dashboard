@@ -23,6 +23,7 @@ import { MasterObatPage } from "./pages/MasterObatPage";
 import { MasterOliPage } from "./pages/MasterOliPage";
 import { MasterPupukPage } from "./pages/MasterPupukPage";
 import { DokumenPage } from "./pages/DokumenPage";
+import { SemuaEstatePage } from "./pages/SemuaEstatePage";
 import { UserActivityPage } from "./pages/UserActivityPage";
 import { StokOpnamePage } from "./pages/StokOpnamePage";
 import { PinjamanPage } from "./pages/PinjamanPage";
@@ -207,6 +208,7 @@ function App() {
                   </RequirePageAccess>
                 }
               />
+              <Route path="/semua-estate/:modul" element={<SemuaEstatePage />} />
               <Route
                 path="/dokumen"
                 element={

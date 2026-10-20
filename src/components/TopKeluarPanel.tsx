@@ -56,14 +56,15 @@ function Segmented<T extends string>({ value, options, onChange }: { value: T; o
 // Dashboard ranking of the items that went out most often (number of transactions) for the estates on
 // screen; total qty is shown alongside. Koreksi is not counted.
 // onExport gets a function that builds the Cetak / Excel part of what the panel shows right now.
-export function TopKeluarPanel({ estates, onExport }: { estates: EstateLink[]; onExport?: (build: (() => ReportPart) | null) => void }) {
+// only: lock the panel to Gudang or Klinik (the all-estate page of that menu).
+export function TopKeluarPanel({ estates, onExport, only }: { estates: EstateLink[]; onExport?: (build: (() => ReportPart) | null) => void; only?: Source }) {
   const navigate = useNavigate();
   const { user } = useAuth();
   // An admin limited to some modules only ranks those (Gudang and/or Klinik).
   const sources = ([
     { key: "gudang", label: "Gudang" },
     { key: "klinik", label: "Klinik" },
-  ] as { key: Source; label: string }[]).filter((o) => canModule(user, o.key === "gudang" ? "GUDANG" : "KLINIK"));
+  ] as { key: Source; label: string }[]).filter((o) => canModule(user, o.key === "gudang" ? "GUDANG" : "KLINIK") && (!only || o.key === only));
   const [source, setSource] = useState<Source>(sources[0]?.key ?? "gudang");
   const [period, setPeriod] = useState<Period>("bulan");
   const [custom, setCustom] = useState(() => periodRange("bulan", { from: "", to: "" }));

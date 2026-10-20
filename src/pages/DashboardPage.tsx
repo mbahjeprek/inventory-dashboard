@@ -17,7 +17,7 @@ type User = ReturnType<typeof useAuth>["user"];
 type GudangStat = { totalItems: number; totalStock: number; lowStock: number; outOfStock: number };
 
 // One entry per estate with the page of each inventory it has.
-const ESTATES = [
+export const ESTATES = [
   { estate: "NILAM", label: "Nilam", gudang: "/inventory", bbm: "/inventory-bbm", pupuk: "/inventory-pupuk", klinik: "/inventory-klinik", oli: "/inventory-oli" },
   { estate: "KNS", label: "KNS", gudang: "/inventory-kns", bbm: "/inventory-bbm-kns", pupuk: "/inventory-pupuk-kns", klinik: "/inventory-klinik-kns", oli: "/inventory-oli-kns" },
   { estate: "WJA", label: "WJA", gudang: "/inventory-wja", bbm: "/inventory-bbm-wja", pupuk: "/inventory-pupuk-wja", klinik: "/inventory-klinik-wja", oli: "/inventory-oli-wja" },
