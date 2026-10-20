@@ -32,10 +32,9 @@ import { useOpenPinjaman } from "../hooks/useOpenPinjaman";
 import { ChangePasswordModal } from "./ChangePasswordModal";
 import { canModule, koperasiOnly, pageAllowed, userEstates, OPNAME_PATH, PINJAMAN_PATH, PASIEN_PATH, KOPERASI_PATH, type Module } from "../lib/access";
 
-type NavItem = { to: string; label: string; icon: typeof Package };
-// highlight: a menu of its own that stands out from the inventory lists (Koperasi): a bordered card in
-// the koperasi gold, bigger, with a subtitle, instead of a small group heading.
-type NavSection = { title?: string; collapsible?: boolean; highlight?: boolean; subtitle?: string; items: NavItem[] };
+// subtitle: shown only on the active menu, which grows into a gold card (see NavRow).
+type NavItem = { to: string; label: string; icon: typeof Package; subtitle?: string };
+type NavSection = { title?: string; collapsible?: boolean; items: NavItem[] };
 
 // Every inventory module has one page per estate. The sidebar shows one estate picker plus one link
 // per module, so switching estate (same module) or module (same estate) is a single click.
@@ -47,14 +46,14 @@ const ESTATES = [
   { code: "FIRUS", label: "Firus", suffix: "-firus" },
 ];
 
-type ModuleLink = { key: Module; icon: typeof Package; title: string; base: string };
+type ModuleLink = { key: Module; icon: typeof Package; title: string; base: string; subtitle: string };
 
 const MODULE_LINKS: ModuleLink[] = [
-  { key: "GUDANG", icon: Package, title: "Gudang", base: "/inventory" },
-  { key: "BBM", icon: Fuel, title: "BBM", base: "/inventory-bbm" },
-  { key: "PUPUK", icon: Sprout, title: "Pupuk NPK", base: "/inventory-pupuk" },
-  { key: "OLI", icon: Droplet, title: "Oli", base: "/inventory-oli" },
-  { key: "KLINIK", icon: Stethoscope, title: "Klinik", base: "/inventory-klinik" },
+  { key: "GUDANG", icon: Package, title: "Gudang", base: "/inventory", subtitle: "Stok barang · In & Out" },
+  { key: "BBM", icon: Fuel, title: "BBM", base: "/inventory-bbm", subtitle: "Solar · Pemakaian" },
+  { key: "PUPUK", icon: Sprout, title: "Pupuk NPK", base: "/inventory-pupuk", subtitle: "Stok & penyaluran" },
+  { key: "OLI", icon: Droplet, title: "Oli", base: "/inventory-oli", subtitle: "Stok & pemakaian" },
+  { key: "KLINIK", icon: Stethoscope, title: "Klinik", base: "/inventory-klinik", subtitle: "Obat · Pasien" },
 ];
 
 const pathFor = (m: ModuleLink, estate: string) => m.base + (ESTATES.find((e) => e.code === estate)?.suffix ?? "");
@@ -69,37 +68,92 @@ function pageOf(pathname: string): { module: ModuleLink; estate: string } | null
 const LAST_ESTATE_KEY = "sidebar-estate";
 
 const navSections: NavSection[] = [
-  { items: [{ to: "/", label: "Dashboard", icon: LayoutDashboard }] },
+  { items: [{ to: "/", label: "Dashboard", icon: LayoutDashboard, subtitle: "Ringkasan semua estate" }] },
   {
     title: "Inventory",
     collapsible: true,
     items: [
-      { to: OPNAME_PATH, label: "Stok Opname", icon: ClipboardCheck },
-      { to: PINJAMAN_PATH, label: "Pinjaman & Transfer", icon: ArrowLeftRight },
+      { to: OPNAME_PATH, label: "Stok Opname", icon: ClipboardCheck, subtitle: "Hitung fisik vs sistem" },
+      { to: PINJAMAN_PATH, label: "Pinjaman & Transfer", icon: ArrowLeftRight, subtitle: "Antar estate" },
     ],
   },
-  { highlight: true, subtitle: "Nilam · Stock Out & Potong Gaji", items: [{ to: KOPERASI_PATH, label: "Koperasi Karyawan", icon: ShoppingBasket }] },
+  { title: "Koperasi", items: [{ to: KOPERASI_PATH, label: "Koperasi Karyawan", icon: ShoppingBasket, subtitle: "Nilam · Stock Out & Potong Gaji" }] },
   {
     title: "Master Data",
     collapsible: true,
     items: [
-      { to: "/master-barang", label: "Barang", icon: Package },
-      { to: "/master-obat", label: "Obat", icon: Pill },
-      { to: PASIEN_PATH, label: "Pasien", icon: Contact },
-      { to: "/master-oli", label: "Oli", icon: Droplet },
-      { to: "/karyawan", label: "Karyawan", icon: Users },
-      { to: "/alat-berat", label: "Alat Berat", icon: Truck },
-      { to: "/master-blok", label: "Blok", icon: Grid3x3 },
-      { to: "/peta-blok", label: "Peta Blok", icon: MapIcon },
-      { to: "/users", label: "Pengguna", icon: KeyRound },
+      { to: "/master-barang", label: "Barang", icon: Package, subtitle: "Daftar barang gudang" },
+      { to: "/master-obat", label: "Obat", icon: Pill, subtitle: "Daftar obat klinik" },
+      { to: PASIEN_PATH, label: "Pasien", icon: Contact, subtitle: "Data pasien klinik" },
+      { to: "/master-oli", label: "Oli", icon: Droplet, subtitle: "Jenis oli" },
+      { to: "/karyawan", label: "Karyawan", icon: Users, subtitle: "Data karyawan" },
+      { to: "/alat-berat", label: "Alat Berat", icon: Truck, subtitle: "Unit & kendaraan" },
+      { to: "/master-blok", label: "Blok", icon: Grid3x3, subtitle: "Blok kebun" },
+      { to: "/peta-blok", label: "Peta Blok", icon: MapIcon, subtitle: "Peta kebun" },
+      { to: "/users", label: "Pengguna", icon: KeyRound, subtitle: "Akun & hak akses" },
     ],
   },
   {
     title: "Monitoring",
     collapsible: true,
-    items: [{ to: "/log-user", label: "Log Aktivitas User", icon: Activity }],
+    items: [{ to: "/log-user", label: "Log Aktivitas User", icon: Activity, subtitle: "Riwayat aksi pengguna" }],
   },
 ];
+
+const isPathActive = (to: string, pathname: string) => to === pathname || (to !== "/" && pathname.startsWith(`${to}/`));
+
+// One menu row. Idle: a compact icon + label line. Active: it grows into a gold card - the icon in a round
+// badge, a bolder label and the subtitle sliding open - so moving between menus visibly moves the card.
+function NavRow({
+  to,
+  label,
+  icon: Icon,
+  subtitle,
+  active,
+  minimized,
+  badge,
+}: NavItem & { active: boolean; minimized: boolean; badge?: number }) {
+  return (
+    <NavLink
+      to={to}
+      end={to === "/"}
+      title={minimized ? label : undefined}
+      className={`group flex items-center rounded-lg transition-all duration-200 ease-out ${
+        minimized ? "justify-center p-1.5" : `gap-3 px-2 ${active ? "py-2.5" : "py-1.5"}`
+      } ${active ? "bg-[#f5c542] text-[#1f3d12] shadow-md" : "text-white/70 hover:bg-white/10 hover:text-white"}`}
+    >
+      <span
+        className={`relative shrink-0 flex items-center justify-center rounded-full transition-all duration-200 ${
+          active ? "w-9 h-9 bg-[#1f3d12]/10" : "w-7 h-7 group-hover:bg-white/10 group-hover:translate-x-0.5"
+        }`}
+      >
+        <Icon size={17} className={`transition-colors duration-200 ${active ? "text-[#1f3d12]" : "text-[#b9f0c9]"}`} />
+        {minimized && !!badge && (
+          <span className="absolute -top-1 -right-1.5 min-w-4 h-4 px-1 rounded-full bg-[#f59e0b] text-[10px] leading-4 text-center text-white">
+            {badge}
+          </span>
+        )}
+      </span>
+      {!minimized && (
+        <span className="flex-1 min-w-0">
+          <span className={`block leading-tight transition-all duration-200 ${active ? "text-[15px] font-bold" : "text-sm font-semibold"}`}>
+            {label}
+          </span>
+          {subtitle && (
+            <span className={`grid transition-all duration-200 ease-out ${active ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"}`}>
+              <span className="overflow-hidden">
+                <span className="block text-[11px] leading-tight mt-0.5 text-[#1f3d12]/75">{subtitle}</span>
+              </span>
+            </span>
+          )}
+        </span>
+      )}
+      {!minimized && !!badge && (
+        <span className="min-w-5 h-5 px-1.5 rounded-full bg-[#f59e0b] text-[11px] leading-5 text-center text-white">{badge}</span>
+      )}
+    </NavLink>
+  );
+}
 
 const SIDEBAR_COLLAPSED_KEY = "sidebar-collapsed";
 
@@ -245,7 +299,7 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: { mobileOpen?: bo
               ? true
               : !(groupCollapsed[section.title!] ?? (section.title !== "Inventory" && visibleSections.filter((x) => x.title).length > 1));
           const hasActive =
-            section.items.some((it) => it.to === location.pathname || (it.to !== "/" && location.pathname.startsWith(`${it.to}/`))) ||
+            section.items.some((it) => isPathActive(it.to, location.pathname)) ||
             (section.title === "Inventory" && !!current);
 
           return (
@@ -322,94 +376,27 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: { mobileOpen?: bo
               {isOpen &&
                 section.title === "Inventory" &&
                 activeEstate &&
-                moduleLinks.map((m) => {
-                  const Icon = m.icon;
-                  const active = current?.module.key === m.key;
-                  return (
-                    <NavLink
-                      key={m.key}
-                      to={pathFor(m, activeEstate)}
-                      title={minimized ? m.title : undefined}
-                      className={`flex items-center gap-3 py-2.5 rounded-md text-sm font-semibold transition-colors ${
-                        minimized ? "justify-center px-0" : "px-3"
-                      } ${
-                        active
-                          ? `bg-white/15 text-white ${minimized ? "" : "border-l-[3px] border-[#b9f0c9] pl-[9px]"}`
-                          : "text-white/70 hover:bg-white/10 hover:text-white"
-                      }`}
-                    >
-                      <Icon size={17} className="shrink-0 text-[#b9f0c9]" />
-                      {!minimized && m.title}
-                    </NavLink>
-                  );
-                })}
-
-              {section.highlight &&
-                section.items.map(({ to, label, icon: Icon }) => (
-                  <NavLink
-                    key={to}
-                    to={to}
-                    title={minimized ? label : undefined}
-                    className={({ isActive }) =>
-                      `group flex items-center gap-3 rounded-lg border transition-colors ${minimized ? "justify-center p-2" : "px-3 py-3"} ${
-                        isActive
-                          ? "bg-[#f5c542] border-[#f5c542] text-[#1f3d12] shadow-md"
-                          : "bg-[#f5c542]/15 border-[#f5c542]/60 text-white hover:bg-[#f5c542]/25"
-                      }`
-                    }
-                  >
-                    {({ isActive }) => (
-                      <>
-                        <span className={`shrink-0 flex items-center justify-center rounded-full ${minimized ? "w-8 h-8" : "w-9 h-9"} ${isActive ? "bg-[#1f3d12]/10" : "bg-[#f5c542]"}`}>
-                          <Icon size={18} className={isActive ? "text-[#1f3d12]" : "text-[#1f3d12]"} />
-                        </span>
-                        {!minimized && (
-                          <span className="flex-1 min-w-0">
-                            <span className="block text-[15px] font-bold leading-tight">{label}</span>
-                            {section.subtitle && <span className={`block text-[11px] leading-tight mt-0.5 ${isActive ? "text-[#1f3d12]/75" : "text-white/70"}`}>{section.subtitle}</span>}
-                          </span>
-                        )}
-                      </>
-                    )}
-                  </NavLink>
+                moduleLinks.map((m) => (
+                  <NavRow
+                    key={m.key}
+                    to={pathFor(m, activeEstate)}
+                    label={m.title}
+                    icon={m.icon}
+                    subtitle={`${activeEstateLabel} · ${m.subtitle}`}
+                    active={current?.module.key === m.key}
+                    minimized={minimized}
+                  />
                 ))}
 
               {isOpen &&
-                !section.highlight &&
-                section.items.map(({ to, label, icon: Icon }) => (
-                  <NavLink
-                    key={to}
-                    to={to}
-                    end={to === "/"}
-                    title={minimized ? label : undefined}
-                    className={({ isActive }) =>
-                      `flex items-center gap-3 py-2.5 rounded-md text-sm font-semibold transition-colors ${
-                        minimized ? "justify-center px-0" : "px-3"
-                      } ${
-                        isActive
-                          ? `bg-white/15 text-white ${minimized ? "" : "border-l-[3px] border-[#b9f0c9] pl-[9px]"}`
-                          : "text-white/70 hover:bg-white/10 hover:text-white"
-                      }`
-                    }
-                  >
-                    <span className="relative shrink-0">
-                      <Icon size={17} className="text-[#b9f0c9]" />
-                      {minimized && to === PINJAMAN_PATH && openLoans > 0 && (
-                        <span className="absolute -top-1.5 -right-2 min-w-4 h-4 px-1 rounded-full bg-[#f59e0b] text-[10px] leading-4 text-center text-white">
-                          {openLoans}
-                        </span>
-                      )}
-                    </span>
-                    {!minimized && <span className="flex-1">{label}</span>}
-                    {!minimized && to === PINJAMAN_PATH && openLoans > 0 && (
-                      <span
-                        title={`${openLoans} pinjaman belum kembali`}
-                        className="min-w-5 h-5 px-1.5 rounded-full bg-[#f59e0b] text-[11px] leading-5 text-center text-white"
-                      >
-                        {openLoans}
-                      </span>
-                    )}
-                  </NavLink>
+                section.items.map((it) => (
+                  <NavRow
+                    key={it.to}
+                    {...it}
+                    active={isPathActive(it.to, location.pathname)}
+                    minimized={minimized}
+                    badge={it.to === PINJAMAN_PATH && openLoans > 0 ? openLoans : undefined}
+                  />
                 ))}
             </div>
           );
