@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ArrowDown, ArrowUp, ArrowUpDown, Banknote, Boxes, ChevronRight, ChevronsDownUp, ChevronsUpDown, ClipboardCheck, HandCoins, LayoutDashboard, ListPlus, Lock, Package, PackageX, Pencil, Plus, Search, ShoppingBasket, Trash2, Truck, UserPlus, Users, X } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, Banknote, Boxes, ChevronRight, ChevronsDownUp, ChevronsUpDown, ClipboardCheck, HandCoins, LayoutDashboard, ListPlus, Lock, Package, PackageX, Pencil, Plus, Search, ShoppingBasket, Trash2, Truck, UserPlus, Users, X } from "lucide-react";
 import {
   api,
   errorText,
@@ -774,16 +774,45 @@ function RekapTab({ periode, reload, canBayar, onChanged }: { periode: string; r
         </div>
       </div>
       {jatuhTempo && (
-        <div className={`px-3 py-2 text-xs border-b border-[var(--border)] ${nBelum ? "bg-[var(--accent-red-bg)] text-[var(--accent-red)]" : "bg-[#f8fafc] text-[var(--text-secondary)]"}`}>
-          Rekap {periodeLabel(periode)} disetor ke HRD tgl 1, dipotong dari gaji tgl 10–{isoDisplay(jatuhTempo)}.{" "}
-          {today <= jatuhTempo
-            ? canBayar
-              ? "Setelah gaji dipotong, centang yang sudah terpotong lalu tekan Tandai lunas. Yang gajinya tidak cukup: tekan Bayar dan isi yang terpotong saja."
-              : "Setelah gaji dipotong, HR menandai lunas di sini."
-            : nBelum
-              ? `${nBelum} orang belum lunas: mereka tidak bisa ngebon lagi sampai tagihannya dilunasi.`
-              : "Semua sudah lunas."}
-          {msg && <b className="ml-2">{msg}</b>}
+        // A callout HR can't miss: when the rekap goes to HRD, when salaries are cut, and what to do after.
+        <div className="px-3 py-3 border-b border-[var(--border)]">
+          <div
+            className={`flex gap-3 rounded-lg border-l-4 px-4 py-3 ${
+              today > jatuhTempo && nBelum
+                ? "bg-[var(--accent-red-bg)] border-[var(--accent-red)] text-[var(--accent-red)]"
+                : today > jatuhTempo
+                  ? "bg-[var(--accent-green-bg)] border-[var(--accent-green)] text-[var(--accent-green)]"
+                  : "bg-[#fff7e0] border-[#f5b400] text-[#7a5200]"
+            }`}
+          >
+            <AlertTriangle size={20} className="shrink-0 mt-0.5" />
+            <div className="text-sm space-y-1">
+              <p className="font-semibold">
+                Rekap {periodeLabel(periode)} disetor ke HRD tgl 1, dipotong dari gaji tgl 10–{isoDisplay(jatuhTempo)}.
+              </p>
+              {today <= jatuhTempo ? (
+                canBayar ? (
+                  <ol className="list-decimal pl-5 space-y-0.5">
+                    <li>
+                      Setelah gaji dipotong, <b>centang</b> yang sudah terpotong lalu tekan <b>Tandai lunas</b>.
+                    </li>
+                    <li>
+                      Yang gajinya tidak cukup: tekan <b>Bayar</b> dan isi yang terpotong saja.
+                    </li>
+                  </ol>
+                ) : (
+                  <p>Setelah gaji dipotong, HR menandai lunas di sini.</p>
+                )
+              ) : nBelum ? (
+                <p>
+                  <b>{nBelum} orang belum lunas</b>: mereka tidak bisa ngebon lagi sampai tagihannya dilunasi.
+                </p>
+              ) : (
+                <p>Semua sudah lunas.</p>
+              )}
+              {msg && <p className="font-semibold">{msg}</p>}
+            </div>
+          </div>
         </div>
       )}
       <div className="table-scroll">
