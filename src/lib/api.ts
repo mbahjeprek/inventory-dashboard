@@ -1352,6 +1352,8 @@ export const api = {
   kopRusak: (body: { tanggal: string; barang_kode: string; qty: number; keterangan: string; evidence_id: string | null }) =>
     req<{ success: boolean }>("/api/koperasi/rusak", { method: "POST", body: JSON.stringify(body) }),
   kopHapus: (id: number, bon = false) => req<{ success: boolean; n: number }>(`/api/koperasi/tx/${id}${bon ? "?bon=1" : ""}`, { method: "DELETE" }),
+  kopEditTx: (id: number, body: { barang_kode: string; qty: number; harga: number }) =>
+    req<{ success: boolean }>(`/api/koperasi/tx/${id}`, { method: "PUT", body: JSON.stringify(body) }),
   kopDashboard: (dari: string, sampai: string) => req<KopDashboard>(`/api/koperasi/dashboard?dari=${dari}&sampai=${sampai}`),
   kopOpnameList: () => req<KopOpname[]>("/api/koperasi/opname"),
   kopOpname: (id: number) => req<KopOpname & { lines: KopOpnameLine[] }>(`/api/koperasi/opname/${id}`),

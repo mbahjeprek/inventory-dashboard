@@ -8200,6 +8200,60 @@ app.delete("/api/koperasi/tx/:id", async (req, res) => {
   res.json({ success: true, n: result.n });
 });
 
+// Edit one Stock Out line (a barang typed wrong): barang, jumlah, harga. Checked like a new line: stock
+// of the barang (the line's own qty counts back if it stays the same barang) and the anggota's monthly limit.
+app.put("/api/koperasi/tx/:id", async (req, res) => {
+  const b = req.body ?? {};
+  try {
+    const result = await withTransaction(async (client) => {
+      const t = await queryOne<any>(
+        "SELECT t.*, b.nama AS barang_nama, a.nama AS anggota_nama FROM koperasi_tx t JOIN koperasi_barang b ON b.kode = t.barang_kode LEFT JOIN koperasi_anggota a ON a.kode = t.anggota_kode WHERE t.id = @id AND t.koperasi = @k FOR UPDATE OF t",
+        { id: req.params.id, k: KOPERASI },
+        client
+      );
+      if (!t) return { error: "Transaksi tidak ditemukan", status: 404 };
+      if (t.jenis !== "JUAL") return { error: "Hanya baris Stock Out yang bisa diedit" };
+      const v = await kopLines([{ barang_kode: String(b.barang_kode ?? "").trim().toUpperCase(), qty: b.qty, harga: b.harga }], client);
+      if ("error" in v) return v;
+      const l = v.lines[0];
+      const sameBarang = l.barang_kode === t.barang_kode;
+      if (!sameBarang) {
+        const dup = await queryOne("SELECT 1 FROM koperasi_tx WHERE bon = @bon AND jenis = 'JUAL' AND barang_kode = @kode AND id <> @id", { bon: t.bon, kode: l.barang_kode, id: t.id }, client);
+        if (t.bon && dup) return { error: `${l.nama} sudah ada di bon ini; ubah jumlah baris itu saja` };
+      }
+      if (l.lacak_stok) {
+        const stok = ((await kopStok([l.barang_kode], client)).get(l.barang_kode) ?? 0) + (sameBarang ? Number(t.qty) : 0);
+        if (stok + 1e-9 < l.qty) return { error: `Stok ${l.nama} tinggal ${kopQty(stok)}, tidak cukup untuk ${kopQty(l.qty)}` };
+      }
+      const totalBaru = Math.round(l.qty * l.harga * 100) / 100;
+      if (t.bayar === "POTONG_GAJI" && t.anggota_kode && totalBaru > Number(t.total)) {
+        await queryOne("SELECT kode FROM koperasi_anggota WHERE kode = @kode FOR UPDATE", { kode: t.anggota_kode }, client);
+        const terpakai = (await kopTerpakai(t.anggota_kode, t.periode, client)) - Number(t.total);
+        if (terpakai + totalBaru > KOP_LIMIT + 0.005) {
+          const rpText = (n: number) => `Rp ${Math.round(n).toLocaleString("id-ID")}`;
+          return { error: `Melebihi limit ${rpText(KOP_LIMIT)} per bulan: sisa ${rpText(Math.max(KOP_LIMIT - terpakai, 0))} untuk baris ini, perubahan ini ${rpText(totalBaru)}` };
+        }
+      }
+      await execute("UPDATE koperasi_tx SET barang_kode = @kode, qty = @qty, harga = @harga, total = @total WHERE id = @id", { kode: l.barang_kode, qty: l.qty, harga: l.harga, total: totalBaru, id: t.id }, client);
+      return { t, l, totalBaru };
+    });
+    if ("error" in result) return res.status((result as any).status ?? 400).json({ error: result.error });
+    const { t, l, totalBaru } = result;
+    const rp = (n: number) => Number(n).toLocaleString("id-ID");
+    await logActivity(req, {
+      module: "KOPERASI",
+      estate: KOPERASI,
+      aksi: "Edit Stock Out",
+      objek: `${t.bon ?? ""} ${t.anggota_kode ?? ""} ${t.anggota_nama ?? ""}`.trim(),
+      detail: `${t.tanggal_iso}: ${t.barang_kode} ${t.barang_nama} ${kopQty(Number(t.qty))} @ ${rp(t.harga)} → ${l.barang_kode} ${l.nama} ${kopQty(l.qty)} @ ${rp(l.harga)} (total ${rp(t.total)} → ${rp(totalBaru)})`,
+    });
+    res.json({ success: true });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Gagal menyimpan perubahan" });
+  }
+});
+
 // ---- Stok opname koperasi (its own, separate from the inventory Stok Opname; see schema.sql koperasi_opname) ----
 // Start = every active stocked barang with its stock now; the counts are typed in (saved as a draft);
 // Selesai books fisik - stok_sistem of each counted line as a KOREKSI movement. One draft at a time.

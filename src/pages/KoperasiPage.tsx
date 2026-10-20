@@ -284,6 +284,7 @@ function TxTable({
   const [res, setRes] = useState<{ data: KopTx[]; total: number; sum_total: number; sum_qty: number } | null>(null);
   const [loading, setLoading] = useState(true);
   const [hapus, setHapus] = useState<{ tx: KopTx; bon: boolean } | null>(null);
+  const [edit, setEdit] = useState<KopTx | null>(null);
   const [error, setError] = useState("");
   const pageSize = 100;
   const params = useMemo(() => ({ jenis, periode, anggota: anggota ?? "", barang: barang ?? "", search: q }), [jenis, periode, anggota, barang, q]);
@@ -534,6 +535,11 @@ function TxTable({
                     </td>
                     {canEdit && (
                       <td className="px-3 py-2 text-right whitespace-nowrap">
+                        {jual && (
+                          <button onClick={() => setEdit(t)} title="Edit barang / jumlah" className="p-1.5 rounded-md text-[var(--text-secondary)] hover:bg-[#f1f5f9]">
+                            <Pencil size={14} />
+                          </button>
+                        )}
                         <button onClick={() => setHapus({ tx: t, bon: false })} title="Hapus baris ini" className="p-1.5 rounded-md text-[var(--accent-red)] hover:bg-[var(--accent-red-bg)]">
                           <Trash2 size={14} />
                         </button>
@@ -564,6 +570,16 @@ function TxTable({
             Berikutnya
           </button>
         </div>
+      )}
+      {edit && (
+        <EditTxModal
+          tx={edit}
+          onClose={() => setEdit(null)}
+          onSuccess={() => {
+            setEdit(null);
+            onChanged();
+          }}
+        />
       )}
       {hapus && (
         <ConfirmDialog
@@ -1675,6 +1691,101 @@ function AnggotaPicker({ value, onChange, karyawanOnly = false }: { value: KopAn
 }
 
 // Input for a rupiah amount: "Rp" in front, dots added while typing.
+// Fix one Stock Out line typed wrong: another barang (its harga jual comes along), the jumlah or the harga.
+function EditTxModal({ tx, onClose, onSuccess }: { tx: KopTx; onClose: () => void; onSuccess: () => void }) {
+  const barang = useBarangAktif();
+  const [pick, setPick] = useState<{ kode: string; nama: string; satuan: string; stok: number | null }>({ kode: tx.barang_kode, nama: tx.barang_nama, satuan: tx.satuan, stok: null });
+  const [search, setSearch] = useState("");
+  const [qty, setQty] = useState(String(tx.qty).replace(".", ","));
+  const [harga, setHarga] = useState(rpText(tx.harga));
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const q = search.trim().toLowerCase();
+  const options = q ? barang.filter((b) => b.nama.toLowerCase().includes(q) || b.kode.toLowerCase().includes(q)).slice(0, 10) : [];
+  const choose = (b: KopBarang) => {
+    setPick({ kode: b.kode, nama: b.nama, satuan: b.satuan, stok: b.lacak_stok ? b.stok + (b.kode === tx.barang_kode ? tx.qty : 0) : null });
+    setHarga(rpText(b.harga_jual));
+    setSearch("");
+  };
+  const n = parseNum(qty);
+  const h = parseNum(harga || "0");
+  const save = async () => {
+    if (!(n > 0) || !(h >= 0)) return setError("Jumlah harus lebih dari 0 dan harga diisi angka");
+    setBusy(true);
+    setError("");
+    try {
+      await api.kopEditTx(tx.id, { barang_kode: pick.kode, qty: n, harga: h });
+      onSuccess();
+    } catch (e) {
+      setError(errorText(e, "Gagal menyimpan perubahan"));
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal title="Edit Stock Out" subtitle={`${tx.anggota_nama || tx.anggota_kode} · ${isoDisplay(tx.tanggal_iso)} · semula ${tx.barang_nama} ${fmtQty(tx.qty)} ${tx.satuan} (${rp(tx.total)})`} onClose={onClose}>
+      <div className="space-y-3">
+        <div className="relative">
+          <label className={labelCls}>Barang</label>
+          <div className="mb-1.5 px-3 py-2 rounded-md bg-[#f8fafc] border border-[var(--border)] text-sm">
+            <span className="font-medium text-[var(--text-primary)]">{pick.nama}</span> <span className="text-[11px] text-[var(--text-muted)]">{pick.kode}</span>
+            {pick.kode !== tx.barang_kode && <span className="ml-2 text-[11px] text-[var(--accent-amber)]">diganti</span>}
+          </div>
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && options[0]) {
+                e.preventDefault();
+                choose(options[0]);
+              }
+            }}
+            placeholder="Ganti barang: ketik nama / kode"
+            className={inputCls}
+            autoFocus
+          />
+          {options.length > 0 && (
+            <div className="absolute z-10 mt-1 w-full max-h-60 overflow-auto bg-white border border-[var(--border)] rounded-md shadow-lg">
+              {options.map((b) => (
+                <button key={b.kode} type="button" onClick={() => choose(b)} className="w-full flex justify-between gap-3 text-left px-3 py-2 text-sm hover:bg-[#f1f5f9] border-b border-[var(--border)] last:border-0">
+                  <span>
+                    {b.nama} <span className="text-[11px] text-[var(--text-muted)]">{b.kode}</span>
+                  </span>
+                  <span className={`text-xs whitespace-nowrap ${b.lacak_stok && b.stok <= 0 ? "text-[var(--accent-red)]" : "text-[var(--text-muted)]"}`}>
+                    {b.lacak_stok ? `stok ${fmtQty(b.stok)} ${b.satuan}` : "tanpa stok"} · {rp(b.harga_jual)}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className={labelCls}>Jumlah ({pick.satuan})</label>
+            <input value={qty} onChange={(e) => setQty(e.target.value)} inputMode="decimal" className={inputCls} />
+            {pick.stok !== null && <p className={`text-[11px] mt-0.5 ${n > pick.stok ? "text-[var(--accent-red)]" : "text-[var(--text-muted)]"}`}>tersedia {fmtQty(pick.stok)} {pick.satuan}</p>}
+          </div>
+          <div>
+            <label className={labelCls}>Harga</label>
+            <RpInput value={harga} onChange={setHarga} />
+          </div>
+        </div>
+        <p className="text-sm">
+          Total baru <b>{rp((n > 0 ? n : 0) * (h >= 0 ? h : 0))}</b>
+        </p>
+        {error && <p className="text-xs text-[var(--accent-red)]">{error}</p>}
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className="px-4 py-2 text-sm rounded-md border border-[var(--border)] text-[var(--text-secondary)]">
+            Batal
+          </button>
+          <button onClick={save} disabled={busy} className={btnPrimary}>
+            {busy ? "Menyimpan..." : "Simpan"}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 function RpInput({ value, onChange, small = false }: { value: string; onChange: (v: string) => void; small?: boolean }) {
   return (
     <div className="relative">
