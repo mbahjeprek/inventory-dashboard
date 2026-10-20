@@ -545,12 +545,13 @@ export type Dokumen = {
   modul: string;
   estate: string;
   keterangan: string;
+  pic: string;
   pinned: boolean;
   oleh: string | null;
   created_at: string;
   updated_at: string;
 };
-export type DokumenInput = Pick<Dokumen, "judul" | "url" | "kategori" | "modul" | "estate" | "keterangan" | "pinned">;
+export type DokumenInput = Pick<Dokumen, "judul" | "url" | "kategori" | "modul" | "estate" | "keterangan" | "pic" | "pinned">;
 export type KopSlipLine = { anggota_kode: string; tanggal_iso: string; bon: string | null; barang_kode: string; barang_nama: string; satuan: string; qty: number; harga: number; total: number; bayar: string };
 export type KopCara = "POTONG_GAJI" | "TUNAI" | "LAINNYA";
 export type KopTagihan = { kode: string; periode: string; tagihan: number; dibayar: number; sisa: number; jatuh_tempo: string };

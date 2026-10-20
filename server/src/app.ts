@@ -8903,6 +8903,7 @@ const dokPayload = (b: any) => ({
   modul: DOK_MODUL.includes(String(b?.modul ?? "").toUpperCase()) ? String(b?.modul ?? "").toUpperCase() : "",
   estate: (ESTATES as readonly string[]).includes(String(b?.estate ?? "").toUpperCase()) ? String(b.estate).toUpperCase() : "",
   keterangan: String(b?.keterangan ?? "").trim(),
+  pic: String(b?.pic ?? "").trim(),
   pinned: b?.pinned === true,
 });
 // Only web links: a javascript: / data: url would run in the page when clicked.
@@ -8932,10 +8933,10 @@ app.get("/api/dokumen", async (req, res) => {
     conditions.push("d.kategori = @kategori");
     params.kategori = String(q.kategori).toUpperCase();
   }
-  wordSearch(q.search ?? "", ["d.judul", "d.keterangan", "d.url"], conditions, params);
+  wordSearch(q.search ?? "", ["d.judul", "d.keterangan", "d.url", "d.pic"], conditions, params);
   const data = await queryMany(
     `SELECT d.*, u.nama AS oleh FROM dokumen_link d LEFT JOIN users u ON u.id = d.user_id
-      WHERE ${conditions.join(" AND ")} ORDER BY d.pinned DESC, d.updated_at DESC`,
+      WHERE ${conditions.join(" AND ")} ORDER BY d.pinned DESC, d.id`,
     params
   );
   res.json({ data });
@@ -8947,8 +8948,8 @@ app.post("/api/dokumen", async (req, res) => {
   if (!dokUrlOk(d.url)) return res.status(400).json({ error: "Link harus diawali https:// (salin dari address bar / tombol Share)" });
   if (d.estate && !estateAllowed(req.user!, d.estate)) return res.status(403).json({ error: "Estate ini tidak termasuk akses akun Anda" });
   const row = await queryOne<{ id: number }>(
-    `INSERT INTO dokumen_link (judul, url, kategori, modul, estate, keterangan, pinned, user_id)
-     VALUES (@judul, @url, @kategori, @modul, @estate, @keterangan, @pinned, @uid) RETURNING id`,
+    `INSERT INTO dokumen_link (judul, url, kategori, modul, estate, keterangan, pic, pinned, user_id)
+     VALUES (@judul, @url, @kategori, @modul, @estate, @keterangan, @pic, @pinned, @uid) RETURNING id`,
     { ...d, uid: req.user!.id }
   );
   await dokLog(req, d, "Tambah Dokumen", d.url);
@@ -8966,11 +8967,11 @@ app.put("/api/dokumen/:id", async (req, res) => {
   if (d.estate && !estateAllowed(req.user!, d.estate)) return res.status(403).json({ error: "Estate ini tidak termasuk akses akun Anda" });
   await execute(
     `UPDATE dokumen_link SET judul = @judul, url = @url, kategori = @kategori, modul = @modul, estate = @estate, keterangan = @keterangan,
-       pinned = @pinned, updated_at = now() WHERE id = @id`,
-    { judul: d.judul, url: d.url, kategori: d.kategori, modul: d.modul, estate: d.estate, keterangan: d.keterangan, pinned: d.pinned, id: existing.id }
+       pic = @pic, pinned = @pinned, updated_at = now() WHERE id = @id`,
+    { judul: d.judul, url: d.url, kategori: d.kategori, modul: d.modul, estate: d.estate, keterangan: d.keterangan, pic: d.pic ?? "", pinned: d.pinned, id: existing.id }
   );
   if (!req.body?.pinOnly)
-    await dokLog(req, d, "Edit Dokumen", describeChanges(existing, d, { judul: "Judul", url: "Link", kategori: "Kategori", modul: "Modul", estate: "Estate", keterangan: "Keterangan" }));
+    await dokLog(req, d, "Edit Dokumen", describeChanges(existing, d, { judul: "Nama dokumen", url: "Link", pic: "PIC", kategori: "Kategori", modul: "Modul", estate: "Estate", keterangan: "Keterangan" }));
   res.json({ success: true });
 });
 

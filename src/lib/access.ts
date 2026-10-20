@@ -42,11 +42,11 @@ export const OTHER_PERMS: { group: string; items: { key: string; label: string }
       { key: "master.blok", label: "Blok" },
       { key: "master.peta", label: "Lihat Peta Blok" },
       { key: "master.peta_edit", label: "Ubah Peta Blok" },
+      { key: "dokumen.edit", label: "Dokumen & Link (tambah, edit, hapus)" },
       { key: "master.users", label: "Pengguna" },
     ],
   },
   { group: "Monitoring", items: [{ key: "monitor.log_user", label: "Log Aktivitas User" }] },
-  { group: "Dokumen & Link", items: [{ key: "dokumen.edit", label: "Kelola Dokumen & Link (tambah, edit, hapus)" }] },
   {
     group: "Koperasi PT.AKSS",
     items: [

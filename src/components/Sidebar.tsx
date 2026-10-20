@@ -83,7 +83,6 @@ const navSections: NavSection[] = [
       { to: PINJAMAN_PATH, label: "Pinjaman & Transfer", icon: ArrowLeftRight, subtitle: "Antar estate" },
     ],
   },
-  { title: "Dokumen", items: [{ to: DOKUMEN_PATH, label: "Dokumen & Link", icon: FolderOpen, subtitle: "Sheets, Docs & file penting" }] },
   { title: "Koperasi", items: [{ to: KOPERASI_PATH, label: "Koperasi PT.AKSS", icon: ShoppingBasket, subtitle: "Stock Out & Potong Gaji" }] },
   {
     title: "Master Data",
@@ -98,6 +97,7 @@ const navSections: NavSection[] = [
       { to: "/alat-berat", label: "Alat Berat", icon: Truck, subtitle: "Unit & kendaraan" },
       { to: "/master-blok", label: "Blok", icon: Grid3x3, subtitle: "Blok kebun" },
       { to: "/peta-blok", label: "Peta Blok", icon: MapIcon, subtitle: "Peta kebun" },
+      { to: DOKUMEN_PATH, label: "Dokumen & Link", icon: FolderOpen, subtitle: "No, nama, PIC & link" },
       { to: "/users", label: "Pengguna", icon: KeyRound, subtitle: "Akun & hak akses" },
     ],
   },

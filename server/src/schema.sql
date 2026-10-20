@@ -816,3 +816,5 @@ CREATE TABLE IF NOT EXISTS dokumen_link (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_dokumen_link_modul ON dokumen_link(modul, estate);
+-- PIC: who looks after the document (the Excel-like list in Master Data).
+ALTER TABLE dokumen_link ADD COLUMN IF NOT EXISTS pic TEXT NOT NULL DEFAULT '';
