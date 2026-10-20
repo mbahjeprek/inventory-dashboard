@@ -1,6 +1,6 @@
 import type { KopRekap, KopSlipLine } from "./api";
 
-// Slip potong gaji koperasi: one slip per karyawan (two to an A4 page), the barang taken in the periode,
+// Slip bon karyawan koperasi: one slip per karyawan (two to an A4 page), the barang taken in the periode,
 // what is cut from the salary and when, the limit left, and boxes to sign. Printed through a hidden
 // iframe like printTable.
 const BULAN = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
@@ -29,7 +29,7 @@ export function printKopSlips(opts: { periode: string; jatuhTempo: string; limit
       .join("");
     return `<section class="slip">
       <div class="head">
-        <div><div class="org">KOPERASI PT.AKSS</div><div class="ttl">Slip Potong Gaji · ${esc(periodeText(periode))}</div></div>
+        <div><div class="org">KOPERASI PT.AKSS</div><div class="ttl">Slip Bon Karyawan · ${esc(periodeText(periode))}</div></div>
         <div class="due">Dipotong dari gaji<br><b>tgl 10–${esc(tgl(jatuhTempo))}</b></div>
       </div>
       <table class="info"><tr>
@@ -53,7 +53,7 @@ export function printKopSlips(opts: { periode: string; jatuhTempo: string; limit
     </section>`;
   };
 
-  const html = `<!doctype html><html><head><meta charset="utf-8"><title>Slip Potong Gaji Koperasi ${esc(periodeText(periode))}</title><style>
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>Slip Bon Karyawan Koperasi ${esc(periodeText(periode))}</title><style>
     @page { size: A4 portrait; margin: 8mm; }
     * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     body { font-family: system-ui, "Segoe UI", Roboto, sans-serif; color: #1a2634; margin: 0; font-size: 8.5pt; }

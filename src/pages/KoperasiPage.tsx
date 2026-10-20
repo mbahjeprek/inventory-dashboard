@@ -669,7 +669,7 @@ function RekapTab({ periode, reload, canBayar, onChanged }: { periode: string; r
       const r = await api.kopSlip(periode, list.map((p) => p.kode));
       printKopSlips({ periode, jatuhTempo: r.jatuh_tempo, limit: r.limit, people: list, lines: r.data });
     } catch {
-      setMsg("Gagal menyiapkan slip");
+      setMsg("Gagal menyiapkan slip bon");
     } finally {
       setSlipBusy(false);
     }
@@ -945,8 +945,8 @@ function RekapTab({ periode, reload, canBayar, onChanged }: { periode: string; r
                       <td className="px-3 py-2 text-right whitespace-nowrap">
                         {s && (
                           <span className="inline-flex gap-3">
-                            <button onClick={() => cetakSlip([r])} disabled={slipBusy} title="Cetak slip potong gaji" className="text-xs text-[var(--text-secondary)] hover:underline">
-                              Slip
+                            <button onClick={() => cetakSlip([r])} disabled={slipBusy} title="Cetak slip bon karyawan" className="text-xs text-[var(--text-secondary)] hover:underline">
+                              Slip bon
                             </button>
                             <button onClick={() => setBayar(r)} className="text-xs text-[var(--accent-blue)] hover:underline">
                               {canBayar ? (sisa > 0.5 ? "Bayar" : "Pembayaran") : "Lihat"}
