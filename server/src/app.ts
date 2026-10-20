@@ -166,6 +166,8 @@ function requiredPerms(req: express.Request): Need {
   if (is(/^\/perbandingan(\/|$)/)) return null;
   // Pemakaian per bulan: the route checks the module's Lihat and the estate itself.
   if (is(/^\/pemakaian(\/|$)/)) return null;
+  // Dokumen & Link: every account sees the links of its estates (the route filters); changing them needs Kelola Dokumen.
+  if (is(/^\/dokumen(\/|$)/)) return m === "GET" ? null : ["dokumen.edit"];
   // Status Update: the route lists only the estates and modules the account can see.
   if (is(/^\/status-update$/)) return null;
   // Foto bukti: any logged-in account uploads for its own transactions (the transaction route checks).
@@ -8888,6 +8890,97 @@ app.get("/api/koperasi/slip", async (req, res) => {
     { k: KOPERASI, periode, kodes }
   );
   res.json({ periode, limit: KOP_LIMIT, jatuh_tempo: kopJatuhTempo(periode), data });
+});
+
+// ---- Dokumen & Link (see schema.sql dokumen_link) ----
+const DOK_KATEGORI = ["LAPORAN", "SOP", "FORM", "REKAP", "KONTRAK", "LAINNYA"];
+const DOK_MODUL = ["", "GUDANG", "BBM", "PUPUK", "OLI", "KLINIK", "KOPERASI"];
+const DOK_LOG: Record<string, LogModule> = { GUDANG: "BARANG", BBM: "BBM", PUPUK: "PUPUK", OLI: "OLI", KLINIK: "KLINIK", KOPERASI: "KOPERASI" };
+const dokPayload = (b: any) => ({
+  judul: String(b?.judul ?? "").trim(),
+  url: String(b?.url ?? "").trim(),
+  kategori: DOK_KATEGORI.includes(String(b?.kategori ?? "").toUpperCase()) ? String(b.kategori).toUpperCase() : "LAINNYA",
+  modul: DOK_MODUL.includes(String(b?.modul ?? "").toUpperCase()) ? String(b?.modul ?? "").toUpperCase() : "",
+  estate: (ESTATES as readonly string[]).includes(String(b?.estate ?? "").toUpperCase()) ? String(b.estate).toUpperCase() : "",
+  keterangan: String(b?.keterangan ?? "").trim(),
+  pinned: b?.pinned === true,
+});
+// Only web links: a javascript: / data: url would run in the page when clicked.
+const dokUrlOk = (u: string) => /^https?:\/\/\S+$/i.test(u);
+async function dokLog(req: express.Request, d: { modul: string; estate: string; judul: string }, aksi: string, detail?: string) {
+  const module = DOK_LOG[d.modul];
+  if (module) await logActivity(req, { module, estate: d.estate || null, aksi, objek: d.judul, detail });
+}
+
+app.get("/api/dokumen", async (req, res) => {
+  const q = req.query as Record<string, string>;
+  const u = req.user!;
+  const conditions: string[] = [];
+  const params: any = { estates: u.role === "superuser" ? [...ESTATES] : u.estates };
+  // Links of every estate ("") and of the account's own estates.
+  conditions.push("(d.estate = '' OR d.estate = ANY(@estates::text[]))");
+  if (q.modul) {
+    conditions.push("d.modul = @modul");
+    params.modul = String(q.modul).toUpperCase();
+  }
+  if (q.estate) {
+    // A page of one estate: that estate's links plus the ones for every estate.
+    conditions.push("(d.estate = '' OR d.estate = @estate)");
+    params.estate = String(q.estate).toUpperCase();
+  }
+  if (q.kategori) {
+    conditions.push("d.kategori = @kategori");
+    params.kategori = String(q.kategori).toUpperCase();
+  }
+  wordSearch(q.search ?? "", ["d.judul", "d.keterangan", "d.url"], conditions, params);
+  const data = await queryMany(
+    `SELECT d.*, u.nama AS oleh FROM dokumen_link d LEFT JOIN users u ON u.id = d.user_id
+      WHERE ${conditions.join(" AND ")} ORDER BY d.pinned DESC, d.updated_at DESC`,
+    params
+  );
+  res.json({ data });
+});
+
+app.post("/api/dokumen", async (req, res) => {
+  const d = dokPayload(req.body);
+  if (!d.judul) return res.status(400).json({ error: "Judul wajib diisi" });
+  if (!dokUrlOk(d.url)) return res.status(400).json({ error: "Link harus diawali https:// (salin dari address bar / tombol Share)" });
+  if (d.estate && !estateAllowed(req.user!, d.estate)) return res.status(403).json({ error: "Estate ini tidak termasuk akses akun Anda" });
+  const row = await queryOne<{ id: number }>(
+    `INSERT INTO dokumen_link (judul, url, kategori, modul, estate, keterangan, pinned, user_id)
+     VALUES (@judul, @url, @kategori, @modul, @estate, @keterangan, @pinned, @uid) RETURNING id`,
+    { ...d, uid: req.user!.id }
+  );
+  await dokLog(req, d, "Tambah Dokumen", d.url);
+  res.json({ success: true, id: row!.id });
+});
+
+app.put("/api/dokumen/:id", async (req, res) => {
+  const existing = await queryOne<any>("SELECT * FROM dokumen_link WHERE id = @id", { id: req.params.id });
+  if (!existing) return res.status(404).json({ error: "Dokumen tidak ditemukan" });
+  if (existing.estate && !estateAllowed(req.user!, existing.estate)) return res.status(403).json({ error: "Akses ditolak" });
+  // Pin only (the star on a card) keeps the rest as it is.
+  const d = req.body?.pinOnly ? { ...existing, pinned: req.body.pinned === true } : dokPayload(req.body);
+  if (!d.judul) return res.status(400).json({ error: "Judul wajib diisi" });
+  if (!dokUrlOk(d.url)) return res.status(400).json({ error: "Link harus diawali https://" });
+  if (d.estate && !estateAllowed(req.user!, d.estate)) return res.status(403).json({ error: "Estate ini tidak termasuk akses akun Anda" });
+  await execute(
+    `UPDATE dokumen_link SET judul = @judul, url = @url, kategori = @kategori, modul = @modul, estate = @estate, keterangan = @keterangan,
+       pinned = @pinned, updated_at = now() WHERE id = @id`,
+    { judul: d.judul, url: d.url, kategori: d.kategori, modul: d.modul, estate: d.estate, keterangan: d.keterangan, pinned: d.pinned, id: existing.id }
+  );
+  if (!req.body?.pinOnly)
+    await dokLog(req, d, "Edit Dokumen", describeChanges(existing, d, { judul: "Judul", url: "Link", kategori: "Kategori", modul: "Modul", estate: "Estate", keterangan: "Keterangan" }));
+  res.json({ success: true });
+});
+
+app.delete("/api/dokumen/:id", async (req, res) => {
+  const existing = await queryOne<any>("SELECT * FROM dokumen_link WHERE id = @id", { id: req.params.id });
+  if (!existing) return res.status(404).json({ error: "Dokumen tidak ditemukan" });
+  if (existing.estate && !estateAllowed(req.user!, existing.estate)) return res.status(403).json({ error: "Akses ditolak" });
+  await execute("DELETE FROM dokumen_link WHERE id = @id", { id: existing.id });
+  await dokLog(req, existing, "Hapus Dokumen", existing.url);
+  res.json({ success: true });
 });
 
 // ---- Status Update: how current each estate's data is, per module ----

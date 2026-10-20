@@ -799,3 +799,20 @@ INSERT INTO master_pupuk (kode, nama) VALUES
   ('PPK-07', 'PUPUK NPK 13.6.27.4+B (HI KAY)'),
   ('PPK-08', 'PUPUK NPK 7.6.34 ZNCUB (PEAT KAY)')
 ON CONFLICT DO NOTHING;
+
+-- Dokumen & Link: links to the files kept elsewhere (Google Sheets / Docs / Drive, PDF...), opened in a new
+-- tab. modul '' = umum, estate '' = every estate (else only accounts with that estate see it).
+CREATE TABLE IF NOT EXISTS dokumen_link (
+  id SERIAL PRIMARY KEY,
+  judul TEXT NOT NULL,
+  url TEXT NOT NULL,
+  kategori TEXT NOT NULL DEFAULT 'LAINNYA',
+  modul TEXT NOT NULL DEFAULT '',
+  estate TEXT NOT NULL DEFAULT '',
+  keterangan TEXT NOT NULL DEFAULT '',
+  pinned BOOLEAN NOT NULL DEFAULT false,
+  user_id INTEGER,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_dokumen_link_modul ON dokumen_link(modul, estate);

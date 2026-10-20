@@ -46,6 +46,7 @@ export const OTHER_PERMS: { group: string; items: { key: string; label: string }
     ],
   },
   { group: "Monitoring", items: [{ key: "monitor.log_user", label: "Log Aktivitas User" }] },
+  { group: "Dokumen & Link", items: [{ key: "dokumen.edit", label: "Kelola Dokumen & Link (tambah, edit, hapus)" }] },
   {
     group: "Koperasi PT.AKSS",
     items: [
@@ -171,6 +172,9 @@ export const PASIEN_PATH = "/master-pasien";
 
 // Koperasi karyawan: only Nilam runs one for now; seen with Lihat Koperasi by an account with Nilam.
 export const KOPERASI_PATH = "/koperasi";
+
+// Dokumen & Link: every account sees the links of its estates; Kelola Dokumen adds / edits them.
+export const DOKUMEN_PATH = "/dokumen";
 export const KOPERASI_ESTATE = "NILAM";
 
 // An account that only has Koperasi ticks (e.g. the koperasi admin, HR): it lands on the Koperasi
@@ -188,6 +192,7 @@ export function pageAllowed(user: AuthUser | null, path: string): boolean {
   if (path === OPNAME_PATH || path.startsWith(`${OPNAME_PATH}/`)) return hasOpnameAccess(user);
   if (path === PINJAMAN_PATH) return MODULES.some((m) => canModule(user, m));
   if (path === PASIEN_PATH) return canModule(user, "KLINIK");
+  if (path === DOKUMEN_PATH) return true;
   if (path === KOPERASI_PATH) return can(user, "koperasi.view") && userEstates(user).includes(KOPERASI_ESTATE);
   // Peta Blok: seen with Lihat Peta Blok, Ubah Peta Blok or Master Blok.
   if (path === "/peta-blok") return ["master.peta", "master.peta_edit", "master.blok"].some((p) => can(user, p));

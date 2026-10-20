@@ -29,6 +29,7 @@ import { printKopSlips } from "../lib/kopSlip";
 // Number typed the Indonesian way ("1.500" thousands, "2,5" or "0.5" decimal).
 import { parseNum } from "../components/BatchGrid";
 import { ActivityLogButton } from "../components/ActivityLogButton";
+import { DokumenButton } from "../components/DokumenButton";
 
 // Koperasi karyawan Nilam: anggota (karyawan) take goods, deducted from the salary of the month taken
 // (periode = calendar month), up to Rp 1,5 juta a month, no cicilan; Kantor / Mess Tamu are billed to the company. The koperasi
@@ -184,6 +185,7 @@ export function KoperasiPage() {
         </select>
         <div className="ml-auto">
           <ActivityLogButton module="KOPERASI" estate="NILAM" />
+          <DokumenButton modul="KOPERASI" estate="NILAM" />
         </div>
       </div>
 

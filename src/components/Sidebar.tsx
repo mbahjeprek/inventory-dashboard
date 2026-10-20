@@ -25,12 +25,13 @@ import {
   Map as MapIcon,
   Check,
   ShoppingBasket,
+  FolderOpen,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { useEstateFilter } from "../hooks/useEstateFilter";
 import { useOpenPinjaman } from "../hooks/useOpenPinjaman";
 import { ChangePasswordModal } from "./ChangePasswordModal";
-import { canModule, koperasiOnly, pageAllowed, userEstates, OPNAME_PATH, PINJAMAN_PATH, PASIEN_PATH, KOPERASI_PATH, type Module } from "../lib/access";
+import { canModule, koperasiOnly, pageAllowed, userEstates, OPNAME_PATH, PINJAMAN_PATH, PASIEN_PATH, KOPERASI_PATH, DOKUMEN_PATH, type Module } from "../lib/access";
 
 // subtitle: shown only on the active menu, which grows into a gold card (see NavRow).
 type NavItem = { to: string; label: string; icon: typeof Package; subtitle?: string };
@@ -77,6 +78,7 @@ const navSections: NavSection[] = [
       { to: PINJAMAN_PATH, label: "Pinjaman & Transfer", icon: ArrowLeftRight, subtitle: "Antar estate" },
     ],
   },
+  { title: "Dokumen", items: [{ to: DOKUMEN_PATH, label: "Dokumen & Link", icon: FolderOpen, subtitle: "Sheets, Docs & file penting" }] },
   { title: "Koperasi", items: [{ to: KOPERASI_PATH, label: "Koperasi PT.AKSS", icon: ShoppingBasket, subtitle: "Stock Out & Potong Gaji" }] },
   {
     title: "Master Data",

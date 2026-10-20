@@ -22,6 +22,7 @@ import { api, errorText, type KlinikStockItem, type KlinikSummary, type PickerIt
 import { StatCard } from "../components/StatCard";
 import { ExportButtons } from "../components/ExportButtons";
 import { ActivityLogButton } from "../components/ActivityLogButton";
+import { DokumenButton } from "../components/DokumenButton";
 import { fetchAllRows, type TableReport } from "../lib/printTable";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { EditKlinikStockModal } from "../components/EditKlinikStockModal";
@@ -286,6 +287,7 @@ export function InventoryKlinikPage({ klinik }: { klinik: string }) {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <ActivityLogButton module="KLINIK" estate={klinik} />
+          <DokumenButton modul="KLINIK" estate={klinik} />
           {tab === "stok" && <ExportButtons total={total} buildReport={buildReport} fileName={`inventory-klinik-${klinik.toLowerCase()}`} />}
           {canInput && tab !== "laporan" && (
             <button

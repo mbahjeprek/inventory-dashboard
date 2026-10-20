@@ -5,6 +5,7 @@ import { api, errorText, type OliRecord, type OliSummary } from "../lib/api";
 import { StatCard } from "../components/StatCard";
 import { ExportButtons } from "../components/ExportButtons";
 import { ActivityLogButton } from "../components/ActivityLogButton";
+import { DokumenButton } from "../components/DokumenButton";
 import { PemakaianButton } from "../components/PemakaianPanel";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { OliTransactionModal } from "../components/OliTransactionModal";
@@ -151,6 +152,7 @@ export function InventoryOliPage({ estate }: { estate: string }) {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <ActivityLogButton module="OLI" estate={estate} />
+          <DokumenButton modul="OLI" estate={estate} />
           <PemakaianButton module="OLI" estate={estate} />
           <ExportButtons total={total} buildReport={buildReport} fileName={`inventory-oli-${estate.toLowerCase()}`} />
           {canInput && (

@@ -37,6 +37,8 @@ export const ALL_PERMS: string[] = [
   "master.peta_edit",
   "master.users",
   "monitor.log_user",
+  // Dokumen & Link: add / edit / delete the links (seeing them needs no tick).
+  "dokumen.edit",
   // Koperasi karyawan: Lihat, Input (pengambilan / pembelian / rusak), Edit (hapus transaksi, master barang & anggota).
   "koperasi.view",
   "koperasi.input",

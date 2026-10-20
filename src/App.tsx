@@ -22,6 +22,7 @@ import { InventoryOliPage } from "./pages/InventoryOliPage";
 import { MasterObatPage } from "./pages/MasterObatPage";
 import { MasterOliPage } from "./pages/MasterOliPage";
 import { MasterPupukPage } from "./pages/MasterPupukPage";
+import { DokumenPage } from "./pages/DokumenPage";
 import { UserActivityPage } from "./pages/UserActivityPage";
 import { StokOpnamePage } from "./pages/StokOpnamePage";
 import { PinjamanPage } from "./pages/PinjamanPage";
@@ -203,6 +204,14 @@ function App() {
                 element={
                   <RequirePageAccess>
                     <MasterObatPage />
+                  </RequirePageAccess>
+                }
+              />
+              <Route
+                path="/dokumen"
+                element={
+                  <RequirePageAccess>
+                    <DokumenPage />
                   </RequirePageAccess>
                 }
               />
