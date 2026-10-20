@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ArrowDown, ArrowUp, ArrowUpDown, Banknote, Boxes, ClipboardCheck, HandCoins, LayoutDashboard, ListPlus, Package, PackageX, Pencil, Plus, Search, ShoppingBasket, Trash2, Truck, UserPlus, Users, X } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, Banknote, Boxes, ChevronRight, ChevronsDownUp, ChevronsUpDown, ClipboardCheck, HandCoins, LayoutDashboard, ListPlus, Package, PackageX, Pencil, Plus, Search, ShoppingBasket, Trash2, Truck, UserPlus, Users, X } from "lucide-react";
 import {
   api,
   errorText,
@@ -326,6 +326,27 @@ function TxTable({
   ];
   const label = jual ? "stock out" : beli ? "stock in" : rusak ? "barang rusak" : "transaksi";
   const pages = Math.max(1, Math.ceil((res?.total ?? 0) / pageSize));
+
+  // Stock Out lines grouped per bon (one person's input), folded until opened; other lists stay one row each.
+  const bonKey = (t: KopTx) => t.bon || `id-${t.id}`;
+  const groups = useMemo(() => {
+    const out: KopTx[][] = [];
+    for (const t of res?.data ?? []) {
+      const last = out[out.length - 1];
+      if (jual && last && t.bon && last[0].bon === t.bon) last.push(t);
+      else out.push([t]);
+    }
+    return out;
+  }, [res, jual]);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const toggle = (t: KopTx) =>
+    setExpanded((s) => {
+      const n = new Set(s);
+      if (!n.delete(bonKey(t))) n.add(bonKey(t));
+      return n;
+    });
+  const multiBons = groups.filter((g) => g.length > 1);
+  const allOpen = multiBons.length > 0 && multiBons.every((g) => expanded.has(bonKey(g[0])));
   const buildReport = async () => {
     const all = await api.kopTx({ ...params, page: 1, pageSize: 500 });
     let rows = all.data;
@@ -360,6 +381,15 @@ function TxTable({
         </span>
         {error && <span className="text-xs text-[var(--accent-red)]">{error}</span>}
         <div className="ml-auto flex gap-2">
+          {jual && multiBons.length > 0 && (
+            <button
+              onClick={() => setExpanded(allOpen ? new Set() : new Set(multiBons.map((g) => bonKey(g[0]))))}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-[var(--border)] text-sm text-[var(--text-secondary)] hover:bg-[#f1f5f9]"
+            >
+              {allOpen ? <ChevronsDownUp size={15} /> : <ChevronsUpDown size={15} />}
+              {allOpen ? "Ringkas semua" : "Buka semua"}
+            </button>
+          )}
           <ExportButtons total={res?.total ?? 0} buildReport={buildReport} fileName={`koperasi-${label.replace(/ /g, "-")}-${periode}`} />
         </div>
       </div>
@@ -390,12 +420,81 @@ function TxTable({
                 </td>
               </tr>
             ) : (
-              res.data.map((t, i) => {
+              groups.map((g, gi) => {
+                const head = g[0];
+                // A Stock Out bon of several barang folds into one line per person; click it to see the barang.
+                if (jual && g.length > 1 && !expanded.has(bonKey(head))) {
+                  const bayar = new Set(g.map((t) => t.bayar)).size === 1 ? head.bayar : null;
+                  return (
+                    <tr
+                      key={`bon-${head.id}`}
+                      onClick={() => toggle(head)}
+                      className={`align-top cursor-pointer hover:bg-[#f8fafc] ${gi > 0 ? "border-t-2 border-t-[var(--border)]" : ""}`}
+                    >
+                      <td className="px-3 py-2 whitespace-nowrap">
+                        <span className="inline-flex items-center gap-1">
+                          <ChevronRight size={14} className="text-[var(--text-muted)]" />
+                          {isoDisplay(head.tanggal_iso)}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2">
+                        <div className="font-medium text-[var(--text-primary)]">{head.anggota_nama || <span className="italic text-[var(--text-muted)]">nama tidak tercatat</span>}</div>
+                        <div className="text-[11px] text-[var(--text-muted)]">{head.anggota_kode}</div>
+                      </td>
+                      <td className="col-grow px-3 py-2">
+                        <div className="font-medium text-[var(--accent-blue)]">{g.length} barang</div>
+                        <div className="text-[11px] text-[var(--text-muted)] line-clamp-1">{g.map((t) => t.barang_nama).join(", ")}</div>
+                      </td>
+                      <td className="px-3 py-2" />
+                      <td className="px-3 py-2" />
+                      <td className="px-3 py-2 text-right whitespace-nowrap font-semibold">{rp(g.reduce((s, t) => s + t.total, 0))}</td>
+                      <td className="px-3 py-2">
+                        {bayar ? (
+                          <span className={`text-[11px] px-2 py-0.5 rounded-full border whitespace-nowrap ${BAYAR_CLS[bayar]}`}>{BAYAR_LABEL[bayar]}</span>
+                        ) : (
+                          <span className="text-[11px] text-[var(--text-muted)]">Campur</span>
+                        )}
+                      </td>
+                      <td className="col-grow px-3 py-2 text-xs text-[var(--text-secondary)]">
+                        <div>{head.keterangan || (head.sumber?.startsWith("IMPORT") ? "" : "-")}</div>
+                        <div className="text-[var(--text-muted)]">{head.sumber?.startsWith("IMPORT") ? "dari spreadsheet" : `oleh ${head.oleh || "-"}`}</div>
+                      </td>
+                      {canEdit && (
+                        <td className="px-3 py-2 text-right whitespace-nowrap">
+                          {head.bon && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setHapus({ tx: head, bon: true });
+                              }}
+                              title="Hapus seluruh bon"
+                              className="text-[11px] px-1.5 py-0.5 rounded border border-[var(--accent-red-border)] text-[var(--accent-red)] hover:bg-[var(--accent-red-bg)]"
+                            >
+                              bon
+                            </button>
+                          )}
+                        </td>
+                      )}
+                    </tr>
+                  );
+                }
+                return g.map((t, li) => {
                 // A bon's lines sit together; its date / anggota are shown once.
-                const sameBon = jual && i > 0 && t.bon && res.data[i - 1].bon === t.bon;
+                const sameBon = li > 0;
+                const foldable = jual && g.length > 1;
                 return (
-                  <tr key={t.id} className={`align-top ${sameBon ? "" : jual && i > 0 ? "border-t-2 border-t-[var(--border)]" : ""}`}>
-                    <td className="px-3 py-2 whitespace-nowrap">{sameBon ? "" : isoDisplay(t.tanggal_iso)}</td>
+                  <tr key={t.id} className={`align-top ${sameBon ? "" : jual && gi > 0 ? "border-t-2 border-t-[var(--border)]" : ""} ${foldable ? "bg-[#fafcff]" : ""}`}>
+                    <td className="px-3 py-2 whitespace-nowrap">
+                      {!sameBon &&
+                        (foldable ? (
+                          <button onClick={() => toggle(t)} title="Ringkas bon ini" className="inline-flex items-center gap-1 hover:text-[var(--accent-blue)]">
+                            <ChevronRight size={14} className="rotate-90 text-[var(--text-muted)]" />
+                            {isoDisplay(t.tanggal_iso)}
+                          </button>
+                        ) : (
+                          isoDisplay(t.tanggal_iso)
+                        ))}
+                    </td>
                     {(jual || !jenis) && (
                       <td className="px-3 py-2">
                         {!sameBon && t.anggota_kode && (
@@ -444,6 +543,7 @@ function TxTable({
                     )}
                   </tr>
                 );
+                });
               })
             )}
           </tbody>
