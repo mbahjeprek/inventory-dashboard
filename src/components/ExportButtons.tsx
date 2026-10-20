@@ -1,3 +1,4 @@
+import { localToday } from "../lib/opname";
 import { useState } from "react";
 import { Printer, FileSpreadsheet } from "lucide-react";
 import { confirmLargePrint, exportExcel, printTable, type AnyReport } from "../lib/printTable";
@@ -23,7 +24,7 @@ export function ExportButtons({
     try {
       const report = await buildReport();
       if (kind === "print") printTable(report);
-      else await exportExcel(report, `${fileName}-${new Date().toISOString().slice(0, 10)}.xlsx`);
+      else await exportExcel(report, `${fileName}-${localToday()}.xlsx`);
     } catch {
       setError(kind === "print" ? "Gagal menyiapkan cetak" : "Gagal membuat file Excel");
     } finally {

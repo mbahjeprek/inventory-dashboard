@@ -10,6 +10,7 @@ import { LOAN_LATE_DAYS, loanDays, useOpenPinjaman } from "../hooks/useOpenPinja
 import { OPNAME_MODULES, OPNAME_MODULE_LABEL, fmtQty, localToday, opnameModule, round3 } from "../lib/opname";
 import { tanggalWaktu } from "../lib/datetime";
 import { PinjamanBatchModal } from "../components/PinjamanBatchModal";
+import { parseNum } from "../components/BatchGrid";
 
 const ESTATES = ["NILAM", "KNS", "WJA", "ZAMRUD", "FIRUS"];
 const inputCls = "w-full text-sm rounded-md border border-[var(--border)] px-3 py-2";
@@ -534,7 +535,7 @@ export function CreatePinjamanModal({
     return () => clearTimeout(t);
   }, [module, dari, search]);
 
-  const n = Number(qty.replace(",", "."));
+  const n = parseNum(qty);
   const isWhole = whole(module, dari, ke);
   const saldoModule = module === "PUPUK" || module === "OLI";
 
@@ -711,7 +712,7 @@ function KembaliModal({ loan, batal, onClose, onSuccess }: { loan: Pinjaman; bat
   const evidenceOn = useEvidenceEnabled();
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
-  const n = Number(qty.replace(",", "."));
+  const n = parseNum(qty);
 
   const submit = async () => {
     setError("");

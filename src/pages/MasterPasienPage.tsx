@@ -1,3 +1,4 @@
+import { localToday } from "../lib/opname";
 import { useEffect, useState } from "react";
 import { ChevronLeft, ChevronRight, Pencil, Plus, Search, Trash2, X } from "lucide-react";
 import { api, errorText, ESTATES, type Pasien, type PasienInput } from "../lib/api";
@@ -11,7 +12,7 @@ import { STATUS_PASIEN, tglSheet, usiaOf } from "../lib/kunjungan";
 const PAGE_SIZE = 50;
 const LABEL: Record<string, string> = { NILAM: "Nilam", KNS: "KNS", WJA: "WJA", ZAMRUD: "Zamrud", FIRUS: "Firus" };
 const inputCls = "w-full text-sm rounded-md border border-[var(--border)] px-3 py-2 bg-[var(--bg-card)]";
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => localToday();
 type Sort = "nama" | "kunjungan" | "kunjungan_terakhir";
 
 function PasienModal({ estate, pasien, onClose, onSaved }: { estate: string; pasien: Pasien | null; onClose: () => void; onSaved: () => void }) {

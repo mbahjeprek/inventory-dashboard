@@ -117,7 +117,7 @@ function App() {
                 path="/inventory-kns"
                 element={
                   <RequireEstate estate="KNS">
-                    <InventoryGudangStockPage gudang="KNS" />
+                    <InventoryGudangStockPage key="KNS" gudang="KNS" />
                   </RequireEstate>
                 }
               />
@@ -125,7 +125,7 @@ function App() {
                 path="/inventory-wja"
                 element={
                   <RequireEstate estate="WJA">
-                    <InventoryGudangStockPage gudang="WJA" />
+                    <InventoryGudangStockPage key="WJA" gudang="WJA" />
                   </RequireEstate>
                 }
               />
@@ -133,7 +133,7 @@ function App() {
                 path="/inventory-zamrud"
                 element={
                   <RequireEstate estate="ZAMRUD">
-                    <InventoryGudangStockPage gudang="ZAMRUD" />
+                    <InventoryGudangStockPage key="ZAMRUD" gudang="ZAMRUD" />
                   </RequireEstate>
                 }
               />
@@ -141,7 +141,7 @@ function App() {
                 path="/inventory-firus"
                 element={
                   <RequireEstate estate="FIRUS">
-                    <InventoryGudangStockPage gudang="FIRUS" />
+                    <InventoryGudangStockPage key="FIRUS" gudang="FIRUS" />
                   </RequireEstate>
                 }
               />
@@ -149,7 +149,7 @@ function App() {
                 path="/inventory-bbm"
                 element={
                   <RequireEstate estate="NILAM">
-                    <InventoryBbmPage lokasiLock="NILAM" />
+                    <InventoryBbmPage key="NILAM" lokasiLock="NILAM" />
                   </RequireEstate>
                 }
               />
@@ -157,7 +157,7 @@ function App() {
                 path="/inventory-bbm-kns"
                 element={
                   <RequireEstate estate="KNS">
-                    <InventoryBbmPage lokasiLock="KNS" />
+                    <InventoryBbmPage key="KNS" lokasiLock="KNS" />
                   </RequireEstate>
                 }
               />
@@ -165,7 +165,7 @@ function App() {
                 path="/inventory-bbm-wja"
                 element={
                   <RequireEstate estate="WJA">
-                    <InventoryBbmPage lokasiLock="WJA" />
+                    <InventoryBbmPage key="WJA" lokasiLock="WJA" />
                   </RequireEstate>
                 }
               />

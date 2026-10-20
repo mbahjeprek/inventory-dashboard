@@ -435,7 +435,8 @@ export const parseNum = (s: string | undefined) => {
   const t = (s ?? "").trim().replace(/\s/g, "");
   if (!t) return NaN;
   if (t.includes(",")) return Number(t.replace(/\./g, "").replace(",", "."));
-  return Number(/^\d{1,3}(\.\d{3})+$/.test(t) ? t.replace(/\./g, "") : t);
+  // "1.500" / "12.500.000" are thousands; "0.250" is a decimal (a thousands group never starts with 0).
+  return Number(/^[1-9]\d{0,2}(\.\d{3})+$/.test(t) ? t.replace(/\./g, "") : t);
 };
 export const isBlankIn = (columns: GridCol[]) => (c: Cells) =>
   columns.filter((col) => col.type !== "select" && !col.carry).every((col) => !(c[col.key] ?? "").trim());

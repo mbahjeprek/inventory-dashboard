@@ -1,3 +1,4 @@
+import { localToday } from "../lib/opname";
 import { useEffect, useRef, useState } from "react";
 import { api, type Pasien } from "../lib/api";
 import { tglSheet, usiaOf } from "../lib/kunjungan";
@@ -40,7 +41,7 @@ export function PasienAutocomplete({
     onPick(p);
     setOpen(false);
   };
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localToday();
 
   return (
     <div ref={box} className="relative">

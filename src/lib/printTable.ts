@@ -29,7 +29,7 @@ const escapeHtml = (v: unknown) =>
 
 // Empty cells show "-" and numbers use Indonesian grouping, the same as the on-screen table.
 const displayCell = (v: Cell) =>
-  v === null || v === undefined || v === "" ? "-" : typeof v === "number" ? v.toLocaleString("id-ID", { maximumFractionDigits: 1 }) : v;
+  v === null || v === undefined || v === "" ? "-" : typeof v === "number" ? v.toLocaleString("id-ID", { maximumFractionDigits: 3 }) : v;
 
 // The chart drawn inside `el` (a recharts <svg>) as a standalone SVG, with an optional legend line
 // above it (the dashboard legends are HTML next to the chart, not part of the svg).
@@ -85,7 +85,10 @@ export async function fetchAllRows<T>(
   const pageSize = 500;
   const first = await fetchPage(1, pageSize);
   const pages = Math.ceil(first.total / pageSize);
-  const rest = await Promise.all(Array.from({ length: Math.max(pages - 1, 0) }, (_, i) => fetchPage(i + 2, pageSize)));
+  // Three pages at a time: dozens of parallel requests can run the database pooler out of connections.
+  const rest: { data: T[] }[] = [];
+  for (let p = 2; p <= pages; p += 3)
+    rest.push(...(await Promise.all([p, p + 1, p + 2].filter((x) => x <= pages).map((x) => fetchPage(x, pageSize)))));
   return [first, ...rest].flatMap((r) => r.data);
 }
 
@@ -226,7 +229,7 @@ export async function exportExcel(report: AnyReport, fileName: string) {
         cell.font = { size: 9 };
         cell.border = allBorders;
         cell.alignment = { vertical: "top", horizontal: col?.align === "right" ? "right" : "left", wrapText: !col?.nowrap };
-        if (typeof cell.value === "number") cell.numFmt = Number.isInteger(cell.value) ? "#,##0" : "#,##0.0";
+        if (typeof cell.value === "number") cell.numFmt = Number.isInteger(cell.value) ? "#,##0" : "#,##0.###";
         if (idx % 2 === 1) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF7FAF5" } };
       });
     });

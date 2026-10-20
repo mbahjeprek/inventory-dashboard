@@ -39,7 +39,7 @@ export function printKopSlips(opts: { periode: string; jatuhTempo: string; limit
       <table class="lines"><thead><tr><th class="c">No</th><th>Tanggal</th><th>Barang</th><th class="r">Jumlah</th><th class="r">Harga</th><th class="r">Total</th></tr></thead>
         <tbody>${rows || `<tr><td colspan="6" class="c muted">Tidak ada pengambilan</td></tr>`}</tbody></table>
       <div class="sum">
-        <div class="lim">Limit ${rp(limit)}/bulan · sisa limit ${rp(Math.max(limit - p.potong_gaji, 0))}<br>${p.n_bon} bon · ${own.length} barang</div>
+        <div class="lim">Limit ${rp(limit)}/bulan · sisa limit ${rp(Math.max(limit - p.potong_gaji, 0))}<br>${new Set(own.map((l) => l.bon ?? l.tanggal_iso)).size} bon · ${own.length} barang</div>
         <table>
           <tr><td>Total potong gaji</td><td class="r">${rp(p.potong_gaji)}</td></tr>
           ${p.dibayar > 0.5 ? `<tr><td>Sudah dibayar</td><td class="r">- ${rp(p.dibayar)}</td></tr>` : ""}

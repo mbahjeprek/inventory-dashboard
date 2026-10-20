@@ -24,7 +24,7 @@ export type TransactionPreset = { mode?: Mode; batchOut?: string; buang?: boolea
 const FEFO = "__fefo";
 const NEW_BATCH = "__new";
 const tgl = (iso: string) => (iso ? iso.split("-").reverse().join("/") : "tanpa tanggal expired");
-const isPast = (iso: string) => !!iso && iso < new Date().toISOString().slice(0, 10);
+const isPast = (iso: string) => !!iso && iso < localToday();
 
 // One Stock In / Stock Out / Koreksi form for every estate. Without `scope` it works on Nilam's
 // gudang stock (items); with a scope on that gudang's or klinik's own stock.

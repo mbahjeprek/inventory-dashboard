@@ -26,6 +26,8 @@ import { KopBeliBatchModal, KopJualBatchModal } from "../components/KoperasiBatc
 import { KoperasiDashboard } from "../components/KoperasiDashboard";
 import { KoperasiOpname } from "../components/KoperasiOpname";
 import { printKopSlips } from "../lib/kopSlip";
+// Number typed the Indonesian way ("1.500" thousands, "2,5" or "0.5" decimal).
+import { parseNum } from "../components/BatchGrid";
 import { ActivityLogButton } from "../components/ActivityLogButton";
 
 // Koperasi karyawan Nilam: anggota (karyawan) take goods, deducted from the salary of the month taken
@@ -55,8 +57,6 @@ const BAYAR_CLS: Record<KopBayar, string> = {
   TUNAI: "bg-[var(--accent-green-bg)] border-[var(--accent-green-border)] text-[var(--accent-green)]",
   INSTANSI: "bg-[#f1f5f9] border-[var(--border)] text-[var(--text-secondary)]",
 };
-// Number typed the Indonesian way ("1.500" or "2,5").
-const parseNum = (s: string) => Number(s.replace(/\./g, "").replace(",", "."));
 
 type Tab = "dashboard" | "jual" | "rekap" | "stok" | "opname" | "beli" | "anggota";
 const TABS: { key: Tab; label: string; icon: typeof Package }[] = [
@@ -345,11 +345,16 @@ function TxTable({
   // Stock Out lines grouped per bon (one person's input), folded until opened; other lists stay one row each.
   const bonKey = (t: KopTx) => t.bon || `id-${t.id}`;
   const groups = useMemo(() => {
+    // By bon over the whole page (Input Banyak can interleave two people's lines), in order of first appearance.
     const out: KopTx[][] = [];
+    const byBon = new Map<string, KopTx[]>();
     for (const t of res?.data ?? []) {
-      const last = out[out.length - 1];
-      if (jual && last && t.bon && last[0].bon === t.bon) last.push(t);
-      else out.push([t]);
+      const g = jual && t.bon ? byBon.get(t.bon) : undefined;
+      if (g) g.push(t);
+      else {
+        out.push([t]);
+        if (jual && t.bon) byBon.set(t.bon, out[out.length - 1]);
+      }
     }
     return out;
   }, [res, jual]);
@@ -627,8 +632,9 @@ const statusBayar = (r: { potong_gaji: number; dibayar: number }, jatuhTempo: st
   if (r.potong_gaji <= 0.5) return null;
   const sisa = r.potong_gaji - r.dibayar;
   if (sisa <= 0.5) return "LUNAS";
-  if (r.dibayar > 0.5) return "SEBAGIAN";
-  return today <= jatuhTempo ? "MENUNGGU" : "BELUM";
+  // Before the jatuh tempo a part-paid bill (e.g. a bon added after Tandai lunas) is still waiting for the salary cut.
+  if (today <= jatuhTempo) return "MENUNGGU";
+  return r.dibayar > 0.5 ? "SEBAGIAN" : "BELUM";
 };
 
 function RekapTab({ periode, reload, canBayar, onChanged }: { periode: string; reload: number; canBayar: boolean; onChanged: () => void }) {
@@ -709,7 +715,8 @@ function RekapTab({ periode, reload, canBayar, onChanged }: { periode: string; r
     try {
       const r = await api.kopBayarLunas(
         periode,
-        pickedRows.map((x) => x.kode)
+        pickedRows.map((x) => x.kode),
+        Object.fromEntries(pickedRows.map((x) => [x.kode, sisaOf(x)]))
       );
       setMsg(`${r.count} orang ditandai lunas (${rp(r.total)})`);
       setPicked(new Set());

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Search, ChevronLeft, ChevronRight, X, Pencil, Trash2 } from "lucide-react";
-import { api, type ActivityLog } from "../lib/api";
+import { api, errorText, type ActivityLog } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { useShownEstates } from "../hooks/useEstateFilter";
 import { ExportButtons } from "../components/ExportButtons";
@@ -95,7 +95,12 @@ export function ActivityLogPage({
   const totalPages = Math.max(Math.ceil(total / pageSize), 1);
 
   const remove = async (log: ActivityLog) => {
-    await api.deleteActivityLog(log.id);
+    try {
+      await api.deleteActivityLog(log.id);
+    } catch (e) {
+      window.alert(errorText(e, "Gagal menghapus log", true));
+      return;
+    }
     // Step back a page when the last row of the last page was removed.
     if (rows.length === 1 && page > 1) setPage((p) => p - 1);
     else load();

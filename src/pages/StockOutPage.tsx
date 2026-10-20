@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Search, ChevronLeft, ChevronRight, ArrowUpCircle, Pencil, Trash2 } from "lucide-react";
-import { api, type StockOutRecord } from "../lib/api";
+import { api, errorText, type StockOutRecord } from "../lib/api";
 import { EditStockOutModal } from "../components/EditStockOutModal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useAuth } from "../context/AuthContext";
@@ -87,7 +87,12 @@ export function StockOutPage({ embedded = false }: { embedded?: boolean }) {
   };
 
   const handleDelete = async (r: StockOutRecord) => {
-    await api.deleteStockOut(r.id);
+    try {
+      await api.deleteStockOut(r.id);
+    } catch (e) {
+      // e.g. bulan lalu (supervisor only) or a transfer already used there: say why instead of leaving the row silently.
+      window.alert(errorText(e, "Gagal menghapus stock out", true));
+    }
     load();
   };
 

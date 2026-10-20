@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Search, ChevronLeft, ChevronRight, ArrowDownCircle, Pencil, Trash2 } from "lucide-react";
-import { api, type StockInRecord } from "../lib/api";
+import { api, errorText, type StockInRecord } from "../lib/api";
 import { EditStockInModal } from "../components/EditStockInModal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useAuth } from "../context/AuthContext";
@@ -95,7 +95,12 @@ export function StockInPage({ embedded = false }: { embedded?: boolean }) {
   };
 
   const handleDelete = async (r: StockInRecord) => {
-    await api.deleteStockIn(r.id);
+    try {
+      await api.deleteStockIn(r.id);
+    } catch (e) {
+      // e.g. bulan lalu (supervisor only) or stock already used: say why instead of leaving the row silently.
+      window.alert(errorText(e, "Gagal menghapus stock in", true));
+    }
     load();
   };
 

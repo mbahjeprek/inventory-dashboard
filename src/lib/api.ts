@@ -1376,7 +1376,8 @@ export const api = {
     req<{ tagihan: KopTagihan; data: KopBayarRow[] }>(`/api/koperasi/bayar?${new URLSearchParams({ anggota, periode })}`),
   kopBayar: (body: { anggota_kode: string; periode: string; jumlah: number; tanggal: string; cara: KopCara; keterangan: string }) =>
     req<{ success: boolean; sisa: number }>("/api/koperasi/bayar", { method: "POST", body: JSON.stringify(body) }),
-  kopBayarLunas: (periode: string, kode: string[]) => req<{ count: number; total: number }>("/api/koperasi/bayar/lunas", { method: "POST", body: JSON.stringify({ periode, kode }) }),
+  kopBayarLunas: (periode: string, kode: string[], sisa?: Record<string, number>) =>
+    req<{ count: number; total: number }>("/api/koperasi/bayar/lunas", { method: "POST", body: JSON.stringify({ periode, kode, sisa }) }),
   kopBayarHapus: (id: number) => req<{ success: boolean }>(`/api/koperasi/bayar/${id}`, { method: "DELETE" }),
   kopLimit: (kode: string, periode: string) =>
     req<{ periode: string; limit: number; terpakai: number; sisa: number; tunggakan: { sisa: number; periode: string[]; pesan: string } | null }>(`/api/koperasi/limit/${encodeURIComponent(kode)}?periode=${periode}`),

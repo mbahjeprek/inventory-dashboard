@@ -22,10 +22,10 @@ export const isoDisplay = (iso: string) => (iso ? iso.split("-").reverse().join(
 export const expLabel = (exp: string) => (exp ? isoDisplay(exp) : "Tanpa expired");
 export const when = (iso: string | null) =>
   iso ? new Date(iso).toLocaleString("id-ID", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "-";
-export const localToday = () => {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-};
+// Today in Asia/Jakarta, the day the server checks dates against (jakartaToday): a browser on WITA / WIT
+// time would otherwise offer "tomorrow" around midnight and have every save refused.
+export const localToday = () =>
+  new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
 
 // A history row booked by the Pinjaman page: a loan or a transfer, told apart by the note it was
 // booked with ("Transfer ke / dari X (Transfer #N): ...").

@@ -268,7 +268,9 @@ async function stockLocations(req: express.Request): Promise<StockLocation[]> {
   if (/^\/gudang-stock(\/transactions|\/transactions\/batch|\/correction)?$/.test(p) && m === "POST") return G(b.gudang);
   if (/^\/gudang-stock\/\d+$/.test(p)) return G(await col("gudang_stock", "gudang"));
   if (/^\/gudang-stock\/history\/\d+$/.test(p)) return G(await col("gudang_stock_tx", "gudang"));
-  if (/^\/klinik-stock\/(transactions|transactions\/batch|correction)$/.test(p)) return K(b.klinik);
+  // Input Banyak rows with "ke" also book stock into that estate, so its opname locks them too.
+  const kirimKe = <T,>(f: (e: unknown) => T[]) => (Array.isArray(b.rows) ? b.rows : []).flatMap((r: any) => (r?.ke ? f(r.ke) : []));
+  if (/^\/klinik-stock\/(transactions|transactions\/batch|correction)$/.test(p)) return [...K(b.klinik), ...kirimKe(K)];
   if (/^\/klinik-stock\/batch\/\d+$/.test(p)) return K(await col("klinik_batch", "klinik"));
   if (/^\/klinik-stock\/\d+$/.test(p) && m === "DELETE") return K(await col("klinik_stock", "klinik"));
   if (/^\/klinik-stock\/\d+\/batches$/.test(p))
@@ -283,16 +285,16 @@ async function stockLocations(req: express.Request): Promise<StockLocation[]> {
     const linked = await queryOne("SELECT 1 FROM klinik_stock_tx WHERE kunjungan_id = @id LIMIT 1", { id });
     return terapiStok || linked ? K(await col("klinik_kunjungan", "klinik")) : [];
   }
-  if ((p === "/bbm" || p === "/bbm/batch") && m === "POST") return B(b.lokasi);
+  if ((p === "/bbm" || p === "/bbm/batch") && m === "POST") return [...B(b.lokasi), ...kirimKe(B)];
   if (/^\/bbm\/\d+$/.test(p)) return B(await col("bbm_log", "lokasi"));
-  if ((p === "/pupuk" || p === "/pupuk/batch") && m === "POST") return P(b.estate);
+  if ((p === "/pupuk" || p === "/pupuk/batch") && m === "POST") return [...P(b.estate), ...kirimKe(P)];
   if (/^\/pupuk\/\d+$/.test(p)) return P(await col("pupuk_log", "estate"));
-  if ((p === "/oli" || p === "/oli/batch") && m === "POST") return O(b.estate);
+  if ((p === "/oli" || p === "/oli/batch") && m === "POST") return [...O(b.estate), ...kirimKe(O)];
   // Pinjaman: both the lending and the borrowing estate's stock move.
   const loanAt = (module: unknown, ...estates: unknown[]) =>
     OPNAME_MODULES_LIST.includes(module as OpnameModule) ? estates.flatMap(at(module as OpnameModule)) : [];
   if ((p === "/pinjaman" || p === "/pinjaman/batch") && m === "POST") return loanAt(b.module, b.dari, b.ke);
-  if (/^\/pinjaman\/\d+\/(kembali|batal)$/.test(p)) {
+  if (/^\/pinjaman\/\d+\/(kembali|batal|delete)$/.test(p)) {
     const l = await queryOne<any>("SELECT module, dari_estate, ke_estate FROM pinjaman WHERE id = @id", { id: p.split("/")[2] });
     return l ? loanAt(l.module, l.dari_estate, l.ke_estate) : [];
   }
@@ -921,7 +923,11 @@ const BACKDATE: Record<string, { module: OpnameModule | ((b: any) => string); es
   "/api/gudang-stock/transactions/batch": { module: "GUDANG", estate: (b) => b.gudang },
   "/api/gudang-stock/correction": { module: "GUDANG", estate: (b) => b.gudang },
   "/api/klinik-stock/transactions": { module: "KLINIK", estate: (b) => b.klinik },
-  "/api/klinik-stock/transactions/batch": { module: "KLINIK", estate: (b) => b.klinik },
+  "/api/klinik-stock/transactions/batch": {
+    module: "KLINIK",
+    // Rows sent on to another clinic land there too, behind that clinic's last opname as well.
+    estate: (b) => [b.klinik, ...(Array.isArray(b.rows) ? b.rows : []).map((r: any) => String(r?.ke ?? "").trim()).filter(Boolean)],
+  },
   "/api/klinik-stock/correction": { module: "KLINIK", estate: (b) => b.klinik },
   "/api/pinjaman": { module: (b) => b.module, estate: (b) => [b.dari, b.ke] },
   "/api/pinjaman/batch": { module: (b) => b.module, estate: (b) => [b.dari, b.ke] },
@@ -1403,6 +1409,7 @@ async function nilamStockCheck(client: PoolClient, itemId: number) {
   if (it.s < 0) throw new StockError(`Stok ${it.kode} di Gudang NILAM tidak cukup (jadi ${it.s})`);
 }
 async function reviseNilamTx(client: PoolClient, req: express.Request, tx: any, next: NilamTxChange) {
+  await lockMovement(client, "transactions", tx);
   const item = (await queryOne<any>("SELECT * FROM items WHERE id = @id", { id: tx.item_id }, client))!;
   // The new transfer is booked before the old one is taken back, so only the net change has to be
   // in that gudang's stock (10 -> 8 needs 2 there, not 10).
@@ -1420,6 +1427,7 @@ async function reviseNilamTx(client: PoolClient, req: express.Request, tx: any, 
   return { item, removed, added };
 }
 async function deleteNilamTx(client: PoolClient, tx: any) {
+  await lockMovement(client, "transactions", tx);
   const removed = await removeTransfer(client, tx.id);
   await applyStockEffect(client, tx.item_id, tx.type, tx.qty, -1);
   await nilamStockCheck(client, tx.item_id);
@@ -1500,7 +1508,7 @@ app.post("/api/transactions", requireEstate("NILAM"), async (req, res) => {
   res.json({ success: true });
 });
 
-app.put("/api/transactions/:id", requireSuperuser, async (req, res) => {
+app.put("/api/transactions/:id", requireEstate("NILAM"), async (req, res) => {
   const existing = await queryOne<any>("SELECT * FROM transactions WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Not found" });
   if (editTooLate(req, res, "gudang", existing)) return;
@@ -1558,7 +1566,7 @@ app.put("/api/transactions/:id", requireSuperuser, async (req, res) => {
   res.json({ success: true });
 });
 
-app.delete("/api/transactions/:id", requireSuperuser, async (req, res) => {
+app.delete("/api/transactions/:id", requireEstate("NILAM"), async (req, res) => {
   const existing = await queryOne<any>("SELECT * FROM transactions WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Not found" });
   if (editTooLate(req, res, "gudang", existing)) return;
@@ -1585,7 +1593,7 @@ app.delete("/api/transactions/:id", requireSuperuser, async (req, res) => {
 });
 
 // ---- Stock correction (stock opname / physical count adjustment) ----
-app.post("/api/stock-correction", requireSuperuser, async (req, res) => {
+app.post("/api/stock-correction", requireEstate("NILAM"), async (req, res) => {
   const { item_id, actual_qty, note } = req.body;
 
   if (!item_id || actual_qty === undefined || actual_qty < 0) {
@@ -1699,7 +1707,7 @@ app.get("/api/stock-in/vendors", requireEstate("NILAM"), async (_req, res) => {
   res.json(rows.map((r) => r.nama_vendor));
 });
 
-app.put("/api/stock-in/:id", requireSuperuser, async (req, res) => {
+app.put("/api/stock-in/:id", requireEstate("NILAM"), async (req, res) => {
   const existing = await queryOne("SELECT * FROM stock_in_log WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Not found" });
   if (editTooLate(req, res, "gudang", existing)) return;
@@ -1750,7 +1758,7 @@ app.put("/api/stock-in/:id", requireSuperuser, async (req, res) => {
   res.json({ success: true });
 });
 
-app.delete("/api/stock-in/:id", requireSuperuser, async (req, res) => {
+app.delete("/api/stock-in/:id", requireEstate("NILAM"), async (req, res) => {
   const existing = await queryOne<any>("SELECT * FROM stock_in_log WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Not found" });
   if (editTooLate(req, res, "gudang", existing)) return;
@@ -1821,7 +1829,7 @@ app.get("/api/stock-out", requireEstate("NILAM"), async (req, res) => {
   res.json({ data, total: Number(total), qtySum: Number(qtySum), page: parseInt(page), pageSize: limit });
 });
 
-app.put("/api/stock-out/:id", requireSuperuser, async (req, res) => {
+app.put("/api/stock-out/:id", requireEstate("NILAM"), async (req, res) => {
   const existing = await queryOne("SELECT * FROM stock_out_log WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Not found" });
   if (editTooLate(req, res, "gudang", existing)) return;
@@ -1878,7 +1886,7 @@ app.put("/api/stock-out/:id", requireSuperuser, async (req, res) => {
   res.json({ success: true });
 });
 
-app.delete("/api/stock-out/:id", requireSuperuser, async (req, res) => {
+app.delete("/api/stock-out/:id", requireEstate("NILAM"), async (req, res) => {
   const existing = await queryOne<any>("SELECT * FROM stock_out_log WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Not found" });
   if (editTooLate(req, res, "gudang", existing)) return;
@@ -2637,7 +2645,7 @@ app.post("/api/bbm", async (req, res) => {
   if (evidenceId === undefined) return;
 
   const lastSaldo = await saldoAsOf("BBM", lokasi, jenis_bbm, tanggal_iso);
-  const saldoBaru = tipe === "DITERIMA" ? lastSaldo + jumlah : lastSaldo - jumlah;
+  const saldoBaru = round3(tipe === "DITERIMA" ? lastSaldo + jumlah : lastSaldo - jumlah);
   const { tanggal, periode } = isoToIndoDate(tanggal_iso);
 
   const result = await queryOne<{ id: number }>(
@@ -3001,6 +3009,14 @@ app.get("/api/pupuk", async (req, res) => {
   res.json({ data, total: totals.c, keluarSum: totals.keluar, diterimaSum: totals.diterima, page: parseInt(q.page) || 1, pageSize: limit });
 });
 
+// A jenis pupuk must be in master pupuk for this estate (or already have history here): a typo would
+// otherwise start a separate saldo chain.
+const pupukJenisOk = async (estate: string, jenis: string) =>
+  !!(await queryOne(
+    `SELECT 1 FROM master_pupuk WHERE nama = @jenis AND ${OLI_AT_ESTATE} UNION ALL SELECT 1 FROM pupuk_log WHERE jenis_pupuk = @jenis AND estate = @estate LIMIT 1`,
+    { jenis, estate }
+  ));
+
 const pupukObjek = (r: { jenis_pupuk: string; tanggal: string; blok?: string | null }) =>
   `${r.jenis_pupuk} · ${r.tanggal}${r.blok ? ` · Blok ${r.blok}` : ""}`;
 
@@ -3017,9 +3033,10 @@ app.post("/api/pupuk", async (req, res) => {
   if (evidenceId === undefined) return;
 
   const jenis = String(jenis_pupuk).trim().toUpperCase();
+  if (!(await pupukJenisOk(estate, jenis))) return res.status(400).json({ error: `Jenis pupuk ${jenis} tidak ada di Master Data Pupuk` });
   const lastSaldo = await saldoAsOf("PUPUK", estate, jenis, tanggal_iso);
   const qty = Number(jumlah);
-  const saldoBaru = tipe === "MASUK" ? lastSaldo + qty : lastSaldo - qty;
+  const saldoBaru = round3(tipe === "MASUK" ? lastSaldo + qty : lastSaldo - qty);
   const [y, m, d] = tanggal_iso.split("-");
   const tanggal = `${d}/${m}/${y}`;
   const periode = `${INDO_MONTHS[Number(m) - 1]} ${y}`;
@@ -3262,6 +3279,14 @@ const EXPIRING_SQL = `(ks.expired_date IS NOT NULL AND ks.expired_date <> '' AND
 // ---- Klinik batches (see schema.sql klinik_batch) ----
 type Alloc = { exp: string; qty: number }; // exp '' = batch without expiry date
 class StockError extends Error {}
+
+// A movement is re-read and locked inside the transaction that reverses it: a double click or a retry of the
+// same delete / edit must not take the stock back twice (the row was read before the transaction began).
+async function lockMovement(client: PoolClient, table: string, old: { id: number; qty: unknown; type: unknown }) {
+  const cur = await queryOne<{ qty: number; type: string }>(`SELECT qty, type FROM ${table} WHERE id = @id FOR UPDATE`, { id: old.id }, client);
+  if (!cur) throw new StockError("Transaksi ini sudah dihapus. Muat ulang halaman.");
+  if (Number(cur.qty) !== Number(old.qty) || cur.type !== old.type) throw new StockError("Transaksi ini baru saja diubah. Muat ulang halaman lalu ulangi.");
+}
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const expText = (exp: string) => (exp ? exp.split("-").reverse().join("/") : "tanpa tanggal");
 // Tujuan of a Stock Out that throws expired obat away; it is left out of Top Barang Keluar.
@@ -4678,6 +4703,7 @@ for (const lr of LEDGER_ROUTES) {
       if (exp && !ISO_DATE.test(exp)) return res.status(400).json({ error: "Tanggal expired tidak valid" });
       try {
         await withTransaction(async (client) => {
+          await lockMovement(client, l.tx, existing);
           await klinikReverse(client, existing);
           const alloc = await klinikApply(client, existing.klinik, existing.obat_kode, existing.type, qty, exp);
           await execute(
@@ -4696,6 +4722,7 @@ for (const lr of LEDGER_ROUTES) {
     const delta = round3(sign * (qty - existing.qty));
     try {
     await withTransaction(async (client) => {
+      await lockMovement(client, l.tx, existing);
       await execute(`UPDATE ${l.tx} SET qty = @qty, tujuan = @tujuan, penerima = @penerima, note = @note WHERE id = @id`, {
         qty,
         tujuan: tujuan ?? "",
@@ -4739,6 +4766,7 @@ for (const lr of LEDGER_ROUTES) {
     if (existing.transfer_from_id) return res.status(400).json({ error: TRANSFER_LOCKED });
     try {
       await withTransaction(async (client) => {
+        await lockMovement(client, l.tx, existing);
         if (l === KLINIK_LEDGER) await klinikReverse(client, existing);
         await execute(`DELETE FROM ${l.tx} WHERE id = @id`, { id: existing.id }, client);
         if (l === KLINIK_LEDGER) await syncKlinikStock(client, existing.klinik, existing.obat_kode);
@@ -6091,6 +6119,21 @@ app.delete("/api/oli/:id", requireSuperuser, async (req, res) => {
   res.json({ success: true });
 });
 
+// A renamed jenis oli / pupuk: loans and opname lines carry the jenis name as their kode, and a return or
+// an approval books under it; renamed with the ledger so they don't start a ghost chain under the old name.
+// A name the ledger already uses (not in master) is refused: merging two saldo chains isn't a rename.
+async function renameSaldoJenis(module: "OLI" | "PUPUK", old: string, nama: string, c: PoolClient) {
+  const t = SALDO_LEDGER[module];
+  if (await queryOne(`SELECT 1 FROM ${t.table} WHERE ${t.jenis} = @nama LIMIT 1`, { nama }, c))
+    throw Object.assign(new Error("dup"), { code: "23505" });
+  await execute("UPDATE pinjaman SET kode = @nama, nama = @nama WHERE module = @module AND kode = @old", { module, old, nama }, c);
+  await execute(
+    "UPDATE opname_line l SET kode = @nama, nama = @nama FROM opname o WHERE o.id = l.opname_id AND o.module = @module AND l.kode = @old",
+    { module, old, nama },
+    c
+  );
+}
+
 // ---- Master data oli (see schema.sql master_oli) ----
 const masterOliPayload = (b: any) => ({
   kode: String(b?.kode ?? "").trim().toUpperCase(),
@@ -6141,6 +6184,7 @@ app.put("/api/master-oli/:id", async (req, res) => {
       await execute("UPDATE master_oli SET kode = @kode, nama = @nama, satuan = @satuan, keterangan = @keterangan, estates = @estates WHERE id = @id", { ...o, id: existing.id }, c);
       if (o.nama !== existing.nama) {
         await execute("UPDATE oli_log SET jenis_oli = @nama WHERE jenis_oli = @old", { nama: o.nama, old: existing.nama }, c);
+        await renameSaldoJenis("OLI", existing.nama, o.nama, c);
       }
     });
   } catch (e: any) {
@@ -6215,6 +6259,7 @@ app.put("/api/master-pupuk/:id", async (req, res) => {
       await execute("UPDATE master_pupuk SET kode = @kode, nama = @nama, keterangan = @keterangan, estates = @estates WHERE id = @id", { ...o, id: existing.id }, c);
       if (o.nama !== existing.nama) {
         await execute("UPDATE pupuk_log SET jenis_pupuk = @nama WHERE jenis_pupuk = @old", { nama: o.nama, old: existing.nama }, c);
+        await renameSaldoJenis("PUPUK", existing.nama, o.nama, c);
       }
     });
   } catch (e: any) {
@@ -6483,6 +6528,7 @@ app.post("/api/pupuk/batch", async (req, res) => {
     const jenis = String(r?.jenis_pupuk ?? "").trim().toUpperCase();
     const qty = Number(r?.jumlah);
     if (!jenis) return refuseRow(res, i, "jenis pupuk wajib diisi");
+    if (!(await pupukJenisOk(estate, jenis))) return refuseRow(res, i, `jenis pupuk ${jenis} tidak ada di Master Data Pupuk`);
     if (!["MASUK", "KELUAR"].includes(r?.tipe)) return refuseRow(res, i, "tipe transaksi tidak valid");
     if (!Number.isFinite(qty) || qty <= 0) return refuseRow(res, i, "jumlah harus lebih dari 0");
     const keluar = r.tipe === "KELUAR";
@@ -7021,7 +7067,7 @@ app.get("/api/pinjaman/barang", async (req, res) => {
       ? BBM_JENIS
       : m === "OLI"
         ? (await queryMany<{ v: string }>("SELECT nama v FROM master_oli ORDER BY nama")).map((r) => r.v)
-        : (await queryMany<{ v: string }>("SELECT DISTINCT jenis_pupuk v FROM pupuk_log WHERE estate = @estate ORDER BY 1", { estate })).map((r) => r.v);
+        : (await queryMany<{ v: string }>(`SELECT nama v FROM master_pupuk WHERE ${OLI_AT_ESTATE} UNION SELECT DISTINCT jenis_pupuk FROM pupuk_log WHERE estate = @estate ORDER BY 1`, { estate })).map((r) => r.v);
   const data: LoanItem[] = [];
   for (const j of jenis) {
     const it = await loanItem(m, estate, j);
@@ -7708,6 +7754,9 @@ app.post("/api/koperasi/anggota", async (req, res) => {
   const nama = String(b.nama ?? "").trim();
   if (!kode) return res.status(400).json({ error: jenis === "KARYAWAN" ? "NIK wajib diisi" : "Kode wajib diisi" });
   if (jenis === "INSTANSI" && !nama) return res.status(400).json({ error: "Nama wajib diisi" });
+  // An instansi has no limit and isn't cut from a salary: a karyawan's NIK can't be one.
+  if (jenis === "INSTANSI" && (await queryOne("SELECT 1 FROM karyawan WHERE UPPER(REPLACE(nik, ' ', '')) = @kode", { kode: kode.replace(/s+/g, "") })))
+    return res.status(400).json({ error: "Kode ini NIK karyawan; daftarkan sebagai Karyawan, bukan Instansi" });
   const k = jenis === "KARYAWAN" ? await queryOne("SELECT nama, estate, lokasi_kerja FROM karyawan WHERE UPPER(REPLACE(nik, ' ', '')) = @kode", { kode }) : null;
   if (jenis === "KARYAWAN" && !k && !nama) return res.status(400).json({ error: "NIK ini tidak ada di master karyawan; isi namanya" });
   const r = await execute(
@@ -7750,6 +7799,18 @@ app.put("/api/koperasi/anggota/:kode", async (req, res) => {
 });
 
 // Limit of one anggota in a periode: what is already deducted (potong gaji) and what is left.
+// A Stock Out change may not bring a periode's potong-gaji bill below what was already paid for it (the payment
+// would be left over, hidden as sisa 0): delete the payment first. delta = change of the bill (negative = less).
+async function kopLebihBayar(kode: string | null, periode: string, delta: number, client: PoolClient): Promise<string | null> {
+  if (!kode || delta >= 0) return null;
+  const dibayar = (await queryOne<{ v: number }>("SELECT COALESCE(SUM(jumlah), 0)::float8 v FROM koperasi_bayar WHERE anggota_kode = @kode AND periode = @periode AND koperasi = @k", { kode, periode, k: KOPERASI }, client))!.v;
+  if (dibayar <= 0.5) return null;
+  const tagihan = await kopTerpakai(kode, periode, client);
+  if (tagihan + delta >= dibayar - 0.5) return null;
+  const rpText = (n: number) => `Rp ${Math.round(n).toLocaleString("id-ID")}`;
+  return `Tagihan ${kode} periode ${periode} sudah dibayar ${rpText(dibayar)}; perubahan ini membuat tagihannya ${rpText(tagihan + delta)}, lebih kecil dari yang dibayar. Hapus / ubah pembayarannya dulu (HR, tombol Pembayaran di Rekap).`;
+}
+
 async function kopTerpakai(kode: string, periode: string, client?: PoolClient) {
   const r = await queryOne<{ v: number }>(
     "SELECT COALESCE(SUM(total), 0)::float8 AS v FROM koperasi_tx WHERE anggota_kode = @kode AND periode = @periode AND jenis = 'JUAL' AND bayar = 'POTONG_GAJI'",
@@ -7874,7 +7935,7 @@ app.post("/api/koperasi/jual", async (req, res) => {
           };
         }
       }
-      const bon = `KOP-${b.tanggal.replace(/-/g, "")}-${Date.now().toString(36).toUpperCase()}`;
+      const bon = `KOP-${b.tanggal.replace(/-/g, "")}-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
       await execute(
         `INSERT INTO koperasi_tx (koperasi, jenis, tanggal_iso, periode, bon, barang_kode, qty, harga, total, anggota_kode, bayar, keterangan, evidence_id, user_id)
          SELECT @k, 'JUAL', @tanggal, @periode, @bon, x.kode, x.qty, x.harga, ROUND((x.qty * x.harga)::numeric, 2), @anggota, @bayar, @ket, @evidence::uuid, @uid
@@ -7940,8 +8001,9 @@ app.post("/api/koperasi/beli", async (req, res) => {
       );
       for (const l of v.lines.filter((l) => l.harga > 0))
         await execute(
-          `UPDATE koperasi_barang SET harga_beli = @harga${b.update_harga !== false ? ", harga_jual = @harga" : ""} WHERE kode = @kode`,
-          { harga: l.harga, kode: l.barang_kode },
+          // A late-entered older nota doesn't override the price of a newer Stock In.
+          `UPDATE koperasi_barang SET harga_beli = @harga${b.update_harga !== false ? ", harga_jual = @harga" : ""} WHERE kode = @kode AND NOT EXISTS (SELECT 1 FROM koperasi_tx x WHERE x.barang_kode = @kode AND x.jenis = 'BELI' AND x.tanggal_iso > @tanggal)`,
+          { harga: l.harga, kode: l.barang_kode, tanggal: b.tanggal },
           client
         );
       return { lines: v.lines, total: v.lines.reduce((s, l) => s + l.qty * l.harga, 0) };
@@ -8140,7 +8202,7 @@ app.post("/api/koperasi/beli/batch", async (req, res) => {
       );
       // The last row of a barang sets its harga beli (and harga jual, unless switched off).
       for (const r of rows.filter((r) => r.harga > 0))
-        await execute(`UPDATE koperasi_barang SET harga_beli = @harga${b.update_harga !== false ? ", harga_jual = @harga" : ""} WHERE kode = @kode`, { harga: r.harga, kode: r.barang_kode }, client);
+        await execute(`UPDATE koperasi_barang SET harga_beli = @harga${b.update_harga !== false ? ", harga_jual = @harga" : ""} WHERE kode = @kode AND NOT EXISTS (SELECT 1 FROM koperasi_tx x WHERE x.barang_kode = @kode AND x.jenis = 'BELI' AND x.tanggal_iso > @tanggal)`, { harga: r.harga, kode: r.barang_kode, tanggal: b.tanggal }, client);
     });
     const total = rows.reduce((s, r) => s + r.qty * r.harga, 0);
     await logActivity(req, {
@@ -8195,10 +8257,20 @@ app.delete("/api/koperasi/tx/:id", async (req, res) => {
   if (kunci) return res.status(403).json({ error: kunci });
   const whole = req.query.bon === "1" && t.jenis === "JUAL" && t.bon;
   const result = await withTransaction(async (client) => {
-    if (t.jenis === "BELI" && t.lacak_stok) {
+    // A koreksi from a stok opname belongs to that opname: changing it here would leave the opname showing a selisih nobody booked.
+    if (t.opname_id) return { error: `Koreksi ini dari Stok Opname #${t.opname_id}; ubah lewat opname itu` };
+    // Stock that came in (Stock In, or a koreksi that added) can't be taken back once it was sold on.
+    if ((t.jenis === "BELI" || (t.jenis === "KOREKSI" && Number(t.qty) > 0)) && t.lacak_stok) {
       await queryOne("SELECT kode FROM koperasi_barang WHERE kode = @kode FOR UPDATE", { kode: t.barang_kode }, client);
       const stok = (await kopStok([t.barang_kode], client)).get(t.barang_kode) ?? 0;
-      if (stok + 1e-9 < t.qty) return { error: `Stock In ini sudah terpakai: stok ${t.barang_nama} tinggal ${kopQty(stok)}, kurang dari ${kopQty(t.qty)}` };
+      if (stok + 1e-9 < t.qty) return { error: `${t.jenis === "BELI" ? "Stock In" : "Koreksi"} ini sudah terpakai: stok ${t.barang_nama} tinggal ${kopQty(stok)}, kurang dari ${kopQty(t.qty)}` };
+    }
+    if (t.jenis === "JUAL" && t.bayar === "POTONG_GAJI") {
+      const removed = whole
+        ? (await queryOne<{ v: number }>("SELECT COALESCE(SUM(total), 0)::float8 v FROM koperasi_tx WHERE bon = @bon AND jenis = 'JUAL' AND bayar = 'POTONG_GAJI'", { bon: t.bon }, client))!.v
+        : Number(t.total);
+      const lebih = await kopLebihBayar(t.anggota_kode, t.periode, -removed, client);
+      if (lebih) return { error: lebih };
     }
     const r = await execute(whole ? "DELETE FROM koperasi_tx WHERE bon = @bon AND jenis = 'JUAL' RETURNING evidence_id" : "DELETE FROM koperasi_tx WHERE id = @id RETURNING evidence_id", { bon: t.bon, id: t.id }, client);
     return { n: r.rowCount };
@@ -8240,7 +8312,7 @@ app.put("/api/koperasi/tx/:id", async (req, res) => {
         if (t.bon && dup) return { error: `${l.nama} sudah ada di bon ini; ubah jumlah baris itu saja` };
       }
       if (l.lacak_stok) {
-        const stok = ((await kopStok([l.barang_kode], client)).get(l.barang_kode) ?? 0) + (sameBarang ? Number(t.qty) : 0);
+        const stok = ((await kopStok([l.barang_kode], client)).get(l.barang_kode) ?? 0) + (sameBarang && t.sumber !== "IMPORT-REKAP2023" ? Number(t.qty) : 0);
         if (stok + 1e-9 < l.qty) return { error: `Stok ${l.nama} tinggal ${kopQty(stok)}, tidak cukup untuk ${kopQty(l.qty)}` };
       }
       const totalBaru = Math.round(l.qty * l.harga * 100) / 100;
@@ -8251,6 +8323,10 @@ app.put("/api/koperasi/tx/:id", async (req, res) => {
           const rpText = (n: number) => `Rp ${Math.round(n).toLocaleString("id-ID")}`;
           return { error: `Melebihi limit ${rpText(KOP_LIMIT)} per bulan: sisa ${rpText(Math.max(KOP_LIMIT - terpakai, 0))} untuk baris ini, perubahan ini ${rpText(totalBaru)}` };
         }
+      }
+      if (t.bayar === "POTONG_GAJI") {
+        const lebih = await kopLebihBayar(t.anggota_kode, t.periode, totalBaru - Number(t.total), client);
+        if (lebih) return { error: lebih };
       }
       await execute("UPDATE koperasi_tx SET barang_kode = @kode, qty = @qty, harga = @harga, total = @total WHERE id = @id", { kode: l.barang_kode, qty: l.qty, harga: l.harga, total: totalBaru, id: t.id }, client);
       return { t, l, totalBaru };
@@ -8367,6 +8443,14 @@ app.post("/api/koperasi/opname/:id/selesai", async (req, res) => {
     if (o.status !== "DRAFT") return { error: "Stok opname ini sudah selesai / dibatalkan", status: 409 };
     const counted = await queryOne<{ n: number }>("SELECT COUNT(fisik)::int AS n FROM koperasi_opname_line WHERE opname_id = @id", { id: o.id }, client);
     if (!counted!.n) return { error: "Belum ada stok fisik yang diisi", status: 400 };
+    // Sales / Stock In while the count was open moved the stock: the koreksi is fisik against the stock now
+    // (as the inventory Stok Opname refreshes stok_sistem at approval), not against the snapshot at the start.
+    await execute(
+      `UPDATE koperasi_opname_line l SET stok_sistem = COALESCE((SELECT ${kopStokSql} FROM koperasi_tx t WHERE t.barang_kode = l.barang_kode), 0)::float8
+        WHERE l.opname_id = @id`,
+      { id: o.id },
+      client
+    );
     const koreksi = await kopOpnameBook(o.id, o.tanggal_iso, req.user!.id, client);
     await execute("UPDATE koperasi_opname SET status = 'SELESAI', selesai_at = now(), selesai_oleh = @uid WHERE id = @id", { id: o.id, uid: req.user!.id }, client);
     return { id: o.id, koreksi, dihitung: counted!.n };
@@ -8625,13 +8709,31 @@ app.post("/api/koperasi/bayar/lunas", async (req, res) => {
   const kodes: string[] = (Array.isArray(b.kode) ? b.kode : []).map((x: unknown) => String(x).toUpperCase());
   if (!isPeriode(b.periode) || !kodes.length) return res.status(400).json({ error: "Pilih anggota dan periode" });
   const tanggal = isIsoDate(b.tanggal) && b.tanggal <= jakartaToday() ? b.tanggal : jakartaToday();
-  const r = await execute(
-    `INSERT INTO koperasi_bayar (koperasi, anggota_kode, periode, jumlah, tanggal_iso, cara, keterangan, user_id)
-     SELECT @k, x.kode, x.periode, x.sisa, @tanggal, 'POTONG_GAJI', 'Lunas potong gaji', @uid
-       FROM (${KOP_TAGIHAN_SQL}) x WHERE x.periode = @periode AND x.kode = ANY(@kodes::text[]) AND x.sisa > 0.5
-     RETURNING jumlah`,
-    { k: KOPERASI, periode: b.periode, kodes, tanggal, uid: req.user!.id }
-  );
+  // The sisa HR saw per kode (optional): if a bon or payment changed it since, refuse rather than book another amount.
+  const seen: Record<string, number> = b.sisa && typeof b.sisa === "object" ? b.sisa : {};
+  const result = await withTransaction(async (client) => {
+    // Locked like POST /bayar, so a double click or two HR users can't both book the same sisa.
+    await execute("SELECT kode FROM koperasi_anggota WHERE kode = ANY(@kodes::text[]) ORDER BY kode FOR UPDATE", { kodes }, client);
+    const now = await queryMany<{ kode: string; sisa: number }>(
+      `SELECT x.kode, x.sisa::float8 sisa FROM (${KOP_TAGIHAN_SQL}) x WHERE x.periode = @periode AND x.kode = ANY(@kodes::text[])`,
+      { k: KOPERASI, periode: b.periode, kodes },
+      client
+    );
+    const changed = now.find((x) => x.kode in seen && Math.abs(Number(seen[x.kode]) - x.sisa) > 0.5);
+    if (changed) return { error: `Tagihan ${changed.kode} berubah sejak halaman dibuka (sekarang Rp ${Math.round(changed.sisa).toLocaleString("id-ID")}). Muat ulang Rekap lalu ulangi.` };
+    return {
+      r: await execute(
+        `INSERT INTO koperasi_bayar (koperasi, anggota_kode, periode, jumlah, tanggal_iso, cara, keterangan, user_id)
+         SELECT @k, x.kode, x.periode, x.sisa, @tanggal, 'POTONG_GAJI', 'Lunas potong gaji', @uid
+           FROM (${KOP_TAGIHAN_SQL}) x WHERE x.periode = @periode AND x.kode = ANY(@kodes::text[]) AND x.sisa > 0.5
+         RETURNING jumlah`,
+        { k: KOPERASI, periode: b.periode, kodes, tanggal, uid: req.user!.id },
+        client
+      ),
+    };
+  });
+  if ("error" in result) return res.status(409).json({ error: result.error });
+  const r = result.r;
   const total = r.rows.reduce((s: number, x: { jumlah: number }) => s + Number(x.jumlah), 0);
   if (r.rowCount)
     await logActivity(req, {
@@ -8687,7 +8789,7 @@ app.get("/api/koperasi/slip", async (req, res) => {
   const data = await queryMany(
     `SELECT t.anggota_kode, t.tanggal_iso, t.bon, t.barang_kode, b.nama AS barang_nama, b.satuan, t.qty::float8 qty, t.harga::float8 harga, t.total::float8 total, t.bayar
        FROM koperasi_tx t JOIN koperasi_barang b ON b.kode = t.barang_kode
-      WHERE t.koperasi = @k AND t.jenis = 'JUAL' AND t.periode = @periode AND t.anggota_kode = ANY(@kodes::text[])
+      WHERE t.koperasi = @k AND t.jenis = 'JUAL' AND t.bayar = 'POTONG_GAJI' AND t.periode = @periode AND t.anggota_kode = ANY(@kodes::text[])
       ORDER BY t.anggota_kode, t.tanggal_iso, t.id`,
     { k: KOPERASI, periode, kodes }
   );

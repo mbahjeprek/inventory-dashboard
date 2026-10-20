@@ -29,6 +29,7 @@ export const ALL_PERMS: string[] = [
   "master.barang",
   "master.obat",
   "master.oli",
+  "master.pupuk",
   "master.karyawan",
   "master.alat",
   "master.blok",
