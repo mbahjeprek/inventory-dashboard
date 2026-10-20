@@ -93,7 +93,7 @@ export function KopJualBatchModal({ onClose, onSuccess }: { onClose: () => void;
         if (a) {
           // What this person already took this month (saved bon), and the rest of the limit before these rows.
           const sudah = terpakai.get(a.kode.toUpperCase()) ?? 0;
-          return `${a.nama}${a.baru ? " · anggota baru" : ""} · bulan ini ${rp(sudah)}, sisa ${rp(Math.max(limit - sudah, 0))}`;
+          return `${a.nama}${a.baru ? " · anggota baru" : ""}${a.jenis === "KARYAWAN" && a.di_master === false ? " · TIDAK DI MASTER KARYAWAN (resign / pindah?)" : ""} · bulan ini ${rp(sudah)}, sisa ${rp(Math.max(limit - sudah, 0))}`;
         }
         if (!norm(c.anggota)) return undefined;
         return extra.has(norm(c.anggota).replace(/\s/g, "")) ? "tidak ada di master karyawan" : "mencari...";

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, Banknote, Boxes, ChevronRight, ChevronsDownUp, ChevronsUpDown, ClipboardCheck, HandCoins, LayoutDashboard, ListPlus, Lock, Package, PackageX, Pencil, Plus, Search, ShoppingBasket, Trash2, Truck, UserPlus, Users, X } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, Banknote, Boxes, ChevronRight, ChevronsDownUp, ChevronsUpDown, ClipboardCheck, HandCoins, LayoutDashboard, ListPlus, Lock, Package, Receipt, PackageX, Pencil, Plus, Search, ShoppingBasket, Trash2, Truck, UserPlus, Users, X } from "lucide-react";
 import {
   api,
   errorText,
@@ -25,6 +25,7 @@ import { tanggalWaktu } from "../lib/datetime";
 import { KopBeliBatchModal, KopJualBatchModal } from "../components/KoperasiBatchModal";
 import { KoperasiDashboard } from "../components/KoperasiDashboard";
 import { KoperasiOpname } from "../components/KoperasiOpname";
+import { printKopSlips } from "../lib/kopSlip";
 import { ActivityLogButton } from "../components/ActivityLogButton";
 
 // Koperasi karyawan Nilam: anggota (karyawan) take goods, deducted from the salary of the month taken
@@ -639,7 +640,7 @@ function RekapTab({ periode, reload, canBayar, onChanged }: { periode: string; r
   const [detail, setDetail] = useState<KopRekap | null>(null);
   const [bayar, setBayar] = useState<KopRekap | null>(null);
   const [filter, setFilter] = useState<"" | "POTONG_GAJI" | "INSTANSI">("POTONG_GAJI");
-  const [statusF, setStatusF] = useState<"" | "LUNAS" | "BELUM">("");
+  const [statusF, setStatusF] = useState<"" | "LUNAS" | "BELUM" | "KELUAR">("");
   const [cari, setCari] = useState("");
   const words = cari.trim().toLowerCase().split(/\s+/).filter(Boolean);
   const [picked, setPicked] = useState<Set<string>>(new Set());
@@ -656,11 +657,28 @@ function RekapTab({ periode, reload, canBayar, onChanged }: { periode: string; r
   const [sort, setSort] = useState<Sort>({ key: "", dir: "asc" });
   const st = (r: KopRekap) => statusBayar(r, jatuhTempo, today);
   const sisaOf = (r: KopRekap) => Math.max(r.potong_gaji - r.dibayar, 0);
+  // A karyawan no longer in master karyawan has likely resigned / moved: their bill must be taken from the last salary.
+  const keluar = (r: KopRekap) => r.jenis === "KARYAWAN" && !r.di_master;
+  const keluarOpen = (rows ?? []).filter((r) => keluar(r) && sisaOf(r) > 0.5);
+  const [slipBusy, setSlipBusy] = useState(false);
+  const cetakSlip = async (people: KopRekap[]) => {
+    const list = people.filter((r) => r.potong_gaji > 0);
+    if (!list.length) return setMsg("Tidak ada karyawan dengan potong gaji untuk dicetak");
+    setSlipBusy(true);
+    try {
+      const r = await api.kopSlip(periode, list.map((p) => p.kode));
+      printKopSlips({ periode, jatuhTempo: r.jatuh_tempo, limit: r.limit, people: list, lines: r.data });
+    } catch {
+      setMsg("Gagal menyiapkan slip");
+    } finally {
+      setSlipBusy(false);
+    }
+  };
   const shown = sortBy(
     (rows ?? []).filter(
       (r) =>
         (filter === "POTONG_GAJI" ? r.potong_gaji > 0 : filter === "INSTANSI" ? r.instansi > 0 : true) &&
-        (statusF === "LUNAS" ? st(r) === "LUNAS" : statusF === "BELUM" ? !!st(r) && st(r) !== "LUNAS" : true) &&
+        (statusF === "LUNAS" ? st(r) === "LUNAS" : statusF === "BELUM" ? !!st(r) && st(r) !== "LUNAS" : statusF === "KELUAR" ? keluar(r) : true) &&
         words.every((w) => [r.kode, r.nama, r.jabatan, r.estate, r.divisi].join(" ").toLowerCase().includes(w))
     ),
     sort,
@@ -753,6 +771,7 @@ function RekapTab({ periode, reload, canBayar, onChanged }: { periode: string; r
           <option value="">Semua status</option>
           <option value="BELUM">Belum lunas</option>
           <option value="LUNAS">Lunas</option>
+          <option value="KELUAR">Tidak di master karyawan (resign / pindah?)</option>
         </select>
         <div className="relative flex-1 min-w-[180px] max-w-xs">
           <Search size={15} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
@@ -770,9 +789,34 @@ function RekapTab({ periode, reload, canBayar, onChanged }: { periode: string; r
               Tandai lunas ({pickedRows.length})
             </button>
           )}
+          <button
+            onClick={() => cetakSlip(pickedRows.length ? pickedRows : shown)}
+            disabled={slipBusy}
+            title={pickedRows.length ? "Cetak slip yang dicentang" : "Cetak slip semua yang tampil (pakai filter / cari untuk memilih)"}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md border border-[var(--border)] text-sm text-[var(--text-secondary)] hover:bg-[#f1f5f9] disabled:opacity-50"
+          >
+            <Receipt size={15} />
+            {slipBusy ? "Menyiapkan..." : `Slip gaji (${(pickedRows.length ? pickedRows : shown).filter((r) => r.potong_gaji > 0).length})`}
+          </button>
           <ExportButtons total={shown.length} buildReport={buildReport} fileName={`koperasi-potong-gaji-${periode}`} />
         </div>
       </div>
+      {keluarOpen.length > 0 && statusF !== "KELUAR" && (
+        <div className="px-3 pt-3">
+          <div className="flex flex-wrap items-center gap-3 rounded-lg border-l-4 border-[var(--accent-red)] bg-[var(--accent-red-bg)] px-4 py-3 text-sm text-[var(--accent-red)]">
+            <AlertTriangle size={20} className="shrink-0" />
+            <p className="flex-1 min-w-[220px]">
+              <b>
+                {keluarOpen.length} karyawan masih punya tagihan {rp(keluarOpen.reduce((t, r) => t + sisaOf(r), 0))}
+              </b>{" "}
+              tapi sudah tidak ada di master karyawan (kemungkinan resign / pindah). Pastikan dipotong dari gaji terakhirnya atau ditagih langsung.
+            </p>
+            <button onClick={() => setStatusF("KELUAR")} className="px-3 py-1.5 rounded-md bg-[var(--accent-red)] text-white text-xs font-medium hover:opacity-90">
+              Tampilkan
+            </button>
+          </div>
+        </div>
+      )}
       {jatuhTempo && (
         // A callout HR can't miss: when the rekap goes to HRD, when salaries are cut, and what to do after.
         <div className="px-3 py-3 border-b border-[var(--border)]">
@@ -873,7 +917,14 @@ function RekapTab({ periode, reload, canBayar, onChanged }: { periode: string; r
                         <button onClick={() => setDetail(r)} className="text-left hover:underline" title="Lihat rincian bon">
                           {r.nama || <span className="italic text-[var(--text-muted)]">nama tidak tercatat</span>}
                         </button>
-                        {r.jenis === "KARYAWAN" && !r.di_master && <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded bg-[var(--accent-amber-bg)] text-[var(--accent-amber)]">tidak di master karyawan</span>}
+                        {keluar(r) && (
+                          <span
+                            title="NIK ini sudah tidak ada di master karyawan: kemungkinan resign / pindah. Tagihannya perlu diambil dari gaji terakhir."
+                            className={`ml-1.5 text-[10px] px-1.5 py-0.5 rounded whitespace-nowrap ${sisa > 0.5 ? "bg-[var(--accent-red-bg)] text-[var(--accent-red)] font-semibold" : "bg-[var(--accent-amber-bg)] text-[var(--accent-amber)]"}`}
+                          >
+                            resign / pindah?
+                          </span>
+                        )}
                       </td>
                       <td className="px-3 py-2 text-xs">{r.jabatan || "-"}</td>
                       <td className="px-3 py-2 text-xs whitespace-nowrap">{[r.estate, r.divisi].filter(Boolean).join(" / ") || "-"}</td>
@@ -893,9 +944,14 @@ function RekapTab({ periode, reload, canBayar, onChanged }: { periode: string; r
                       {filter !== "POTONG_GAJI" && <td className="px-3 py-2 text-right whitespace-nowrap">{r.instansi ? rp(r.instansi) : "-"}</td>}
                       <td className="px-3 py-2 text-right whitespace-nowrap">
                         {s && (
-                          <button onClick={() => setBayar(r)} className="text-xs text-[var(--accent-blue)] hover:underline">
-                            {canBayar ? (sisa > 0.5 ? "Bayar" : "Pembayaran") : "Lihat"}
-                          </button>
+                          <span className="inline-flex gap-3">
+                            <button onClick={() => cetakSlip([r])} disabled={slipBusy} title="Cetak slip potong gaji" className="text-xs text-[var(--text-secondary)] hover:underline">
+                              Slip
+                            </button>
+                            <button onClick={() => setBayar(r)} className="text-xs text-[var(--accent-blue)] hover:underline">
+                              {canBayar ? (sisa > 0.5 ? "Bayar" : "Pembayaran") : "Lihat"}
+                            </button>
+                          </span>
                         )}
                       </td>
                     </tr>
@@ -1711,6 +1767,9 @@ function AnggotaPicker({ value, onChange, karyawanOnly = false }: { value: KopAn
             {[value.estate, value.divisi].filter(Boolean).length > 0 && ` · ${[value.estate, value.divisi].filter(Boolean).join(" / ")}`}
             {value.jenis === "INSTANSI" && " · instansi (ditagih ke kantor)"}
           </div>
+          {value.jenis === "KARYAWAN" && value.di_master === false && (
+            <div className="mt-1 text-[11px] font-semibold text-[var(--accent-red)]">Tidak ada di master karyawan (resign / pindah?): pastikan tagihannya masih bisa dipotong dari gaji.</div>
+          )}
         </div>
         <button onClick={() => onChange(null)} title="Ganti" className="p-1 rounded hover:bg-white/60">
           <X size={16} />

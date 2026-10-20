@@ -8679,6 +8679,21 @@ app.get("/api/koperasi/rekap", async (req, res) => {
   res.json({ periode, limit: KOP_LIMIT, jatuh_tempo: kopJatuhTempo(periode), today: jakartaToday(), data });
 });
 
+// Slip potong gaji: every Stock Out line of these anggota in the periode, for one printed slip each.
+app.get("/api/koperasi/slip", async (req, res) => {
+  const periode = isPeriode(req.query.periode) ? req.query.periode : kopMonth(jakartaToday());
+  const kodes = String(req.query.kode ?? "").split(",").map((k) => k.trim().toUpperCase()).filter(Boolean).slice(0, 1000);
+  if (!kodes.length) return res.json({ periode, limit: KOP_LIMIT, jatuh_tempo: kopJatuhTempo(periode), data: [] });
+  const data = await queryMany(
+    `SELECT t.anggota_kode, t.tanggal_iso, t.bon, t.barang_kode, b.nama AS barang_nama, b.satuan, t.qty::float8 qty, t.harga::float8 harga, t.total::float8 total, t.bayar
+       FROM koperasi_tx t JOIN koperasi_barang b ON b.kode = t.barang_kode
+      WHERE t.koperasi = @k AND t.jenis = 'JUAL' AND t.periode = @periode AND t.anggota_kode = ANY(@kodes::text[])
+      ORDER BY t.anggota_kode, t.tanggal_iso, t.id`,
+    { k: KOPERASI, periode, kodes }
+  );
+  res.json({ periode, limit: KOP_LIMIT, jatuh_tempo: kopJatuhTempo(periode), data });
+});
+
 // ---- Status Update: how current each estate's data is, per module ----
 // The latest date with data (transaction date, so a back-entered day counts) and how many days ago
 // that is, against a limit per module. The Dashboard panel and the admins' reminder banner read it.

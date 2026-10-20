@@ -536,6 +536,7 @@ export type KopRingkasan = {
 };
 export type KopRekap = KopAnggota & { n_bon: number; dari: string; sampai: string; potong_gaji: number; tunai: number; instansi: number; total: number; dibayar: number };
 export type KopTunggakan = { kode: string; nama: string; jabatan: string; divisi: string; sisa: number; periode: string[] };
+export type KopSlipLine = { anggota_kode: string; tanggal_iso: string; bon: string | null; barang_kode: string; barang_nama: string; satuan: string; qty: number; harga: number; total: number; bayar: string };
 export type KopCara = "POTONG_GAJI" | "TUNAI" | "LAINNYA";
 export type KopTagihan = { kode: string; periode: string; tagihan: number; dibayar: number; sisa: number; jatuh_tempo: string };
 export type KopBayarRow = { id: number; jumlah: number; tanggal_iso: string; cara: KopCara; keterangan: string; sumber: string | null; created_at: string; oleh: string };
@@ -1352,6 +1353,8 @@ export const api = {
   kopRusak: (body: { tanggal: string; barang_kode: string; qty: number; keterangan: string; evidence_id: string | null }) =>
     req<{ success: boolean }>("/api/koperasi/rusak", { method: "POST", body: JSON.stringify(body) }),
   kopHapus: (id: number, bon = false) => req<{ success: boolean; n: number }>(`/api/koperasi/tx/${id}${bon ? "?bon=1" : ""}`, { method: "DELETE" }),
+  kopSlip: (periode: string, kodes: string[]) =>
+    req<{ periode: string; limit: number; jatuh_tempo: string; data: KopSlipLine[] }>(`/api/koperasi/slip?${new URLSearchParams({ periode, kode: kodes.join(",") })}`),
   kopEditTx: (id: number, body: { barang_kode: string; qty: number; harga: number }) =>
     req<{ success: boolean }>(`/api/koperasi/tx/${id}`, { method: "PUT", body: JSON.stringify(body) }),
   kopDashboard: (dari: string, sampai: string) => req<KopDashboard>(`/api/koperasi/dashboard?dari=${dari}&sampai=${sampai}`),
