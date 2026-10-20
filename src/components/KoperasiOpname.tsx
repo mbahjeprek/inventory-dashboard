@@ -4,6 +4,7 @@ import { api, errorText, type KopOpname, type KopOpnameLine } from "../lib/api";
 import { ExportButtons } from "./ExportButtons";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { fmtQty, isoDisplay, localToday } from "../lib/opname";
+import { tanggalWaktu } from "../lib/datetime";
 
 // Stok Opname of the koperasi (its own tab, separate from the inventory Stok Opname menu). Start =
 // the stock of every active barang is noted; the counts are typed in and saved as a draft (Input);
@@ -162,7 +163,7 @@ export function KoperasiOpname({ canInput, canEdit, isSuperuser, onChanged }: { 
                 <tr key={o.id} className="cursor-pointer hover:bg-[#f8fafc]" onClick={() => setOpen(o.id)}>
                   <td className="px-3 py-2 text-[var(--text-muted)]">#{o.id}</td>
                   <td className="px-3 py-2 whitespace-nowrap">
-                    {isoDisplay(o.tanggal_iso)}
+                    {tanggalWaktu(o.tanggal_iso, o.created_at)}
                     {o.catatan && <div className="text-[11px] text-[var(--text-muted)]">{o.catatan}</div>}
                   </td>
                   <td className="px-3 py-2">

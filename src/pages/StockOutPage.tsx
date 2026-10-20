@@ -8,6 +8,7 @@ import { can, canEditRow } from "../lib/access";
 import { ExportButtons } from "../components/ExportButtons";
 import { fetchAllRows, type TableReport } from "../lib/printTable";
 import { EvidenceLink } from "../components/EvidenceInput";
+import { tanggalWaktu } from "../lib/datetime";
 
 const TUJUAN_OPTIONS = ["NILAM", "KNS", "WJA", "ZAMRUD", "FIRUS"];
 
@@ -81,7 +82,7 @@ export function StockOutPage({ embedded = false }: { embedded?: boolean }) {
         { label: "Tujuan" },
         { label: "Keterangan" },
       ],
-      rows: all.map((r) => [r.tanggal_keluar, r.kode, r.nama, r.penerima, r.qty, r.satuan, r.tujuan, r.keterangan]),
+      rows: all.map((r) => [tanggalWaktu(r.tanggal_keluar_iso, r.input_at ?? r.created_at, r.tanggal_keluar), r.kode, r.nama, r.penerima, r.qty, r.satuan, r.tujuan, r.keterangan]),
     };
   };
 
@@ -189,7 +190,7 @@ export function StockOutPage({ embedded = false }: { embedded?: boolean }) {
               ) : (
                 items.map((r) => (
                   <tr key={r.id} className="border-t border-[var(--border)] hover:bg-[#f8fafc]">
-                    <td className="px-4 py-2.5 whitespace-nowrap text-[var(--text-secondary)]">{r.tanggal_keluar || "-"}</td>
+                    <td className="px-4 py-2.5 whitespace-nowrap text-[var(--text-secondary)]">{tanggalWaktu(r.tanggal_keluar_iso, r.input_at ?? r.created_at, r.tanggal_keluar)}</td>
                     <td className="px-4 py-2.5 font-mono text-xs text-[var(--text-secondary)]">{r.kode}</td>
                     <td className="col-grow px-4 py-2.5">{r.nama}</td>
                     <td className="px-4 py-2.5 text-[var(--text-secondary)]">{r.penerima || "-"}</td>

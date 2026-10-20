@@ -21,6 +21,7 @@ import { ExportButtons } from "../components/ExportButtons";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { EvidenceInput, EvidenceLink } from "../components/EvidenceInput";
 import { fmtQty, isoDisplay, localToday } from "../lib/opname";
+import { tanggalWaktu } from "../lib/datetime";
 import { KopBeliBatchModal, KopJualBatchModal } from "../components/KoperasiBatchModal";
 import { KoperasiDashboard } from "../components/KoperasiDashboard";
 import { KoperasiOpname } from "../components/KoperasiOpname";
@@ -46,6 +47,8 @@ const rpText = (v: string | number) => {
   return digits ? Number(digits).toLocaleString("id-ID") : "";
 };
 const BAYAR_LABEL: Record<KopBayar, string> = { POTONG_GAJI: "Potong Gaji", TUNAI: "Tunai", INSTANSI: "Instansi" };
+// A line's date with the time it was entered; spreadsheet imports carry their import time, so date only.
+const txWaktu = (t: KopTx) => tanggalWaktu(t.tanggal_iso, t.sumber?.startsWith("IMPORT") ? null : t.created_at);
 const BAYAR_CLS: Record<KopBayar, string> = {
   POTONG_GAJI: "bg-[var(--accent-blue-bg)] border-[var(--accent-blue-border)] text-[var(--accent-blue)]",
   TUNAI: "bg-[var(--accent-green-bg)] border-[var(--accent-green-border)] text-[var(--accent-green)]",
@@ -357,7 +360,7 @@ function TxTable({
       landscape: true,
       columns: cols.map((c) => ({ label: ["Harga", "Total"].includes(c) ? `${c} (Rp)` : c, align: ["Jumlah", "Harga", "Total"].includes(c) ? ("right" as const) : undefined })),
       rows: rows.map((t) => [
-        isoDisplay(t.tanggal_iso),
+        txWaktu(t),
         ...(jual || !jenis ? [t.anggota_kode ? `${t.anggota_nama || "-"} (${t.anggota_kode})` : "-"] : []),
         ...(beli ? [t.no_po] : []),
         t.barang_nama,
@@ -434,7 +437,7 @@ function TxTable({
                       <td className="px-3 py-2 whitespace-nowrap">
                         <span className="inline-flex items-center gap-1">
                           <ChevronRight size={14} className="text-[var(--text-muted)]" />
-                          {isoDisplay(head.tanggal_iso)}
+                          {txWaktu(head)}
                         </span>
                       </td>
                       <td className="px-3 py-2">
@@ -489,10 +492,10 @@ function TxTable({
                         (foldable ? (
                           <button onClick={() => toggle(t)} title="Ringkas bon ini" className="inline-flex items-center gap-1 hover:text-[var(--accent-blue)]">
                             <ChevronRight size={14} className="rotate-90 text-[var(--text-muted)]" />
-                            {isoDisplay(t.tanggal_iso)}
+                            {txWaktu(t)}
                           </button>
                         ) : (
-                          isoDisplay(t.tanggal_iso)
+                          txWaktu(t)
                         ))}
                     </td>
                     {(jual || !jenis) && (
@@ -956,7 +959,7 @@ function BayarModal({
                 <div key={p.id} className="flex items-start gap-2 px-3 py-2">
                   <div className="flex-1 min-w-0">
                     <div>
-                      <b>{rp(p.jumlah)}</b> · {CARA_LABEL[p.cara] ?? p.cara} · {isoDisplay(p.tanggal_iso)}
+                      <b>{rp(p.jumlah)}</b> · {CARA_LABEL[p.cara] ?? p.cara} · {tanggalWaktu(p.tanggal_iso, p.created_at)}
                     </div>
                     <div className="text-[11px] text-[var(--text-muted)]">
                       {p.keterangan || "-"}

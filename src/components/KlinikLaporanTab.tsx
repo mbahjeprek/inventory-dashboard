@@ -13,6 +13,7 @@ import { CocokkanObatModal } from "./CocokkanObatModal";
 import { KonsumsiObatPanel } from "./KonsumsiObatPanel";
 import { fetchAllRows, type ReportSection, type SectionReport, type TableReport } from "../lib/printTable";
 import { MAX_TERAPI, hariOf, kodeTglOf, periodeOf, tglSheet, yaTidak } from "../lib/kunjungan";
+import { tanggalWaktu } from "../lib/datetime";
 
 const PAGE_SIZE = 50;
 const BULAN = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
@@ -759,7 +760,7 @@ export function KlinikLaporanTab({ klinik }: { klinik: string }) {
                       </div>
                     </div>
                     <div className="text-right shrink-0">
-                      <div>{tgl(k.tanggal_iso)}</div>
+                      <div>{tanggalWaktu(k.tanggal_iso, k.created_at)}</div>
                       <div className="text-[11px] text-[var(--text-muted)]">
                         No {k.nomor} · {k.jenis_kunjungan}
                       </div>
@@ -819,7 +820,7 @@ export function KlinikLaporanTab({ klinik }: { klinik: string }) {
                     <tr key={k.id} className="border-t border-[var(--border)] hover:bg-[#f8fafc] align-top">
                       <td className="px-3 py-2 text-right text-[var(--text-muted)]">{k.nomor}</td>
                       <td className="px-3 py-2 whitespace-nowrap">
-                        {tgl(k.tanggal_iso)}
+                        {tanggalWaktu(k.tanggal_iso, k.created_at)}
                         <div className="text-[11px] text-[var(--text-muted)]">
                           {hariOf(k.tanggal_iso)} · {periodeOf(k.tanggal_iso)}
                         </div>
