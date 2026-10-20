@@ -39,14 +39,18 @@ type UserRow = {
   estates: string | null;
   perms: string | null;
   temp_full_until: Date | null;
+  temp_full_modules?: string | null;
 };
 
 // Temporary full access (users.temp_full_until): until it expires, every action (edit, hapus,
 // koreksi, approve...) of the modules the account already has, in its own estates. It never opens a
 // module the account has nothing ticked in (a klinik account stays in Klinik).
-function withTempFull(perms: string[], until: Date | null): string[] {
+// temp_full_modules (e.g. "bbm") narrows it to those modules; empty = every module it holds.
+function withTempFull(perms: string[], until: Date | null, modules?: string | null): string[] {
   if (!until || until <= new Date()) return perms;
   const held = new Set(perms.filter((p) => MODULE_PERMS.includes(p)).map((p) => p.split(".")[0]));
+  const only = (modules ?? "").split(",").map((m) => m.trim()).filter(Boolean);
+  if (only.length) for (const m of [...held]) if (!only.includes(m)) held.delete(m);
   return [...new Set([...perms, ...MODULE_PERMS.filter((p) => held.has(p.split(".")[0]))])];
 }
 
@@ -62,7 +66,7 @@ function toSessionUser(row: UserRow): SessionUser {
     estates,
     perms: superuser
       ? [...ALL_PERMS]
-      : withTempFull(parseList(row.perms, ALL_PERMS), row.temp_full_until),
+      : withTempFull(parseList(row.perms, ALL_PERMS), row.temp_full_until, row.temp_full_modules),
   };
 }
 
@@ -83,7 +87,7 @@ async function sessionFromCookie(req: express.Request, res?: express.Response): 
   };
   const hit = sessionCache.get(claims.id);
   if (hit && Date.now() - hit.at < SESSION_TTL_MS) return renew(hit.user);
-  const row = await queryOne<UserRow>("SELECT id, username, nama, role, estate, estates, perms, temp_full_until FROM users WHERE id = @id", { id: claims.id });
+  const row = await queryOne<UserRow>("SELECT id, username, nama, role, estate, estates, perms, temp_full_until, temp_full_modules FROM users WHERE id = @id", { id: claims.id });
   if (!row) return null;
   const user = toSessionUser(row);
   sessionCache.set(user.id, { user, at: Date.now() });

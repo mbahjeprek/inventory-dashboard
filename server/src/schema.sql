@@ -24,6 +24,8 @@ UPDATE users SET estates = estate WHERE estates IS NULL AND estate IS NOT NULL;
 -- Temporary full access: until this moment an estate account has every inventory permission
 -- (MODULE_ACTIONS) in its own estates, on top of its ticked perms; afterwards it falls back to them.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS temp_full_until TIMESTAMPTZ;
+-- Narrows temp_full_until to these modules (comma list, e.g. "bbm"); NULL / empty = all it holds.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS temp_full_modules TEXT;
 UPDATE users SET perms = (
   SELECT string_agg(lower(trim(m)) || '.view,' || lower(trim(m)) || '.input', ',')
   FROM unnest(string_to_array(COALESCE(NULLIF(modules, ''), 'GUDANG,BBM,PUPUK,KLINIK'), ',')) m
