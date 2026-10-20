@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   ArrowLeft,
@@ -20,6 +20,8 @@ import {
   CircleDashed,
   X,
   Pencil,
+  FileDown,
+  FileUp,
 } from "lucide-react";
 import { api, ApiError, errorText, type Opname, type OpnameLine, type PickerItem, type StockScope } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
@@ -27,6 +29,7 @@ import { OpnameStatusBadge } from "../components/OpnameStatusBadge";
 import { canOpname } from "../lib/access";
 import { StatCard } from "../components/StatCard";
 import { ExportButtons } from "../components/ExportButtons";
+import { downloadOpnameSheet, readOpnameUpload } from "../lib/opnameExcel";
 import { ItemPickerModal } from "../components/ItemPickerModal";
 import type { TableReport } from "../lib/printTable";
 import { OPNAME_MODULE_LABEL, OPNAME_STATUS, expLabel, fmtQty, opnameModule, opnameWhole, round3, when } from "../lib/opname";
@@ -65,6 +68,9 @@ export function StokOpnameDetailPage() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [dialog, setDialog] = useState<DialogSpec | null>(null);
+  // Unduh / Upload Excel SO (see unduhExcel / uploadExcel below).
+  const [excelBusy, setExcelBusy] = useState(false);
+  const uploadRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
   const [adding, setAdding] = useState<"" | "picker" | "jenis">("");
   const [pickedObat, setPickedObat] = useState<PickerItem | null>(null);
@@ -203,6 +209,54 @@ export function StokOpnameDetailPage() {
     const p = parseQty(pak), b = parseQty(lepas);
     const fisik = p === null && b === null ? "" : p === undefined || b === undefined ? "x" : toInput(round3((p ?? 0) * isiOf(l) + (b ?? 0)));
     setEdit(l, { pak, lepas, fisik });
+  };
+
+  // Excel: download the count sheet, fill Stok Fisik, upload it back - the counts land in the form (not
+  // saved yet) so they can be checked, then Simpan as usual. An empty Stok Fisik cell changes nothing.
+  const unduhExcel = async () => {
+    setExcelBusy(true);
+    try {
+      await downloadOpnameSheet({ id: opname.id, title: locName, tanggal: opname.tanggal, klinik: isKlinik }, lines, fisikOf, (l) => edits[l.id]?.ket ?? l.keterangan);
+    } catch (e) {
+      setError(errorText(e, "Gagal membuat file Excel"));
+    } finally {
+      setExcelBusy(false);
+    }
+  };
+  const uploadExcel = async (file: File) => {
+    setExcelBusy(true);
+    setError("");
+    try {
+      const r = await readOpnameUpload(file, lines);
+      const bad = r.invalid.map((x) => `baris ${x.row}: ${x.text}`);
+      const patch: Record<number, Edit> = {};
+      for (const f of r.found) {
+        if (f.fisik === null) continue;
+        if (whole && !Number.isInteger(f.fisik)) {
+          bad.push(`${f.line.kode} ${f.line.nama}: ${f.fisik} bukan bilangan bulat`);
+          continue;
+        }
+        const cur = edits[f.line.id];
+        const ket = f.ket ?? cur?.ket ?? f.line.keterangan;
+        const fisik = toInput(f.fisik);
+        if (fisik === (cur ? cur.fisik : toInput(f.line.stok_fisik)) && ket === (cur?.ket ?? f.line.keterangan)) continue;
+        patch[f.line.id] = { ...cur, fisik, ket, pak: undefined, lepas: undefined };
+      }
+      const ids = Object.keys(patch).map(Number);
+      setEdits((c) => ({ ...c, ...patch }));
+      setTouched((t) => ({ key: viewKey, ids: new Set([...(t.key === viewKey ? t.ids : []), ...ids]) }));
+      setNotice(
+        ids.length
+          ? `${ids.length} hitungan terisi dari Excel${r.unknown ? ` · ${r.unknown} baris tidak dikenali` : ""}. Periksa, lalu tekan Simpan.`
+          : `Tidak ada hitungan baru di file ini${r.unknown ? ` (${r.unknown} baris tidak dikenali)` : ""}.`
+      );
+      if (bad.length) setError(`${bad.length} baris dilewati: ${bad.slice(0, 5).join("; ")}${bad.length > 5 ? " ..." : ""}`);
+    } catch (e) {
+      setError(errorText(e, "Gagal membaca file Excel"));
+    } finally {
+      setExcelBusy(false);
+      if (uploadRef.current) uploadRef.current.value = "";
+    }
   };
 
   const save = async (): Promise<boolean> => {
@@ -372,6 +426,17 @@ export function StokOpnameDetailPage() {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <ExportButtons total={filtered.length} buildReport={buildReport} fileName={`stok-opname-${opname.id}`} />
+          {canCount && (
+            <>
+              <button onClick={unduhExcel} disabled={excelBusy} title="File isian: isi kolom Stok Fisik lalu upload kembali" className={`${btn} border border-[var(--accent-green-border)] text-[var(--accent-green)] hover:bg-[var(--accent-green-bg)]`}>
+                <FileDown size={16} /> Unduh Excel SO
+              </button>
+              <button onClick={() => uploadRef.current?.click()} disabled={excelBusy} title="Upload file Excel yang Stok Fisik-nya sudah diisi" className={`${btn} border border-[var(--accent-blue-border)] text-[var(--accent-blue)] hover:bg-[var(--accent-blue-bg)]`}>
+                <FileUp size={16} /> {excelBusy ? "Memproses..." : "Upload hasil SO"}
+              </button>
+              <input ref={uploadRef} type="file" accept=".xlsx" hidden onChange={(e) => e.target.files?.[0] && uploadExcel(e.target.files[0])} />
+            </>
+          )}
           {superEdit && (
             <button
               onClick={() =>
