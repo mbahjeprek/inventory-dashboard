@@ -123,7 +123,7 @@ export function UserActivityPage() {
           ? ([
               ["Gudang", p.m_gudang],
               ["BBM", p.m_bbm],
-              ["Pupuk NPK", p.m_pupuk],
+              ["Pupuk", p.m_pupuk],
               ["Klinik", p.m_klinik],
               ["Oli", p.m_oli ?? 0],
             ] as [string, number][])

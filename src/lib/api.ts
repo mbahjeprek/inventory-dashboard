@@ -377,6 +377,7 @@ export type OliRecord = {
 };
 // estates: where the jenis is used, comma separated ('' = every estate).
 export type MasterOli = { id: number; kode: string; nama: string; satuan: string; keterangan: string; estates: string; transaksi: number };
+export type MasterPupuk = { id: number; kode: string; nama: string; keterangan: string; estates: string; transaksi: number };
 export type OliSaldo = { jenis_oli: string; saldo_stock: number; tanggal: string };
 export type OliSummary = {
   perJenis: { jenis_oli: string; diterima: number; pemakaian: number }[];
@@ -1103,6 +1104,12 @@ export const api = {
   updateMasterOli: (id: number, payload: { kode: string; nama: string; satuan: string; keterangan: string; estates: string[] }) =>
     req<{ success: boolean }>(`/api/master-oli/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
   deleteMasterOli: (id: number) => req<{ success: boolean }>(`/api/master-oli/${id}`, { method: "DELETE" }),
+  masterPupuk: (search = "") => req<{ data: MasterPupuk[]; total: number }>(`/api/master-pupuk?${new URLSearchParams({ search })}`),
+  createMasterPupuk: (payload: { kode: string; nama: string; keterangan: string; estates: string[] }) =>
+    req<{ success: boolean; id: number }>("/api/master-pupuk", { method: "POST", body: JSON.stringify(payload) }),
+  updateMasterPupuk: (id: number, payload: { kode: string; nama: string; keterangan: string; estates: string[] }) =>
+    req<{ success: boolean }>(`/api/master-pupuk/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
+  deleteMasterPupuk: (id: number) => req<{ success: boolean }>(`/api/master-pupuk/${id}`, { method: "DELETE" }),
 
   gudangStockSummary: (gudang: string) => req<GudangStockSummary>(`/api/gudang-stock/summary?gudang=${gudang}`),
 

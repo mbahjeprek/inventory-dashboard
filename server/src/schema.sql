@@ -779,3 +779,23 @@ CREATE TABLE IF NOT EXISTS koperasi_bayar (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_koperasi_bayar ON koperasi_bayar(anggota_kode, periode);
+
+-- Master data pupuk: the jenis pupuk Inventory Pupuk and Stok Opname offer (pupuk_log.jenis_pupuk holds
+-- the nama). estates '' = every estate, like master_oli. Satuan is always KG.
+CREATE TABLE IF NOT EXISTS master_pupuk (
+  id SERIAL PRIMARY KEY,
+  kode TEXT UNIQUE NOT NULL,
+  nama TEXT UNIQUE NOT NULL,
+  keterangan TEXT NOT NULL DEFAULT '',
+  estates TEXT NOT NULL DEFAULT ''
+);
+INSERT INTO master_pupuk (kode, nama) VALUES
+  ('PPK-01', 'PUPUK NPK 12.12.17.2'),
+  ('PPK-02', 'PUPUK ROCK PHOSPAT'),
+  ('PPK-03', 'PUPUK DOLOMITE'),
+  ('PPK-04', 'PUPUK NPK 12.12.17.2+TE'),
+  ('PPK-05', 'PUPUK UREA'),
+  ('PPK-06', 'PUPUK MOP'),
+  ('PPK-07', 'PUPUK NPK 13.6.27.4+B (HI KAY)'),
+  ('PPK-08', 'PUPUK NPK 7.6.34 ZNCUB (PEAT KAY)')
+ON CONFLICT DO NOTHING;

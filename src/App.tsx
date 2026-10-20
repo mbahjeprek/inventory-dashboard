@@ -21,6 +21,7 @@ import { InventoryKlinikPage } from "./pages/InventoryKlinikPage";
 import { InventoryOliPage } from "./pages/InventoryOliPage";
 import { MasterObatPage } from "./pages/MasterObatPage";
 import { MasterOliPage } from "./pages/MasterOliPage";
+import { MasterPupukPage } from "./pages/MasterPupukPage";
 import { UserActivityPage } from "./pages/UserActivityPage";
 import { StokOpnamePage } from "./pages/StokOpnamePage";
 import { PinjamanPage } from "./pages/PinjamanPage";
@@ -202,6 +203,14 @@ function App() {
                 element={
                   <RequirePageAccess>
                     <MasterObatPage />
+                  </RequirePageAccess>
+                }
+              />
+              <Route
+                path="/master-pupuk"
+                element={
+                  <RequirePageAccess>
+                    <MasterPupukPage />
                   </RequirePageAccess>
                 }
               />

@@ -34,7 +34,7 @@ const ESTATES = [
 ];
 type EstateInfo = (typeof ESTATES)[number];
 
-const MODULE_LABEL: Record<ActivityLog["module"], string> = { BARANG: "Gudang", BBM: "BBM", PUPUK: "Pupuk NPK", KLINIK: "Klinik", OLI: "Oli", KOPERASI: "Koperasi" };
+const MODULE_LABEL: Record<ActivityLog["module"], string> = { BARANG: "Gudang", BBM: "BBM", PUPUK: "Pupuk", KLINIK: "Klinik", OLI: "Oli", KOPERASI: "Koperasi" };
 
 // Postgres COUNT/SUM can arrive as strings, so coerce before formatting or comparing.
 const fmt = (n: number | string | undefined) => Number(n ?? 0).toLocaleString("id-ID");
@@ -175,7 +175,7 @@ function EstateRow({ e, d, monthLabel }: { e: EstateInfo; d: EstateData; monthLa
       )}
 
       {can("PUPUK") && (
-      <Panel to={e.pupuk} title="Pupuk NPK" icon={<Sprout size={16} className="text-[var(--accent-green)]" />}>
+      <Panel to={e.pupuk} title="Pupuk" icon={<Sprout size={16} className="text-[var(--accent-green)]" />}>
         {loading(d.pupuk) ? (
           <Muted>Memuat...</Muted>
         ) : failed(d.pupuk) ? (
@@ -306,11 +306,11 @@ function estateSection(e: EstateInfo, d: EstateData, user: User, heading: string
   }
   if (canModule(user, "PUPUK")) {
     const jenis = d.pupuk ? Array.from(new Set(d.pupuk.saldoTerakhir.map((x) => x.jenis_pupuk))) : [];
-    if (ready("Pupuk NPK", d.pupuk, () => jenis.length === 0, "Belum ada data pupuk"))
+    if (ready("Pupuk", d.pupuk, () => jenis.length === 0, "Belum ada data pupuk"))
       for (const j of jenis) {
         const saldo = n(d.pupuk!.saldoTerakhir.find((x) => x.jenis_pupuk === j)?.saldo_stock);
         const flow = d.pupuk!.perJenis.find((x) => x.jenis_pupuk === j);
-        rows.push(["Pupuk NPK", j.replace(/^PUPUK /, ""), saldo, "KG", n(flow?.diterima), n(flow?.keluar), minus(saldo)]);
+        rows.push(["Pupuk", j.replace(/^PUPUK /, ""), saldo, "KG", n(flow?.diterima), n(flow?.keluar), minus(saldo)]);
       }
   }
   if (canModule(user, "OLI")) {
@@ -438,7 +438,7 @@ function AttentionPanel({ e, d, onExport }: { e: EstateInfo; d: EstateData; onEx
                 g.names.join(" · ") + (g.total > g.names.length ? ` · +${fmt(g.total - g.names.length)} lainnya` : ""),
               ]),
               ...(negativePupuk.length
-                ? [["Pupuk NPK · saldo minus", "", negativePupuk.map((x) => `${x.jenis_pupuk.replace(/^PUPUK /, "")} ${fmt(x.saldo_stock)} KG`).join(" · ")]]
+                ? [["Pupuk · saldo minus", "", negativePupuk.map((x) => `${x.jenis_pupuk.replace(/^PUPUK /, "")} ${fmt(x.saldo_stock)} KG`).join(" · ")]]
                 : []),
               ...(negativeOli.length ? [["Oli · saldo minus", "", negativeOli.map((x) => `${x.jenis_oli} ${fmt(x.saldo_stock)} LTR`).join(" · ")]] : []),
             ];
@@ -477,7 +477,7 @@ function AttentionPanel({ e, d, onExport }: { e: EstateInfo; d: EstateData; onEx
           {negativePupuk.length > 0 && (
             <Link to={e.pupuk} className="block py-2.5 group">
               <div className="flex items-center justify-between gap-2">
-                <span className="text-sm font-medium text-[var(--accent-red)]">Pupuk NPK · saldo minus</span>
+                <span className="text-sm font-medium text-[var(--accent-red)]">Pupuk · saldo minus</span>
                 <ChevronRight size={12} className="text-[var(--text-muted)] group-hover:text-[var(--text-primary)]" />
               </div>
               <div className="text-xs text-[var(--text-secondary)] mt-0.5">

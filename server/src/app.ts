@@ -189,6 +189,7 @@ function requiredPerms(req: express.Request): Need {
   if (is(/^\/activity-log$/)) return ACTIVITY_PERM[q.module] ? [`${ACTIVITY_PERM[q.module]}.view`] : "super";
   if (is(/^\/obat(\/|$)/)) return ["master.obat"];
   if (is(/^\/master-oli(\/|$)/)) return ["master.oli"];
+  if (is(/^\/master-pupuk(\/|$)/)) return ["master.pupuk"];
   if (is(/^\/karyawan(\/|$)/)) return ["master.karyawan"];
   if (is(/^\/alat-berat(\/|$)/)) return ["master.alat"];
   if (is(/^\/master-blok(\/|$)/)) return ["master.blok"];
@@ -2967,7 +2968,11 @@ app.get("/api/pupuk/summary", async (req, res) => {
 app.get("/api/pupuk/options", async (req, res) => {
   const { estate = "" } = req.query as Record<string, string>;
   if (!checkPupukEstate(req, res, estate)) return;
-  const jenis = await queryMany<{ v: string }>("SELECT DISTINCT jenis_pupuk v FROM pupuk_log ORDER BY v");
+  // Master pupuk (for this estate) plus any jenis this estate still has history of.
+  const jenis = await queryMany<{ v: string }>(
+    `SELECT nama v FROM master_pupuk WHERE ${OLI_AT_ESTATE} UNION SELECT DISTINCT jenis_pupuk FROM pupuk_log WHERE estate = @estate ORDER BY v`,
+    { estate }
+  );
   const divisi = await queryMany<{ v: string }>(
     "SELECT DISTINCT divisi v FROM pupuk_log WHERE estate = @estate AND divisi <> '' ORDER BY v",
     { estate }
@@ -5077,14 +5082,14 @@ async function opnameSnapshot(module: OpnameModule, estate: string, client?: Poo
       client
     );
   }
-  // Every jenis pupuk known in any estate (at least PUPUK NPK), with this estate's saldo or 0, so an
-  // estate without pupuk history yet (KNS/WJA) still gets its lines to count.
+  // Every jenis in master pupuk (plus any this estate still has history of), this estate's saldo or 0,
+  // so an estate without pupuk history yet still gets its lines to count.
   return queryMany(
     `SELECT j kode, j nama, 'KG' satuan, '' exp,
        COALESCE((SELECT saldo_stock FROM pupuk_log WHERE jenis_pupuk = j AND estate = @estate AND saldo_stock IS NOT NULL
                  ORDER BY tanggal_iso DESC, id DESC LIMIT 1), 0)::float8 stok_sistem
-     FROM (SELECT DISTINCT jenis_pupuk j FROM pupuk_log UNION SELECT @npk) x ORDER BY j`,
-    { estate, npk: "PUPUK NPK" },
+     FROM (SELECT nama j FROM master_pupuk WHERE ${OLI_AT_ESTATE} UNION SELECT DISTINCT jenis_pupuk FROM pupuk_log WHERE estate = @estate) x ORDER BY j`,
+    { estate },
     client
   );
 }
@@ -6159,6 +6164,80 @@ app.delete("/api/master-oli/:id", async (req, res) => {
   if (used) return res.status(409).json({ error: "Jenis oli ini sudah punya transaksi, tidak bisa dihapus" });
   await execute("DELETE FROM master_oli WHERE id = @id", { id: existing.id });
   await logActivity(req, { module: "OLI", estate: null, aksi: "Hapus Jenis Oli", objek: `${existing.kode} - ${existing.nama}` });
+  res.json({ success: true });
+});
+
+// ---- Master data pupuk (see schema.sql master_pupuk), same shape as master oli without a satuan ----
+const masterPupukPayload = (b: any) => ({
+  kode: String(b?.kode ?? "").trim().toUpperCase(),
+  nama: String(b?.nama ?? "").trim().toUpperCase(),
+  keterangan: String(b?.keterangan ?? "").trim(),
+  estates: ESTATES.filter((e) => (Array.isArray(b?.estates) ? b.estates : []).includes(e)).join(","),
+});
+
+app.get("/api/master-pupuk", async (req, res) => {
+  const { search = "" } = req.query as Record<string, string>;
+  const conditions: string[] = [];
+  const params: any = {};
+  wordSearch(search, ["kode", "nama", "keterangan"], conditions, params);
+  const data = await queryMany(
+    `SELECT m.*, (SELECT COUNT(*)::int FROM pupuk_log l WHERE l.jenis_pupuk = m.nama) transaksi
+     FROM master_pupuk m ${conditions.length ? "WHERE " + conditions.join(" AND ") : ""} ORDER BY m.kode`,
+    params
+  );
+  res.json({ data, total: data.length });
+});
+
+app.post("/api/master-pupuk", async (req, res) => {
+  const o = masterPupukPayload(req.body);
+  if (!o.kode || !o.nama) return res.status(400).json({ error: "Kode dan nama jenis pupuk wajib diisi" });
+  try {
+    const row = await queryOne<{ id: number }>(
+      "INSERT INTO master_pupuk (kode, nama, keterangan, estates) VALUES (@kode, @nama, @keterangan, @estates) RETURNING id",
+      o
+    );
+    await logActivity(req, { module: "PUPUK", estate: null, aksi: "Tambah Jenis Pupuk", objek: `${o.kode} - ${o.nama}`, detail: `Estate: ${o.estates || "semua"}` });
+    res.json({ success: true, id: row!.id });
+  } catch (e: any) {
+    if (e.code === "23505") return res.status(409).json({ error: "Kode atau nama jenis pupuk sudah dipakai" });
+    throw e;
+  }
+});
+
+// A renamed jenis is renamed in the pupuk ledger too, so its saldo and history stay with it.
+app.put("/api/master-pupuk/:id", async (req, res) => {
+  const existing = await queryOne<any>("SELECT * FROM master_pupuk WHERE id = @id", { id: req.params.id });
+  if (!existing) return res.status(404).json({ error: "Not found" });
+  const o = masterPupukPayload(req.body);
+  if (!o.kode || !o.nama) return res.status(400).json({ error: "Kode dan nama jenis pupuk wajib diisi" });
+  try {
+    await withTransaction(async (c) => {
+      await execute("UPDATE master_pupuk SET kode = @kode, nama = @nama, keterangan = @keterangan, estates = @estates WHERE id = @id", { ...o, id: existing.id }, c);
+      if (o.nama !== existing.nama) {
+        await execute("UPDATE pupuk_log SET jenis_pupuk = @nama WHERE jenis_pupuk = @old", { nama: o.nama, old: existing.nama }, c);
+      }
+    });
+  } catch (e: any) {
+    if (e.code === "23505") return res.status(409).json({ error: "Kode atau nama jenis pupuk sudah dipakai" });
+    throw e;
+  }
+  await logActivity(req, {
+    module: "PUPUK",
+    estate: null,
+    aksi: "Edit Jenis Pupuk",
+    objek: `${o.kode} - ${o.nama}`,
+    detail: describeChanges(existing, o, { kode: "Kode", nama: "Nama", keterangan: "Keterangan", estates: "Estate" }),
+  });
+  res.json({ success: true });
+});
+
+app.delete("/api/master-pupuk/:id", async (req, res) => {
+  const existing = await queryOne<any>("SELECT * FROM master_pupuk WHERE id = @id", { id: req.params.id });
+  if (!existing) return res.status(404).json({ error: "Not found" });
+  const used = await queryOne("SELECT 1 FROM pupuk_log WHERE jenis_pupuk = @n LIMIT 1", { n: existing.nama });
+  if (used) return res.status(409).json({ error: "Jenis pupuk ini sudah punya transaksi, tidak bisa dihapus" });
+  await execute("DELETE FROM master_pupuk WHERE id = @id", { id: existing.id });
+  await logActivity(req, { module: "PUPUK", estate: null, aksi: "Hapus Jenis Pupuk", objek: `${existing.kode} - ${existing.nama}` });
   res.json({ success: true });
 });
 

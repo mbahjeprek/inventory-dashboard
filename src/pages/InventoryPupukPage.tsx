@@ -113,7 +113,7 @@ export function InventoryPupukPage({ estate }: { estate: string }) {
   const totalPages = Math.max(Math.ceil(total / pageSize), 1);
 
   const jenisList = Array.from(new Set([...(summary?.saldoTerakhir.map((s) => s.jenis_pupuk) ?? []), ...options.jenis])).sort();
-  const cardJenis = jenisList.length ? jenisList : ["PUPUK NPK"];
+  const cardJenis = jenisList;
   const saldoFor = (j: string) => summary?.saldoPerTanggal.find((s) => s.jenis_pupuk === j)?.saldo_stock ?? 0;
   const flowFor = (j: string) => summary?.perJenis.find((s) => s.jenis_pupuk === j);
 
@@ -127,7 +127,7 @@ export function InventoryPupukPage({ estate }: { estate: string }) {
       (dateFrom || dateTo) && `Tanggal: ${tgl(dateFrom) || "awal"} - ${tgl(dateTo) || "akhir"}`,
     ].filter(Boolean);
     return {
-      title: `Inventory Pupuk NPK - ${estate}`,
+      title: `Inventory Pupuk - ${estate}`,
       subtitle: [
         ...(active.length ? [`Filter: ${active.join(" · ")}`] : []),
         `${total.toLocaleString("id-ID")} transaksi · total stock in ${diterimaSum.toLocaleString("id-ID")} KG · total stock out ${keluarSum.toLocaleString("id-ID")} KG`,
@@ -172,7 +172,7 @@ export function InventoryPupukPage({ estate }: { estate: string }) {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold text-[var(--text-primary)]">Inventory Pupuk NPK - {estate}</h1>
+          <h1 className="text-xl font-semibold text-[var(--text-primary)]">Inventory Pupuk - {estate}</h1>
           <p className="text-sm text-[var(--text-secondary)]">Monitoring stok, penerimaan & pemakaian pupuk per blok</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">

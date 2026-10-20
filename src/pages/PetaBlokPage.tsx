@@ -477,7 +477,7 @@ export function PetaBlokPage() {
                       <span className="text-right">{fmt(hover.ha, 2)} Ha</span>
                       <span className="text-[var(--text-muted)]">Pokok (PKK)</span>
                       <span className="text-right">{fmt(hover.pkk)}</span>
-                      <span className="text-[var(--text-muted)]">Pupuk NPK</span>
+                      <span className="text-[var(--text-muted)]">Pupuk</span>
                       <span className="text-right">{fmt(hover.kg ?? 0)} kg</span>
                       <span className="text-[var(--text-muted)]">Progress</span>
                       <span className="text-right font-semibold">

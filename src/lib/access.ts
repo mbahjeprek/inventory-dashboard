@@ -5,7 +5,7 @@ import type { AuthUser } from "./api";
 // which is the actual security boundary - this only decides what to show.
 export const MODULES = ["GUDANG", "BBM", "PUPUK", "KLINIK", "OLI"] as const;
 export type Module = (typeof MODULES)[number];
-export const MODULE_LABELS: Record<Module, string> = { GUDANG: "Gudang", BBM: "BBM", PUPUK: "Pupuk NPK", KLINIK: "Klinik", OLI: "Oli" };
+export const MODULE_LABELS: Record<Module, string> = { GUDANG: "Gudang", BBM: "BBM", PUPUK: "Pupuk", KLINIK: "Klinik", OLI: "Oli" };
 
 export const ACTIONS = [
   { key: "view", label: "Lihat" },
@@ -36,6 +36,7 @@ export const OTHER_PERMS: { group: string; items: { key: string; label: string }
       { key: "master.barang", label: "Barang" },
       { key: "master.obat", label: "Obat" },
       { key: "master.oli", label: "Oli" },
+      { key: "master.pupuk", label: "Pupuk" },
       { key: "master.karyawan", label: "Karyawan" },
       { key: "master.alat", label: "Alat Berat" },
       { key: "master.blok", label: "Blok" },
@@ -144,6 +145,7 @@ export const PAGE_PERMS: Record<string, string> = {
   "/master-barang": "master.barang",
   "/master-obat": "master.obat",
   "/master-oli": "master.oli",
+  "/master-pupuk": "master.pupuk",
   "/karyawan": "master.karyawan",
   "/alat-berat": "master.alat",
   "/master-blok": "master.blok",

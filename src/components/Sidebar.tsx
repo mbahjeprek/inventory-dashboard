@@ -51,7 +51,7 @@ type ModuleLink = { key: Module; icon: typeof Package; title: string; base: stri
 const MODULE_LINKS: ModuleLink[] = [
   { key: "GUDANG", icon: Package, title: "Gudang", base: "/inventory", subtitle: "Stok barang · In & Out" },
   { key: "BBM", icon: Fuel, title: "BBM", base: "/inventory-bbm", subtitle: "Solar · Pemakaian" },
-  { key: "PUPUK", icon: Sprout, title: "Pupuk NPK", base: "/inventory-pupuk", subtitle: "Stok & penyaluran" },
+  { key: "PUPUK", icon: Sprout, title: "Pupuk", base: "/inventory-pupuk", subtitle: "Stok & penyaluran" },
   { key: "OLI", icon: Droplet, title: "Oli", base: "/inventory-oli", subtitle: "Stok & pemakaian" },
   { key: "KLINIK", icon: Stethoscope, title: "Klinik", base: "/inventory-klinik", subtitle: "Obat · Pasien" },
 ];
@@ -86,6 +86,7 @@ const navSections: NavSection[] = [
       { to: "/master-obat", label: "Obat", icon: Pill, subtitle: "Daftar obat klinik" },
       { to: PASIEN_PATH, label: "Pasien", icon: Contact, subtitle: "Data pasien klinik" },
       { to: "/master-oli", label: "Oli", icon: Droplet, subtitle: "Jenis oli" },
+      { to: "/master-pupuk", label: "Pupuk", icon: Sprout, subtitle: "Jenis pupuk" },
       { to: "/karyawan", label: "Karyawan", icon: Users, subtitle: "Data karyawan" },
       { to: "/alat-berat", label: "Alat Berat", icon: Truck, subtitle: "Unit & kendaraan" },
       { to: "/master-blok", label: "Blok", icon: Grid3x3, subtitle: "Blok kebun" },

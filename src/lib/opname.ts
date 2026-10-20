@@ -3,7 +3,7 @@ import type { Module } from "./access";
 
 // Stok Opname labels shared by the list and detail pages (see server/src/app.ts "Stok Opname").
 export const OPNAME_MODULES: OpnameModule[] = ["GUDANG", "KLINIK", "BBM", "PUPUK", "OLI"];
-export const OPNAME_MODULE_LABEL: Record<OpnameModule, string> = { GUDANG: "Gudang", KLINIK: "Klinik", BBM: "BBM", PUPUK: "Pupuk NPK", OLI: "Oli" };
+export const OPNAME_MODULE_LABEL: Record<OpnameModule, string> = { GUDANG: "Gudang", KLINIK: "Klinik", BBM: "BBM", PUPUK: "Pupuk", OLI: "Oli" };
 export const opnameModule = (m: OpnameModule) => m as Module;
 
 export const OPNAME_STATUS: Record<OpnameStatus, { label: string; cls: string }> = {

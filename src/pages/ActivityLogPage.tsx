@@ -17,7 +17,7 @@ const ESTATES_BY_MODULE = {
   KOPERASI: ["NILAM"],
 };
 // Module names in titles / text.
-const MODULE_NAME: Record<ActivityLog["module"], string> = { BARANG: "Gudang", BBM: "BBM", PUPUK: "Pupuk NPK", KLINIK: "Klinik", OLI: "Oli", KOPERASI: "Koperasi" };
+const MODULE_NAME: Record<ActivityLog["module"], string> = { BARANG: "Gudang", BBM: "BBM", PUPUK: "Pupuk", KLINIK: "Klinik", OLI: "Oli", KOPERASI: "Koperasi" };
 
 const formatWaktu = (iso: string) =>
   new Date(iso).toLocaleString("id-ID", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });

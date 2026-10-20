@@ -31,7 +31,7 @@ export function PupukTransactionModal({
   onClose: () => void;
   onSuccess: () => void;
 }) {
-  const [jenis, setJenis] = useState(jenisOptions[0] ?? "PUPUK NPK");
+  const [jenis, setJenis] = useState(jenisOptions[0] ?? "");
   const [tipe, setTipe] = useState<"MASUK" | "KELUAR">("KELUAR");
   const [tanggal, setTanggal] = useState(todayIso());
   const [jumlah, setJumlah] = useState(0);
