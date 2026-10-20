@@ -796,7 +796,7 @@ function RekapTab({ periode, reload, canBayar, onChanged }: { periode: string; r
             className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md border border-[var(--border)] text-sm text-[var(--text-secondary)] hover:bg-[#f1f5f9] disabled:opacity-50"
           >
             <Receipt size={15} />
-            {slipBusy ? "Menyiapkan..." : `Slip gaji (${(pickedRows.length ? pickedRows : shown).filter((r) => r.potong_gaji > 0).length})`}
+            {slipBusy ? "Menyiapkan..." : `Slip bon karyawan (${(pickedRows.length ? pickedRows : shown).filter((r) => r.potong_gaji > 0).length})`}
           </button>
           <ExportButtons total={shown.length} buildReport={buildReport} fileName={`koperasi-potong-gaji-${periode}`} />
         </div>
