@@ -7460,6 +7460,16 @@ const KOPERASI = "NILAM";
 const KOP_LIMIT = 1_500_000;
 const KOPERASI_LIST = [KOPERASI];
 const kopMonth = (d: string) => d.slice(0, 7);
+// Kunci periode: on the 1st the previous month's rekap goes to HRD and the salaries are cut from it, so
+// from then on that month's Stock Out can't be added (back-dated), edited or deleted, except by HR
+// (Pelunasan Koperasi) or a Super User. Stock In / Rusak / Koreksi aren't billed and stay open.
+function kopKunci(req: express.Request, periode: string): string | null {
+  const u = req.user!;
+  if (u.role === "superuser" || u.perms.includes("koperasi.pelunasan") || periode >= kopMonth(jakartaToday())) return null;
+  const [y, m] = periode.split("-");
+  const bulan = INDO_MONTHS[Number(m) - 1];
+  return `Periode ${bulan.charAt(0) + bulan.slice(1).toLowerCase()} ${y} sudah dikunci: rekapnya sudah disetor ke HRD tgl 1. Stock Out periode itu hanya bisa ditambah / diubah / dihapus oleh HR (Pelunasan Koperasi) atau Super User.`;
+}
 const isIsoDate = (d: unknown): d is string => typeof d === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d) && !Number.isNaN(Date.parse(d));
 const isPeriode = (p: unknown): p is string => typeof p === "string" && /^\d{4}-\d{2}$/.test(p);
 // The anggota's shown name / jabatan / estate: master karyawan's while the employee is there, else what
@@ -7817,6 +7827,8 @@ const kopQty = (n: number) => n.toLocaleString("id-ID", { maximumFractionDigits:
 app.post("/api/koperasi/jual", async (req, res) => {
   const b = req.body ?? {};
   if (!isIsoDate(b.tanggal) || b.tanggal > jakartaToday()) return res.status(400).json({ error: "Tanggal tidak valid (tidak boleh setelah hari ini)" });
+  const kunci = kopKunci(req, kopMonth(b.tanggal));
+  if (kunci) return res.status(403).json({ error: kunci });
   const kode = String(b.anggota_kode ?? "").trim().toUpperCase();
   if (!kode) return res.status(400).json({ error: "Pilih anggota / karyawan" });
   const evidence = b.evidence_id ? await claimEvidence(req, res) : null;
@@ -7955,6 +7967,8 @@ app.post("/api/koperasi/beli", async (req, res) => {
 app.post("/api/koperasi/jual/batch", async (req, res) => {
   const b = req.body ?? {};
   if (!isIsoDate(b.tanggal) || b.tanggal > jakartaToday()) return res.status(400).json({ error: "Tanggal tidak valid (tidak boleh setelah hari ini)" });
+  const kunci = kopKunci(req, kopMonth(b.tanggal));
+  if (kunci) return res.status(403).json({ error: kunci });
   const rows: { anggota_kode: string; barang_kode: string; qty: number; harga: number }[] = (Array.isArray(b.rows) ? b.rows : []).map((r: any) => ({
     anggota_kode: String(r?.anggota_kode ?? "").trim().toUpperCase(),
     barang_kode: String(r?.barang_kode ?? "").trim().toUpperCase(),
@@ -8177,6 +8191,8 @@ app.delete("/api/koperasi/tx/:id", async (req, res) => {
     k: KOPERASI,
   });
   if (!t) return res.status(404).json({ error: "Transaksi tidak ditemukan" });
+  const kunci = t.jenis === "JUAL" ? kopKunci(req, t.periode) : null;
+  if (kunci) return res.status(403).json({ error: kunci });
   const whole = req.query.bon === "1" && t.jenis === "JUAL" && t.bon;
   const result = await withTransaction(async (client) => {
     if (t.jenis === "BELI" && t.lacak_stok) {
@@ -8213,6 +8229,8 @@ app.put("/api/koperasi/tx/:id", async (req, res) => {
       );
       if (!t) return { error: "Transaksi tidak ditemukan", status: 404 };
       if (t.jenis !== "JUAL") return { error: "Hanya baris Stock Out yang bisa diedit" };
+      const kunci = kopKunci(req, t.periode);
+      if (kunci) return { error: kunci, status: 403 };
       const v = await kopLines([{ barang_kode: String(b.barang_kode ?? "").trim().toUpperCase(), qty: b.qty, harga: b.harga }], client);
       if ("error" in v) return v;
       const l = v.lines[0];

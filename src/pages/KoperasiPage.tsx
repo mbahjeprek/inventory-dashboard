@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ArrowDown, ArrowUp, ArrowUpDown, Banknote, Boxes, ChevronRight, ChevronsDownUp, ChevronsUpDown, ClipboardCheck, HandCoins, LayoutDashboard, ListPlus, Package, PackageX, Pencil, Plus, Search, ShoppingBasket, Trash2, Truck, UserPlus, Users, X } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, Banknote, Boxes, ChevronRight, ChevronsDownUp, ChevronsUpDown, ClipboardCheck, HandCoins, LayoutDashboard, ListPlus, Lock, Package, PackageX, Pencil, Plus, Search, ShoppingBasket, Trash2, Truck, UserPlus, Users, X } from "lucide-react";
 import {
   api,
   errorText,
@@ -285,6 +285,16 @@ function TxTable({
   const [loading, setLoading] = useState(true);
   const [hapus, setHapus] = useState<{ tx: KopTx; bon: boolean } | null>(null);
   const [edit, setEdit] = useState<KopTx | null>(null);
+  // A month whose rekap went to HRD (from the 1st) is locked for Stock Out changes, except for HR / Super User.
+  const { user } = useAuth();
+  const bukaKunci = user?.role === "superuser" || can(user, "koperasi.pelunasan");
+  const bulanIni = localToday().slice(0, 7);
+  const terkunci = (t: KopTx) => t.jenis === "JUAL" && t.periode < bulanIni && !bukaKunci;
+  const kunciIcon = (
+    <span title="Periode sudah dikunci: rekapnya sudah disetor ke HRD. Perubahan lewat HR (Pelunasan Koperasi) atau Super User." className="inline-flex p-1.5 text-[var(--text-muted)]">
+      <Lock size={14} />
+    </span>
+  );
   const [error, setError] = useState("");
   const pageSize = 100;
   const params = useMemo(() => ({ jenis, periode, anggota: anggota ?? "", barang: barang ?? "", search: q }), [jenis, periode, anggota, barang, q]);
@@ -465,7 +475,7 @@ function TxTable({
                       </td>
                       {canEdit && (
                         <td className="px-3 py-2 text-right whitespace-nowrap">
-                          {head.bon && (
+                          {terkunci(head) ? kunciIcon : head.bon && (
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
@@ -535,6 +545,10 @@ function TxTable({
                     </td>
                     {canEdit && (
                       <td className="px-3 py-2 text-right whitespace-nowrap">
+                        {terkunci(t) ? (
+                          !sameBon && kunciIcon
+                        ) : (
+                          <>
                         {jual && (
                           <button onClick={() => setEdit(t)} title="Edit barang / jumlah" className="p-1.5 rounded-md text-[var(--text-secondary)] hover:bg-[#f1f5f9]">
                             <Pencil size={14} />
@@ -547,6 +561,8 @@ function TxTable({
                           <button onClick={() => setHapus({ tx: t, bon: true })} title="Hapus seluruh bon" className="text-[11px] px-1.5 py-0.5 rounded border border-[var(--accent-red-border)] text-[var(--accent-red)] hover:bg-[var(--accent-red-bg)]">
                             bon
                           </button>
+                        )}
+                          </>
                         )}
                       </td>
                     )}
