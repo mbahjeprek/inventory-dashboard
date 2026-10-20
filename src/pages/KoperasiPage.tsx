@@ -624,6 +624,8 @@ function RekapTab({ periode, reload, canBayar, onChanged }: { periode: string; r
   const [bayar, setBayar] = useState<KopRekap | null>(null);
   const [filter, setFilter] = useState<"" | "POTONG_GAJI" | "INSTANSI">("POTONG_GAJI");
   const [statusF, setStatusF] = useState<"" | "LUNAS" | "BELUM">("");
+  const [cari, setCari] = useState("");
+  const words = cari.trim().toLowerCase().split(/\s+/).filter(Boolean);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [confirmLunas, setConfirmLunas] = useState(false);
   const [msg, setMsg] = useState("");
@@ -642,7 +644,8 @@ function RekapTab({ periode, reload, canBayar, onChanged }: { periode: string; r
     (rows ?? []).filter(
       (r) =>
         (filter === "POTONG_GAJI" ? r.potong_gaji > 0 : filter === "INSTANSI" ? r.instansi > 0 : true) &&
-        (statusF === "LUNAS" ? st(r) === "LUNAS" : statusF === "BELUM" ? !!st(r) && st(r) !== "LUNAS" : true)
+        (statusF === "LUNAS" ? st(r) === "LUNAS" : statusF === "BELUM" ? !!st(r) && st(r) !== "LUNAS" : true) &&
+        words.every((w) => [r.kode, r.nama, r.jabatan, r.estate, r.divisi].join(" ").toLowerCase().includes(w))
     ),
     sort,
     {
@@ -685,6 +688,7 @@ function RekapTab({ periode, reload, canBayar, onChanged }: { periode: string; r
     title: `Rekap Potong Gaji Koperasi Nilam - ${periodeLabel(periode)}`,
     subtitle: [
       filter === "POTONG_GAJI" ? "Karyawan dengan potong gaji" : filter === "INSTANSI" ? "Instansi (ditagih ke kantor)" : "Semua anggota",
+      ...(cari.trim() ? [`Cari: ${cari.trim()}`] : []),
       ...(jatuhTempo ? [`Disetor ke HRD tgl 1, potong gaji paling lambat ${isoDisplay(jatuhTempo)}`] : []),
     ],
     landscape: true,
@@ -734,6 +738,10 @@ function RekapTab({ periode, reload, canBayar, onChanged }: { periode: string; r
           <option value="BELUM">Belum lunas</option>
           <option value="LUNAS">Lunas</option>
         </select>
+        <div className="relative flex-1 min-w-[180px] max-w-xs">
+          <Search size={15} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
+          <input value={cari} onChange={(e) => setCari(e.target.value)} placeholder="Cari NIK / nama / jabatan / divisi..." className={`${inputCls} pl-8`} />
+        </div>
         <span className="text-xs text-[var(--text-muted)]">
           {shown.length} orang · Potong gaji <b className="text-[var(--text-primary)]">{rp(sum((r) => r.potong_gaji))}</b> · sisa{" "}
           <b className={sum(sisaOf) > 0.5 ? "text-[var(--accent-red)]" : "text-[var(--text-primary)]"}>{rp(sum(sisaOf))}</b>
