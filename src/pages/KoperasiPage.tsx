@@ -129,6 +129,7 @@ export function KoperasiPage() {
   // Marking bills paid / not paid is HR's (its own tick), not the koperasi admin's.
   const canBayar = can(user, "koperasi.pelunasan");
   const [tab, setTab] = useState<Tab>("dashboard");
+  const [fokusExp, setFokusExp] = useState(0);
   const [periodes, setPeriodes] = useState<string[]>([]);
   const [periode, setPeriode] = useState(localToday().slice(0, 7));
   const [ringkasan, setRingkasan] = useState<KopRingkasan | null>(null);
@@ -190,6 +191,7 @@ export function KoperasiPage() {
       </div>
 
       <TunggakanBanner reload={reload} canBayar={canBayar} onChanged={done} />
+      <ExpBanner reload={reload} onLihat={() => (setTab("stok"), setFokusExp((n) => n + 1))} />
 
       {ringkasan && tab !== "dashboard" && (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -243,7 +245,7 @@ export function KoperasiPage() {
       {tab === "dashboard" && <KoperasiDashboard periode={periode} reload={reload} />}
       {tab === "jual" && <TxTable jenis="JUAL" periode={periode} reload={reload} canEdit={canEdit} onChanged={done} />}
       {tab === "rekap" && <RekapTab periode={periode} reload={reload} canBayar={canBayar} onChanged={done} />}
-      {tab === "stok" && <StokTab reload={reload} canEdit={canEdit} onChanged={done} />}
+      {tab === "stok" && <StokTab reload={reload} canEdit={canEdit} onChanged={done} fokusExp={fokusExp} />}
       {tab === "opname" && <KoperasiOpname canInput={canInput} canEdit={canEdit} isSuperuser={user?.role === "superuser"} onChanged={done} />}
       {tab === "beli" && (
         <div className="space-y-4">
@@ -1219,11 +1221,15 @@ function TunggakanBanner({ reload, canBayar, onChanged }: { reload: number; canB
 }
 
 // ---- Stok Barang ----
-function StokTab({ reload, canEdit, onChanged }: { reload: number; canEdit: boolean; onChanged: () => void }) {
+function StokTab({ reload, canEdit, onChanged, fokusExp = 0 }: { reload: number; canEdit: boolean; onChanged: () => void; fokusExp?: number }) {
   const [rows, setRows] = useState<KopBarang[] | null>(null);
   const [search, setSearch] = useState("");
   const [aktif, setAktif] = useState("1");
-  const [only, setOnly] = useState<"" | "ada" | "menipis">("");
+  const [only, setOnly] = useState<"" | "ada" | "menipis" | "exp">(fokusExp ? "exp" : "");
+  // The reminder's "Lihat" opens this tab on the expired / expiring barang.
+  useEffect(() => {
+    if (fokusExp) setOnly("exp");
+  }, [fokusExp]);
   const [editing, setEditing] = useState<KopBarang | "new" | null>(null);
   const [riwayat, setRiwayat] = useState<KopBarang | null>(null);
   const [koreksi, setKoreksi] = useState<KopBarang | null>(null);
@@ -1239,7 +1245,7 @@ function StokTab({ reload, canEdit, onChanged }: { reload: number; canEdit: bool
   const [sort, setSort] = useState<Sort>({ key: "nama", dir: "asc" });
   const shown = sortBy(
     (rows ?? []).filter(
-      (b) => (!q || b.nama.toLowerCase().includes(q) || b.kode.toLowerCase().includes(q)) && (only === "ada" ? b.stok > 0 : only === "menipis" ? menipis(b) : true)
+      (b) => (!q || b.nama.toLowerCase().includes(q) || b.kode.toLowerCase().includes(q)) && (only === "ada" ? b.stok > 0 : only === "menipis" ? menipis(b) : only === "exp" ? !!expPerlu(b) : true)
     ),
     sort,
     {
@@ -1249,6 +1255,7 @@ function StokTab({ reload, canEdit, onChanged }: { reload: number; canEdit: bool
       harga_beli: (b) => b.harga_beli,
       harga_jual: (b) => b.harga_jual,
       terakhir: (b) => b.terakhir,
+      exp: (b) => b.exp_iso,
     }
   );
   const buildReport = async () => ({
@@ -1262,8 +1269,20 @@ function StokTab({ reload, canEdit, onChanged }: { reload: number; canEdit: bool
       { label: "Harga Beli (Rp)", align: "right" as const },
       { label: "Harga Jual (Rp)", align: "right" as const },
       { label: "Nilai Stok (Rp)", align: "right" as const },
+      { label: "Expired" },
+      { label: "Catatan" },
     ],
-    rows: shown.map((b) => [b.kode, b.nama, b.lacak_stok ? b.stok : "tidak dilacak", b.satuan, b.harga_beli, b.harga_jual, b.lacak_stok ? Math.max(b.stok, 0) * b.harga_beli : ""]),
+    rows: shown.map((b) => [
+      b.kode,
+      b.nama,
+      b.lacak_stok ? b.stok : "tidak dilacak",
+      b.satuan,
+      b.harga_beli,
+      b.harga_jual,
+      b.lacak_stok ? Math.max(b.stok, 0) * b.harga_beli : "",
+      b.exp_iso ? `${isoDisplay(b.exp_iso)}${expPerlu(b) ? ` (${expText(b)})` : ""}` : "",
+      b.catatan,
+    ]),
   });
 
   return (
@@ -1277,6 +1296,7 @@ function StokTab({ reload, canEdit, onChanged }: { reload: number; canEdit: bool
           <option value="">Semua stok</option>
           <option value="ada">Ada stok</option>
           <option value="menipis">Menipis / habis</option>
+          <option value="exp">Expired / ≤ 30 hari lagi</option>
         </select>
         <select value={aktif} onChange={(e) => setAktif(e.target.value)} className={selectCls} aria-label="Status">
           <option value="1">Barang aktif</option>
@@ -1302,6 +1322,7 @@ function StokTab({ reload, canEdit, onChanged }: { reload: number; canEdit: bool
               <SortTh label="Stok" k="stok" sort={sort} setSort={setSort} num />
               <SortTh label="Harga Beli" k="harga_beli" sort={sort} setSort={setSort} num />
               <SortTh label="Harga Jual" k="harga_jual" sort={sort} setSort={setSort} num />
+              <SortTh label="Expired" k="exp" sort={sort} setSort={setSort} />
               <SortTh label="Terakhir Bergerak" k="terakhir" sort={sort} setSort={setSort} desc />
               <th className="px-3 py-2.5" />
             </tr>
@@ -1309,13 +1330,13 @@ function StokTab({ reload, canEdit, onChanged }: { reload: number; canEdit: bool
           <tbody className="divide-y divide-[var(--border)]">
             {rows === null ? (
               <tr>
-                <td colSpan={7} className="px-4 py-8 text-center text-[var(--text-muted)]">
+                <td colSpan={8} className="px-4 py-8 text-center text-[var(--text-muted)]">
                   Memuat...
                 </td>
               </tr>
             ) : !shown.length ? (
               <tr>
-                <td colSpan={7} className="px-4 py-10 text-center text-[var(--text-muted)]">
+                <td colSpan={8} className="px-4 py-10 text-center text-[var(--text-muted)]">
                   Tidak ada barang.
                 </td>
               </tr>
@@ -1326,12 +1347,25 @@ function StokTab({ reload, canEdit, onChanged }: { reload: number; canEdit: bool
                   <td className="col-grow px-3 py-2 font-medium text-[var(--text-primary)]">
                     {b.nama}
                     {!b.aktif && <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded bg-[#f1f5f9] text-[var(--text-secondary)]">tidak aktif</span>}
+                    {b.catatan && <div className="text-[11px] font-normal text-[var(--text-secondary)]">{b.catatan}</div>}
                   </td>
                   <td className={`px-3 py-2 text-right whitespace-nowrap font-semibold ${!b.lacak_stok ? "text-[var(--text-muted)]" : menipis(b) ? "text-[var(--accent-red)]" : "text-[var(--text-primary)]"}`}>
                     {b.lacak_stok ? `${fmtQty(b.stok)} ${b.satuan}` : <span className="text-xs font-normal">tidak dilacak</span>}
                   </td>
                   <td className="px-3 py-2 text-right whitespace-nowrap">{rp(b.harga_beli)}</td>
                   <td className="px-3 py-2 text-right whitespace-nowrap">{rp(b.harga_jual)}</td>
+                  <td className="px-3 py-2 whitespace-nowrap text-xs">
+                    {b.exp_iso ? (
+                      <>
+                        <span className={expPerlu(b) === "lewat" ? "text-[var(--accent-red)] font-semibold" : expPerlu(b) ? "text-[var(--accent-amber)] font-semibold" : "text-[var(--text-secondary)]"}>
+                          {isoDisplay(b.exp_iso)}
+                        </span>
+                        {expPerlu(b) && <div className={`text-[10px] ${expPerlu(b) === "lewat" ? "text-[var(--accent-red)]" : "text-[var(--accent-amber)]"}`}>{expText(b)}</div>}
+                      </>
+                    ) : (
+                      <span className="text-[var(--text-muted)]">-</span>
+                    )}
+                  </td>
                   <td className="px-3 py-2 whitespace-nowrap text-xs text-[var(--text-secondary)]">{b.terakhir ? isoDisplay(b.terakhir) : "-"}</td>
                   <td className="px-3 py-2 text-right whitespace-nowrap">
                     <button onClick={() => setRiwayat(b)} className="text-xs text-[var(--accent-blue)] hover:underline mr-2">
@@ -1435,6 +1469,8 @@ function BarangModal({ barang, onClose, onSuccess }: { barang: KopBarang | null;
     stok_min: String(barang?.stok_min ?? 0),
     aktif: barang?.aktif ?? true,
     lacak_stok: barang?.lacak_stok ?? true,
+    exp_iso: barang?.exp_iso ?? "",
+    catatan: barang?.catatan ?? "",
   });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -1451,6 +1487,8 @@ function BarangModal({ barang, onClose, onSuccess }: { barang: KopBarang | null;
         stok_min: parseNum(f.stok_min || "0"),
         aktif: f.aktif,
         lacak_stok: f.lacak_stok,
+        exp_iso: f.exp_iso || null,
+        catatan: f.catatan,
       });
       onSuccess();
     } catch (e) {
@@ -1482,6 +1520,17 @@ function BarangModal({ barang, onClose, onSuccess }: { barang: KopBarang | null;
           <div>
             <label className={labelCls}>Harga jual ke anggota</label>
             <RpInput value={f.harga_jual} onChange={(v) => setF((x) => ({ ...x, harga_jual: v }))} />
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className={labelCls}>Tanggal expired (stok yang ada)</label>
+            <input type="date" value={f.exp_iso} onChange={set("exp_iso")} className={inputCls} />
+            <p className="text-[11px] text-[var(--text-muted)] mt-0.5">Isi yang paling dekat. Kosongkan bila tidak ada.</p>
+          </div>
+          <div>
+            <label className={labelCls}>Catatan (opsional)</label>
+            <input value={f.catatan} onChange={set("catatan")} placeholder="mis. simpan di rak 2, merek pengganti" className={inputCls} />
           </div>
         </div>
         <label className="flex items-center gap-2 text-sm">
@@ -1928,6 +1977,51 @@ type Line = { barang: KopBarang; qty: string; harga: string };
 const adaStok = (b: KopBarang) => !b.lacak_stok || b.stok > 0;
 const byStok = (list: KopBarang[]) => [...list].sort((a, b) => Number(adaStok(b)) - Number(adaStok(a)));
 const stokCls = (b: KopBarang) => (adaStok(b) ? "text-[var(--accent-green)]" : "text-[var(--accent-red)]");
+
+// Expiry of a barang that is still on hand (stock or not tracked): "lewat" = past, "dekat" = within 30 days.
+const EXP_HARI = 30;
+const hariLagi = (iso: string) => Math.round((Date.parse(iso) - Date.parse(localToday())) / 86400000);
+function expPerlu(b: KopBarang): "lewat" | "dekat" | null {
+  if (!b.exp_iso || !b.aktif || (b.lacak_stok && b.stok <= 0)) return null;
+  const d = hariLagi(b.exp_iso);
+  return d < 0 ? "lewat" : d <= EXP_HARI ? "dekat" : null;
+}
+const expText = (b: KopBarang) => {
+  const d = hariLagi(b.exp_iso!);
+  return d < 0 ? `expired ${-d} hari lalu` : d === 0 ? "expired hari ini" : `${d} hari lagi`;
+};
+
+// Reminder at the top of the Koperasi page: barang on hand that are expired or expire within 30 days.
+function ExpBanner({ reload, onLihat }: { reload: number; onLihat: () => void }) {
+  const [rows, setRows] = useState<KopBarang[]>([]);
+  useEffect(() => {
+    api
+      .kopBarang({ aktif: "1" })
+      .then(setRows)
+      .catch(() => setRows([]));
+  }, [reload]);
+  const lewat = rows.filter((b) => expPerlu(b) === "lewat");
+  const dekat = rows.filter((b) => expPerlu(b) === "dekat");
+  if (!lewat.length && !dekat.length) return null;
+  const nama = [...lewat, ...dekat].slice(0, 4).map((b) => b.nama).join(", ");
+  return (
+    <div className={`flex flex-wrap items-center gap-3 rounded-lg border-l-4 px-4 py-3 text-sm ${lewat.length ? "border-[var(--accent-red)] bg-[var(--accent-red-bg)] text-[var(--accent-red)]" : "border-[#f5b400] bg-[#fff7e0] text-[#7a5200]"}`}>
+      <AlertTriangle size={20} className="shrink-0" />
+      <p className="flex-1 min-w-[220px]">
+        {lewat.length > 0 && <b>{lewat.length} barang sudah expired</b>}
+        {lewat.length > 0 && dekat.length > 0 && " · "}
+        {dekat.length > 0 && <b>{dekat.length} barang expired dalam {EXP_HARI} hari</b>}
+        <span className="block text-xs opacity-90">
+          {nama}
+          {lewat.length + dekat.length > 4 ? ", ..." : ""}. Tarik dari rak / catat sebagai Rusak, atau perbarui tanggalnya bila stoknya sudah baru.
+        </span>
+      </p>
+      <button onClick={onLihat} className={`px-3 py-1.5 rounded-md text-xs font-medium text-white hover:opacity-90 ${lewat.length ? "bg-[var(--accent-red)]" : "bg-[#b07a00]"}`}>
+        Lihat barang
+      </button>
+    </div>
+  );
+}
 
 function useBarangAktif() {
   const [barang, setBarang] = useState<KopBarang[]>([]);

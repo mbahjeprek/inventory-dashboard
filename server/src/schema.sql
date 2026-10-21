@@ -833,3 +833,8 @@ ALTER TABLE opname ADD COLUMN IF NOT EXISTS dibuka_oleh_nama TEXT;
 ALTER TABLE opname_line ADD COLUMN IF NOT EXISTS dihitung_oleh INTEGER;
 ALTER TABLE opname_line ADD COLUMN IF NOT EXISTS dihitung_oleh_nama TEXT;
 ALTER TABLE opname_line ADD COLUMN IF NOT EXISTS dihitung_at TIMESTAMPTZ;
+
+-- Koperasi barang: the expiry date of the stock on hand (the nearest one; NULL = none / not tracked) and a
+-- free note. Stok Barang colours it and the Koperasi page reminds of barang expired / expiring in 30 days.
+ALTER TABLE koperasi_barang ADD COLUMN IF NOT EXISTS exp_iso TEXT;
+ALTER TABLE koperasi_barang ADD COLUMN IF NOT EXISTS catatan TEXT NOT NULL DEFAULT '';

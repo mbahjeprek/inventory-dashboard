@@ -7878,7 +7878,7 @@ app.get("/api/koperasi/barang", async (req, res) => {
   res.json(data);
 });
 
-const KOP_BARANG_LABELS = { nama: "Nama", satuan: "Satuan", harga_jual: "Harga Jual", harga_beli: "Harga Beli", stok_min: "Stok Minimum", aktif: "Aktif", lacak_stok: "Lacak Stok" };
+const KOP_BARANG_LABELS = { exp_iso: "Tanggal Expired", catatan: "Catatan", nama: "Nama", satuan: "Satuan", harga_jual: "Harga Jual", harga_beli: "Harga Beli", stok_min: "Stok Minimum", aktif: "Aktif", lacak_stok: "Lacak Stok" };
 function kopBarangBody(b: any): { error: string } | Record<string, unknown> {
   const nama = String(b.nama ?? "").trim().replace(/\s+/g, " ");
   const satuan = String(b.satuan ?? "").trim().toUpperCase();
@@ -7888,7 +7888,10 @@ function kopBarangBody(b: any): { error: string } | Record<string, unknown> {
   if (!nama) return { error: "Nama barang wajib diisi" };
   if (!satuan) return { error: "Satuan wajib diisi" };
   if (![harga_jual, harga_beli, stok_min].every((n) => Number.isFinite(n) && n >= 0)) return { error: "Harga / stok minimum tidak valid" };
-  return { nama, satuan, harga_jual, harga_beli, stok_min, aktif: b.aktif !== false, lacak_stok: b.lacak_stok !== false };
+  // Tanggal expired of the stock on hand (the nearest one); empty = none / not tracked.
+  const exp = String(b.exp_iso ?? "").trim();
+  if (exp && !isIsoDate(exp)) return { error: "Tanggal expired tidak valid" };
+  return { nama, satuan, harga_jual, harga_beli, stok_min, aktif: b.aktif !== false, lacak_stok: b.lacak_stok !== false, exp_iso: exp || null, catatan: String(b.catatan ?? "").trim() };
 }
 
 app.post("/api/koperasi/barang", async (req, res) => {
@@ -7898,8 +7901,8 @@ app.post("/api/koperasi/barang", async (req, res) => {
   const last = await queryOne<{ n: number }>("SELECT COALESCE(MAX(SUBSTRING(kode FROM 2)::int), 0) AS n FROM koperasi_barang WHERE kode ~ '^K[0-9]+$'");
   const kode = `K${String(last!.n + 1).padStart(4, "0")}`;
   await execute(
-    `INSERT INTO koperasi_barang (kode, koperasi, nama, satuan, harga_jual, harga_beli, stok_min, aktif, lacak_stok)
-     VALUES (@kode, @k, @nama, @satuan, @harga_jual, @harga_beli, @stok_min, @aktif, @lacak_stok)`,
+    `INSERT INTO koperasi_barang (kode, koperasi, nama, satuan, harga_jual, harga_beli, stok_min, aktif, lacak_stok, exp_iso, catatan)
+     VALUES (@kode, @k, @nama, @satuan, @harga_jual, @harga_beli, @stok_min, @aktif, @lacak_stok, @exp_iso, @catatan)`,
     { kode, k: KOPERASI, ...v }
   );
   await logActivity(req, { module: "KOPERASI", estate: KOPERASI, aksi: "Tambah Barang", objek: `${kode} ${v.nama}` });
@@ -7913,7 +7916,7 @@ app.put("/api/koperasi/barang/:kode", async (req, res) => {
   if ("error" in v) return res.status(400).json(v);
   await execute(
     `UPDATE koperasi_barang SET nama = @nama, satuan = @satuan, harga_jual = @harga_jual, harga_beli = @harga_beli, stok_min = @stok_min,
-       aktif = @aktif, lacak_stok = @lacak_stok WHERE kode = @kode`,
+       aktif = @aktif, lacak_stok = @lacak_stok, exp_iso = @exp_iso, catatan = @catatan WHERE kode = @kode`,
     { kode: req.params.kode, ...v }
   );
   await logActivity(req, { module: "KOPERASI", estate: KOPERASI, aksi: "Edit Barang", objek: `${before.kode} ${before.nama}`, detail: describeChanges(before, v, KOP_BARANG_LABELS) });

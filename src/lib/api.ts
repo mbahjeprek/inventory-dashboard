@@ -478,6 +478,9 @@ export type Pinjaman = {
 export type KopBarang = {
   kode: string;
   nama: string;
+  // Expiry of the stock on hand (nearest; null = none) and a free note.
+  exp_iso: string | null;
+  catatan: string;
   satuan: string;
   harga_jual: number;
   harga_beli: number;
