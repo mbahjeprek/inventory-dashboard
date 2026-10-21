@@ -2,7 +2,6 @@ import { useState } from "react";
 import { X } from "lucide-react";
 import { api, errorText, type GudangStockItem } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
-import { can } from "../lib/access";
 
 export function EditGudangStockModal({
   item,
@@ -15,9 +14,9 @@ export function EditGudangStockModal({
 }) {
   const [bufferStock, setBufferStock] = useState(item.buffer_stock);
   const [stockTersedia, setStockTersedia] = useState(item.stock_tersedia);
-  // A changed stock is booked as a Koreksi Stok (server), so it needs the Koreksi Gudang tick.
   const { user } = useAuth();
-  const bisaKoreksi = can(user, "gudang.koreksi");
+  // Changing the stock is a Koreksi Stok: Super User only (other differences go through a Stok Opname).
+  const bisaKoreksi = user?.role === "superuser";
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
@@ -78,7 +77,7 @@ export function EditGudangStockModal({
                 disabled={!bisaKoreksi}
                 className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-2 disabled:bg-[#f8fafc] disabled:text-[var(--text-muted)]"
               />
-              <p className="text-[11px] text-[var(--text-muted)] mt-0.5">{bisaKoreksi ? "Perubahan stok dicatat sebagai Koreksi Stok" : "Ubah stok perlu hak Koreksi Gudang"}</p>
+              <p className="text-[11px] text-[var(--text-muted)] mt-0.5">{bisaKoreksi ? "Perubahan stok dicatat sebagai Koreksi Stok" : "Stok hanya bisa diubah Super User; selisih stok lewat Stok Opname"}</p>
             </div>
           </div>
 

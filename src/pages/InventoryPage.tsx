@@ -141,7 +141,7 @@ export function InventoryPage() {
   const showActions = canEdit || canDelete;
   // "Transaksi" opens the Stok Masuk / Keluar / Koreksi form: shown when any of those is allowed.
   const canInput = can(user, "gudang.input");
-  const canTx = canInput || can(user, "gudang.koreksi");
+  const canTx = canInput || user?.role === "superuser";
   const [editingItem, setEditingItem] = useState<Item | null>(null);
   const [showPicker, setShowPicker] = useState(false);
   // Input Banyak (many Stok Masuk / Keluar in one go) and its "saved" notice.

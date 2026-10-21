@@ -12,19 +12,18 @@ export const ACTIONS = [
   { key: "input", label: "Input" },
   { key: "edit", label: "Edit" },
   { key: "delete", label: "Hapus" },
-  { key: "koreksi", label: "Koreksi" },
   { key: "opname", label: "Opname" },
   { key: "approve", label: "Approve Opname" },
 ] as const;
 export type Action = (typeof ACTIONS)[number]["key"];
 
-// Which actions each module has (only Gudang and Klinik have Koreksi of a single item; every module
-// has Stok Opname: Opname = create + count, Approve Opname = approve / send back).
+// Which actions each module has: Stok Opname (Opname = create + count, Approve Opname = approve / send
+// back). A one-item Koreksi Stok is Super User only; every other difference goes through a Stok Opname.
 export const MODULE_ACTIONS: Record<Module, Action[]> = {
-  GUDANG: ["view", "input", "edit", "delete", "koreksi", "opname", "approve"],
+  GUDANG: ["view", "input", "edit", "delete", "opname", "approve"],
   BBM: ["view", "input", "edit", "delete", "opname", "approve"],
   PUPUK: ["view", "input", "edit", "delete", "opname", "approve"],
-  KLINIK: ["view", "input", "edit", "delete", "koreksi", "opname", "approve"],
+  KLINIK: ["view", "input", "edit", "delete", "opname", "approve"],
   OLI: ["view", "input", "edit", "delete", "opname", "approve"],
 };
 export const modulePerm = (m: Module, a: Action) => `${m.toLowerCase()}.${a}`;

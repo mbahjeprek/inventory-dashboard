@@ -144,7 +144,7 @@ export function InventoryGudangStockPage({ gudang }: { gudang: string }) {
   const showActions = true;
   // "Transaksi" opens the Stok Masuk / Keluar / Koreksi form: shown when any of those is allowed.
   const canInput = can(user, "gudang.input");
-  const canTx = canInput || can(user, "gudang.koreksi");
+  const canTx = canInput || user?.role === "superuser";
   const [editingItem, setEditingItem] = useState<GudangStockItem | null>(null);
   const [deleteError, setDeleteError] = useState("");
   const [confirmDelete, setConfirmDelete] = useState<GudangStockItem | null>(null);

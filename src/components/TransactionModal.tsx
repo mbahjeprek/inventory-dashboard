@@ -43,10 +43,11 @@ export function TransactionModal({
 }) {
   const isKlinik = scope?.kind === "klinik";
   const { user } = useAuth();
-  // Stock In/Out need the module's Input permission, Koreksi its Koreksi permission (Pengguna).
+  // Stock In/Out need the module's Input permission; Koreksi of one item is Super User only (other
+  // differences go through a Stok Opname).
   const mod = isKlinik ? "klinik" : "gudang";
   const canInput = can(user, `${mod}.input`);
-  const canKoreksi = can(user, `${mod}.koreksi`);
+  const canKoreksi = user?.role === "superuser";
   const [item, setItem] = useState(initialItem);
   const [tujuan, setTujuan] = useState("");
   const [penerima, setPenerima] = useState("");

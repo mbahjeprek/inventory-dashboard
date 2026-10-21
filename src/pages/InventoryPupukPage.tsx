@@ -52,7 +52,7 @@ export function InventoryPupukPage({ estate }: { estate: string }) {
   const showActions = canEdit || canDelete;
   // "Transaksi" opens the Stok Masuk / Keluar / Koreksi form: shown when any of those is allowed.
   const canInput = can(user, "pupuk.input");
-  const canTx = canInput || can(user, "pupuk.koreksi");
+  const canTx = canInput || user?.role === "superuser";
   const [editing, setEditing] = useState<PupukRecord | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<PupukRecord | null>(null);
   const pageSize = 25;

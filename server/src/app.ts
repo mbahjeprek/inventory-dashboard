@@ -174,8 +174,8 @@ function requiredPerms(req: express.Request): Need {
   if (is(/^\/status-update$/)) return null;
   // Foto bukti: any logged-in account uploads for its own transactions (the transaction route checks).
   if (is(/^\/evidence(\/|$)/)) return null;
-  if (is(/^\/(stock-correction|gudang-stock\/correction)$/)) return ["gudang.koreksi"];
-  if (is(/^\/klinik-stock\/correction$/)) return ["klinik.koreksi"];
+  // Koreksi Stok of one item: Super User only (with a reason); other differences go through a Stok Opname.
+  if (is(/^\/(stock-correction|gudang-stock\/correction|klinik-stock\/correction)$/)) return "super";
   // items = the master barang list, which is also Nilam's gudang stock.
   if (is(/^\/items$/) && m === "GET") return ["gudang.view", "master.barang"];
   if (is(/^\/items(\/\d+)?$/) && m !== "GET") return ["master.barang", `gudang.${act}`];
@@ -1037,12 +1037,12 @@ app.put("/api/gudang-stock/:id", requireSuperuser, async (req, res) => {
   if (!estateAllowed(req.user!, existing.gudang)) return res.status(403).json({ error: "Akses ditolak" });
 
   const { buffer_stock } = req.body;
-  // A changed stock is a Koreksi (Koreksi Gudang tick, a history row with the difference), like Klinik's
+  // A changed stock is a Koreksi (Super User only, a history row with the difference), like Klinik's
   // edit: setting the number directly left the Riwayat saldo out of step with the stock.
   const stockBaru = req.body.stock_tersedia === undefined || req.body.stock_tersedia === null || req.body.stock_tersedia === "" ? null : Number(req.body.stock_tersedia);
   const stockBerubah = stockBaru !== null && round3(stockBaru) !== round3(Number(existing.stock_tersedia));
   if (stockBerubah) {
-    if (req.user!.role !== "superuser" && !req.user!.perms.includes("gudang.koreksi")) return res.status(403).json({ error: "Mengubah stok perlu hak Koreksi Gudang (tercatat sebagai Koreksi Stok)" });
+    if (req.user!.role !== "superuser") return res.status(403).json({ error: "Stok hanya bisa diubah Super User (tercatat sebagai Koreksi Stok); selisih stok lewat Stok Opname" });
     if (!validQty(GUDANG_LEDGER, stockBaru) || stockBaru! < 0) return res.status(400).json({ error: "Stok tidak valid" });
   }
   await execute("UPDATE gudang_stock SET buffer_stock = @buffer_stock WHERE id = @id", { buffer_stock: buffer_stock ?? 0, id: req.params.id });
@@ -1265,6 +1265,7 @@ app.post("/api/gudang-stock/correction", requireSuperuser, async (req, res) => {
   if (!GUDANG_STOCK_OPTIONS.includes(gudang)) return res.status(400).json({ error: "Gudang tidak valid" });
   if (!estateAllowed(req.user!, gudang)) return res.status(403).json({ error: "Akses ditolak" });
   if (!validQty(GUDANG_LEDGER, actual_qty) || actual_qty < 0) return res.status(400).json({ error: "Invalid payload" });
+  if (!String(note ?? "").trim()) return res.status(400).json({ error: "Isi alasan koreksinya" });
 
   const item = await queryOne<any>("SELECT kode, nama FROM items WHERE kode = @item_kode", { item_kode });
   if (!item) return res.status(404).json({ error: "Barang tidak ditemukan di master data" });
@@ -1658,6 +1659,7 @@ app.post("/api/stock-correction", requireEstate("NILAM"), async (req, res) => {
   if (!item_id || actual_qty === undefined || actual_qty < 0) {
     return res.status(400).json({ error: "Invalid payload" });
   }
+  if (!String(note ?? "").trim()) return res.status(400).json({ error: "Isi alasan koreksinya" });
 
   const item = await queryOne<any>("SELECT * FROM items WHERE id = @id", { id: item_id });
   if (!item) return res.status(404).json({ error: "Not found" });
@@ -4553,6 +4555,7 @@ app.post("/api/klinik-stock/correction", requireSuperuser, async (req, res) => {
   const exp = String(req.body.expired_date ?? "");
   if (!checkKlinik(req, res, klinik)) return;
   if (!Number.isInteger(actual_qty) || actual_qty < 0) return res.status(400).json({ error: "Invalid payload" });
+  if (!String(note ?? "").trim()) return res.status(400).json({ error: "Isi alasan koreksinya" });
   if (exp && !ISO_DATE.test(exp)) return res.status(400).json({ error: "Tanggal expired tidak valid" });
   const obat = await queryOne<any>("SELECT kode, nama FROM obat WHERE kode = @obat_kode", { obat_kode });
   if (!obat) return res.status(404).json({ error: "Obat tidak ditemukan di master data" });
@@ -4653,8 +4656,8 @@ app.put("/api/klinik-stock/:id/batches", requireSuperuser, async (req, res) => {
     return res.json({ success: true });
   }
 
-  if (req.user!.role !== "superuser" && !req.user!.perms.includes("klinik.koreksi"))
-    return res.status(403).json({ error: `Total berubah (${before} → ${after}) dan itu Koreksi Stok, yang tidak diizinkan untuk akun ini` });
+  if (req.user!.role !== "superuser")
+    return res.status(403).json({ error: `Total berubah (${before} → ${after}) dan itu Koreksi Stok, yang hanya bisa dilakukan Super User; selisih stok lewat Stok Opname` });
   if (!note) return res.status(400).json({ error: "Isi alasan koreksi" });
   const exps = [...new Set([...have.keys(), ...want.keys()])];
   try {

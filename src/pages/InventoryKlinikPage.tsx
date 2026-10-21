@@ -155,7 +155,7 @@ export function InventoryKlinikPage({ klinik }: { klinik: string }) {
   const canDelete = can(user, "klinik.delete");
   // "Transaksi" opens the Stok Masuk / Keluar / Koreksi form: shown when any of those is allowed.
   const canInput = can(user, "klinik.input");
-  const canTx = canInput || can(user, "klinik.koreksi");
+  const canTx = canInput || user?.role === "superuser";
   // Aksi column: Riwayat (everyone), the per-row Transaksi shortcut plus Edit / Hapus.
   const showActions = true;
   const [editingItem, setEditingItem] = useState<KlinikStockItem | null>(null);

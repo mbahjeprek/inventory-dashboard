@@ -2,7 +2,6 @@ import { useState } from "react";
 import { Plus, Trash2, X } from "lucide-react";
 import { api, errorText, type KlinikStockItem } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
-import { can } from "../lib/access";
 import { isiOf, kemasanName, kemasanText, split } from "../lib/kemasan";
 
 // Buffer, note and the stock per expiry date of one clinic stock row. The rows are simply what is on
@@ -38,7 +37,8 @@ export function EditKlinikStockModal({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const { user } = useAuth();
-  const canKoreksi = can(user, "klinik.koreksi");
+  // A changed total is a Koreksi Stok: Super User only (other differences go through a Stok Opname).
+  const canKoreksi = user?.role === "superuser";
 
   const total = rows.reduce((n, r) => n + r.qty, 0);
   const selisih = total - item.stock_tersedia;
@@ -52,7 +52,7 @@ export function EditKlinikStockModal({
     setError("");
     if (bufferStock < 0) return setError("Buffer tidak boleh negatif");
     if (rows.some((r) => r.qty < 0 || !Number.isInteger(r.qty))) return setError("Jumlah harus bilangan bulat positif");
-    if (selisih !== 0 && !canKoreksi) return setError(`Total harus tetap ${item.stock_tersedia}. Akun ini tidak punya izin Koreksi Stok.`);
+    if (selisih !== 0 && !canKoreksi) return setError(`Total harus tetap ${item.stock_tersedia}. Koreksi stok hanya oleh Super User; selisih stok lewat Stok Opname.`);
     if (selisih !== 0 && !alasan.trim()) return setError("Isi alasan koreksi");
     setSubmitting(true);
     try {
