@@ -184,7 +184,7 @@ export function KoperasiPage() {
             </option>
           ))}
         </select>
-        <div className="ml-auto">
+        <div className="ml-auto flex flex-wrap items-center gap-2">
           <ActivityLogButton module="KOPERASI" estate="NILAM" />
           <DokumenButton modul="KOPERASI" estate="NILAM" />
         </div>
@@ -2108,7 +2108,7 @@ function ExpBanner({ reload, onLihat }: { reload: number; onLihat: () => void })
   if (!lewat.length && !dekat.length) return null;
   const nama = [...lewat, ...dekat].slice(0, 4).map((b) => b.nama).join(", ");
   return (
-    <div className={`flex flex-wrap items-center gap-3 rounded-lg border-l-4 px-4 py-3 text-sm ${lewat.length ? "border-[var(--accent-red)] bg-[var(--accent-red-bg)] text-[var(--accent-red)]" : "border-[#f5b400] bg-[#fff7e0] text-[#7a5200]"}`}>
+    <div className={`flex flex-wrap items-center gap-3 w-full min-w-0 rounded-lg border px-4 py-3 text-sm ${lewat.length ? "border-[var(--accent-red)] bg-[var(--accent-red-bg)] text-[var(--accent-red)]" : "border-[#f5b400] bg-[#fff7e0] text-[#7a5200]"}`}>
       <AlertTriangle size={20} className="shrink-0" />
       <p className="flex-1 min-w-[220px]">
         {lewat.length > 0 && <b>{lewat.length} barang sudah expired</b>}
