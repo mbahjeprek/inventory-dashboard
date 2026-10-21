@@ -1225,7 +1225,7 @@ function StokTab({ reload, canEdit, onChanged, fokusExp = 0 }: { reload: number;
   const [rows, setRows] = useState<KopBarang[] | null>(null);
   const [search, setSearch] = useState("");
   const [aktif, setAktif] = useState("1");
-  const [only, setOnly] = useState<"" | "ada" | "menipis" | "exp">(fokusExp ? "exp" : "");
+  const [only, setOnly] = useState<"" | "ada" | "kosong" | "menipis" | "exp">(fokusExp ? "exp" : "");
   // The reminder's "Lihat" opens this tab on the expired / expiring barang.
   useEffect(() => {
     if (fokusExp) setOnly("exp");
@@ -1242,10 +1242,13 @@ function StokTab({ reload, canEdit, onChanged, fokusExp = 0 }: { reload: number;
   }, [aktif, reload]);
   const q = search.trim().toLowerCase();
   const menipis = (b: KopBarang) => b.lacak_stok && b.stok <= b.stok_min;
+  const kosong = (b: KopBarang) => b.lacak_stok && b.stok <= 0;
+  const nAda = (rows ?? []).filter((b) => b.stok > 0).length;
+  const nKosong = (rows ?? []).filter(kosong).length;
   const [sort, setSort] = useState<Sort>({ key: "nama", dir: "asc" });
   const shown = sortBy(
     (rows ?? []).filter(
-      (b) => (!q || b.nama.toLowerCase().includes(q) || b.kode.toLowerCase().includes(q)) && (only === "ada" ? b.stok > 0 : only === "menipis" ? menipis(b) : only === "exp" ? !!expPerlu(b) : true)
+      (b) => (!q || b.nama.toLowerCase().includes(q) || b.kode.toLowerCase().includes(q)) && (only === "ada" ? b.stok > 0 : only === "kosong" ? kosong(b) : only === "menipis" ? menipis(b) : only === "exp" ? !!expPerlu(b) : true)
     ),
     sort,
     {
@@ -1295,6 +1298,7 @@ function StokTab({ reload, canEdit, onChanged, fokusExp = 0 }: { reload: number;
         <select value={only} onChange={(e) => setOnly(e.target.value as typeof only)} className={selectCls} aria-label="Stok">
           <option value="">Semua stok</option>
           <option value="ada">Ada stok</option>
+          <option value="kosong">Stok kosong</option>
           <option value="menipis">Menipis / habis</option>
           <option value="exp">Expired / ≤ 30 hari lagi</option>
         </select>
@@ -1303,7 +1307,17 @@ function StokTab({ reload, canEdit, onChanged, fokusExp = 0 }: { reload: number;
           <option value="0">Tidak aktif</option>
           <option value="">Semua</option>
         </select>
-        <span className="text-xs text-[var(--text-muted)]">{shown.length} barang</span>
+        <span className="text-xs text-[var(--text-muted)]">
+          {shown.length} barang
+          {rows && (
+            <>
+              {" · "}
+              <span className="text-[var(--accent-green)]">{nAda} ada stok</span>
+              {" · "}
+              <span className="text-[var(--accent-red)]">{nKosong} kosong</span>
+            </>
+          )}
+        </span>
         <div className="ml-auto flex gap-2">
           <ExportButtons total={shown.length} buildReport={buildReport} fileName="koperasi-stok" />
           {canEdit && (
