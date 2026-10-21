@@ -101,7 +101,7 @@ export function KopJualBatchModal({ onClose, onSuccess }: { onClose: () => void;
       key: "barang",
       label: "Kode Barang",
       width: 240,
-      options: items.map((i) => ({ value: i.kode, label: `${i.nama} · ${i.lacak_stok ? `stok ${fmtNum(i.stok)} ${i.satuan}` : "tanpa stok"} · ${rp(i.harga_jual)}` })),
+      options: items.map((i) => ({ value: i.kode, label: `${i.nama} · ${i.lacak_stok ? `stok ${fmtNum(i.stok)} ${i.satuan}` : "tanpa stok"} · ${rp(i.harga_jual)}`, stok: i.lacak_stok ? Number(i.stok) : null })),
       placeholder: loading ? "memuat daftar..." : "ketik kode / nama",
       hint: (c) => {
         const i = itemOf(c);

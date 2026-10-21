@@ -89,7 +89,7 @@ export function StockBatchModal({ scope, onClose, onSuccess }: { scope?: StockSc
       key: "barang",
       label: klinik ? "Kode Obat / Alat" : "Kode Barang",
       width: 150,
-      options: items.map((i) => ({ value: i.kode, label: `${i.nama} · stok ${fmtNum(i.stock_tersedia)} ${i.satuan ?? ""}` })),
+      options: items.map((i) => ({ value: i.kode, label: `${i.nama} · stok ${fmtNum(i.stock_tersedia)} ${i.satuan ?? ""}`, stok: Number(i.stock_tersedia) })),
       placeholder: loading ? "memuat daftar..." : "ketik kode / nama",
       hint: (c) => {
         const i = itemOf(c);

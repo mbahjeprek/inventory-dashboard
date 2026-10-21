@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Plus, Trash2, X } from "lucide-react";
+import { ComboCell, type Option } from "./BatchGrid";
 import { api, errorText, type Kunjungan, type KunjunganInput, type KunjunganObat, type KunjunganOptions } from "../lib/api";
 import { KaryawanAutocomplete } from "./KaryawanAutocomplete";
 import { PasienAutocomplete } from "./PasienAutocomplete";
@@ -89,6 +90,12 @@ export function KunjunganModal({ klinik, kunjungan, onClose, onSaved }: { klinik
     return { ...kunjungan, obat };
   });
   const [opts, setOpts] = useState<KunjunganOptions | null>(null);
+  // The obat list of the terapi cells: name, then kode and the clinic's stock (in stock first, green; empty red).
+  const obatOptions: Option[] = (opts?.obat ?? []).map((o) => ({
+    value: o.nama,
+    label: `${o.kode} · ${o.stok === null ? "tanpa stok" : `stok ${o.stok.toLocaleString("id-ID")} ${o.satuan}`}`,
+    stok: o.stok,
+  }));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [savedCount, setSavedCount] = useState(0);
@@ -336,7 +343,14 @@ export function KunjunganModal({ klinik, kunjungan, onClose, onSaved }: { klinik
                   <div key={i} className="grid grid-cols-[2rem_1fr_2rem] sm:grid-cols-[2rem_1fr_6rem_8rem_2rem] gap-2 items-start">
                     <span className="text-xs text-[var(--text-muted)] pt-2.5">{i + 1}</span>
                     <div className="min-w-0">
-                      <input value={o.nama_obat} onChange={(e) => pickObat(i, e.target.value)} list="kj-obat" placeholder={`Terapi ${i + 1}`} aria-label={`Terapi ${i + 1}`} className={inputCls} />
+                      <ComboCell
+                        value={o.nama_obat}
+                        options={obatOptions}
+                        onChange={(v) => pickObat(i, v)}
+                        onFocus={() => {}}
+                        placeholder={`Terapi ${i + 1}`}
+                        className={inputCls}
+                      />
                       {m?.bhp ? (
                         <span className="text-[11px] text-[var(--text-muted)]">bahan habis pakai - stok dipotong per {(m.satuan || "kemasan").toLowerCase()} saat dibuka, qty boleh kosong</span>
                       ) : m ? (
@@ -373,11 +387,6 @@ export function KunjunganModal({ klinik, kunjungan, onClose, onSaved }: { klinik
               })}
             </div>
             {list("kj-satuan", opts?.satuan)}
-            <datalist id="kj-obat">
-              {(opts?.obat ?? []).map((o) => (
-                <option key={o.kode} value={o.nama} />
-              ))}
-            </datalist>
             {f.obat.length < MAX_TERAPI && (
               <button type="button" onClick={() => setF((c) => ({ ...c, obat: [...c.obat, blankObat()] }))} className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-[var(--accent-blue)] hover:underline">
                 <Plus size={14} /> Tambah terapi ({f.obat.length}/{MAX_TERAPI})

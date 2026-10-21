@@ -646,15 +646,16 @@ export function CreatePinjamanModal({
               {options.length === 0 ? (
                 <div className="px-3 py-2 text-xs text-[var(--text-muted)]">Tidak ada stok yang bisa dipinjamkan.</div>
               ) : (
-                options.map((o) => (
+                // In stock first, green; empty / minus red.
+                [...options].sort((a, b) => Number(b.stok > 0) - Number(a.stok > 0)).map((o) => (
                   <button
                     key={o.kode}
                     onClick={() => setBarang(o)}
                     className="w-full flex items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-[#f8fafc]"
                   >
-                    <span className="truncate">{o.nama}</span>
-                    <span className={`text-xs whitespace-nowrap ${o.stok < 0 ? "text-[var(--accent-red)]" : "text-[var(--text-muted)]"}`}>
-                      {fmtQty(o.stok)} {o.satuan}
+                    <span className={`truncate ${o.stok > 0 ? "text-[var(--accent-green)]" : "text-[var(--accent-red)]"}`}>{o.nama}</span>
+                    <span className={`text-xs font-medium whitespace-nowrap ${o.stok > 0 ? "text-[var(--accent-green)]" : "text-[var(--accent-red)]"}`}>
+                      stok {fmtQty(o.stok)} {o.satuan}
                     </span>
                   </button>
                 ))

@@ -14,7 +14,8 @@ import { EvidenceInput, useEvidenceEnabled } from "./EvidenceInput";
 //   server refuses (ApiError.data.row) marked the same way.
 // - Unsaved rows stay as a draft in this browser (per `draftKey`) until saved or cleared.
 export type Cells = Record<string, string>;
-export type Option = { value: string; label?: string };
+// stok: the choice's stock (barang / obat lists) - in stock shows green and comes first, empty shows red.
+export type Option = { value: string; label?: string; stok?: number | null };
 
 export type GridCol = {
   key: string;
@@ -466,7 +467,8 @@ export const headerInputCls = "block text-sm rounded-md border border-[var(--bor
 // so the modal's scrolling table can't clip it, and the same in every browser (the native datalist of
 // some browsers was as narrow as the cell and hid the labels). Arrow keys pick, Enter takes the choice
 // and moves on like the grid, Esc closes.
-function ComboCell({
+// Also used outside the grid (no common: e.g. Kunjungan terapi).
+export function ComboCell({
   common,
   value,
   options,
@@ -475,7 +477,7 @@ function ComboCell({
   placeholder,
   className,
 }: {
-  common: { "data-r": number; "data-c": string; onKeyDown: (e: KeyboardEvent<HTMLElement>) => void };
+  common?: { "data-r": number; "data-c": string; onKeyDown: (e: KeyboardEvent<HTMLElement>) => void };
   value: string;
   options: Option[];
   onChange: (v: string) => void;
@@ -490,7 +492,10 @@ function ComboCell({
   const listRef = useRef<HTMLDivElement>(null);
   const words = value.toLowerCase().split(/\s+/).filter(Boolean);
   const exact = options.some((o) => o.value === value);
-  const shown = (exact ? options : options.filter((o) => words.every((w) => `${o.value} ${o.label ?? ""}`.toLowerCase().includes(w)))).slice(0, 60);
+  const matched = exact ? options : options.filter((o) => words.every((w) => `${o.value} ${o.label ?? ""}`.toLowerCase().includes(w)));
+  // Barang in stock first (the list's own order otherwise); one without a stock count (not tracked) is available.
+  const ada = (o: Option) => typeof o.stok !== "number" || o.stok > 0;
+  const shown = (matched.some((o) => typeof o.stok === "number") ? [...matched].sort((a, b) => Number(ada(b)) - Number(ada(a))) : matched).slice(0, 60);
 
   const place = () => {
     const r = ref.current?.getBoundingClientRect();
@@ -538,15 +543,15 @@ function ComboCell({
     // Enter on an open list takes the highlighted choice (unless the typed text already is one), then moves on.
     if (e.key === "Enter" && open && shown.length && !exact) pick(shown[Math.min(hi, shown.length - 1)]);
     if (e.key === "Enter" || e.key === "Tab") setOpen(false);
-    common.onKeyDown(e);
+    common?.onKeyDown(e);
   };
 
   return (
     <>
       <input
         ref={ref}
-        data-r={common["data-r"]}
-        data-c={common["data-c"]}
+        data-r={common?.["data-r"]}
+        data-c={common?.["data-c"]}
         type="text"
         autoComplete="off"
         value={value}
@@ -584,8 +589,10 @@ function ComboCell({
                 onMouseEnter={() => setHi(i)}
                 className={`w-full text-left px-3 py-1.5 border-b border-[var(--border)] last:border-0 ${i === hi ? "bg-[var(--accent-blue-bg)]" : "hover:bg-[#f8fafc]"}`}
               >
-                <span className="font-semibold text-[var(--text-primary)]">{o.value}</span>
-                {o.label && <span className="ml-2 text-[var(--text-secondary)]">{o.label}</span>}
+                <span className={`font-semibold ${typeof o.stok === "number" ? (o.stok > 0 ? "text-[var(--accent-green)]" : "text-[var(--accent-red)]") : "text-[var(--text-primary)]"}`}>{o.value}</span>
+                {o.label && (
+                  <span className={`ml-2 ${typeof o.stok === "number" ? (o.stok > 0 ? "text-[var(--accent-green)]" : "text-[var(--accent-red)]") : "text-[var(--text-secondary)]"}`}>{o.label}</span>
+                )}
               </button>
             ))}
           </div>,

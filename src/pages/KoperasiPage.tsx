@@ -1822,7 +1822,7 @@ function EditTxModal({ tx, onClose, onSuccess }: { tx: KopTx; onClose: () => voi
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const q = search.trim().toLowerCase();
-  const options = q ? barang.filter((b) => b.nama.toLowerCase().includes(q) || b.kode.toLowerCase().includes(q)).slice(0, 10) : [];
+  const options = q ? byStok(barang.filter((b) => b.nama.toLowerCase().includes(q) || b.kode.toLowerCase().includes(q))).slice(0, 10) : [];
   const choose = (b: KopBarang) => {
     setPick({ kode: b.kode, nama: b.nama, satuan: b.satuan, stok: b.lacak_stok ? b.stok + (b.kode === tx.barang_kode ? tx.qty : 0) : null });
     setHarga(rpText(b.harga_jual));
@@ -1869,9 +1869,9 @@ function EditTxModal({ tx, onClose, onSuccess }: { tx: KopTx; onClose: () => voi
               {options.map((b) => (
                 <button key={b.kode} type="button" onClick={() => choose(b)} className="w-full flex justify-between gap-3 text-left px-3 py-2 text-sm hover:bg-[#f1f5f9] border-b border-[var(--border)] last:border-0">
                   <span>
-                    {b.nama} <span className="text-[11px] text-[var(--text-muted)]">{b.kode}</span>
+                    <span className={stokCls(b)}>{b.nama}</span> <span className="text-[11px] text-[var(--text-muted)]">{b.kode}</span>
                   </span>
-                  <span className={`text-xs whitespace-nowrap ${b.lacak_stok && b.stok <= 0 ? "text-[var(--accent-red)]" : "text-[var(--text-muted)]"}`}>
+                  <span className={`text-xs whitespace-nowrap ${stokCls(b)}`}>
                     {b.lacak_stok ? `stok ${fmtQty(b.stok)} ${b.satuan}` : "tanpa stok"} · {rp(b.harga_jual)}
                   </span>
                 </button>
@@ -1924,6 +1924,11 @@ function RpInput({ value, onChange, small = false }: { value: string; onChange: 
 // ---- Forms: lines of barang (pengambilan uses harga jual, pembelian harga beli) ----
 type Line = { barang: KopBarang; qty: string; harga: string };
 
+// Barang lists: in stock first (a barang without stock tracking counts as available), coloured by it.
+const adaStok = (b: KopBarang) => !b.lacak_stok || b.stok > 0;
+const byStok = (list: KopBarang[]) => [...list].sort((a, b) => Number(adaStok(b)) - Number(adaStok(a)));
+const stokCls = (b: KopBarang) => (adaStok(b) ? "text-[var(--accent-green)]" : "text-[var(--accent-red)]");
+
 function useBarangAktif() {
   const [barang, setBarang] = useState<KopBarang[]>([]);
   useEffect(() => {
@@ -1938,7 +1943,7 @@ function BarangLines({ lines, setLines, harga, checkStok }: { lines: Line[]; set
   const [open, setOpen] = useState(false);
   const box = useRef<HTMLDivElement>(null);
   const q = search.trim().toLowerCase();
-  const options = q ? barang.filter((b) => (b.nama.toLowerCase().includes(q) || b.kode.toLowerCase().includes(q)) && !lines.some((l) => l.barang.kode === b.kode)).slice(0, 12) : [];
+  const options = q ? byStok(barang.filter((b) => (b.nama.toLowerCase().includes(q) || b.kode.toLowerCase().includes(q)) && !lines.some((l) => l.barang.kode === b.kode))).slice(0, 12) : [];
   const add = (b: KopBarang) => {
     setLines((l) => [...l, { barang: b, qty: "1", harga: rpText(harga === "jual" ? b.harga_jual : b.harga_beli) }]);
     setSearch("");
@@ -1968,9 +1973,9 @@ function BarangLines({ lines, setLines, harga, checkStok }: { lines: Line[]; set
             {options.map((b) => (
               <button key={b.kode} type="button" onClick={() => add(b)} className="w-full flex justify-between gap-3 text-left px-3 py-2 text-sm hover:bg-[#f1f5f9] border-b border-[var(--border)] last:border-0">
                 <span>
-                  {b.nama} <span className="text-[11px] text-[var(--text-muted)]">{b.kode}</span>
+                  <span className={stokCls(b)}>{b.nama}</span> <span className="text-[11px] text-[var(--text-muted)]">{b.kode}</span>
                 </span>
-                <span className={`text-xs whitespace-nowrap ${b.lacak_stok && b.stok <= 0 ? "text-[var(--accent-red)]" : "text-[var(--text-muted)]"}`}>
+                <span className={`text-xs whitespace-nowrap ${stokCls(b)}`}>
                   {b.lacak_stok ? `stok ${fmtQty(b.stok)} ${b.satuan}` : "tanpa stok"} · {rp(harga === "jual" ? b.harga_jual : b.harga_beli)}
                 </span>
               </button>

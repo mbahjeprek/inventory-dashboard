@@ -74,7 +74,7 @@ export function PinjamanBatchModal({
       key: "barang",
       label: jenisModule ? "Jenis" : module === "KLINIK" ? "Kode Obat / Alat" : "Kode Barang",
       width: 220,
-      options: items.map((i) => ({ value: i.kode, label: `${i.nama} · stok ${fmtNum(i.stok)} ${i.satuan}` })),
+      options: items.map((i) => ({ value: i.kode, label: `${i.nama} · stok ${fmtNum(i.stok)} ${i.satuan}`, stok: Number(i.stok) })),
       placeholder: loading ? "memuat daftar..." : jenisModule ? "pilih jenis" : "ketik kode / nama",
       hint: (c) => {
         const i = itemOf(c);

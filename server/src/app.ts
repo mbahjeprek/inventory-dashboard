@@ -707,7 +707,8 @@ app.get("/api/items", async (req, res) => {
   const offset = (Math.max(parseInt(page) || 1, 1) - 1) * limit;
 
   const items = await queryMany(
-    `SELECT * FROM items ${where} ORDER BY ${sortCol} ${dir} NULLS LAST LIMIT @limit OFFSET @offset`,
+    // sortBy ada_stok (the barang pickers): in stock first, then by kode.
+    `SELECT * FROM items ${where} ORDER BY ${sortBy === "ada_stok" ? "(stock_tersedia > 0) DESC, kode" : `${sortCol} ${dir} NULLS LAST`} LIMIT @limit OFFSET @offset`,
     { ...params, limit, offset }
   );
 
@@ -1099,7 +1100,7 @@ app.get("/api/gudang-stock/pick", async (req, res) => {
     `SELECT i.id, i.kode, i.nama, i.satuan, COALESCE(gs.buffer_stock, 0) buffer_stock,
             COALESCE(gs.stock_tersedia, 0) stock_tersedia,
             CASE WHEN COALESCE(gs.stock_tersedia, 0) > 0 THEN 'AMAN' ELSE 'BUFFER STOCK' END AS keterangan
-     ${joinSql} ORDER BY i.kode LIMIT @limit OFFSET @offset`,
+     ${joinSql} ORDER BY (COALESCE(gs.stock_tersedia, 0) > 0) DESC, i.kode LIMIT @limit OFFSET @offset`,
     { ...params, limit, offset }
   );
   res.json({ data, total: Number(total), page: parseInt(page), pageSize: limit });
@@ -4452,7 +4453,7 @@ app.get("/api/klinik-stock/pick", async (req, res) => {
   const data = await queryMany(
     `SELECT o.id, o.kode, o.nama, o.satuan, o.kemasan, o.isi_kemasan, COALESCE(ks.buffer_stock, 0) buffer_stock, COALESCE(ks.stock_tersedia, 0) stock_tersedia,
             CASE WHEN COALESCE(ks.stock_tersedia, 0) > 0 THEN 'AMAN' ELSE 'BUFFER STOCK' END AS keterangan
-     ${joinSql} ORDER BY o.kode LIMIT @limit OFFSET @offset`,
+     ${joinSql} ORDER BY (COALESCE(ks.stock_tersedia, 0) > 0) DESC, o.kode LIMIT @limit OFFSET @offset`,
     { ...params, limit, offset }
   );
   res.json({ data, total: Number(total), page: parseInt(page), pageSize: limit });

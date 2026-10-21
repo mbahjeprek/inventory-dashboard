@@ -26,7 +26,8 @@ export function ItemPickerModal({
     let stale = false;
     setLoading(true);
     const t = setTimeout(() => {
-      const params = { search, sortBy: "kode", sortDir: "asc", page, pageSize: PAGE_SIZE };
+      // In stock first (the gudang / klinik pick lists always order so).
+      const params = { search, sortBy: "ada_stok", sortDir: "asc", page, pageSize: PAGE_SIZE };
       const request =
         scope?.kind === "klinik"
           ? api.klinikPickItems({ ...params, klinik: scope.name })
@@ -95,11 +96,11 @@ export function ItemPickerModal({
                   className={`w-full flex items-center justify-between gap-3 py-2.5 text-left hover:bg-[#f8fafc] px-1 rounded-md ${loading ? "opacity-50" : ""}`}
                 >
                   <div className="min-w-0">
-                    <div className="text-sm font-medium truncate">{item.nama}</div>
+                    <div className={`text-sm font-medium truncate ${item.stock_tersedia > 0 ? "text-[var(--accent-green)]" : "text-[var(--accent-red)]"}`}>{item.nama}</div>
                     <div className="text-xs text-[var(--text-muted)] font-mono">{item.kode}</div>
                   </div>
-                  <div className="text-xs text-[var(--text-secondary)] shrink-0">
-                    {item.stock_tersedia.toLocaleString("id-ID")} {item.satuan}
+                  <div className={`text-xs font-medium shrink-0 ${item.stock_tersedia > 0 ? "text-[var(--accent-green)]" : "text-[var(--accent-red)]"}`}>
+                    stok {item.stock_tersedia.toLocaleString("id-ID")} {item.satuan}
                   </div>
                 </button>
               ))
