@@ -5559,6 +5559,13 @@ async function logOpname(req: express.Request, o: OpnameRow, aksi: string, detai
   await logActivity(req, { module: OPNAME_LOG_MODULE[o.module], estate: o.estate, aksi, objek: `Stok Opname #${o.id} - ${opnameName(o)}`, detail });
 }
 
+// The team / witness names of an opname: one per line or comma, tidied.
+const namaList = (v: unknown) => String(v ?? "").split(/[\n,;]+/).map((s) => s.trim()).filter(Boolean);
+// Hitung buta: while the count runs, stok sistem (and so the selisih) is hidden from whoever counts;
+// an approver / Super User sees it, everyone sees it once the count is finished (dibuka_at).
+const opnameHidden = (u: SessionUser, o: OpnameRow) =>
+  !!o.hitung_buta && !o.dibuka_at && o.status === "DRAFT" && u.role !== "superuser" && !opnameCan(u, o.module, "approve");
+
 const OPNAME_COUNTS = `COUNT(l.id)::int total, COUNT(l.stok_fisik)::int dihitung,
   COUNT(*) FILTER (WHERE l.stok_fisik IS NOT NULL AND ROUND((l.stok_fisik - l.stok_sistem)::numeric, 3) <> 0)::int selisih`;
 
@@ -5584,11 +5591,18 @@ app.get("/api/stock-opname", async (req, res) => {
      GROUP BY o.id ORDER BY o.created_at DESC, o.id DESC LIMIT @limit OFFSET @offset`,
     { ...params, limit, offset }
   );
+  for (const r of data as any[]) if (opnameHidden(u, r)) r.selisih = null;
   res.json({ data, total, page: parseInt(page) || 1, pageSize: limit });
 });
 
 app.post("/api/stock-opname", async (req, res) => {
   const { module, estate, tanggal, catatan } = req.body ?? {};
+  const tim = namaList(req.body?.tim);
+  const saksi = namaList(req.body?.saksi);
+  const pemegang = String(req.body?.pemegang ?? "").trim();
+  if (tim.length < 2) return res.status(400).json({ error: "Isi tim penghitung minimal 2 orang" });
+  if (!saksi.length) return res.status(400).json({ error: "Isi nama saksi" });
+  if (!pemegang) return res.status(400).json({ error: "Isi nama pemegang gudang / stok" });
   if (!OPNAME_MODULES.includes(module)) return res.status(400).json({ error: "Modul tidak valid" });
   if (!(ESTATES as readonly string[]).includes(estate)) return res.status(400).json({ error: "Estate tidak valid" });
   if (!ISO_DATE.test(tanggal || "")) return res.status(400).json({ error: "Tanggal tidak valid" });
@@ -5600,9 +5614,20 @@ app.post("/api/stock-opname", async (req, res) => {
   try {
     o = await withTransaction(async (client) => {
       const row = (await queryOne<OpnameRow>(
-        `INSERT INTO opname (module, estate, tanggal, catatan, created_by, created_by_nama)
-         VALUES (@module, @estate, @tanggal, @catatan, @uid, @unama) RETURNING *`,
-        { module, estate, tanggal, catatan: String(catatan ?? "").trim(), uid: u.id, unama: u.nama },
+        `INSERT INTO opname (module, estate, tanggal, catatan, created_by, created_by_nama, tim, saksi, pemegang, hitung_buta)
+         VALUES (@module, @estate, @tanggal, @catatan, @uid, @unama, @tim, @saksi, @pemegang, @buta) RETURNING *`,
+        {
+          module,
+          estate,
+          tanggal,
+          catatan: String(catatan ?? "").trim(),
+          uid: u.id,
+          unama: u.nama,
+          tim: tim.join(", "),
+          saksi: saksi.join(", "),
+          pemegang,
+          buta: req.body?.hitung_buta !== false,
+        },
         client
       ))!;
       const lines = await opnameSnapshot(module, estate, client);
@@ -5620,7 +5645,7 @@ app.post("/api/stock-opname", async (req, res) => {
     if (e.code === "23505") return res.status(409).json({ error: `${opnameName({ module, estate })} masih punya stok opname yang belum selesai` });
     throw e;
   }
-  await logOpname(req, o, "Buat Stok Opname", `Tanggal: ${isoToDisplay(tanggal)}; ${count} item; transaksi stok dikunci`);
+  await logOpname(req, o, "Buat Stok Opname", `Tanggal: ${isoToDisplay(tanggal)}; ${count} item; tim: ${tim.join(", ")}; saksi: ${saksi.join(", ")}; pemegang: ${pemegang}${o.hitung_buta ? "; hitung buta" : ""}; transaksi stok dikunci`);
   res.json({ success: true, id: o.id });
 });
 
@@ -5634,7 +5659,10 @@ app.get("/api/stock-opname/:id", async (req, res) => {
      WHERE l.opname_id = @id ORDER BY l.ditambahkan, l.id`,
     { id: o.id, klinik: o.module === "KLINIK" }
   );
-  res.json({ opname: o, lines });
+  // Hitung buta: the counter gets no stok sistem until the count is finished.
+  const hidden = opnameHidden(req.user!, o);
+  if (hidden) for (const l of lines as any[]) l.stok_sistem = null;
+  res.json({ opname: { ...o, disembunyikan: hidden }, lines });
 });
 
 // Saves counts (stok_fisik null = not counted) and notes while DRAFT.
@@ -5692,10 +5720,13 @@ app.put("/api/stock-opname/:id", async (req, res) => {
     }
     if (rows.length) {
       await execute(
-        `UPDATE opname_line l SET stok_fisik = x.stok_fisik, keterangan = x.keterangan
+        `UPDATE opname_line l SET stok_fisik = x.stok_fisik, keterangan = x.keterangan,
+           dihitung_oleh = CASE WHEN l.stok_fisik IS DISTINCT FROM x.stok_fisik THEN @uid ELSE l.dihitung_oleh END,
+           dihitung_oleh_nama = CASE WHEN l.stok_fisik IS DISTINCT FROM x.stok_fisik THEN @unama ELSE l.dihitung_oleh_nama END,
+           dihitung_at = CASE WHEN l.stok_fisik IS DISTINCT FROM x.stok_fisik THEN now() ELSE l.dihitung_at END
          FROM json_to_recordset(@rows::json) AS x(id int, stok_fisik float8, keterangan text)
          WHERE l.id = x.id AND l.opname_id = @oid`,
-        { rows: JSON.stringify(rows), oid: o.id },
+        { rows: JSON.stringify(rows), oid: o.id, uid: req.user!.id, unama: req.user!.nama },
         client
       );
     }
@@ -5879,6 +5910,22 @@ app.post("/api/stock-opname/:id/submit", async (req, res) => {
       client
     ))!;
     if (!c.dihitung) return refuse(res, 400, "Belum ada stok fisik yang diisi");
+    if (namaList(o.tim).length < 2 || !namaList(o.saksi).length || !String(o.pemegang ?? "").trim())
+      return refuse(res, 400, "Lengkapi tim penghitung (minimal 2 orang), saksi dan pemegang gudang dulu");
+    if (o.hitung_buta && !o.dibuka_at) return refuse(res, 400, 'Klik "Selesai hitung" dulu untuk membuka stok sistem, lalu isi alasan setiap selisih');
+    // Every selisih is explained before it goes for approval.
+    const tanpaAlasan = await queryMany<{ nama: string }>(
+      `SELECT nama FROM opname_line WHERE opname_id = @id AND stok_fisik IS NOT NULL
+         AND ROUND((stok_fisik - stok_sistem)::numeric, 3) <> 0 AND TRIM(keterangan) = '' ORDER BY id`,
+      { id: o.id },
+      client
+    );
+    if (tanpaAlasan.length)
+      return refuse(
+        res,
+        400,
+        `${tanpaAlasan.length} item selisih belum ada alasannya: ${tanpaAlasan.slice(0, 5).map((x) => x.nama).join(", ")}${tanpaAlasan.length > 5 ? ", ..." : ""}`
+      );
     await execute(
       `UPDATE opname SET status = 'SUBMITTED', submitted_by = @uid, submitted_by_nama = @unama, submitted_at = now() WHERE id = @id`,
       { uid: u.id, unama: u.nama, id: o.id },
@@ -5888,6 +5935,43 @@ app.post("/api/stock-opname/:id/submit", async (req, res) => {
   });
   if (!done) return;
   await logOpname(req, done.o, "Ajukan Stok Opname", `Dihitung ${done.c.dihitung} dari ${done.c.total} item; ${done.c.selisih} item selisih`);
+  res.json({ success: true });
+});
+
+// Tim / saksi / pemegang of a DRAFT (filled or corrected later; opnames from before had none).
+app.put("/api/stock-opname/:id/info", async (req, res) => {
+  const tim = namaList(req.body?.tim);
+  const saksi = namaList(req.body?.saksi);
+  const pemegang = String(req.body?.pemegang ?? "").trim();
+  if (tim.length < 2) return res.status(400).json({ error: "Isi tim penghitung minimal 2 orang" });
+  if (!saksi.length) return res.status(400).json({ error: "Isi nama saksi" });
+  if (!pemegang) return res.status(400).json({ error: "Isi nama pemegang gudang / stok" });
+  const o = await withTransaction(async (client) => {
+    const o = await loadOpname(req, res, "opname", client);
+    if (!o) return null;
+    if (o.status !== "DRAFT") return refuse(res, 400, "Opname ini sudah diajukan");
+    await execute("UPDATE opname SET tim = @tim, saksi = @saksi, pemegang = @pemegang WHERE id = @id", { tim: tim.join(", "), saksi: saksi.join(", "), pemegang, id: o.id }, client);
+    return o;
+  });
+  if (!o) return;
+  await logOpname(req, o, "Edit Tim Stok Opname", `Tim: ${tim.join(", ")}; saksi: ${saksi.join(", ")}; pemegang: ${pemegang}`);
+  res.json({ success: true });
+});
+
+// Hitung buta: the count is finished - stok sistem opens so every selisih can be explained (rekonsiliasi).
+app.post("/api/stock-opname/:id/buka", async (req, res) => {
+  const o = await withTransaction(async (client) => {
+    const o = await loadOpname(req, res, "opname", client);
+    if (!o) return null;
+    if (o.status !== "DRAFT") return refuse(res, 400, "Opname ini sudah diajukan");
+    if (o.dibuka_at) return o;
+    const c = (await queryOne<{ total: number; dihitung: number }>(`SELECT ${OPNAME_COUNTS} FROM opname_line l WHERE l.opname_id = @id`, { id: o.id }, client))!;
+    if (!c.dihitung) return refuse(res, 400, "Belum ada stok fisik yang diisi");
+    await execute("UPDATE opname SET dibuka_at = now(), dibuka_oleh_nama = @n WHERE id = @id", { n: req.user!.nama, id: o.id }, client);
+    return o;
+  });
+  if (!o) return;
+  await logOpname(req, o, "Selesai Hitung Stok Opname", "Stok sistem dibuka untuk rekonsiliasi selisih");
   res.json({ success: true });
 });
 
@@ -5922,6 +6006,9 @@ app.post("/api/stock-opname/:id/approve", async (req, res) => {
       if (o.status !== "SUBMITTED") return refuse(res, 400, "Opname ini tidak sedang menunggu approval");
       // The count is checked by someone else; a superuser may approve their own.
       if (o.submitted_by === u.id && u.role !== "superuser") return refuse(res, 403, "Opname yang Anda ajukan sendiri harus disetujui orang lain");
+      // Nor by someone who counted it.
+      if (u.role !== "superuser" && (await queryOne("SELECT 1 FROM opname_line WHERE opname_id = @id AND dihitung_oleh = @uid LIMIT 1", { id: o.id, uid: u.id }, client)))
+        return refuse(res, 403, "Anda ikut menghitung opname ini, jadi harus disetujui orang lain");
       const lines = await queryMany<OpnameLine & { id: number; stok_fisik: number }>(
         "SELECT * FROM opname_line WHERE opname_id = @id AND stok_fisik IS NOT NULL ORDER BY id",
         { id: o.id },

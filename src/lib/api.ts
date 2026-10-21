@@ -625,6 +625,15 @@ export type Opname = {
   approved_by: number | null;
   approved_by_nama: string | null;
   approved_at: string | null;
+  // The count team, witness and stock holder (see schema.sql); hitung_buta hides stok sistem from the
+  // counters until dibuka_at; disembunyikan = it is hidden from this account right now.
+  tim: string;
+  saksi: string;
+  pemegang: string;
+  hitung_buta: boolean;
+  dibuka_at: string | null;
+  dibuka_oleh_nama: string | null;
+  disembunyikan?: boolean;
 };
 export type OpnameListRow = Opname & { total: number; dihitung: number; selisih: number };
 export type OpnameLine = {
@@ -640,6 +649,8 @@ export type OpnameLine = {
   stok_fisik: number | null;
   keterangan: string;
   ditambahkan: boolean;
+  dihitung_oleh_nama: string | null;
+  dihitung_at: string | null;
   // Klinik: the obat's pack (isi 0 = none), so the count can be typed as strip utuh + biji lepas.
   kemasan: string;
   isi_kemasan: number;
@@ -1441,7 +1452,10 @@ export const api = {
     req<{ data: OpnameListRow[]; total: number; page: number; pageSize: number }>(
       `/api/stock-opname?${new URLSearchParams(params as any)}`
     ),
-  createOpname: (payload: { module: OpnameModule; estate: string; tanggal: string; catatan?: string }) =>
+  opnameInfo: (id: number, payload: { tim: string; saksi: string; pemegang: string }) =>
+    req<{ success: boolean }>(`/api/stock-opname/${id}/info`, { method: "PUT", body: JSON.stringify(payload) }),
+  opnameBuka: (id: number) => req<{ success: boolean }>(`/api/stock-opname/${id}/buka`, { method: "POST", body: "{}" }),
+  createOpname: (payload: { module: OpnameModule; estate: string; tanggal: string; catatan?: string; tim: string; saksi: string; pemegang: string; hitung_buta: boolean }) =>
     req<{ success: boolean; id: number }>("/api/stock-opname", { method: "POST", body: JSON.stringify(payload) }),
   opname: (id: number) => req<{ opname: Opname; lines: OpnameLine[] }>(`/api/stock-opname/${id}`),
   saveOpname: (id: number, payload: { catatan?: string; lines: { id: number; stok_fisik: number | null; keterangan: string; exp_fisik?: string | null }[] }) =>

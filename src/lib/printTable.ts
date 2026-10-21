@@ -9,6 +9,8 @@ export type TableReport = {
   columns: PrintColumn[];
   rows: Cell[][];
   landscape?: boolean;
+  // Boxes to sign under the table (a Berita Acara): role and the person's name.
+  signatures?: { label: string; nama: string }[];
 };
 
 // A report of several tables one after another (e.g. Klinik > Laporan Harian > Ringkasan KPI: the
@@ -138,11 +140,16 @@ export function printTable(report: AnyReport) {
     .chart { display: block; max-width: 100%; height: auto; margin-top: 6px; page-break-inside: avoid; }
     .note { color: #5b6b7c; font-size: 7.5pt; margin: 3px 0 0; }
     .empty { text-align: center; color: #94a3b8; padding: 16px; }
+    .sign { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; page-break-inside: avoid; }
+    .sign div { flex: 1 1 150px; text-align: center; font-size: 8.5pt; }
+    .sign span { display: block; height: 52px; }
+    .sign b { display: block; border-top: 1px solid #1a2634; padding-top: 2px; font-weight: 600; }
   </style></head><body>
     <h1>${escapeHtml(title)}</h1>
     ${subtitle.map((s) => `<p class="meta">${escapeHtml(s)}</p>`).join("")}
     <p class="meta">Dicetak: ${escapeHtml(printedAtText())}${rowCount(report)}</p>
     ${asSections(report).map(table).join("")}
+    ${"signatures" in report && report.signatures?.length ? `<div class="sign">${report.signatures.map((s) => `<div>${escapeHtml(s.label)}<span></span><b>${escapeHtml(s.nama || " ")}</b></div>`).join("")}</div>` : ""}
   </body></html>`;
 
   const iframe = document.createElement("iframe");
@@ -252,6 +259,14 @@ export async function exportExcel(report: AnyReport, fileName: string) {
     ws.views = [{ state: "frozen", ySplit: headerRowNo }];
     ws.autoFilter = { from: { row: headerRowNo, column: 1 }, to: { row: headerRowNo, column: report.columns.length } };
     ws.pageSetup.printTitlesRow = `${headerRowNo}:${headerRowNo}`;
+  }
+
+  if ("signatures" in report && report.signatures?.length) {
+    ws.addRow([]);
+    ws.addRow(report.signatures.map((s) => s.label)).font = { bold: true };
+    ws.addRow([]);
+    ws.addRow([]);
+    ws.addRow(report.signatures.map((s) => `(${s.nama || "........................"})`));
   }
 
   const buf = await wb.xlsx.writeBuffer();

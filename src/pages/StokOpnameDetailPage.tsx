@@ -20,6 +20,8 @@ import {
   CircleDashed,
   X,
   Pencil,
+  Eye,
+  EyeOff,
   FileDown,
   FileUp,
 } from "lucide-react";
@@ -68,6 +70,7 @@ export function StokOpnameDetailPage() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [dialog, setDialog] = useState<DialogSpec | null>(null);
+  const [editTim, setEditTim] = useState(false);
   // Unduh / Upload Excel SO (see unduhExcel / uploadExcel below).
   const [excelBusy, setExcelBusy] = useState(false);
   const uploadRef = useRef<HTMLInputElement>(null);
@@ -118,6 +121,7 @@ export function StokOpnameDetailPage() {
   const expCell = (l: OpnameLine) => (expOf(l) === l.exp ? expLabel(l.exp) : `${expLabel(expOf(l))} (sistem: ${expLabel(l.exp)})`);
   const selisihOf = (l: OpnameLine) => {
     const f = fisikOf(l);
+    if (opname?.disembunyikan) return null;
     return f === null ? null : round3(f - l.stok_sistem);
   };
 
@@ -126,11 +130,12 @@ export function StokOpnameDetailPage() {
       plus = 0,
       minus = 0;
     for (const l of lines) {
-      const s = selisihOf(l);
-      if (s === null) continue;
+      // Counted = a stok fisik is there (the selisih may be hidden: hitung buta).
+      if (fisikOf(l) === null) continue;
       dihitung++;
-      if (s > 0) plus++;
-      if (s < 0) minus++;
+      const s = selisihOf(l);
+      if (s !== null && s > 0) plus++;
+      if (s !== null && s < 0) minus++;
     }
     return { total: lines.length, dihitung, plus, minus, belum: lines.length - dihitung };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -143,8 +148,8 @@ export function StokOpnameDetailPage() {
       if (!words.every((w) => hay.includes(w))) return false;
       if (keep?.has(l.id)) return true;
       const s = selisihOf(l);
-      if (filter === "dihitung") return s !== null;
-      if (filter === "belum") return s === null;
+      if (filter === "dihitung") return fisikOf(l) !== null;
+      if (filter === "belum") return fisikOf(l) === null;
       if (filter === "selisih") return s !== null && s !== 0;
       if (filter === "sesuai") return s === 0;
       return true;
@@ -170,6 +175,10 @@ export function StokOpnameDetailPage() {
   const canApprove = opname.status === "SUBMITTED" && approver;
   const canCancel = (opname.status === "DRAFT" && (canCount || approver)) || (opname.status === "SUBMITTED" && approver);
   const isKlinik = opname.module === "KLINIK";
+  // Hitung buta: stok sistem / selisih hidden from this counter until "Selesai hitung"; then every selisih
+  // needs its reason (rekonsiliasi).
+  const hidden = !!opname.disembunyikan;
+  const rekon = opname.status === "DRAFT" && opname.hitung_buta && !!opname.dibuka_at;
   const whole = opnameWhole(opname.module, opname.estate);
   const locName = `${OPNAME_MODULE_LABEL[opname.module]} ${opname.estate}`;
   const locked = opname.status === "DRAFT" || opname.status === "SUBMITTED";
@@ -216,7 +225,7 @@ export function StokOpnameDetailPage() {
   const unduhExcel = async () => {
     setExcelBusy(true);
     try {
-      await downloadOpnameSheet({ id: opname.id, title: locName, tanggal: opname.tanggal, klinik: isKlinik }, lines, fisikOf, (l) => edits[l.id]?.ket ?? l.keterangan);
+      await downloadOpnameSheet({ id: opname.id, title: locName, tanggal: opname.tanggal, klinik: isKlinik, hideSistem: hidden }, lines, fisikOf, (l) => edits[l.id]?.ket ?? l.keterangan);
     } catch (e) {
       setError(errorText(e, "Gagal membuat file Excel"));
     } finally {
@@ -334,7 +343,7 @@ export function StokOpnameDetailPage() {
     if (e.key !== "Enter") return;
     e.preventDefault();
     const v = field === "fisik" ? fisikOf(l) : null;
-    if (typeof v === "number" && round3(v - l.stok_sistem) !== 0) {
+    if (!hidden && typeof v === "number" && round3(v - l.stok_sistem) !== 0) {
       document.querySelector<HTMLInputElement>(`input[data-ket="${l.id}"]`)?.focus();
       return;
     }
@@ -349,6 +358,7 @@ export function StokOpnameDetailPage() {
   const buildReport = async (): Promise<TableReport> => ({
     title: `Berita Acara Stok Opname #${opname.id} - ${locName}`,
     subtitle: [
+      `Tim penghitung: ${opname.tim || "-"} · Saksi: ${opname.saksi || "-"} · Pemegang gudang: ${opname.pemegang || "-"}${opname.hitung_buta ? " · Hitung buta" : ""}`,
       `Tanggal opname: ${tanggalWaktu(opname.tanggal, opname.created_at)} · Status: ${OPNAME_STATUS[opname.status].label}${opname.catatan ? ` · ${opname.catatan}` : ""}`,
       [
         `Dibuat: ${opname.created_by_nama ?? "-"} (${when(opname.created_at)})`,
@@ -362,16 +372,23 @@ export function StokOpnameDetailPage() {
       }`,
     ],
     landscape: true,
+    signatures: [
+      ...namaOf(opname.tim).map((n, i) => ({ label: i === 0 ? "Tim Penghitung" : " ", nama: n })),
+      { label: "Saksi", nama: opname.saksi },
+      { label: "Pemegang Gudang", nama: opname.pemegang },
+      { label: "Disetujui", nama: opname.approved_by_nama ?? "" },
+    ],
     columns: [
       { label: "No", align: "right" },
       { label: "Kode", nowrap: true },
       { label: "Nama" },
       ...(isKlinik ? [{ label: "Expired", nowrap: true }] : []),
       { label: "Satuan" },
-      { label: "Stok Sistem", align: "right" as const },
+      ...(hidden ? [] : [{ label: "Stok Sistem", align: "right" as const }]),
       { label: "Stok Fisik", align: "right" as const },
-      { label: "Selisih", align: "right" as const },
+      ...(hidden ? [] : [{ label: "Selisih", align: "right" as const }]),
       { label: "Keterangan" },
+      { label: "Dihitung oleh" },
     ],
     rows: filtered.map((l, i) => {
       const s = selisihOf(l);
@@ -381,10 +398,11 @@ export function StokOpnameDetailPage() {
         l.nama,
         ...(isKlinik ? [expCell(l)] : []),
         l.satuan,
-        l.stok_sistem,
+        ...(hidden ? [] : [l.stok_sistem]),
         fisikOf(l),
-        s === null ? "Belum dihitung" : s,
+        ...(hidden ? [] : [s === null ? "Belum dihitung" : s]),
         edits[l.id]?.ket ?? l.keterangan,
+        l.dihitung_oleh_nama ?? "",
       ];
     }),
   });
@@ -403,7 +421,21 @@ export function StokOpnameDetailPage() {
   );
 
   const btn = "inline-flex items-center gap-1.5 text-sm px-3.5 py-2 rounded-md disabled:opacity-50";
-  const colCount = (isKlinik ? 9 : 8) + (canCount ? 1 : 0);
+  const colCount = (isKlinik ? 9 : 8) - (hidden ? 2 : 0) + (canCount ? 1 : 0);
+  const selesaiHitung = () =>
+    setDialog({
+      title: "Selesai hitung?",
+      message: `${stats.dihitung.toLocaleString("id-ID")} dari ${stats.total.toLocaleString("id-ID")} item sudah dihitung. Stok sistem akan dibuka supaya selisihnya terlihat, lalu isi alasan setiap selisih sebelum Ajukan. Setelah dibuka, hitungan masih bisa dikoreksi.`,
+      confirmLabel: "Selesai hitung & buka stok sistem",
+      tone: "blue",
+      onConfirm: async () => {
+        if (!(await save())) throw new Error("Simpan hitungan dulu gagal");
+        await api.opnameBuka(opname.id);
+        setDialog(null);
+        await load();
+        setNotice("Stok sistem dibuka. Isi alasan untuk setiap item yang selisih, simpan, lalu Ajukan.");
+      },
+    });
 
   return (
     <div className="space-y-4">
@@ -586,6 +618,52 @@ export function StokOpnameDetailPage() {
         </div>
       </div>
 
+      <div className="flex flex-wrap items-start gap-x-6 gap-y-2 text-sm rounded-lg border border-[var(--border)] bg-[var(--bg-card)] px-4 py-3">
+        <div>
+          <div className="text-[11px] uppercase tracking-wide text-[var(--text-muted)]">Tim penghitung</div>
+          <div className="font-medium text-[var(--text-primary)]">{opname.tim || <span className="text-[var(--accent-red)]">belum diisi</span>}</div>
+        </div>
+        <div>
+          <div className="text-[11px] uppercase tracking-wide text-[var(--text-muted)]">Saksi</div>
+          <div className="font-medium text-[var(--text-primary)]">{opname.saksi || <span className="text-[var(--accent-red)]">belum diisi</span>}</div>
+        </div>
+        <div>
+          <div className="text-[11px] uppercase tracking-wide text-[var(--text-muted)]">Pemegang gudang</div>
+          <div className="font-medium text-[var(--text-primary)]">{opname.pemegang || <span className="text-[var(--accent-red)]">belum diisi</span>}</div>
+        </div>
+        <div>
+          <div className="text-[11px] uppercase tracking-wide text-[var(--text-muted)]">Cara hitung</div>
+          <div className="font-medium text-[var(--text-primary)]">
+            {opname.hitung_buta ? (opname.dibuka_at ? `Hitung buta · stok sistem dibuka ${when(opname.dibuka_at)}` : "Hitung buta · stok sistem disembunyikan") : "Biasa"}
+          </div>
+        </div>
+        {canCount && (
+          <button onClick={() => setEditTim(true)} className="ml-auto inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-md border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[#f1f5f9]">
+            <Pencil size={13} /> Ubah tim
+          </button>
+        )}
+      </div>
+      {opname.status === "DRAFT" && opname.hitung_buta && !opname.dibuka_at && (
+        <div className="flex flex-wrap items-center gap-3 text-sm rounded-lg border border-[var(--accent-blue-border)] bg-[var(--accent-blue-bg)] text-[var(--accent-blue)] px-4 py-3">
+          <EyeOff size={18} className="shrink-0" />
+          <div className="flex-1 min-w-[220px]">
+            <b>Hitung buta.</b> {hidden ? "Stok sistem disembunyikan: isi Stok Fisik sesuai hitungan nyata." : "Penghitung tidak melihat stok sistem (Anda melihatnya sebagai approver)."} Setelah semua item dihitung, klik <b>Selesai hitung</b> untuk membuka stok sistem dan mengisi alasan selisih.
+          </div>
+          {canCount && (
+            <button onClick={selesaiHitung} disabled={saving || stats.dihitung === 0} className={`${btn} bg-[var(--accent-blue)] text-white hover:opacity-90`}>
+              <Eye size={16} /> Selesai hitung
+            </button>
+          )}
+        </div>
+      )}
+      {rekon && (
+        <div className="flex gap-2 text-sm rounded-lg border border-[var(--accent-amber-border)] bg-[var(--accent-amber-bg)] text-[#92400e] px-4 py-3">
+          <AlertTriangle size={16} className="shrink-0 mt-0.5" />
+          <div>
+            <b>Rekonsiliasi:</b> stok sistem sudah dibuka. Isi <b>alasan</b> untuk setiap item yang selisih (kolom Keterangan bertanda merah), simpan, lalu Ajukan.
+          </div>
+        </div>
+      )}
       {locked && (
         <div className="flex gap-2 text-sm rounded-lg border border-[var(--accent-amber-border)] bg-[var(--accent-amber-bg)] text-[#92400e] px-4 py-3">
           <Lock size={16} className="shrink-0 mt-0.5" />
@@ -640,8 +718,8 @@ export function StokOpnameDetailPage() {
         />
         <StatCard
           label="Ada Selisih"
-          value={(stats.plus + stats.minus).toLocaleString("id-ID")}
-          suffix={stats.plus + stats.minus ? `+${stats.plus} / −${stats.minus}` : undefined}
+          value={hidden ? "?" : (stats.plus + stats.minus).toLocaleString("id-ID")}
+          suffix={hidden ? "tersembunyi" : stats.plus + stats.minus ? `+${stats.plus} / −${stats.minus}` : undefined}
           icon={AlertTriangle}
           tone="amber"
           active={filter === "selisih"}
@@ -670,8 +748,8 @@ export function StokOpnameDetailPage() {
         <div className="flex flex-wrap gap-1.5">
           {filterChip("", "Semua", stats.total)}
           {filterChip("belum", "Belum dihitung", stats.belum)}
-          {filterChip("selisih", "Ada selisih", stats.plus + stats.minus)}
-          {filterChip("sesuai", "Sesuai", stats.dihitung - stats.plus - stats.minus)}
+          {!hidden && filterChip("selisih", "Ada selisih", stats.plus + stats.minus)}
+          {!hidden && filterChip("sesuai", "Sesuai", stats.dihitung - stats.plus - stats.minus)}
         </div>
         {canCount && opname.module !== "BBM" && (
           <button
@@ -694,9 +772,9 @@ export function StokOpnameDetailPage() {
                 <th className="px-4 py-2.5 text-left">Nama</th>
                 {isKlinik && <th className="px-4 py-2.5 text-left">Expired</th>}
                 <th className="px-4 py-2.5 text-left">Satuan</th>
-                <th className="px-4 py-2.5 text-right">Stok Sistem</th>
+                {!hidden && <th className="px-4 py-2.5 text-right">Stok Sistem</th>}
                 <th className="px-4 py-2.5 text-right">Stok Fisik</th>
-                <th className="px-4 py-2.5 text-right">Selisih</th>
+                {!hidden && <th className="px-4 py-2.5 text-right">Selisih</th>}
                 <th className="px-4 py-2.5 text-left">Keterangan</th>
                 {canCount && <th className="px-2 py-2.5" />}
               </tr>
@@ -743,10 +821,12 @@ export function StokOpnameDetailPage() {
                         </td>
                       )}
                       <td className="px-4 py-2 text-[var(--text-secondary)] whitespace-nowrap">{l.satuan || "-"}</td>
-                      <td className="px-4 py-2 text-right">
-                        {fmtQty(l.stok_sistem)}
-                        {kemasanText(l.stok_sistem, l) && <div className="text-[11px] text-[var(--text-muted)] whitespace-nowrap">{kemasanText(l.stok_sistem, l)}</div>}
-                      </td>
+                      {!hidden && (
+                        <td className="px-4 py-2 text-right">
+                          {fmtQty(l.stok_sistem)}
+                          {kemasanText(l.stok_sistem, l) && <div className="text-[11px] text-[var(--text-muted)] whitespace-nowrap">{kemasanText(l.stok_sistem, l)}</div>}
+                        </td>
+                      )}
                       <td className="px-4 py-2 text-right">
                         {editableLine(l) && isiOf(l) ? (
                           <div className="inline-flex items-center gap-1 whitespace-nowrap text-xs text-[var(--text-secondary)]">
@@ -776,7 +856,7 @@ export function StokOpnameDetailPage() {
                               className={`w-14 text-right text-sm rounded-md border px-2 py-1 ${invalid ? "border-[var(--accent-red)] bg-[var(--accent-red-bg)]" : "border-[var(--border)]"}`}
                             />
                             <span title={`1 ${kemasanName(l)} = ${isiOf(l)} ${l.satuan}`}>= {fisikOf(l) === null ? "-" : fmtQty(fisikOf(l)!)}</span>
-                            <button
+                            {!hidden && <button
                               onClick={() => {
                                 const { pak, lepas } = split(l.stok_sistem, isiOf(l));
                                 setEdit(l, { fisik: toInput(l.stok_sistem), pak: String(pak), lepas: toInput(lepas) });
@@ -785,7 +865,7 @@ export function StokOpnameDetailPage() {
                               className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--accent-green)] hover:bg-[var(--accent-green-bg)]"
                             >
                               <Check size={14} />
-                            </button>
+                            </button>}
                           </div>
                         ) : editableLine(l) ? (
                           <div className="inline-flex items-center gap-1">
@@ -801,27 +881,30 @@ export function StokOpnameDetailPage() {
                                 invalid ? "border-[var(--accent-red)] bg-[var(--accent-red-bg)]" : "border-[var(--border)]"
                               }`}
                             />
-                            <button
-                              onClick={() => setEdit(l, { fisik: toInput(l.stok_sistem) })}
-                              title="Sesuai sistem"
-                              className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--accent-green)] hover:bg-[var(--accent-green-bg)]"
-                            >
-                              <Check size={14} />
-                            </button>
+                            {!hidden && (
+                              <button
+                                onClick={() => setEdit(l, { fisik: toInput(l.stok_sistem) })}
+                                title="Sesuai sistem"
+                                className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--accent-green)] hover:bg-[var(--accent-green-bg)]"
+                              >
+                                <Check size={14} />
+                              </button>
+                            )}
                           </div>
                         ) : l.stok_fisik === null ? (
                           <span className="text-[var(--text-muted)]">-</span>
                         ) : (
                           fmtQty(l.stok_fisik)
                         )}
+                        {l.dihitung_oleh_nama && <div className="text-[10px] text-[var(--text-muted)] whitespace-nowrap">oleh {l.dihitung_oleh_nama}</div>}
                       </td>
-                      <td
+                      {!hidden && <td
                         className={`px-4 py-2 text-right font-medium whitespace-nowrap ${
                           s === null ? "text-[var(--text-muted)] font-normal" : s > 0 ? "text-[var(--accent-green)]" : s < 0 ? "text-[var(--accent-red)]" : "text-[var(--text-secondary)] font-normal"
                         }`}
                       >
                         {s === null ? "-" : s === 0 ? "0" : `${s > 0 ? "+" : "−"}${fmtQty(Math.abs(s))}`}
-                      </td>
+                      </td>}
                       <td className="col-grow px-4 py-2">
                         {editableLine(l) ? (
                           <input
@@ -829,8 +912,10 @@ export function StokOpnameDetailPage() {
                             onKeyDown={nextOnEnter(l, "ket")}
                             value={e ? e.ket : l.keterangan}
                             onChange={(ev) => setEdit(l, { ket: ev.target.value })}
-                            placeholder={s ? "Alasan selisih" : ""}
-                            className="w-full text-sm rounded-md border border-[var(--border)] px-2 py-1"
+                            placeholder={s ? "Alasan selisih (wajib)" : ""}
+                            className={`w-full text-sm rounded-md border px-2 py-1 ${
+                              s && !(e ? e.ket : l.keterangan).trim() ? "border-[var(--accent-red)] bg-[var(--accent-red-bg)]" : "border-[var(--border)]"
+                            }`}
                           />
                         ) : (
                           <span className="text-[var(--text-secondary)]">{l.keterangan || "-"}</span>
@@ -876,6 +961,16 @@ export function StokOpnameDetailPage() {
         </div>
       </div>
 
+      {editTim && opname && (
+        <TimModal
+          opname={opname}
+          onClose={() => setEditTim(false)}
+          onSaved={async () => {
+            setEditTim(false);
+            await load();
+          }}
+        />
+      )}
       {dialog && <ActionDialog key={dialog.title} spec={dialog} onClose={() => setDialog(null)} />}
       {adding === "picker" && !pickedObat && (
         <ItemPickerModal
@@ -1054,4 +1149,59 @@ function AddJenisModal({ oli, estate, onClose, onConfirm }: { oli: boolean; esta
   }, [estate, oli]);
   const noun = oli ? "Oli" : "Pupuk";
   return <SmallFormModal title={`Tambah Jenis ${noun}`} label={`Jenis ${noun.toLowerCase()}`} options={jenis} confirmLabel="Tambah" onClose={onClose} onConfirm={onConfirm} />;
+}
+
+const namaOf = (v: string) => v.split(/[\n,;]+/).map((x) => x.trim()).filter(Boolean);
+
+// Tim penghitung / saksi / pemegang of a DRAFT opname (opnames made before had none).
+function TimModal({ opname, onClose, onSaved }: { opname: Opname; onClose: () => void; onSaved: () => Promise<void> }) {
+  const [tim, setTim] = useState(opname.tim);
+  const [saksi, setSaksi] = useState(opname.saksi);
+  const [pemegang, setPemegang] = useState(opname.pemegang);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const save = async () => {
+    if (namaOf(tim).length < 2) return setError("Isi tim penghitung minimal 2 orang (pisahkan dengan koma)");
+    if (!saksi.trim() || !pemegang.trim()) return setError("Isi saksi dan pemegang gudang");
+    setBusy(true);
+    setError("");
+    try {
+      await api.opnameInfo(opname.id, { tim, saksi, pemegang });
+      await onSaved();
+    } catch (e) {
+      setError(errorText(e, "Gagal menyimpan"));
+      setBusy(false);
+    }
+  };
+  const inputCls = "w-full text-sm rounded-md border border-[var(--border)] px-3 py-2";
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-lg w-full max-w-md shadow-xl p-5 space-y-3">
+        <h3 className="font-semibold text-sm text-[var(--text-primary)]">Tim Stok Opname #{opname.id}</h3>
+        <div>
+          <label className="text-xs text-[var(--text-secondary)] mb-1 block">Tim penghitung (minimal 2 orang, pisahkan dengan koma)</label>
+          <input value={tim} onChange={(e) => setTim(e.target.value)} className={inputCls} autoFocus />
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="text-xs text-[var(--text-secondary)] mb-1 block">Saksi</label>
+            <input value={saksi} onChange={(e) => setSaksi(e.target.value)} className={inputCls} />
+          </div>
+          <div>
+            <label className="text-xs text-[var(--text-secondary)] mb-1 block">Pemegang gudang</label>
+            <input value={pemegang} onChange={(e) => setPemegang(e.target.value)} className={inputCls} />
+          </div>
+        </div>
+        {error && <p className="text-xs text-[var(--accent-red)]">{error}</p>}
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className="px-4 py-2 text-sm rounded-md border border-[var(--border)] text-[var(--text-secondary)]">
+            Batal
+          </button>
+          <button onClick={save} disabled={busy} className="px-4 py-2 text-sm rounded-md bg-[var(--accent-blue)] text-white disabled:opacity-50">
+            {busy ? "Menyimpan..." : "Simpan"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }

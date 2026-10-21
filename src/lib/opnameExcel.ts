@@ -6,11 +6,12 @@ import type { OpnameLine } from "./api";
 
 const HEAD = ["ID (jangan diubah)", "Kode", "Nama Barang", "Expired", "Satuan", "Stok Sistem", "Stok Fisik", "Keterangan"];
 
-export async function downloadOpnameSheet(o: { id: number; title: string; tanggal: string; klinik: boolean }, lines: OpnameLine[], fisikOf: (l: OpnameLine) => number | null, ketOf: (l: OpnameLine) => string) {
+export async function downloadOpnameSheet(o: { id: number; title: string; tanggal: string; klinik: boolean; hideSistem?: boolean }, lines: OpnameLine[], fisikOf: (l: OpnameLine) => number | null, ketOf: (l: OpnameLine) => string) {
   const { default: ExcelJS } = await import("exceljs");
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet(`Opname ${o.id}`, { pageSetup: { paperSize: 9, orientation: "landscape", fitToPage: true, fitToWidth: 1, fitToHeight: 0 } });
-  const head = o.klinik ? HEAD : HEAD.filter((h) => h !== "Expired");
+  // Hitung buta: the counters' sheet has no stok sistem.
+  const head = HEAD.filter((h) => (o.klinik || h !== "Expired") && (!o.hideSistem || h !== "Stok Sistem"));
   ws.addRow([`Stok Opname #${o.id} - ${o.title}`]).font = { bold: true, size: 13 };
   ws.addRow([`Tanggal ${o.tanggal.split("-").reverse().join("/")} · isi kolom Stok Fisik (kuning) dengan hitungan nyata, lalu upload lewat tombol "Upload hasil SO". Kosongkan bila belum dihitung.`]).font = {
     size: 9,
@@ -26,7 +27,7 @@ export async function downloadOpnameSheet(o: { id: number; title: string; tangga
   });
   const fisikCol = head.indexOf("Stok Fisik") + 1;
   for (const l of lines) {
-    const r = ws.addRow([l.id, l.kode, l.nama, ...(o.klinik ? [l.exp ? l.exp.split("-").reverse().join("/") : "-"] : []), l.satuan, l.stok_sistem, fisikOf(l), ketOf(l)]);
+    const r = ws.addRow([l.id, l.kode, l.nama, ...(o.klinik ? [l.exp ? l.exp.split("-").reverse().join("/") : "-"] : []), l.satuan, ...(o.hideSistem ? [] : [l.stok_sistem]), fisikOf(l), ketOf(l)]);
     r.eachCell({ includeEmpty: true }, (c, n) => {
       c.border = { top: { style: "thin", color: { argb: "FFD5DDE6" } }, bottom: { style: "thin", color: { argb: "FFD5DDE6" } }, left: { style: "thin", color: { argb: "FFD5DDE6" } }, right: { style: "thin", color: { argb: "FFD5DDE6" } } };
       if (n === fisikCol) c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFF3C4" } };

@@ -197,14 +197,22 @@ function CreateOpnameModal({
   const [estate, setEstate] = useState(estates[0] ?? "");
   const [tanggal, setTanggal] = useState(localToday());
   const [catatan, setCatatan] = useState("");
+  const [tim, setTim] = useState("");
+  const [saksi, setSaksi] = useState("");
+  const [pemegang, setPemegang] = useState("");
+  const [buta, setButa] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const nTim = tim.split(/[\n,;]+/).map((s) => s.trim()).filter(Boolean).length;
 
   const submit = async () => {
+    if (nTim < 2) return setError("Isi tim penghitung minimal 2 orang (pisahkan dengan koma)");
+    if (!saksi.trim()) return setError("Isi nama saksi");
+    if (!pemegang.trim()) return setError("Isi nama pemegang gudang / stok");
     setSubmitting(true);
     setError("");
     try {
-      const res = await api.createOpname({ module, estate, tanggal, catatan });
+      const res = await api.createOpname({ module, estate, tanggal, catatan, tim, saksi, pemegang, hitung_buta: buta });
       onCreated(res.id);
     } catch (e) {
       setError(errorText(e, "Gagal membuat stok opname", true));
@@ -253,6 +261,30 @@ function CreateOpnameModal({
             <label className={labelCls}>Tanggal opname</label>
             <input type="date" value={tanggal} max={localToday()} onChange={(e) => setTanggal(e.target.value)} className={inputCls} />
           </div>
+          <div>
+            <label className={labelCls}>Tim penghitung (minimal 2 orang, pisahkan dengan koma)</label>
+            <input value={tim} onChange={(e) => setTim(e.target.value)} placeholder="mis. Randy, Agus" className={inputCls} />
+            <p className="text-[11px] text-[var(--text-muted)] mt-0.5">Sebaiknya bukan orang yang memegang gudang ini. {nTim > 0 && `${nTim} orang`}</p>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={labelCls}>Saksi</label>
+              <input value={saksi} onChange={(e) => setSaksi(e.target.value)} placeholder="mis. Asisten / KTU" className={inputCls} />
+            </div>
+            <div>
+              <label className={labelCls}>Pemegang gudang / stok</label>
+              <input value={pemegang} onChange={(e) => setPemegang(e.target.value)} placeholder="nama admin gudang" className={inputCls} />
+            </div>
+          </div>
+          <label className="flex items-start gap-2 text-sm rounded-md border border-[var(--border)] p-3 cursor-pointer">
+            <input type="checkbox" checked={buta} onChange={(e) => setButa(e.target.checked)} className="mt-0.5" />
+            <span>
+              <b>Hitung buta</b> (disarankan)
+              <span className="block text-xs text-[var(--text-secondary)]">
+                Penghitung tidak melihat stok sistem sampai klik "Selesai hitung", supaya angka yang diisi benar-benar hasil hitungan. Setelah itu stok sistem dibuka dan setiap selisih wajib diberi alasan.
+              </span>
+            </span>
+          </label>
           <div>
             <label className={labelCls}>Catatan (opsional)</label>
             <input value={catatan} onChange={(e) => setCatatan(e.target.value)} placeholder="mis. Opname akhir bulan September" className={inputCls} />

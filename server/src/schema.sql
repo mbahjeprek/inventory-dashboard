@@ -818,3 +818,17 @@ CREATE TABLE IF NOT EXISTS dokumen_link (
 CREATE INDEX IF NOT EXISTS idx_dokumen_link_modul ON dokumen_link(modul, estate);
 -- PIC: who looks after the document (the Excel-like list in Master Data).
 ALTER TABLE dokumen_link ADD COLUMN IF NOT EXISTS pic TEXT NOT NULL DEFAULT '';
+
+-- Stok opname done properly: a team counts (tim, at least two people), with a witness (saksi) and the
+-- person who holds the stock (pemegang) named on the Berita Acara. hitung_buta: the counters don't see
+-- stok sistem until the count is finished (dibuka_at), then they explain every selisih. Each line keeps
+-- who counted it, and someone who counted can't approve.
+ALTER TABLE opname ADD COLUMN IF NOT EXISTS tim TEXT NOT NULL DEFAULT '';
+ALTER TABLE opname ADD COLUMN IF NOT EXISTS saksi TEXT NOT NULL DEFAULT '';
+ALTER TABLE opname ADD COLUMN IF NOT EXISTS pemegang TEXT NOT NULL DEFAULT '';
+ALTER TABLE opname ADD COLUMN IF NOT EXISTS hitung_buta BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE opname ADD COLUMN IF NOT EXISTS dibuka_at TIMESTAMPTZ;
+ALTER TABLE opname ADD COLUMN IF NOT EXISTS dibuka_oleh_nama TEXT;
+ALTER TABLE opname_line ADD COLUMN IF NOT EXISTS dihitung_oleh INTEGER;
+ALTER TABLE opname_line ADD COLUMN IF NOT EXISTS dihitung_oleh_nama TEXT;
+ALTER TABLE opname_line ADD COLUMN IF NOT EXISTS dihitung_at TIMESTAMPTZ;
