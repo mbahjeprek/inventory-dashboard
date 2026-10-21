@@ -54,7 +54,7 @@ export const OTHER_PERMS: { group: string; items: { key: string; label: string }
       { key: "koperasi.input", label: "Input Koperasi (pengambilan, pembelian, rusak)" },
       { key: "koperasi.edit", label: "Edit Koperasi (hapus transaksi, barang, anggota)" },
       { key: "koperasi.pelunasan", label: "Pelunasan Koperasi (tandai lunas / belum lunas, untuk HR)" },
-      { key: "koperasi.approve", label: "Approve Barang Rusak / Expired Koperasi (pemeriksa, bukan yang menginput)" },
+      { key: "koperasi.approve", label: "Approve Koperasi (periksa barang rusak / expired dan koreksi stok, selesaikan stok opname; bukan yang menginput)" },
     ],
   },
 ];

@@ -67,7 +67,7 @@ const TABS: { key: Tab; label: string; icon: typeof Package }[] = [
   { key: "rekap", label: "Rekap Potong Gaji", icon: HandCoins },
   { key: "stok", label: "Stok Barang", icon: Boxes },
   { key: "opname", label: "Stok Opname", icon: ClipboardCheck },
-  { key: "beli", label: "Stock In & Rusak", icon: Truck },
+  { key: "beli", label: "Stock In, Rusak & Koreksi", icon: Truck },
   { key: "anggota", label: "Anggota", icon: Users },
 ];
 
@@ -262,6 +262,11 @@ export function KoperasiPage() {
             Diinput dengan foto, lalu diperiksa orang kedua (hak Approve Koperasi) yang mencocokkan barang fisiknya. Yang disetujui masuk Berita Acara Pemusnahan; pemusnahan disaksikan minimal 2 orang.
           </p>
           <TxTable jenis="RUSAK" periode={periode} reload={reload} canEdit={canEdit} onChanged={done} />
+          <h2 className="text-sm font-semibold text-[var(--text-primary)] pt-2">Koreksi Stok</h2>
+          <p className="text-xs text-[var(--text-muted)] -mt-2">
+            Dihitung tanpa melihat stok sistem, dengan foto. Stok baru berubah setelah diperiksa orang kedua (hak Approve Koperasi). Koreksi dari Stok Opname ikut tercatat di sini.
+          </p>
+          <TxTable jenis="KOREKSI" periode={periode} reload={reload} canEdit={canEdit} onChanged={done} />
         </div>
       )}
       {tab === "anggota" && <AnggotaTab reload={reload} canEdit={canEdit} onChanged={done} />}
@@ -285,7 +290,7 @@ function TxTable({
   canEdit,
   onChanged,
 }: {
-  jenis: "JUAL" | "BELI" | "RUSAK" | "";
+  jenis: "JUAL" | "BELI" | "RUSAK" | "KOREKSI" | "";
   periode: string;
   anggota?: string;
   barang?: string;
@@ -344,7 +349,9 @@ function TxTable({
 
   const jual = jenis === "JUAL";
   const beli = jenis === "BELI";
-  const rusak = jenis === "RUSAK";
+  const koreksi = jenis === "KOREKSI";
+  // Barang Rusak / Expired and Koreksi Stok: a nilai (harga beli) and a pemeriksaan instead of harga / total.
+  const rusak = jenis === "RUSAK" || koreksi;
   const cols = [
     "Tanggal",
     ...(jual || !jenis ? ["Anggota"] : []),
@@ -356,7 +363,7 @@ function TxTable({
     "Keterangan",
     ...(rusak ? ["Pemeriksaan"] : []),
   ];
-  const label = jual ? "stock out" : beli ? "stock in" : rusak ? "barang rusak" : "transaksi";
+  const label = jual ? "stock out" : beli ? "stock in" : koreksi ? "koreksi stok" : rusak ? "barang rusak" : "transaksi";
   const pages = Math.max(1, Math.ceil((res?.total ?? 0) / pageSize));
 
   // Stock Out lines grouped per bon (one person's input), folded until opened; other lists stay one row each.
@@ -389,7 +396,7 @@ function TxTable({
     let rows = all.data;
     for (let p = 2; rows.length < all.total && p <= 40; p++) rows = rows.concat((await api.kopTx({ ...params, page: p, pageSize: 500 })).data);
     return {
-      title: `Koperasi PT.AKSS - ${jual ? "Stock Out" : beli ? "Stock In" : rusak ? "Barang Rusak" : "Riwayat"}`,
+      title: `Koperasi PT.AKSS - ${jual ? "Stock Out" : beli ? "Stock In" : koreksi ? "Koreksi Stok" : rusak ? "Barang Rusak" : "Riwayat"}`,
       subtitle: [periode ? `Periode ${periodeLabel(periode)}` : "Semua periode", ...(q ? [`Cari: ${q}`] : [])],
       landscape: true,
       columns: cols.map((c) => ({ label: ["Harga", "Total", "Nilai"].includes(c) ? `${c} (Rp)` : c, align: ["Jumlah", "Harga", "Total", "Nilai"].includes(c) ? ("right" as const) : undefined })),
@@ -398,10 +405,10 @@ function TxTable({
         ...(jual || !jenis ? [t.anggota_kode ? `${t.anggota_nama || "-"} (${t.anggota_kode})` : "-"] : []),
         ...(beli ? [t.no_po] : []),
         t.barang_nama,
-        `${fmtQty(t.qty)} ${t.satuan}`,
+        `${koreksi && t.qty > 0 ? "+" : ""}${fmtQty(t.qty)} ${t.satuan}`,
         ...(rusak ? [t.total] : [t.harga, t.total]),
         ...(jual ? [BAYAR_LABEL[t.bayar]] : []),
-        rusak && t.alasan ? `${ALASAN_LABEL[t.alasan]}: ${t.keterangan}` : t.keterangan,
+        rusak && t.alasan ? `${ALASAN_LABEL[t.alasan] ?? t.alasan}: ${t.keterangan}` : t.keterangan,
         ...(rusak ? [periksaText(t)] : []),
       ]),
     };
@@ -429,7 +436,11 @@ function TxTable({
             </button>
           )}
           {rusak && (
-            <button onClick={() => cetakBeritaAcara(periode).catch((e) => setError(errorText(e, "Gagal mencetak")))} className={btnOutline} title="Barang rusak / expired yang sudah disetujui di periode ini, dengan kolom tanda tangan">
+            <button
+              onClick={() => cetakBeritaAcara(koreksi ? "KOREKSI" : "RUSAK", periode).catch((e) => setError(errorText(e, "Gagal mencetak")))}
+              className={btnOutline}
+              title={`${koreksi ? "Koreksi stok" : "Barang rusak / expired"} yang sudah disetujui di periode ini, dengan kolom tanda tangan`}
+            >
               <FileText size={15} /> Berita Acara
             </button>
           )}
@@ -556,11 +567,12 @@ function TxTable({
                         {!jenis && ` · ${t.jenis === "JUAL" ? "Stock Out" : t.jenis === "BELI" ? "Stock In" : t.jenis === "KOREKSI" ? "Koreksi stok" : "Rusak"}`}
                       </div>
                     </td>
-                    <td className="px-3 py-2 text-right whitespace-nowrap">
+                    <td className={`px-3 py-2 text-right whitespace-nowrap ${koreksi ? (t.qty < 0 ? "text-[var(--accent-red)] font-medium" : "text-[var(--accent-green)] font-medium") : ""}`}>
+                      {koreksi && t.qty > 0 ? "+" : ""}
                       {fmtQty(t.qty)} {t.satuan}
                     </td>
                     {!rusak && <td className="px-3 py-2 text-right whitespace-nowrap">{rp(t.harga)}</td>}
-                    <td className={`px-3 py-2 text-right whitespace-nowrap ${rusak ? "text-[var(--text-secondary)]" : "font-medium"}`}>{rusak && !t.total ? "-" : rp(t.total)}</td>
+                    <td className={`px-3 py-2 text-right whitespace-nowrap ${rusak ? "text-[var(--text-secondary)]" : "font-medium"}`}>{rusak && !t.total ? "-" : `${koreksi && t.total > 0 ? "+" : ""}${rp(t.total)}`}</td>
                     {jual && (
                       <td className="px-3 py-2">
                         <span className={`text-[11px] px-2 py-0.5 rounded-full border whitespace-nowrap ${BAYAR_CLS[t.bayar]}`}>{BAYAR_LABEL[t.bayar]}</span>
@@ -568,14 +580,20 @@ function TxTable({
                     )}
                     <td className="col-grow px-3 py-2 text-xs text-[var(--text-secondary)]">
                       <div>
-                        {rusak && t.alasan && <span className={`mr-1 text-[10px] px-1.5 py-0.5 rounded border ${t.alasan === "EXPIRED" ? "border-[var(--accent-red-border)] text-[var(--accent-red)]" : "border-[var(--border)]"}`}>{ALASAN_LABEL[t.alasan]}</span>}
+                        {rusak && t.alasan && <span className={`mr-1 text-[10px] px-1.5 py-0.5 rounded border ${["EXPIRED", "HILANG"].includes(t.alasan) ? "border-[var(--accent-red-border)] text-[var(--accent-red)]" : "border-[var(--border)]"}`}>{ALASAN_LABEL[t.alasan] ?? t.alasan}</span>}
                         {t.keterangan || (t.sumber?.startsWith("IMPORT") ? "" : "-")} <EvidenceLink id={t.evidence_id} label="foto" />
                       </div>
                       <div className="text-[var(--text-muted)]">{t.sumber?.startsWith("IMPORT") ? "dari spreadsheet" : `oleh ${t.oleh || "-"}`}</div>
                     </td>
                     {rusak && (
                       <td className="px-3 py-2 text-xs">
-                        <span className={`text-[11px] px-2 py-0.5 rounded-full border whitespace-nowrap ${STATUS_RUSAK[t.status ?? "DISETUJUI"].cls}`}>{STATUS_RUSAK[t.status ?? "DISETUJUI"].label}</span>
+                        {t.opname_id ? (
+                          <span className="text-[var(--text-muted)] whitespace-nowrap">Stok Opname #{t.opname_id}</span>
+                        ) : (
+                        <span className={`text-[11px] px-2 py-0.5 rounded-full border whitespace-nowrap ${STATUS_RUSAK[t.status ?? "DISETUJUI"].cls}`}>
+                          {t.status === "DITOLAK" && koreksi ? "Ditolak, stok tetap" : STATUS_RUSAK[t.status ?? "DISETUJUI"].label}
+                        </span>
+                        )}
                         {t.status && t.status !== "MENUNGGU" && (
                           <div className="mt-1 text-[var(--text-muted)]">
                             oleh {t.diperiksa_nama || "-"}
@@ -1469,34 +1487,75 @@ function StokTab({ reload, canEdit, onChanged, fokusExp = 0 }: { reload: number;
 }
 
 // Koreksi Stok of one barang: the stock becomes the counted figure, the difference is booked as a koreksi.
+// Koreksi Stok, counted blind: the form doesn't show the stok sistem (no number to write down); the selisih
+// shows after saving, and the stock only changes once a second account (Approve Koperasi) has checked it.
+const KOREKSI_ALASAN: Record<string, string> = {
+  SALAH_HITUNG: "Salah hitung sebelumnya",
+  HILANG: "Hilang",
+  SELISIH_BON: "Selisih bon / salah serah",
+  SALAH_INPUT: "Salah input transaksi",
+  LAINNYA: "Lainnya",
+};
 function KoreksiModal({ barang, onClose, onSuccess }: { barang: KopBarang; onClose: () => void; onSuccess: () => void }) {
+  const fotoAktif = useEvidenceEnabled();
   const [tanggal, setTanggal] = useState(localToday());
   const [fisik, setFisik] = useState("");
+  const [alasan, setAlasan] = useState("");
   const [ket, setKet] = useState("");
+  const [evidence, setEvidence] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [hasil, setHasil] = useState<{ selisih: number; nilai: number } | null>(null);
   const n = parseNum(fisik || "x");
-  const selisih = Number.isFinite(n) ? Math.round((n - barang.stok) * 1000) / 1000 : null;
   const save = async () => {
-    if (!(n >= 0)) return setError("Isi stok fisik (angka 0 atau lebih)");
-    if (!ket.trim()) return setError("Tulis alasan koreksinya");
+    if (!(n >= 0)) return setError("Isi stok fisik hasil hitung (angka 0 atau lebih)");
+    if (!alasan) return setError("Pilih alasannya");
+    if (!ket.trim()) return setError("Tulis keterangannya");
+    if (fotoAktif && !evidence) return setError("Foto barang yang dihitung wajib");
     setBusy(true);
     setError("");
     try {
-      await api.kopKoreksi({ tanggal, barang_kode: barang.kode, stok_fisik: n, keterangan: ket });
-      onSuccess();
+      const r = await api.kopKoreksi({ tanggal, barang_kode: barang.kode, stok_fisik: n, alasan, keterangan: ket.trim(), evidence_id: evidence });
+      setHasil({ selisih: r.selisih, nilai: r.nilai });
     } catch (e) {
       setError(errorText(e, "Gagal menyimpan koreksi"));
     } finally {
       setBusy(false);
     }
   };
+  if (hasil)
+    return (
+      <Modal title={`Koreksi Stok ${barang.nama}`} subtitle={barang.kode} onClose={onSuccess}>
+        <div className="space-y-3 text-sm">
+          {hasil.selisih === 0 ? (
+            <p className="text-[var(--accent-green)]">Cocok: stok fisik sama dengan stok sistem. Tidak ada yang dikoreksi.</p>
+          ) : (
+            <>
+              <p className={hasil.selisih < 0 ? "text-[var(--accent-red)]" : "text-[var(--accent-green)]"}>
+                Selisih{" "}
+                <b>
+                  {hasil.selisih > 0 ? "+" : ""}
+                  {fmtQty(hasil.selisih)} {barang.satuan}
+                </b>{" "}
+                ({rp(hasil.nilai)}).
+              </p>
+              <p className="text-[var(--text-secondary)]">Tersimpan sebagai menunggu pemeriksaan. Stok baru berubah setelah disetujui orang kedua yang punya hak Approve Koperasi.</p>
+            </>
+          )}
+          <div className="flex justify-end">
+            <button onClick={onSuccess} className={btnPrimary}>
+              Tutup
+            </button>
+          </div>
+        </div>
+      </Modal>
+    );
   return (
-    <Modal title={`Koreksi Stok ${barang.nama}`} subtitle={`${barang.kode} · stok sistem ${fmtQty(barang.stok)} ${barang.satuan}`} onClose={onClose}>
+    <Modal title={`Koreksi Stok ${barang.nama}`} subtitle={`${barang.kode} · hitung fisiknya dulu, stok sistem tidak ditampilkan`} onClose={onClose}>
       <div className="space-y-3">
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className={labelCls}>Stok fisik ({barang.satuan})</label>
+            <label className={labelCls}>Stok fisik hasil hitung ({barang.satuan})</label>
             <input value={fisik} onChange={(e) => setFisik(e.target.value)} inputMode="decimal" className={inputCls} autoFocus />
           </div>
           <div>
@@ -1504,24 +1563,32 @@ function KoreksiModal({ barang, onClose, onSuccess }: { barang: KopBarang; onClo
             <input type="date" value={tanggal} max={localToday()} onChange={(e) => setTanggal(e.target.value)} className={inputCls} />
           </div>
         </div>
-        {selisih !== null && selisih !== 0 && (
-          <p className={`text-sm ${selisih < 0 ? "text-[var(--accent-red)]" : "text-[var(--accent-green)]"}`}>
-            Selisih {selisih > 0 ? "+" : ""}
-            {fmtQty(selisih)} {barang.satuan} ({rp(selisih * barang.harga_beli)})
-          </p>
-        )}
-        <div>
-          <label className={labelCls}>Alasan (mis. salah hitung, hilang, selisih bon)</label>
-          <input value={ket} onChange={(e) => setKet(e.target.value)} className={inputCls} />
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className={labelCls}>Alasan</label>
+            <select value={alasan} onChange={(e) => setAlasan(e.target.value)} className={`${selectCls} w-full`}>
+              <option value="">-- Pilih --</option>
+              {Object.entries(KOREKSI_ALASAN).map(([k, v]) => (
+                <option key={k} value={k}>
+                  {v}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className={labelCls}>Keterangan</label>
+            <input value={ket} onChange={(e) => setKet(e.target.value)} placeholder="mis. dihitung di rak 2 dan gudang" className={inputCls} />
+          </div>
         </div>
-        <p className="text-[11px] text-[var(--text-muted)]">Untuk menghitung banyak barang sekaligus pakai tab Stok Opname.</p>
+        <EvidenceInput value={evidence} onChange={setEvidence} label="Foto barang yang dihitung (wajib)" />
+        <p className="text-[11px] text-[var(--text-muted)]">Selisihnya muncul setelah disimpan; stok baru berubah setelah diperiksa orang kedua. Untuk menghitung banyak barang sekaligus pakai tab Stok Opname.</p>
         {error && <p className="text-xs text-[var(--accent-red)]">{error}</p>}
         <div className="flex justify-end gap-2">
           <button onClick={onClose} className="px-4 py-2 text-sm rounded-md border border-[var(--border)] text-[var(--text-secondary)]">
             Batal
           </button>
           <button onClick={save} disabled={busy} className={btnPrimary}>
-            {busy ? "Menyimpan..." : "Simpan Koreksi"}
+            {busy ? "Menyimpan..." : "Simpan, minta pemeriksaan"}
           </button>
         </div>
       </div>
@@ -2468,14 +2535,14 @@ function BeliModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: () 
 
 // ---- Barang Rusak / Expired: entered with a photo, checked by a second account (Approve Koperasi) who
 // matches the barang on hand; what is approved goes on the Berita Acara Pemusnahan. ----
-const ALASAN_LABEL: Record<"EXPIRED" | "RUSAK", string> = { EXPIRED: "Expired", RUSAK: "Rusak" };
+const ALASAN_LABEL: Record<string, string> = { EXPIRED: "Expired", RUSAK: "Rusak", ...KOREKSI_ALASAN };
 const STATUS_RUSAK: Record<"MENUNGGU" | "DISETUJUI" | "DITOLAK", { label: string; cls: string }> = {
   MENUNGGU: { label: "Menunggu pemeriksaan", cls: "bg-[var(--accent-amber-bg)] border-[var(--accent-amber-border)] text-[var(--accent-amber)]" },
   DISETUJUI: { label: "Disetujui", cls: "bg-[var(--accent-green-bg)] border-[var(--accent-green-border)] text-[var(--accent-green)]" },
   DITOLAK: { label: "Ditolak, stok kembali", cls: "bg-[var(--accent-red-bg)] border-[var(--accent-red-border)] text-[var(--accent-red)]" },
 };
 const periksaText = (t: KopTx) =>
-  `${STATUS_RUSAK[t.status ?? "DISETUJUI"].label}${t.status && t.status !== "MENUNGGU" ? ` oleh ${t.diperiksa_nama || "-"}${t.diperiksa_catatan ? ` (${t.diperiksa_catatan})` : ""}` : ""}`;
+  t.opname_id ? `Stok Opname #${t.opname_id}` : `${STATUS_RUSAK[t.status ?? "DISETUJUI"].label}${t.status && t.status !== "MENUNGGU" ? ` oleh ${t.diperiksa_nama || "-"}${t.diperiksa_catatan ? ` (${t.diperiksa_catatan})` : ""}` : ""}`;
 // Stock on hand of a barang that is already past its tanggal expired (from its FEFO batches).
 const qtyExpired = (b: KopBarang) => (b.exp_batches ?? []).filter((x) => hariLagi(x.exp) < 0).reduce((s, x) => s + x.qty, 0);
 
@@ -2486,22 +2553,41 @@ async function fetchAllTx(params: Record<string, string>) {
   return rows;
 }
 
-async function cetakBeritaAcara(periode: string) {
-  const all = await fetchAllTx({ jenis: "RUSAK", status: "DISETUJUI", periode });
-  if (!all.length) throw new Error(`Belum ada barang rusak / expired yang disetujui di ${periodeLabel(periode)}`);
+// Berita Acara of the approved Barang Rusak / Expired (pemusnahan) or Koreksi Stok (selisih) of a periode,
+// with signature boxes. Koreksi also sums the minus / plus per petugas, to see who corrects often.
+async function cetakBeritaAcara(jenis: "RUSAK" | "KOREKSI", periode: string) {
+  const kor = jenis === "KOREKSI";
+  const all = await fetchAllTx({ jenis, status: "DISETUJUI", periode });
+  if (!all.length) throw new Error(`Belum ada ${kor ? "koreksi stok" : "barang rusak / expired"} yang disetujui di ${periodeLabel(periode)}`);
   const uniq = (v: (string | null)[]) => [...new Set(v.filter(Boolean))].join(", ");
+  const minus = all.filter((t) => t.total < 0).reduce((s, t) => s + t.total, 0);
+  const plus = all.filter((t) => t.total > 0).reduce((s, t) => s + t.total, 0);
+  const perPetugas = new Map<string, { n: number; minus: number; plus: number }>();
+  for (const t of all) {
+    const k = t.opname_id ? `Stok Opname #${t.opname_id}` : t.oleh || "-";
+    const r = perPetugas.get(k) ?? { n: 0, minus: 0, plus: 0 };
+    r.n++;
+    if (t.total < 0) r.minus += t.total;
+    else r.plus += t.total;
+    perPetugas.set(k, r);
+  }
   printTable({
-    title: "Berita Acara Pemusnahan Barang Rusak / Expired",
-    subtitle: [
-      `Koperasi PT.AKSS · Periode ${periodeLabel(periode)} · nilai (harga beli) ${rp(all.reduce((s, t) => s + t.total, 0))}`,
-      "Barang di bawah ini sudah diperiksa dan dicocokkan fisiknya, lalu dimusnahkan (kemasan dirusak / dihancurkan) di hadapan para saksi pada tanggal ..............................",
-    ],
+    title: kor ? "Berita Acara Selisih Stok (Koreksi)" : "Berita Acara Pemusnahan Barang Rusak / Expired",
+    subtitle: kor
+      ? [
+          `Koperasi PT.AKSS · Periode ${periodeLabel(periode)} · kurang ${rp(minus)} · lebih ${rp(plus)} · bersih ${rp(minus + plus)} (harga beli)`,
+          `Per petugas: ${[...perPetugas].map(([k, r]) => `${k} ${r.n}x (kurang ${rp(r.minus)}, lebih ${rp(r.plus)})`).join(" · ")}`,
+        ]
+      : [
+          `Koperasi PT.AKSS · Periode ${periodeLabel(periode)} · nilai (harga beli) ${rp(all.reduce((s, t) => s + t.total, 0))}`,
+          "Barang di bawah ini sudah diperiksa dan dicocokkan fisiknya, lalu dimusnahkan (kemasan dirusak / dihancurkan) di hadapan para saksi pada tanggal ..............................",
+        ],
     columns: [
       { label: "No", align: "right" },
       { label: "Tanggal" },
       { label: "Kode" },
       { label: "Nama Barang" },
-      { label: "Jumlah", align: "right" },
+      { label: kor ? "Selisih" : "Jumlah", align: "right" },
       { label: "Alasan" },
       { label: "Keterangan" },
       { label: "Nilai (Rp)", align: "right" },
@@ -2512,20 +2598,26 @@ async function cetakBeritaAcara(periode: string) {
       isoDisplay(t.tanggal_iso),
       t.barang_kode,
       t.barang_nama,
-      `${fmtQty(t.qty)} ${t.satuan}`,
-      t.alasan ? ALASAN_LABEL[t.alasan] : "Rusak",
+      `${kor && t.qty > 0 ? "+" : ""}${fmtQty(t.qty)} ${t.satuan}`,
+      t.alasan ? (ALASAN_LABEL[t.alasan] ?? t.alasan) : kor ? (t.opname_id ? "Stok opname" : "-") : "Rusak",
       t.keterangan,
       t.total,
-      `${t.oleh || "-"} / ${t.diperiksa_nama || "-"}`,
+      t.opname_id ? `Stok Opname #${t.opname_id}` : `${t.oleh || "-"} / ${t.diperiksa_nama || "-"}`,
     ]),
     landscape: true,
-    signatures: [
-      { label: "Petugas Koperasi", nama: uniq(all.map((t) => t.oleh)) },
-      { label: "Pemeriksa", nama: uniq(all.map((t) => t.diperiksa_nama)) },
-      { label: "Saksi 1", nama: "" },
-      { label: "Saksi 2", nama: "" },
-      { label: "Mengetahui", nama: "" },
-    ],
+    signatures: kor
+      ? [
+          { label: "Petugas Koperasi", nama: uniq(all.map((t) => (t.opname_id ? null : t.oleh))) },
+          { label: "Pemeriksa", nama: uniq(all.map((t) => t.diperiksa_nama)) },
+          { label: "Mengetahui", nama: "" },
+        ]
+      : [
+          { label: "Petugas Koperasi", nama: uniq(all.map((t) => t.oleh)) },
+          { label: "Pemeriksa", nama: uniq(all.map((t) => t.diperiksa_nama)) },
+          { label: "Saksi 1", nama: "" },
+          { label: "Saksi 2", nama: "" },
+          { label: "Mengetahui", nama: "" },
+        ],
   });
 }
 
@@ -2534,7 +2626,7 @@ function RusakMenungguBanner({ reload, canApprove, onLihat }: { reload: number; 
   const [n, setN] = useState(0);
   useEffect(() => {
     api
-      .kopTx({ jenis: "RUSAK", status: "MENUNGGU", page: 1, pageSize: 1 })
+      .kopTx({ jenis: "", status: "MENUNGGU", page: 1, pageSize: 1 })
       .then((r) => setN(r.total))
       .catch(() => setN(0));
   }, [reload]);
@@ -2543,9 +2635,9 @@ function RusakMenungguBanner({ reload, canApprove, onLihat }: { reload: number; 
     <div className="flex flex-wrap items-center gap-3 w-full min-w-0 rounded-lg border border-[var(--accent-amber-border)] bg-[var(--accent-amber-bg)] px-4 py-3 text-sm text-[var(--accent-amber)]">
       <ClipboardCheck size={20} className="shrink-0" />
       <p className="flex-1 min-w-[220px]">
-        <b>{n} barang rusak / expired menunggu pemeriksaan</b>
+        <b>{n} barang rusak / expired / koreksi stok menunggu pemeriksaan</b>
         <span className="block text-xs opacity-90">
-          {canApprove ? "Cocokkan barang fisik dan fotonya, lalu Setujui atau Tolak." : "Perlu diperiksa orang yang punya hak Approve Koperasi."} Stoknya ditahan (tidak bisa dijual) sampai diperiksa.
+          {canApprove ? "Cocokkan barang fisik dan fotonya, lalu Setujui atau Tolak." : "Perlu diperiksa orang yang punya hak Approve Koperasi."} Barang rusak / expired sudah ditahan; koreksi baru mengubah stok setelah disetujui.
         </span>
       </p>
       <button onClick={onLihat} className="px-3 py-1.5 rounded-md text-xs font-medium text-white bg-[var(--accent-amber)] hover:opacity-90">
@@ -2556,6 +2648,7 @@ function RusakMenungguBanner({ reload, canApprove, onLihat }: { reload: number; 
 }
 
 function PeriksaRusakModal({ tx, onClose, onSuccess }: { tx: KopTx; onClose: () => void; onSuccess: () => void }) {
+  const kor = tx.jenis === "KOREKSI";
   const [catatan, setCatatan] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -2564,7 +2657,7 @@ function PeriksaRusakModal({ tx, onClose, onSuccess }: { tx: KopTx; onClose: () 
     setBusy(true);
     setError("");
     try {
-      await api.kopPeriksaRusak(tx.id, { setuju, catatan: catatan.trim() });
+      await api.kopPeriksa(kor ? "KOREKSI" : "RUSAK", tx.id, { setuju, catatan: catatan.trim() });
       onSuccess();
     } catch (e) {
       setError(errorText(e, "Gagal menyimpan"));
@@ -2573,17 +2666,22 @@ function PeriksaRusakModal({ tx, onClose, onSuccess }: { tx: KopTx; onClose: () 
     }
   };
   return (
-    <Modal title="Periksa Barang Rusak / Expired" subtitle="Cocokkan dengan barang fisiknya dan fotonya" onClose={onClose}>
+    <Modal
+      title={kor ? "Periksa Koreksi Stok" : "Periksa Barang Rusak / Expired"}
+      subtitle={kor ? "Hitung ulang barangnya sendiri sebelum menyetujui" : "Cocokkan dengan barang fisiknya dan fotonya"}
+      onClose={onClose}
+    >
       <div className="space-y-3 text-sm">
         <div className="rounded-md border border-[var(--border)] p-3 space-y-1">
           <div className="font-medium text-[var(--text-primary)]">
             {tx.barang_nama} <span className="text-xs text-[var(--text-muted)]">{tx.barang_kode}</span>
           </div>
           <div>
-            <b>
+            <b className={kor ? (tx.qty < 0 ? "text-[var(--accent-red)]" : "text-[var(--accent-green)]") : ""}>
+              {kor && tx.qty > 0 ? "+" : ""}
               {fmtQty(tx.qty)} {tx.satuan}
             </b>{" "}
-            · {tx.alasan ? ALASAN_LABEL[tx.alasan] : "Rusak"} · {isoDisplay(tx.tanggal_iso)}
+            · {tx.alasan ? (ALASAN_LABEL[tx.alasan] ?? tx.alasan) : "Rusak"} · {isoDisplay(tx.tanggal_iso)}
             {tx.total > 0 && <span className="text-[var(--text-muted)]"> · nilai {rp(tx.total)}</span>}
           </div>
           <div className="text-xs text-[var(--text-secondary)]">
@@ -2591,11 +2689,19 @@ function PeriksaRusakModal({ tx, onClose, onSuccess }: { tx: KopTx; onClose: () 
           </div>
           <div className="text-xs text-[var(--text-muted)]">diinput oleh {tx.oleh || "-"}</div>
         </div>
-        <ul className="text-xs text-[var(--text-secondary)] list-disc pl-4 space-y-0.5">
-          <li>Jumlah fisiknya sama dengan yang diinput?</li>
-          <li>Tanggal expired di kemasan / kerusakannya sesuai foto?</li>
-          <li>Barangnya masih ada di tempat barang rusak (belum dibuang)?</li>
-        </ul>
+        {kor ? (
+          <ul className="text-xs text-[var(--text-secondary)] list-disc pl-4 space-y-0.5">
+            <li>Hitung ulang sendiri: hasilnya sama dengan stok fisik yang diinput?</li>
+            <li>Alasannya masuk akal? Cek Riwayat barang ini (Stock Out / Stock In terakhir, bon).</li>
+            <li>Bila hilang: sudah jelas siapa yang bertanggung jawab / dilaporkan?</li>
+          </ul>
+        ) : (
+          <ul className="text-xs text-[var(--text-secondary)] list-disc pl-4 space-y-0.5">
+            <li>Jumlah fisiknya sama dengan yang diinput?</li>
+            <li>Tanggal expired di kemasan / kerusakannya sesuai foto?</li>
+            <li>Barangnya masih ada di tempat barang rusak (belum dibuang)?</li>
+          </ul>
+        )}
         <div>
           <label className={labelCls}>Catatan (wajib bila ditolak)</label>
           <input value={catatan} onChange={(e) => setCatatan(e.target.value)} placeholder="mis. fisik hanya 10, bukan 16" className={inputCls} />
@@ -2607,7 +2713,7 @@ function PeriksaRusakModal({ tx, onClose, onSuccess }: { tx: KopTx; onClose: () 
             disabled={busy}
             className="px-4 py-2 text-sm rounded-md border border-[var(--accent-red-border)] text-[var(--accent-red)] hover:bg-[var(--accent-red-bg)] disabled:opacity-50"
           >
-            Tolak (stok kembali)
+            {kor ? "Tolak (stok tidak berubah)" : "Tolak (stok kembali)"}
           </button>
           <button onClick={() => kirim(true)} disabled={busy} className={btnPrimary}>
             {busy ? "Menyimpan..." : "Setujui"}

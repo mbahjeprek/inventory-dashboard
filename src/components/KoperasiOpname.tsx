@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
+import { useAuth } from "../context/AuthContext";
+import { can } from "../lib/access";
 import { ArrowLeft, CheckCircle2, ClipboardList, Pencil, Plus, Save, Search, Trash2, XCircle } from "lucide-react";
 import { api, errorText, type KopOpname, type KopOpnameLine } from "../lib/api";
 import { ExportButtons } from "./ExportButtons";
@@ -172,8 +174,8 @@ export function KoperasiOpname({ canInput, canEdit, isSuperuser, onChanged }: { 
                   <td className="px-3 py-2 text-right whitespace-nowrap">
                     {o.dihitung} / {o.n_barang}
                   </td>
-                  <td className="px-3 py-2 text-right">{o.n_selisih}</td>
-                  <td className={`px-3 py-2 text-right whitespace-nowrap ${(o.nilai_selisih ?? 0) < 0 ? "text-[var(--accent-red)]" : ""}`}>{rp(o.nilai_selisih ?? 0)}</td>
+                  <td className="px-3 py-2 text-right">{o.n_selisih ?? "-"}</td>
+                  <td className={`px-3 py-2 text-right whitespace-nowrap ${(o.nilai_selisih ?? 0) < 0 ? "text-[var(--accent-red)]" : ""}`}>{o.nilai_selisih === null ? "-" : rp(o.nilai_selisih ?? 0)}</td>
                   <td className="px-3 py-2 text-xs">
                     {o.oleh || "-"}
                     {o.selesai_oleh_nama && o.status === "SELESAI" && <div className="text-[var(--text-muted)]">selesai: {o.selesai_oleh_nama}</div>}
@@ -230,6 +232,11 @@ function OpnameDetail({
   const [editMode, setEditMode] = useState(false);
   const [eTanggal, setETanggal] = useState("");
   const [eCatatan, setECatatan] = useState("");
+  // Selesai books the koreksi: only with Approve Koperasi, and not by who started the opname. While it is
+  // open, an account without Approve counts blind (the server leaves out the stok sistem).
+  const { user } = useAuth();
+  const canSelesai = can(user, "koperasi.approve");
+  const buta = !!head?.buta;
   const load = () =>
     api
       .kopOpname(id)
@@ -255,7 +262,7 @@ function OpnameDetail({
   const fisikOf = (r: Row) => (editable ? parseFisik(r.input) : r.fisik);
   const selisihOf = (r: Row) => {
     const f = fisikOf(r);
-    return f === null || Number.isNaN(f) ? null : Math.round((f - r.stok_sistem) * 1000) / 1000;
+    return f === null || Number.isNaN(f) || r.stok_sistem === null ? null : Math.round((f - r.stok_sistem) * 1000) / 1000;
   };
   const q = search.trim().toLowerCase();
   const shown = useMemo(
@@ -368,16 +375,20 @@ function OpnameDetail({
       { label: "Kode" },
       { label: "Barang" },
       { label: "Satuan" },
-      { label: "Stok Sistem", align: "right" as const },
+      ...(buta ? [] : [{ label: "Stok Sistem", align: "right" as const }]),
       { label: "Fisik", align: "right" as const },
-      { label: "Selisih", align: "right" as const },
-      { label: "Nilai Selisih (Rp)", align: "right" as const },
+      ...(buta
+        ? []
+        : [
+            { label: "Selisih", align: "right" as const },
+            { label: "Nilai Selisih (Rp)", align: "right" as const },
+          ]),
       { label: "Keterangan" },
     ],
     rows: shown.map((r, i) => {
       const f = fisikOf(r);
       const s = selisihOf(r);
-      return [i + 1, r.kode, r.nama, r.satuan, r.stok_sistem, f ?? "", s ?? "", s === null ? "" : Math.round(s * r.harga_beli), editable ? r.ket : r.keterangan];
+      return [i + 1, r.kode, r.nama, r.satuan, ...(buta ? [] : [r.stok_sistem]), f ?? "", ...(buta ? [] : [s ?? "", s === null ? "" : Math.round(s * r.harga_beli)]), editable ? r.ket : r.keterangan];
     }),
   });
 
@@ -436,8 +447,8 @@ function OpnameDetail({
         {[
           ["Barang", rows.length.toLocaleString("id-ID")],
           ["Sudah dihitung", `${counted} / ${rows.length}`],
-          ["Ada selisih", withDiff.toLocaleString("id-ID")],
-          ["Nilai selisih", rp(nilai)],
+          ["Ada selisih", buta ? "-" : withDiff.toLocaleString("id-ID")],
+          ["Nilai selisih", buta ? "-" : rp(nilai)],
         ].map(([l, v]) => (
           <div key={l} className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg px-4 py-3">
             <div className="text-xs text-[var(--text-secondary)]">{l}</div>
@@ -455,7 +466,7 @@ function OpnameDetail({
           <select value={only} onChange={(e) => setOnly(e.target.value as typeof only)} className="text-sm rounded-md border border-[var(--border)] px-3 py-2 bg-white">
             <option value="">Semua barang</option>
             <option value="belum">Belum dihitung</option>
-            <option value="selisih">Ada selisih</option>
+            {!buta && <option value="selisih">Ada selisih</option>}
           </select>
           <div className="ml-auto flex flex-wrap gap-2">
             <ExportButtons total={shown.length} buildReport={buildReport} fileName={`koperasi-opname-${id}`} />
@@ -466,10 +477,10 @@ function OpnameDetail({
             <thead>
               <tr className="bg-[#d5edc9] text-left text-xs text-[var(--text-primary)]">
                 <th className="px-3 py-2.5">Barang</th>
-                <th className="px-3 py-2.5 text-right whitespace-nowrap">Stok sistem</th>
+                {!buta && <th className="px-3 py-2.5 text-right whitespace-nowrap">Stok sistem</th>}
                 <th className="px-3 py-2.5 text-right w-32">Fisik</th>
-                <th className="px-3 py-2.5 text-right">Selisih</th>
-                <th className="px-3 py-2.5 text-right whitespace-nowrap">Nilai selisih</th>
+                {!buta && <th className="px-3 py-2.5 text-right">Selisih</th>}
+                {!buta && <th className="px-3 py-2.5 text-right whitespace-nowrap">Nilai selisih</th>}
                 <th className="px-3 py-2.5">Keterangan</th>
               </tr>
             </thead>
@@ -483,9 +494,11 @@ function OpnameDetail({
                       <div className="text-[var(--text-primary)]">{r.nama}</div>
                       <div className="text-[11px] text-[var(--text-muted)]">{r.kode}</div>
                     </td>
-                    <td className="px-3 py-1.5 text-right whitespace-nowrap">
-                      {fmtQty(r.stok_sistem)} {r.satuan}
-                    </td>
+                    {!buta && (
+                      <td className="px-3 py-1.5 text-right whitespace-nowrap">
+                        {fmtQty(r.stok_sistem ?? 0)} {r.satuan}
+                      </td>
+                    )}
                     <td className="px-3 py-1.5 text-right">
                       {editable ? (
                         <input
@@ -501,13 +514,15 @@ function OpnameDetail({
                         fmtQty(r.fisik)
                       )}
                     </td>
-                    <td className={`px-3 py-1.5 text-right whitespace-nowrap font-semibold ${s ? (s < 0 ? "text-[var(--accent-red)]" : "text-[var(--accent-green)]") : "text-[var(--text-muted)]"}`}>
-                      {s === null ? "" : s === 0 ? "cocok" : `${s > 0 ? "+" : ""}${fmtQty(s)}`}
-                    </td>
-                    <td className="px-3 py-1.5 text-right whitespace-nowrap">{s ? rp(s * r.harga_beli) : ""}</td>
+                    {!buta && (
+                      <td className={`px-3 py-1.5 text-right whitespace-nowrap font-semibold ${s ? (s < 0 ? "text-[var(--accent-red)]" : "text-[var(--accent-green)]") : "text-[var(--text-muted)]"}`}>
+                        {s === null ? "" : s === 0 ? "cocok" : `${s > 0 ? "+" : ""}${fmtQty(s)}`}
+                      </td>
+                    )}
+                    {!buta && <td className="px-3 py-1.5 text-right whitespace-nowrap">{s ? rp(s * r.harga_beli) : ""}</td>}
                     <td className="px-3 py-1.5">
                       {editable ? (
-                        <input value={r.ket} onChange={(e) => set(r.kode, "ket", e.target.value)} placeholder={s ? "alasan selisih" : ""} className="w-full min-w-[140px] text-sm rounded border border-[var(--border)] px-2 py-1" />
+                        <input value={r.ket} onChange={(e) => set(r.kode, "ket", e.target.value)} placeholder={s || buta ? "alasan selisih" : ""} className="w-full min-w-[140px] text-sm rounded border border-[var(--border)] px-2 py-1" />
                       ) : (
                         <span className="text-xs text-[var(--text-secondary)]">{r.keterangan}</span>
                       )}
@@ -518,7 +533,7 @@ function OpnameDetail({
             </tbody>
           </table>
         </div>
-        {head.status === "DRAFT" && !editMode && (canInput || canEdit) && (
+        {head.status === "DRAFT" && !editMode && (canInput || canEdit || canSelesai) && (
           <div className="flex flex-wrap items-center gap-2 p-3 border-t border-[var(--border)]">
             {error && <span className="text-xs text-[var(--accent-red)]">{error}</span>}
             {note && <span className="text-xs text-[var(--accent-green)]">{note}</span>}
@@ -534,13 +549,17 @@ function OpnameDetail({
                   <Save size={16} /> Simpan hitungan
                 </button>
               )}
-              {canEdit && (
+              {canSelesai && head.user_id !== user?.id && (
                 <button onClick={() => setConfirm("selesai")} disabled={busy || !counted} className="inline-flex items-center gap-1.5 text-sm px-3.5 py-2 rounded-md bg-[var(--accent-blue)] text-white hover:opacity-90 disabled:opacity-50">
                   <CheckCircle2 size={16} /> Selesai & Koreksi Stok
                 </button>
               )}
             </div>
-            {!canEdit && <p className="w-full text-[11px] text-[var(--text-muted)]">Setelah selesai menghitung, minta akun dengan hak Edit Koperasi menekan "Selesai & Koreksi Stok".</p>}
+            {!(canSelesai && head.user_id !== user?.id) && (
+              <p className="w-full text-[11px] text-[var(--text-muted)]">
+                {buta ? "Hitung buta: stok sistem dan selisih tidak ditampilkan. " : ""}Setelah selesai menghitung, minta orang lain (bukan yang memulai opname ini) dengan hak Approve Koperasi memeriksa lalu menekan "Selesai & Koreksi Stok".
+              </p>
+            )}
           </div>
         )}
         {head.status !== "DRAFT" && note && <p className="p-3 text-xs text-[var(--accent-green)] border-t border-[var(--border)]">{note}</p>}
