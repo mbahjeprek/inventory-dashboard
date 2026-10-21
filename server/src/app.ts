@@ -160,6 +160,8 @@ function requiredPerms(req: express.Request): Need {
   if (is(/^\/auth\//) || is(/^\/karyawan\/pick$/) || is(/^\/alat-berat\/pick$/)) return null;
   // Stok Opname: each route checks the opname's own module (view / opname / approve) and estate.
   if (is(/^\/stock-opname(\/|$)/)) return null;
+  // Log Stok Opname: the route lists the modules / estates whose opnames the account may see.
+  if (is(/^\/stock-opname-log$/)) return null;
   // Pinjaman antar estate: each route checks the loan's module (view / input) and estates itself.
   if (is(/^\/pinjaman(\/|$)/)) return null;
   // Perbandingan antar estate: the route checks the module's Lihat and the estates itself.
@@ -5936,6 +5938,34 @@ app.post("/api/stock-opname/:id/submit", async (req, res) => {
   if (!done) return;
   await logOpname(req, done.o, "Ajukan Stok Opname", `Dihitung ${done.c.dihitung} dari ${done.c.total} item; ${done.c.selisih} item selisih`);
   res.json({ success: true });
+});
+
+// Log Stok Opname: every opname step (buat, tim, selesai hitung, ajukan, kembalikan, setujui, batal, hapus)
+// and the koreksi stok it booked, across the modules / estates the account may see the opnames of.
+// opname = one opname's history.
+app.get("/api/stock-opname-log", async (req, res) => {
+  const q = req.query as Record<string, string>;
+  const u = req.user!;
+  const mods = OPNAME_MODULES.filter((m) => opnameCan(u, m, "view") && (!q.module || m === q.module)).map((m) => OPNAME_LOG_MODULE[m]);
+  const params: any = { mods, estates: listEstates(u, q.estate ?? "", "") };
+  const cond = ["module = ANY(@mods::text[])", "estate = ANY(@estates::text[])", "(objek LIKE 'Stok Opname #%' OR detail ~ 'Opname #[0-9]+')"];
+  if (q.opname) {
+    cond.push("(objek ~ @re OR detail ~ @re)");
+    params.re = `Opname #${Number(q.opname) || 0}([^0-9]|$)`;
+  }
+  if (q.search) {
+    cond.push("(objek ILIKE @s OR detail ILIKE @s OR nama ILIKE @s OR aksi ILIKE @s)");
+    params.s = `%${q.search}%`;
+  }
+  const where = "WHERE " + cond.join(" AND ");
+  const limit = Math.min(parseInt(q.pageSize) || 50, 200);
+  const offset = (Math.max(parseInt(q.page) || 1, 1) - 1) * limit;
+  const total = (await queryOne<{ c: number }>(`SELECT COUNT(*)::int c FROM activity_log ${where}`, params))!.c;
+  const data = await queryMany(
+    `SELECT id, created_at, module, estate, aksi, objek, detail, nama, username FROM activity_log ${where} ORDER BY created_at DESC, id DESC LIMIT @limit OFFSET @offset`,
+    { ...params, limit, offset }
+  );
+  res.json({ data, total });
 });
 
 // Tim / saksi / pemegang of a DRAFT (filled or corrected later; opnames from before had none).

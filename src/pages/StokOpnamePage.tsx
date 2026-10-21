@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { OpnameLogButton } from "../components/OpnameLogButton";
 import { useNavigate } from "react-router-dom";
 import { ClipboardCheck, Plus, ChevronLeft, ChevronRight, X, Lock } from "lucide-react";
 import { api, errorText, type OpnameListRow, type OpnameModule } from "../lib/api";
@@ -50,6 +51,8 @@ export function StokOpnamePage() {
           <h1 className="text-xl font-semibold text-[var(--text-primary)]">Stok Opname</h1>
           <p className="text-sm text-[var(--text-secondary)]">Hitung fisik per lokasi, ajukan, lalu stok dikoreksi setelah disetujui</p>
         </div>
+        <div className="flex flex-wrap items-center gap-2">
+        <OpnameLogButton module={module || undefined} estate={estate || undefined} />
         {createModules.length > 0 && (
           <button
             onClick={() => setCreating(true)}
@@ -58,6 +61,7 @@ export function StokOpnamePage() {
             <Plus size={16} /> Buat Opname
           </button>
         )}
+        </div>
       </div>
 
       <div className="flex flex-wrap items-center gap-3 bg-[var(--bg-card)] border border-[var(--border)] rounded-lg p-3">

@@ -31,6 +31,7 @@ import { OpnameStatusBadge } from "../components/OpnameStatusBadge";
 import { canOpname } from "../lib/access";
 import { StatCard } from "../components/StatCard";
 import { ExportButtons } from "../components/ExportButtons";
+import { OpnameLogButton } from "../components/OpnameLogButton";
 import { downloadOpnameSheet, readOpnameUpload } from "../lib/opnameExcel";
 import { ItemPickerModal } from "../components/ItemPickerModal";
 import type { TableReport } from "../lib/printTable";
@@ -457,6 +458,7 @@ export function StokOpnameDetailPage() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <OpnameLogButton opnameId={opname.id} />
           <ExportButtons total={filtered.length} buildReport={buildReport} fileName={`stok-opname-${opname.id}`} />
           {canCount && (
             <>

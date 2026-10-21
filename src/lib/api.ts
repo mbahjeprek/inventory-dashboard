@@ -1452,6 +1452,10 @@ export const api = {
     req<{ data: OpnameListRow[]; total: number; page: number; pageSize: number }>(
       `/api/stock-opname?${new URLSearchParams(params as any)}`
     ),
+  opnameLog: (p: { module?: string; estate?: string; opname?: number; search?: string; page?: number }) =>
+    req<{ data: { id: number; created_at: string; module: string; estate: string; aksi: string; objek: string; detail: string; nama: string; username: string }[]; total: number }>(
+      `/api/stock-opname-log?${new URLSearchParams(Object.entries(p).filter(([, v]) => v !== undefined && v !== "").map(([k, v]) => [k, String(v)]))}`
+    ),
   opnameInfo: (id: number, payload: { tim: string; saksi: string; pemegang: string }) =>
     req<{ success: boolean }>(`/api/stock-opname/${id}/info`, { method: "PUT", body: JSON.stringify(payload) }),
   opnameBuka: (id: number) => req<{ success: boolean }>(`/api/stock-opname/${id}/buka`, { method: "POST", body: "{}" }),
