@@ -18,7 +18,8 @@ import {
   XCircle,
 } from "lucide-react";
 import { api, type Item, type PickerItem, type Summary } from "../lib/api";
-import { TransactionModal } from "../components/TransactionModal";
+import { QuickInOut } from "../components/QuickInOut";
+import { TransactionModal, type TransactionPreset } from "../components/TransactionModal";
 import { EditItemModal } from "../components/EditItemModal";
 import { ItemPickerModal } from "../components/ItemPickerModal";
 import { StatCard } from "../components/StatCard";
@@ -123,6 +124,12 @@ export function InventoryPage() {
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [selectedItem, setSelectedItem] = useState<PickerItem | null>(null);
+  const [txPreset, setTxPreset] = useState<TransactionPreset | undefined>(undefined);
+  // The row's + Masuk / − Keluar: the Transaksi form straight on that barang.
+  const openTx = (item: PickerItem, mode: "IN" | "OUT") => {
+    setTxPreset({ mode });
+    setSelectedItem(item);
+  };
   const [tab, setTab] = useInventoryTab();
   // Bumped after a new transaction so an open Stock In/Out tab reloads.
   const [historyKey, setHistoryKey] = useState(0);
@@ -298,7 +305,7 @@ export function InventoryPage() {
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Cari kode, nama, atau satuan barang..."
+                placeholder="Cari barang, lalu klik + Masuk / − Keluar di barisnya..."
                 className="w-full pl-9 pr-3 py-2 text-sm rounded-md border border-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-blue-border)]"
               />
             </div>
@@ -374,6 +381,7 @@ export function InventoryPage() {
                         </td>
                         <td className="px-4 py-2.5 text-right">
                           <div className="inline-flex gap-1.5">
+                            {canInput && <QuickInOut onIn={() => openTx(item, "IN")} onOut={() => openTx(item, "OUT")} />}
                             <Link
                               to={`/inventory/${item.id}`}
                               title="Riwayat pergerakan"
@@ -453,9 +461,11 @@ export function InventoryPage() {
       {selectedItem && (
         <TransactionModal
           item={selectedItem}
-          onClose={() => setSelectedItem(null)}
+          preset={txPreset}
+          onClose={() => (setSelectedItem(null), setTxPreset(undefined))}
           onSuccess={() => {
             setSelectedItem(null);
+            setTxPreset(undefined);
             setHistoryKey((k) => k + 1);
             api.summary().then(setSummary);
             load();

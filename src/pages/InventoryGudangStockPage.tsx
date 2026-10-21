@@ -26,7 +26,8 @@ import { fetchAllRows, type TableReport } from "../lib/printTable";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { EditGudangStockModal } from "../components/EditGudangStockModal";
 import { ItemPickerModal } from "../components/ItemPickerModal";
-import { TransactionModal } from "../components/TransactionModal";
+import { QuickInOut } from "../components/QuickInOut";
+import { TransactionModal, type TransactionPreset } from "../components/TransactionModal";
 import { useAuth } from "../context/AuthContext";
 import { can } from "../lib/access";
 import { InventoryTabs, useInventoryTab } from "../components/InventoryTabs";
@@ -125,6 +126,12 @@ export function InventoryGudangStockPage({ gudang }: { gudang: string }) {
   const [showBatch, setShowBatch] = useState(false);
   const [batchNotice, setBatchNotice] = useState("");
   const [selectedItem, setSelectedItem] = useState<PickerItem | null>(null);
+  const [txPreset, setTxPreset] = useState<TransactionPreset | undefined>(undefined);
+  // The row's + Masuk / − Keluar: the Transaksi form straight on that barang.
+  const openTx = (item: PickerItem, mode: "IN" | "OUT") => {
+    setTxPreset({ mode });
+    setSelectedItem(item);
+  };
   const [tab, setTab] = useInventoryTab();
   // Bumped after a new transaction so an open Stock In/Out tab reloads.
   const [historyKey, setHistoryKey] = useState(0);
@@ -307,7 +314,7 @@ export function InventoryGudangStockPage({ gudang }: { gudang: string }) {
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Cari kode, nama, atau satuan barang..."
+                placeholder="Cari barang, lalu klik + Masuk / − Keluar di barisnya..."
                 className="w-full pl-9 pr-3 py-2 text-sm rounded-md border border-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-blue-border)]"
               />
             </div>
@@ -378,6 +385,7 @@ export function InventoryGudangStockPage({ gudang }: { gudang: string }) {
                         {showActions && (
                           <td className="px-4 py-2.5 text-right">
                             <div className="inline-flex gap-1.5">
+                              {canInput && <QuickInOut onIn={() => openTx(item, "IN")} onOut={() => openTx(item, "OUT")} />}
                               <ItemRiwayatButton scope={{ kind: "gudang", name: gudang }} item={{ kode: item.kode, nama: item.nama, satuan: item.satuan, stok: item.stock_tersedia }} />
                               {canEdit && (<button
                                 onClick={() => setEditingItem(item)}
@@ -460,9 +468,11 @@ export function InventoryGudangStockPage({ gudang }: { gudang: string }) {
         <TransactionModal
           item={selectedItem}
           scope={{ kind: "gudang", name: gudang }}
-          onClose={() => setSelectedItem(null)}
+          preset={txPreset}
+          onClose={() => (setSelectedItem(null), setTxPreset(undefined))}
           onSuccess={() => {
             setSelectedItem(null);
+            setTxPreset(undefined);
             setHistoryKey((k) => k + 1);
             load();
             loadSummary();

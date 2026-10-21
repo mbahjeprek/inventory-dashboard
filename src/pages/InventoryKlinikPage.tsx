@@ -27,6 +27,7 @@ import { fetchAllRows, type TableReport } from "../lib/printTable";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { EditKlinikStockModal } from "../components/EditKlinikStockModal";
 import { ItemPickerModal } from "../components/ItemPickerModal";
+import { QuickInOut } from "../components/QuickInOut";
 import { TransactionModal, type TransactionPreset } from "../components/TransactionModal";
 import { kemasanText } from "../lib/kemasan";
 import { useAuth } from "../context/AuthContext";
@@ -367,7 +368,7 @@ export function InventoryKlinikPage({ klinik }: { klinik: string }) {
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Cari kode, nama, jenis atau kegunaan obat..."
+                placeholder="Cari obat, lalu klik + Masuk / − Keluar di barisnya..."
                 className="w-full pl-9 pr-3 py-2 text-sm rounded-md border border-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-blue-border)]"
               />
             </div>
@@ -496,6 +497,7 @@ export function InventoryKlinikPage({ klinik }: { klinik: string }) {
                           {showActions && (
                             <td className="px-4 py-2.5 text-right">
                               <div className="inline-flex gap-1.5">
+                                {canInput && <QuickInOut onIn={() => openTx(item, { mode: "IN" })} onOut={() => openTx(item, { mode: "OUT" })} />}
                                 <ItemRiwayatButton scope={{ kind: "klinik", name: klinik }} item={{ kode: item.kode, nama: item.nama, satuan: item.satuan, stok: item.stock_tersedia }} />
                                 {canTx && (
                                   <button
