@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, Banknote, Boxes, ChevronRight, ChevronsDownUp, ChevronsUpDown, ClipboardCheck, FileText, HandCoins, LayoutDashboard, ListPlus, Lock, Package, Receipt, PackageX, Pencil, Plus, Search, ShoppingBasket, Trash2, Truck, UserPlus, Users, X } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, Banknote, Boxes, ChevronRight, ChevronsDownUp, ChevronsUpDown, CalendarClock, ClipboardCheck, FileText, HandCoins, LayoutDashboard, ListPlus, Lock, Package, Receipt, PackageX, Pencil, Plus, Search, ShoppingBasket, Trash2, Truck, UserPlus, Users, X } from "lucide-react";
 import {
   api,
   errorText,
@@ -148,6 +148,7 @@ export function KoperasiPage() {
     setModal("");
     setReload((n) => n + 1);
   };
+  const expCard = <ExpCard reload={reload} onLihat={() => (setTab("stok"), setFokusExp((n) => n + 1))} />;
 
   return (
     <div className="space-y-4">
@@ -194,14 +195,9 @@ export function KoperasiPage() {
 
       <TunggakanBanner reload={reload} canBayar={canBayar} onChanged={done} />
       <RusakMenungguBanner reload={reload} canApprove={can(user, "koperasi.approve")} onLihat={() => setTab("beli")} />
-      <ExpBanner
-        reload={reload}
-        onLihat={() => (setTab("stok"), setFokusExp((n) => n + 1))}
-        onCatat={canInput ? () => (setRusakAlasan("EXPIRED"), setModal("rusak")) : undefined}
-      />
 
       {ringkasan && tab !== "dashboard" && (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
           <StatCard
             label={`Stock Out ${periodeLabel(periode)}`}
             value={rp(ringkasan.jual)}
@@ -232,6 +228,7 @@ export function KoperasiPage() {
             title="Buka Stok Barang"
             footer={<span className={`text-[11px] ${ringkasan.menipis ? "text-[var(--accent-red)]" : "text-[var(--text-muted)]"}`}>{ringkasan.menipis} barang stok menipis / habis · harga beli</span>}
           />
+          {expCard}
         </div>
       )}
 
@@ -249,7 +246,7 @@ export function KoperasiPage() {
         ))}
       </div>
 
-      {tab === "dashboard" && <KoperasiDashboard periode={periode} reload={reload} />}
+      {tab === "dashboard" && <KoperasiDashboard periode={periode} reload={reload} extraCard={expCard} />}
       {tab === "jual" && <TxTable jenis="JUAL" periode={periode} reload={reload} canEdit={canEdit} onChanged={done} />}
       {tab === "rekap" && <RekapTab periode={periode} reload={reload} canBayar={canBayar} onChanged={done} />}
       {tab === "stok" && <StokTab reload={reload} canEdit={canEdit} onChanged={done} fokusExp={fokusExp} />}
@@ -2224,8 +2221,8 @@ const expText = (b: KopBarang) => {
   return d < 0 ? `expired ${-d} hari lalu` : d === 0 ? "expired hari ini" : `${d} hari lagi`;
 };
 
-// Reminder at the top of the Koperasi page: barang on hand that are expired or expire within 30 days.
-function ExpBanner({ reload, onLihat, onCatat }: { reload: number; onLihat: () => void; onCatat?: () => void }) {
+// Card of the barang on hand that are expired or expire within 30 days (like Klinik's); opens that list.
+function ExpCard({ reload, onLihat }: { reload: number; onLihat: () => void }) {
   const [rows, setRows] = useState<KopBarang[]>([]);
   useEffect(() => {
     api
@@ -2235,29 +2232,21 @@ function ExpBanner({ reload, onLihat, onCatat }: { reload: number; onLihat: () =
   }, [reload]);
   const lewat = rows.filter((b) => expPerlu(b) === "lewat");
   const dekat = rows.filter((b) => expPerlu(b) === "dekat");
-  if (!lewat.length && !dekat.length) return null;
-  const nama = [...lewat, ...dekat].slice(0, 4).map((b) => b.nama).join(", ");
+  const n = lewat.length + dekat.length;
   return (
-    <div className={`flex flex-wrap items-center gap-3 w-full min-w-0 rounded-lg border px-4 py-3 text-sm ${lewat.length ? "border-[var(--accent-red)] bg-[var(--accent-red-bg)] text-[var(--accent-red)]" : "border-[#f5b400] bg-[#fff7e0] text-[#7a5200]"}`}>
-      <AlertTriangle size={20} className="shrink-0" />
-      <p className="flex-1 min-w-[220px]">
-        {lewat.length > 0 && <b>{lewat.length} barang sudah expired</b>}
-        {lewat.length > 0 && dekat.length > 0 && " · "}
-        {dekat.length > 0 && <b>{dekat.length} barang expired dalam {EXP_HARI} hari</b>}
-        <span className="block text-xs opacity-90">
-          {nama}
-          {lewat.length + dekat.length > 4 ? ", ..." : ""}. Tarik dari rak, foto, lalu Catat expired (diperiksa orang kedua sebelum dimusnahkan), atau perbarui tanggalnya bila stoknya sudah baru.
+    <StatCard
+      label={`Expired / ≤ ${EXP_HARI} Hari`}
+      value={n.toLocaleString("id-ID")}
+      icon={CalendarClock}
+      tone={lewat.length ? "red" : dekat.length ? "amber" : "green"}
+      onClick={onLihat}
+      title="Lihat barang expired / segera expired"
+      footer={
+        <span className={`text-[11px] line-clamp-1 ${lewat.length ? "text-[var(--accent-red)]" : "text-[var(--text-muted)]"}`}>
+          {n ? `${lewat.length} sudah expired · ${dekat.length} segera` : "tidak ada yang expired"}
         </span>
-      </p>
-      {onCatat && lewat.length > 0 && (
-        <button onClick={onCatat} className="px-3 py-1.5 rounded-md text-xs font-medium border border-[var(--accent-red)] bg-white hover:opacity-90">
-          Catat expired
-        </button>
-      )}
-      <button onClick={onLihat} className={`px-3 py-1.5 rounded-md text-xs font-medium text-white hover:opacity-90 ${lewat.length ? "bg-[var(--accent-red)]" : "bg-[#b07a00]"}`}>
-        Lihat barang
-      </button>
-    </div>
+      }
+    />
   );
 }
 

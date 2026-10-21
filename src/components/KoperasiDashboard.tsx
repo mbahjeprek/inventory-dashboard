@@ -51,7 +51,7 @@ function Tip({ lines }: { lines: ReactNode[] }) {
   return <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-md shadow px-3 py-2 text-xs space-y-0.5">{lines}</div>;
 }
 
-export function KoperasiDashboard({ periode, reload }: { periode: string; reload: number }) {
+export function KoperasiDashboard({ periode, reload, extraCard }: { periode: string; reload: number; extraCard?: ReactNode }) {
   // A preset counts back from the periode picked on the page; "custom" is any dari..sampai months.
   const [range, setRange] = useState<number | "custom">(1);
   const [custom, setCustom] = useState({ dari: periode, sampai: periode });
@@ -229,7 +229,7 @@ export function KoperasiDashboard({ periode, reload }: { periode: string; reload
         !error && <p className="text-sm text-[var(--text-muted)]">Memuat dashboard...</p>
       ) : (
         <>
-          <div className="grid grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5 gap-3">
+          <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
             <StatCard label="Total penjualan" value={rp(k.jual)} icon={ShoppingBasket} tone="blue" footer={<span className="text-[11px] text-[var(--text-muted)]">{k.jenis_barang} jenis barang terjual</span>} />
             <StatCard label="Potong gaji" value={rp(k.potong_gaji)} icon={HandCoins} tone="amber" footer={<span className="text-[11px] text-[var(--text-muted)]">Instansi {rp(k.instansi)}</span>} />
             <StatCard
@@ -241,6 +241,7 @@ export function KoperasiDashboard({ periode, reload }: { periode: string; reload
             />
             <StatCard label="Jumlah bon" value={k.bon.toLocaleString("id-ID")} icon={Receipt} tone="blue" footer={<span className="text-[11px] text-[var(--text-muted)]">rata-rata {rp(k.bon ? k.jual / k.bon : 0)} / bon</span>} />
             <StatCard label="Stock In barang" value={rp(k.beli)} icon={Truck} tone="green" footer={<span className="text-[11px] text-[var(--text-muted)]">belanja stok di periode ini</span>} />
+            {extraCard}
           </div>
 
           {d.dekatLimit.length > 0 && (
