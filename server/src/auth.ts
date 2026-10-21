@@ -45,6 +45,8 @@ export const ALL_PERMS: string[] = [
   "koperasi.edit",
   // Pelunasan: mark a karyawan's bill paid / not paid (HR only, not the koperasi admin).
   "koperasi.pelunasan",
+  // Approve: check (Setujui / Tolak) a Barang Rusak / Expired entered by someone else.
+  "koperasi.approve",
 ];
 
 // Session: the token only identifies the account; estates and perms are re-read from the users

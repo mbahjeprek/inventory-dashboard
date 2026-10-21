@@ -207,6 +207,8 @@ function requiredPerms(req: express.Request): Need {
     if (m === "GET") return ["koperasi.view"];
     // Pelunasan (record / tandai lunas / delete a payment): its own tick, given to HR only.
     if (is(/^\/koperasi\/bayar(\/|$)/)) return ["koperasi.pelunasan"];
+    // Barang Rusak / Expired: checked (Setujui / Tolak) by a second account with Approve Koperasi.
+    if (is(/^\/koperasi\/rusak\/\d+\/periksa$/)) return ["koperasi.approve"];
     const input =
       (m === "POST" && is(/^\/koperasi\/((jual|beli|rusak)(\/batch)?|opname)$/)) || (m === "PUT" && is(/^\/koperasi\/opname\/\d+\/lines$/));
     return input ? ["koperasi.input"] : ["koperasi.edit"];
@@ -7740,7 +7742,7 @@ const KOP_ANGGOTA_COLS = `a.kode, a.jenis, COALESCE(NULLIF(k.nama, ''), a.nama) 
 const KOP_ANGGOTA_JOIN = "LEFT JOIN karyawan k ON UPPER(REPLACE(k.nik, ' ', '')) = a.kode";
 // The April 2023 rekap (sumber IMPORT-REKAP2023) is history from before the ledger: it doesn't move the stock.
 // KOREKSI (stok opname / koreksi stok) carries a signed qty: + found, - missing.
-const kopStokSql = `SUM(CASE WHEN t.sumber = 'IMPORT-REKAP2023' THEN 0 WHEN t.jenis IN ('BELI', 'KOREKSI') THEN t.qty ELSE -t.qty END)`;
+const kopStokSql = `SUM(CASE WHEN t.sumber = 'IMPORT-REKAP2023' OR t.status = 'DITOLAK' THEN 0 WHEN t.jenis IN ('BELI', 'KOREKSI') THEN t.qty ELSE -t.qty END)`;
 
 app.use("/api/koperasi", (req, res, next) => {
   if (!estateAllowed(req.user!, KOPERASI)) return res.status(403).json({ error: "Koperasi hanya untuk akun estate Nilam" });
@@ -8104,25 +8106,27 @@ app.get("/api/koperasi/limit/:kode", async (req, res) => {
 
 // ---- Transaksi ----
 app.get("/api/koperasi/tx", async (req, res) => {
-  const { jenis = "JUAL", periode = "", anggota = "", barang = "", search = "", page = "1", pageSize = "100" } = req.query as Record<string, string>;
+  const { jenis = "JUAL", periode = "", anggota = "", barang = "", status = "", search = "", page = "1", pageSize = "100" } = req.query as Record<string, string>;
   const conditions = ["t.koperasi = @k"];
   if (["JUAL", "BELI", "RUSAK", "KOREKSI"].includes(jenis)) conditions.push("t.jenis = @jenis");
   if (isPeriode(periode)) conditions.push("t.periode = @periode");
   if (anggota) conditions.push("t.anggota_kode = @anggota");
   if (barang) conditions.push("t.barang_kode = @barang");
+  if (["MENUNGGU", "DISETUJUI", "DITOLAK"].includes(status)) conditions.push(status === "DISETUJUI" ? "COALESCE(t.status, 'DISETUJUI') = @status" : "t.status = @status");
   if (search) conditions.push("(b.nama ILIKE @like OR t.barang_kode ILIKE @like OR t.anggota_kode ILIKE @like OR a.nama ILIKE @like OR k.nama ILIKE @like OR t.no_po ILIKE @like OR t.keterangan ILIKE @like)");
   const where = `WHERE ${conditions.join(" AND ")}`;
   const from = `FROM koperasi_tx t JOIN koperasi_barang b ON b.kode = t.barang_kode
     LEFT JOIN koperasi_anggota a ON a.kode = t.anggota_kode LEFT JOIN karyawan k ON UPPER(REPLACE(k.nik, ' ', '')) = a.kode`;
-  const params = { k: KOPERASI, jenis, periode, anggota, barang, like: `%${search}%` };
+  const params = { k: KOPERASI, jenis, periode, anggota, barang, status, like: `%${search}%` };
   const sum = await queryOne<{ n: number; total: number; qty: number }>(`SELECT COUNT(*)::int n, COALESCE(SUM(t.total), 0)::float8 total, COALESCE(SUM(t.qty), 0)::float8 qty ${from} ${where}`, params);
   const limit = Math.min(parseInt(pageSize) || 100, 500);
   const offset = (Math.max(parseInt(page) || 1, 1) - 1) * limit;
   const data = await queryMany(
     `SELECT t.id, t.jenis, t.tanggal_iso, t.periode, t.bon, t.barang_kode, b.nama AS barang_nama, b.satuan, t.qty, t.harga, t.total, t.anggota_kode,
             COALESCE(NULLIF(k.nama, ''), a.nama) AS anggota_nama, a.jenis AS anggota_jenis, t.bayar, t.no_po, t.keterangan, t.evidence_id, t.sumber, t.created_at,
-            COALESCE(u.nama, u.username, '') AS oleh
-       ${from} LEFT JOIN users u ON u.id = t.user_id ${where}
+            COALESCE(u.nama, u.username, '') AS oleh, t.user_id, t.alasan, t.status, t.diperiksa_at, t.diperiksa_catatan,
+            COALESCE(p.nama, p.username) AS diperiksa_nama
+       ${from} LEFT JOIN users u ON u.id = t.user_id LEFT JOIN users p ON p.id = t.diperiksa_oleh ${where}
       ORDER BY t.tanggal_iso DESC, t.id DESC LIMIT @limit OFFSET @offset`,
     { ...params, limit, offset }
   );
@@ -8503,9 +8507,12 @@ app.post("/api/koperasi/beli/batch", async (req, res) => {
 app.post("/api/koperasi/rusak", async (req, res) => {
   const b = req.body ?? {};
   if (!isIsoDate(b.tanggal) || b.tanggal > jakartaToday()) return res.status(400).json({ error: "Tanggal tidak valid (tidak boleh setelah hari ini)" });
+  const alasan = b.alasan === "EXPIRED" ? "EXPIRED" : b.alasan === "RUSAK" ? "RUSAK" : "";
+  if (!alasan) return res.status(400).json({ error: "Pilih alasannya: Expired atau Rusak" });
   const ket = String(b.keterangan ?? "").trim();
-  if (!ket) return res.status(400).json({ error: "Tulis kenapa barangnya rusak / dibuang" });
-  const evidence = b.evidence_id ? await claimEvidence(req, res) : null;
+  if (!ket) return res.status(400).json({ error: "Tulis keterangannya (mis. tanggal expired di kemasan, pecah, digigit tikus)" });
+  // The photo of the barang (with its tanggal expired / damage) is what the pemeriksa checks it against.
+  const evidence = await claimEvidence(req, res);
   if (evidence === undefined) return;
   const result = await withTransaction(async (client) => {
     const v = await kopLines([{ barang_kode: b.barang_kode, qty: b.qty, harga: 0 }], client);
@@ -8514,15 +8521,49 @@ app.post("/api/koperasi/rusak", async (req, res) => {
     const stok = (await kopStok([l.barang_kode], client)).get(l.barang_kode) ?? 0;
     if (l.lacak_stok && stok + 1e-9 < l.qty) return { error: `Stok ${l.nama} tinggal ${kopQty(stok)}` };
     await execute(
-      `INSERT INTO koperasi_tx (koperasi, jenis, tanggal_iso, periode, barang_kode, qty, keterangan, evidence_id, user_id)
-       VALUES (@k, 'RUSAK', @tanggal, @periode, @kode, @qty, @ket, @evidence::uuid, @uid)`,
-      { k: KOPERASI, tanggal: b.tanggal, periode: kopMonth(b.tanggal), kode: l.barang_kode, qty: l.qty, ket, evidence, uid: req.user!.id },
+      `INSERT INTO koperasi_tx (koperasi, jenis, tanggal_iso, periode, barang_kode, qty, harga, total, keterangan, evidence_id, user_id, alasan, status)
+       SELECT @k, 'RUSAK', @tanggal, @periode, @kode, @qty, harga_beli, harga_beli * @qty, @ket, @evidence::uuid, @uid, @alasan, 'MENUNGGU' FROM koperasi_barang WHERE kode = @kode`,
+      { k: KOPERASI, tanggal: b.tanggal, periode: kopMonth(b.tanggal), kode: l.barang_kode, qty: l.qty, ket, evidence, uid: req.user!.id, alasan },
       client
     );
     return { l };
   });
   if ("error" in result) return res.status(400).json(result);
-  await logActivity(req, { module: "KOPERASI", estate: KOPERASI, aksi: "Barang Rusak", objek: `${result.l.barang_kode} ${result.l.nama}`, detail: `${kopQty(result.l.qty)} · ${ket}` });
+  await logActivity(req, { module: "KOPERASI", estate: KOPERASI, aksi: alasan === "EXPIRED" ? "Barang Expired" : "Barang Rusak", objek: `${result.l.barang_kode} ${result.l.nama}`, detail: `${kopQty(result.l.qty)} · ${ket} · menunggu pemeriksaan` });
+  res.json({ success: true });
+});
+
+// Pemeriksaan of a Barang Rusak / Expired by a second account: Setujui (stays out of stock, goes on the
+// Berita Acara) or Tolak (catatan required; the stock comes back). Never by the account that entered it.
+app.put("/api/koperasi/rusak/:id/periksa", async (req, res) => {
+  const setuju = req.body?.setuju === true;
+  const catatan = String(req.body?.catatan ?? "").trim();
+  if (!setuju && !catatan) return res.status(400).json({ error: "Tulis alasan penolakannya" });
+  const result = await withTransaction(async (client) => {
+    const t = await queryOne(
+      "SELECT t.*, b.nama AS barang_nama FROM koperasi_tx t JOIN koperasi_barang b ON b.kode = t.barang_kode WHERE t.id = @id AND t.koperasi = @k AND t.jenis = 'RUSAK' FOR UPDATE OF t",
+      { id: req.params.id, k: KOPERASI },
+      client
+    );
+    if (!t) return { status: 404, error: "Barang rusak tidak ditemukan" };
+    if (t.status !== "MENUNGGU") return { status: 400, error: "Sudah diperiksa" };
+    if (t.user_id === req.user!.id) return { status: 403, error: "Yang memeriksa harus orang lain, bukan yang menginput" };
+    await execute(
+      "UPDATE koperasi_tx SET status = @status, diperiksa_oleh = @uid, diperiksa_at = now(), diperiksa_catatan = @catatan WHERE id = @id",
+      { status: setuju ? "DISETUJUI" : "DITOLAK", uid: req.user!.id, catatan, id: t.id },
+      client
+    );
+    return { t };
+  });
+  if ("error" in result) return res.status(result.status ?? 400).json({ error: result.error });
+  const t = result.t;
+  await logActivity(req, {
+    module: "KOPERASI",
+    estate: KOPERASI,
+    aksi: `${setuju ? "Setujui" : "Tolak"} Barang ${t.alasan === "EXPIRED" ? "Expired" : "Rusak"}`,
+    objek: `${t.barang_kode} ${t.barang_nama}`,
+    detail: `${t.tanggal_iso} · ${kopQty(t.qty)}${catatan ? ` · ${catatan}` : ""}`,
+  });
   res.json({ success: true });
 });
 
@@ -8540,6 +8581,8 @@ app.delete("/api/koperasi/tx/:id", async (req, res) => {
   const result = await withTransaction(async (client) => {
     // A koreksi from a stok opname belongs to that opname: changing it here would leave the opname showing a selisih nobody booked.
     if (t.opname_id) return { error: `Koreksi ini dari Stok Opname #${t.opname_id}; ubah lewat opname itu` };
+    // An approved Barang Rusak / Expired is on a Berita Acara: only a Super User takes it back.
+    if (t.jenis === "RUSAK" && t.status === "DISETUJUI" && req.user!.role !== "superuser") return { error: "Barang rusak ini sudah disetujui pemeriksa; hanya Super User yang bisa menghapusnya" };
     // Stock that came in (Stock In, or a koreksi that added) can't be taken back once it was sold on.
     if ((t.jenis === "BELI" || (t.jenis === "KOREKSI" && Number(t.qty) > 0)) && t.lacak_stok) {
       await queryOne("SELECT kode FROM koperasi_barang WHERE kode = @kode FOR UPDATE", { kode: t.barang_kode }, client);

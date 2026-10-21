@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, Banknote, Boxes, ChevronRight, ChevronsDownUp, ChevronsUpDown, ClipboardCheck, HandCoins, LayoutDashboard, ListPlus, Lock, Package, Receipt, PackageX, Pencil, Plus, Search, ShoppingBasket, Trash2, Truck, UserPlus, Users, X } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, Banknote, Boxes, ChevronRight, ChevronsDownUp, ChevronsUpDown, ClipboardCheck, FileText, HandCoins, LayoutDashboard, ListPlus, Lock, Package, Receipt, PackageX, Pencil, Plus, Search, ShoppingBasket, Trash2, Truck, UserPlus, Users, X } from "lucide-react";
 import {
   api,
   errorText,
@@ -19,7 +19,8 @@ import { can } from "../lib/access";
 import { StatCard } from "../components/StatCard";
 import { ExportButtons } from "../components/ExportButtons";
 import { ConfirmDialog } from "../components/ConfirmDialog";
-import { EvidenceInput, EvidenceLink } from "../components/EvidenceInput";
+import { EvidenceInput, EvidenceLink, useEvidenceEnabled } from "../components/EvidenceInput";
+import { printTable } from "../lib/printTable";
 import { fmtQty, isoDisplay, localToday } from "../lib/opname";
 import { tanggalWaktu } from "../lib/datetime";
 import { KopBeliBatchModal, KopJualBatchModal } from "../components/KoperasiBatchModal";
@@ -129,6 +130,7 @@ export function KoperasiPage() {
   // Marking bills paid / not paid is HR's (its own tick), not the koperasi admin's.
   const canBayar = can(user, "koperasi.pelunasan");
   const [tab, setTab] = useState<Tab>("dashboard");
+  const [rusakAlasan, setRusakAlasan] = useState<"EXPIRED" | "RUSAK">("RUSAK");
   const [fokusExp, setFokusExp] = useState(0);
   const [periodes, setPeriodes] = useState<string[]>([]);
   const [periode, setPeriode] = useState(localToday().slice(0, 7));
@@ -156,8 +158,8 @@ export function KoperasiPage() {
         </div>
         {canInput && (
           <div className="flex flex-wrap gap-2">
-            <button onClick={() => setModal("rusak")} className={btnOutline}>
-              <PackageX size={16} /> Barang Rusak
+            <button onClick={() => (setRusakAlasan("RUSAK"), setModal("rusak"))} className={btnOutline}>
+              <PackageX size={16} /> Barang Rusak / Expired
             </button>
             <button onClick={() => setModal("beli")} className={btnOutline}>
               <Truck size={16} /> Input Stock In
@@ -191,7 +193,12 @@ export function KoperasiPage() {
       </div>
 
       <TunggakanBanner reload={reload} canBayar={canBayar} onChanged={done} />
-      <ExpBanner reload={reload} onLihat={() => (setTab("stok"), setFokusExp((n) => n + 1))} />
+      <RusakMenungguBanner reload={reload} canApprove={can(user, "koperasi.approve")} onLihat={() => setTab("beli")} />
+      <ExpBanner
+        reload={reload}
+        onLihat={() => (setTab("stok"), setFokusExp((n) => n + 1))}
+        onCatat={canInput ? () => (setRusakAlasan("EXPIRED"), setModal("rusak")) : undefined}
+      />
 
       {ringkasan && tab !== "dashboard" && (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -250,7 +257,10 @@ export function KoperasiPage() {
       {tab === "beli" && (
         <div className="space-y-4">
           <TxTable jenis="BELI" periode={periode} reload={reload} canEdit={canEdit} onChanged={done} />
-          <h2 className="text-sm font-semibold text-[var(--text-primary)] pt-2">Barang Rusak / Dibuang</h2>
+          <h2 className="text-sm font-semibold text-[var(--text-primary)] pt-2">Barang Rusak / Expired</h2>
+          <p className="text-xs text-[var(--text-muted)] -mt-2">
+            Diinput dengan foto, lalu diperiksa orang kedua (hak Approve Koperasi) yang mencocokkan barang fisiknya. Yang disetujui masuk Berita Acara Pemusnahan; pemusnahan disaksikan minimal 2 orang.
+          </p>
           <TxTable jenis="RUSAK" periode={periode} reload={reload} canEdit={canEdit} onChanged={done} />
         </div>
       )}
@@ -258,7 +268,7 @@ export function KoperasiPage() {
 
       {modal === "jual" && <JualModal onClose={() => setModal("")} onSuccess={done} />}
       {modal === "beli" && <BeliModal onClose={() => setModal("")} onSuccess={done} />}
-      {modal === "rusak" && <RusakModal onClose={() => setModal("")} onSuccess={done} />}
+      {modal === "rusak" && <RusakModal alasanAwal={rusakAlasan} onClose={() => setModal("")} onSuccess={done} />}
       {modal === "jualBatch" && <KopJualBatchModal onClose={() => setModal("")} onSuccess={done} />}
       {modal === "beliBatch" && <KopBeliBatchModal onClose={() => setModal("")} onSuccess={done} />}
     </div>
@@ -290,11 +300,13 @@ function TxTable({
   const [loading, setLoading] = useState(true);
   const [hapus, setHapus] = useState<{ tx: KopTx; bon: boolean } | null>(null);
   const [edit, setEdit] = useState<KopTx | null>(null);
+  const [periksa, setPeriksa] = useState<KopTx | null>(null);
   // A month whose rekap went to HRD (from the 1st) is locked for Stock Out changes, except for HR / Super User.
   const { user } = useAuth();
   const bukaKunci = user?.role === "superuser" || can(user, "koperasi.pelunasan");
   const bulanIni = localToday().slice(0, 7);
   const terkunci = (t: KopTx) => t.jenis === "JUAL" && t.periode < bulanIni && !bukaKunci;
+  const canApprove = can(user, "koperasi.approve");
   const kunciIcon = (
     <span title="Periode sudah dikunci: rekapnya sudah disetor ke HRD. Perubahan lewat HR (Pelunasan Koperasi) atau Super User." className="inline-flex p-1.5 text-[var(--text-muted)]">
       <Lock size={14} />
@@ -339,9 +351,10 @@ function TxTable({
     ...(beli ? ["No PO"] : []),
     "Barang",
     "Jumlah",
-    ...(rusak ? [] : ["Harga", "Total"]),
+    ...(rusak ? ["Nilai"] : ["Harga", "Total"]),
     ...(jual ? ["Bayar"] : []),
     "Keterangan",
+    ...(rusak ? ["Pemeriksaan"] : []),
   ];
   const label = jual ? "stock out" : beli ? "stock in" : rusak ? "barang rusak" : "transaksi";
   const pages = Math.max(1, Math.ceil((res?.total ?? 0) / pageSize));
@@ -379,16 +392,17 @@ function TxTable({
       title: `Koperasi PT.AKSS - ${jual ? "Stock Out" : beli ? "Stock In" : rusak ? "Barang Rusak" : "Riwayat"}`,
       subtitle: [periode ? `Periode ${periodeLabel(periode)}` : "Semua periode", ...(q ? [`Cari: ${q}`] : [])],
       landscape: true,
-      columns: cols.map((c) => ({ label: ["Harga", "Total"].includes(c) ? `${c} (Rp)` : c, align: ["Jumlah", "Harga", "Total"].includes(c) ? ("right" as const) : undefined })),
+      columns: cols.map((c) => ({ label: ["Harga", "Total", "Nilai"].includes(c) ? `${c} (Rp)` : c, align: ["Jumlah", "Harga", "Total", "Nilai"].includes(c) ? ("right" as const) : undefined })),
       rows: rows.map((t) => [
         txWaktu(t),
         ...(jual || !jenis ? [t.anggota_kode ? `${t.anggota_nama || "-"} (${t.anggota_kode})` : "-"] : []),
         ...(beli ? [t.no_po] : []),
         t.barang_nama,
         `${fmtQty(t.qty)} ${t.satuan}`,
-        ...(rusak ? [] : [t.harga, t.total]),
+        ...(rusak ? [t.total] : [t.harga, t.total]),
         ...(jual ? [BAYAR_LABEL[t.bayar]] : []),
-        t.keterangan,
+        rusak && t.alasan ? `${ALASAN_LABEL[t.alasan]}: ${t.keterangan}` : t.keterangan,
+        ...(rusak ? [periksaText(t)] : []),
       ]),
     };
   };
@@ -414,6 +428,11 @@ function TxTable({
               {allOpen ? "Ringkas semua" : "Buka semua"}
             </button>
           )}
+          {rusak && (
+            <button onClick={() => cetakBeritaAcara(periode).catch((e) => setError(errorText(e, "Gagal mencetak")))} className={btnOutline} title="Barang rusak / expired yang sudah disetujui di periode ini, dengan kolom tanda tangan">
+              <FileText size={15} /> Berita Acara
+            </button>
+          )}
           <ExportButtons total={res?.total ?? 0} buildReport={buildReport} fileName={`koperasi-${label.replace(/ /g, "-")}-${periode}`} />
         </div>
       </div>
@@ -422,7 +441,7 @@ function TxTable({
           <thead>
             <tr className="bg-[#d5edc9] text-left text-xs text-[var(--text-primary)]">
               {cols.map((c) => (
-                <th key={c} className={`px-3 py-2.5 whitespace-nowrap ${["Jumlah", "Harga", "Total"].includes(c) ? "text-right" : ""}`}>
+                <th key={c} className={`px-3 py-2.5 whitespace-nowrap ${["Jumlah", "Harga", "Total", "Nilai"].includes(c) ? "text-right" : ""}`}>
                   {c}
                 </th>
               ))}
@@ -541,7 +560,7 @@ function TxTable({
                       {fmtQty(t.qty)} {t.satuan}
                     </td>
                     {!rusak && <td className="px-3 py-2 text-right whitespace-nowrap">{rp(t.harga)}</td>}
-                    {!rusak && <td className="px-3 py-2 text-right whitespace-nowrap font-medium">{rp(t.total)}</td>}
+                    <td className={`px-3 py-2 text-right whitespace-nowrap ${rusak ? "text-[var(--text-secondary)]" : "font-medium"}`}>{rusak && !t.total ? "-" : rp(t.total)}</td>
                     {jual && (
                       <td className="px-3 py-2">
                         <span className={`text-[11px] px-2 py-0.5 rounded-full border whitespace-nowrap ${BAYAR_CLS[t.bayar]}`}>{BAYAR_LABEL[t.bayar]}</span>
@@ -549,10 +568,30 @@ function TxTable({
                     )}
                     <td className="col-grow px-3 py-2 text-xs text-[var(--text-secondary)]">
                       <div>
+                        {rusak && t.alasan && <span className={`mr-1 text-[10px] px-1.5 py-0.5 rounded border ${t.alasan === "EXPIRED" ? "border-[var(--accent-red-border)] text-[var(--accent-red)]" : "border-[var(--border)]"}`}>{ALASAN_LABEL[t.alasan]}</span>}
                         {t.keterangan || (t.sumber?.startsWith("IMPORT") ? "" : "-")} <EvidenceLink id={t.evidence_id} label="foto" />
                       </div>
                       <div className="text-[var(--text-muted)]">{t.sumber?.startsWith("IMPORT") ? "dari spreadsheet" : `oleh ${t.oleh || "-"}`}</div>
                     </td>
+                    {rusak && (
+                      <td className="px-3 py-2 text-xs">
+                        <span className={`text-[11px] px-2 py-0.5 rounded-full border whitespace-nowrap ${STATUS_RUSAK[t.status ?? "DISETUJUI"].cls}`}>{STATUS_RUSAK[t.status ?? "DISETUJUI"].label}</span>
+                        {t.status && t.status !== "MENUNGGU" && (
+                          <div className="mt-1 text-[var(--text-muted)]">
+                            oleh {t.diperiksa_nama || "-"}
+                            {t.diperiksa_catatan && <span className="block text-[var(--text-secondary)]">{t.diperiksa_catatan}</span>}
+                          </div>
+                        )}
+                        {t.status === "MENUNGGU" &&
+                          (canApprove && t.user_id !== user?.id ? (
+                            <button onClick={() => setPeriksa(t)} className="mt-1 block text-[11px] px-2 py-0.5 rounded border border-[var(--accent-blue)] text-[var(--accent-blue)] hover:bg-[#eef4ff]">
+                              Periksa
+                            </button>
+                          ) : (
+                            <div className="mt-1 text-[var(--text-muted)]">{t.user_id === user?.id ? "diperiksa orang lain" : "perlu hak Approve"}</div>
+                          ))}
+                      </td>
+                    )}
                     {canEdit && (
                       <td className="px-3 py-2 text-right whitespace-nowrap">
                         {terkunci(t) ? (
@@ -596,6 +635,16 @@ function TxTable({
             Berikutnya
           </button>
         </div>
+      )}
+      {periksa && (
+        <PeriksaRusakModal
+          tx={periksa}
+          onClose={() => setPeriksa(null)}
+          onSuccess={() => {
+            setPeriksa(null);
+            onChanged();
+          }}
+        />
       )}
       {edit && (
         <EditTxModal
@@ -2109,7 +2158,7 @@ const expText = (b: KopBarang) => {
 };
 
 // Reminder at the top of the Koperasi page: barang on hand that are expired or expire within 30 days.
-function ExpBanner({ reload, onLihat }: { reload: number; onLihat: () => void }) {
+function ExpBanner({ reload, onLihat, onCatat }: { reload: number; onLihat: () => void; onCatat?: () => void }) {
   const [rows, setRows] = useState<KopBarang[]>([]);
   useEffect(() => {
     api
@@ -2130,9 +2179,14 @@ function ExpBanner({ reload, onLihat }: { reload: number; onLihat: () => void })
         {dekat.length > 0 && <b>{dekat.length} barang expired dalam {EXP_HARI} hari</b>}
         <span className="block text-xs opacity-90">
           {nama}
-          {lewat.length + dekat.length > 4 ? ", ..." : ""}. Tarik dari rak / catat sebagai Rusak, atau perbarui tanggalnya bila stoknya sudah baru.
+          {lewat.length + dekat.length > 4 ? ", ..." : ""}. Tarik dari rak, foto, lalu Catat expired (diperiksa orang kedua sebelum dimusnahkan), atau perbarui tanggalnya bila stoknya sudah baru.
         </span>
       </p>
+      {onCatat && lewat.length > 0 && (
+        <button onClick={onCatat} className="px-3 py-1.5 rounded-md text-xs font-medium border border-[var(--accent-red)] bg-white hover:opacity-90">
+          Catat expired
+        </button>
+      )}
       <button onClick={onLihat} className={`px-3 py-1.5 rounded-md text-xs font-medium text-white hover:opacity-90 ${lewat.length ? "bg-[var(--accent-red)]" : "bg-[#b07a00]"}`}>
         Lihat barang
       </button>
@@ -2412,23 +2466,105 @@ function BeliModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: () 
   );
 }
 
-function RusakModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
-  const barang = useBarangAktif();
-  const [tanggal, setTanggal] = useState(localToday());
-  const [kode, setKode] = useState("");
-  const [qty, setQty] = useState("");
-  const [keterangan, setKeterangan] = useState("");
-  const [evidence, setEvidence] = useState<string | null>(null);
+// ---- Barang Rusak / Expired: entered with a photo, checked by a second account (Approve Koperasi) who
+// matches the barang on hand; what is approved goes on the Berita Acara Pemusnahan. ----
+const ALASAN_LABEL: Record<"EXPIRED" | "RUSAK", string> = { EXPIRED: "Expired", RUSAK: "Rusak" };
+const STATUS_RUSAK: Record<"MENUNGGU" | "DISETUJUI" | "DITOLAK", { label: string; cls: string }> = {
+  MENUNGGU: { label: "Menunggu pemeriksaan", cls: "bg-[var(--accent-amber-bg)] border-[var(--accent-amber-border)] text-[var(--accent-amber)]" },
+  DISETUJUI: { label: "Disetujui", cls: "bg-[var(--accent-green-bg)] border-[var(--accent-green-border)] text-[var(--accent-green)]" },
+  DITOLAK: { label: "Ditolak, stok kembali", cls: "bg-[var(--accent-red-bg)] border-[var(--accent-red-border)] text-[var(--accent-red)]" },
+};
+const periksaText = (t: KopTx) =>
+  `${STATUS_RUSAK[t.status ?? "DISETUJUI"].label}${t.status && t.status !== "MENUNGGU" ? ` oleh ${t.diperiksa_nama || "-"}${t.diperiksa_catatan ? ` (${t.diperiksa_catatan})` : ""}` : ""}`;
+// Stock on hand of a barang that is already past its tanggal expired (from its FEFO batches).
+const qtyExpired = (b: KopBarang) => (b.exp_batches ?? []).filter((x) => hariLagi(x.exp) < 0).reduce((s, x) => s + x.qty, 0);
+
+async function fetchAllTx(params: Record<string, string>) {
+  const first = await api.kopTx({ ...params, page: 1, pageSize: 500 });
+  let rows = first.data;
+  for (let p = 2; rows.length < first.total && p <= 40; p++) rows = rows.concat((await api.kopTx({ ...params, page: p, pageSize: 500 })).data);
+  return rows;
+}
+
+async function cetakBeritaAcara(periode: string) {
+  const all = await fetchAllTx({ jenis: "RUSAK", status: "DISETUJUI", periode });
+  if (!all.length) throw new Error(`Belum ada barang rusak / expired yang disetujui di ${periodeLabel(periode)}`);
+  const uniq = (v: (string | null)[]) => [...new Set(v.filter(Boolean))].join(", ");
+  printTable({
+    title: "Berita Acara Pemusnahan Barang Rusak / Expired",
+    subtitle: [
+      `Koperasi PT.AKSS · Periode ${periodeLabel(periode)} · nilai (harga beli) ${rp(all.reduce((s, t) => s + t.total, 0))}`,
+      "Barang di bawah ini sudah diperiksa dan dicocokkan fisiknya, lalu dimusnahkan (kemasan dirusak / dihancurkan) di hadapan para saksi pada tanggal ..............................",
+    ],
+    columns: [
+      { label: "No", align: "right" },
+      { label: "Tanggal" },
+      { label: "Kode" },
+      { label: "Nama Barang" },
+      { label: "Jumlah", align: "right" },
+      { label: "Alasan" },
+      { label: "Keterangan" },
+      { label: "Nilai (Rp)", align: "right" },
+      { label: "Input / Diperiksa" },
+    ],
+    rows: all.map((t, i) => [
+      i + 1,
+      isoDisplay(t.tanggal_iso),
+      t.barang_kode,
+      t.barang_nama,
+      `${fmtQty(t.qty)} ${t.satuan}`,
+      t.alasan ? ALASAN_LABEL[t.alasan] : "Rusak",
+      t.keterangan,
+      t.total,
+      `${t.oleh || "-"} / ${t.diperiksa_nama || "-"}`,
+    ]),
+    landscape: true,
+    signatures: [
+      { label: "Petugas Koperasi", nama: uniq(all.map((t) => t.oleh)) },
+      { label: "Pemeriksa", nama: uniq(all.map((t) => t.diperiksa_nama)) },
+      { label: "Saksi 1", nama: "" },
+      { label: "Saksi 2", nama: "" },
+      { label: "Mengetahui", nama: "" },
+    ],
+  });
+}
+
+// Reminder at the top of the Koperasi page: Barang Rusak / Expired still waiting for their pemeriksaan.
+function RusakMenungguBanner({ reload, canApprove, onLihat }: { reload: number; canApprove: boolean; onLihat: () => void }) {
+  const [n, setN] = useState(0);
+  useEffect(() => {
+    api
+      .kopTx({ jenis: "RUSAK", status: "MENUNGGU", page: 1, pageSize: 1 })
+      .then((r) => setN(r.total))
+      .catch(() => setN(0));
+  }, [reload]);
+  if (!n) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-3 w-full min-w-0 rounded-lg border border-[var(--accent-amber-border)] bg-[var(--accent-amber-bg)] px-4 py-3 text-sm text-[var(--accent-amber)]">
+      <ClipboardCheck size={20} className="shrink-0" />
+      <p className="flex-1 min-w-[220px]">
+        <b>{n} barang rusak / expired menunggu pemeriksaan</b>
+        <span className="block text-xs opacity-90">
+          {canApprove ? "Cocokkan barang fisik dan fotonya, lalu Setujui atau Tolak." : "Perlu diperiksa orang yang punya hak Approve Koperasi."} Stoknya ditahan (tidak bisa dijual) sampai diperiksa.
+        </span>
+      </p>
+      <button onClick={onLihat} className="px-3 py-1.5 rounded-md text-xs font-medium text-white bg-[var(--accent-amber)] hover:opacity-90">
+        Lihat
+      </button>
+    </div>
+  );
+}
+
+function PeriksaRusakModal({ tx, onClose, onSuccess }: { tx: KopTx; onClose: () => void; onSuccess: () => void }) {
+  const [catatan, setCatatan] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const b = barang.find((x) => x.kode === kode);
-  const save = async () => {
-    if (!kode) return setError("Pilih barang");
-    if (!(parseNum(qty) > 0)) return setError("Jumlah harus lebih dari 0");
+  const kirim = async (setuju: boolean) => {
+    if (!setuju && !catatan.trim()) return setError("Tulis alasan penolakannya");
     setBusy(true);
     setError("");
     try {
-      await api.kopRusak({ tanggal, barang_kode: kode, qty: parseNum(qty), keterangan, evidence_id: evidence });
+      await api.kopPeriksaRusak(tx.id, { setuju, catatan: catatan.trim() });
       onSuccess();
     } catch (e) {
       setError(errorText(e, "Gagal menyimpan"));
@@ -2437,24 +2573,128 @@ function RusakModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: ()
     }
   };
   return (
-    <Modal title="Barang Rusak / Dibuang" subtitle="Mengurangi stok tanpa ditagihkan ke siapa pun" onClose={onClose}>
+    <Modal title="Periksa Barang Rusak / Expired" subtitle="Cocokkan dengan barang fisiknya dan fotonya" onClose={onClose}>
+      <div className="space-y-3 text-sm">
+        <div className="rounded-md border border-[var(--border)] p-3 space-y-1">
+          <div className="font-medium text-[var(--text-primary)]">
+            {tx.barang_nama} <span className="text-xs text-[var(--text-muted)]">{tx.barang_kode}</span>
+          </div>
+          <div>
+            <b>
+              {fmtQty(tx.qty)} {tx.satuan}
+            </b>{" "}
+            · {tx.alasan ? ALASAN_LABEL[tx.alasan] : "Rusak"} · {isoDisplay(tx.tanggal_iso)}
+            {tx.total > 0 && <span className="text-[var(--text-muted)]"> · nilai {rp(tx.total)}</span>}
+          </div>
+          <div className="text-xs text-[var(--text-secondary)]">
+            {tx.keterangan} <EvidenceLink id={tx.evidence_id} label="lihat foto" />
+          </div>
+          <div className="text-xs text-[var(--text-muted)]">diinput oleh {tx.oleh || "-"}</div>
+        </div>
+        <ul className="text-xs text-[var(--text-secondary)] list-disc pl-4 space-y-0.5">
+          <li>Jumlah fisiknya sama dengan yang diinput?</li>
+          <li>Tanggal expired di kemasan / kerusakannya sesuai foto?</li>
+          <li>Barangnya masih ada di tempat barang rusak (belum dibuang)?</li>
+        </ul>
+        <div>
+          <label className={labelCls}>Catatan (wajib bila ditolak)</label>
+          <input value={catatan} onChange={(e) => setCatatan(e.target.value)} placeholder="mis. fisik hanya 10, bukan 16" className={inputCls} />
+        </div>
+        {error && <p className="text-xs text-[var(--accent-red)]">{error}</p>}
+        <div className="flex justify-end gap-2">
+          <button
+            onClick={() => kirim(false)}
+            disabled={busy}
+            className="px-4 py-2 text-sm rounded-md border border-[var(--accent-red-border)] text-[var(--accent-red)] hover:bg-[var(--accent-red-bg)] disabled:opacity-50"
+          >
+            Tolak (stok kembali)
+          </button>
+          <button onClick={() => kirim(true)} disabled={busy} className={btnPrimary}>
+            {busy ? "Menyimpan..." : "Setujui"}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function RusakModal({ alasanAwal, onClose, onSuccess }: { alasanAwal: "EXPIRED" | "RUSAK"; onClose: () => void; onSuccess: () => void }) {
+  const barang = useBarangAktif();
+  const fotoAktif = useEvidenceEnabled();
+  const [alasan, setAlasan] = useState(alasanAwal);
+  const [tanggal, setTanggal] = useState(localToday());
+  const [kode, setKode] = useState("");
+  const [qty, setQty] = useState("");
+  const [keterangan, setKeterangan] = useState("");
+  const [evidence, setEvidence] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const b = barang.find((x) => x.kode === kode);
+  // Expired: the barang with expired stock come first; picking one fills in that qty and its dates.
+  const pilihan = barang
+    .filter((x) => x.lacak_stok && x.stok > 0)
+    .sort((x, y) => (alasan === "EXPIRED" ? Number(qtyExpired(y) > 0) - Number(qtyExpired(x) > 0) : 0));
+  const pilih = (k: string) => {
+    setKode(k);
+    const x = barang.find((y) => y.kode === k);
+    if (alasan !== "EXPIRED" || !x) return;
+    const q = qtyExpired(x);
+    const tgl = (x.exp_batches ?? []).filter((e) => hariLagi(e.exp) < 0).map((e) => isoDisplay(e.exp));
+    if (q > 0) setQty(String(q));
+    if (tgl.length) setKeterangan(`Expired ${tgl.join(", ")}`);
+  };
+  const save = async () => {
+    if (!kode) return setError("Pilih barang");
+    if (!(parseNum(qty) > 0)) return setError("Jumlah harus lebih dari 0");
+    if (!keterangan.trim()) return setError("Isi keterangannya");
+    if (fotoAktif && !evidence) return setError("Foto barangnya wajib (tanggal expired / kerusakan dan jumlahnya terlihat)");
+    setBusy(true);
+    setError("");
+    try {
+      await api.kopRusak({ tanggal, barang_kode: kode, qty: parseNum(qty), alasan, keterangan: keterangan.trim(), evidence_id: evidence });
+      onSuccess();
+    } catch (e) {
+      setError(errorText(e, "Gagal menyimpan"));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal title="Barang Rusak / Expired" subtitle="Stoknya langsung ditahan (tidak bisa dijual), lalu diperiksa orang kedua sebelum dimusnahkan" onClose={onClose}>
       <div className="space-y-3">
+        <div className="flex gap-2">
+          {(["EXPIRED", "RUSAK"] as const).map((a) => (
+            <button
+              key={a}
+              onClick={() => (setAlasan(a), setKode(""), setQty(""), setKeterangan(""))}
+              className={`flex-1 px-3 py-2 text-sm rounded-md border ${
+                alasan === a ? "border-[var(--accent-blue)] bg-[#eef4ff] text-[var(--accent-blue)] font-medium" : "border-[var(--border)] text-[var(--text-secondary)]"
+              }`}
+            >
+              {a === "EXPIRED" ? "Expired" : "Rusak (pecah, bocor, tikus, ...)"}
+            </button>
+          ))}
+        </div>
         <div>
           <label className={labelCls}>Barang</label>
-          <select value={kode} onChange={(e) => setKode(e.target.value)} className={`${selectCls} w-full`}>
+          <select value={kode} onChange={(e) => pilih(e.target.value)} className={`${selectCls} w-full`}>
             <option value="">-- Pilih barang --</option>
-            {barang
-              .filter((x) => x.lacak_stok && x.stok > 0)
-              .map((x) => (
-                <option key={x.kode} value={x.kode}>
-                  {x.nama} (stok {fmtQty(x.stok)} {x.satuan})
-                </option>
-              ))}
+            {pilihan.map((x) => (
+              <option key={x.kode} value={x.kode}>
+                {x.nama} (stok {fmtQty(x.stok)} {x.satuan}
+                {alasan === "EXPIRED" && qtyExpired(x) > 0 ? ` · expired ${fmtQty(qtyExpired(x))}` : ""})
+              </option>
+            ))}
           </select>
+          {alasan === "EXPIRED" && b && !qtyExpired(b) && (
+            <p className="mt-1 text-[11px] text-[var(--accent-amber)]">
+              Menurut sistem stok barang ini belum ada yang expired. Pastikan tanggal di kemasan, dan perbarui tanggal expired-nya di Stok Barang bila salah.
+            </p>
+          )}
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className={labelCls}>Jumlah {b && `(${b.satuan})`}</label>
+            <label className={labelCls}>Jumlah fisik {b && `(${b.satuan})`}</label>
             <input value={qty} onChange={(e) => setQty(e.target.value)} inputMode="decimal" className={inputCls} />
           </div>
           <div>
@@ -2463,17 +2703,18 @@ function RusakModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: ()
           </div>
         </div>
         <div>
-          <label className={labelCls}>Alasan (mis. expired, pecah, digigit tikus)</label>
+          <label className={labelCls}>{alasan === "EXPIRED" ? "Keterangan (tanggal expired di kemasan)" : "Keterangan (mis. pecah, bocor, digigit tikus)"}</label>
           <input value={keterangan} onChange={(e) => setKeterangan(e.target.value)} className={inputCls} />
         </div>
-        <EvidenceInput value={evidence} onChange={setEvidence} label="Foto (opsional)" />
+        <EvidenceInput value={evidence} onChange={setEvidence} label="Foto barang (wajib: tanggal expired / kerusakan dan jumlahnya terlihat)" />
+        <p className="text-[11px] text-[var(--text-muted)]">Simpan barangnya di tempat barang rusak, jangan dibuang dulu: pemeriksa akan mencocokkan fisiknya.</p>
         {error && <p className="text-xs text-[var(--accent-red)]">{error}</p>}
         <div className="flex justify-end gap-2">
           <button onClick={onClose} className="px-4 py-2 text-sm rounded-md border border-[var(--border)] text-[var(--text-secondary)]">
             Batal
           </button>
           <button onClick={save} disabled={busy} className={btnPrimary}>
-            {busy ? "Menyimpan..." : "Simpan"}
+            {busy ? "Menyimpan..." : "Simpan, minta pemeriksaan"}
           </button>
         </div>
       </div>

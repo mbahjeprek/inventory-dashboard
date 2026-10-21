@@ -531,6 +531,13 @@ export type KopTx = {
   sumber: string | null;
   created_at: string;
   oleh: string;
+  user_id: number | null;
+  // Barang Rusak / Expired: alasan and the check by a second account (status null = before the check existed).
+  alasan: "EXPIRED" | "RUSAK" | null;
+  status: "MENUNGGU" | "DISETUJUI" | "DITOLAK" | null;
+  diperiksa_nama: string | null;
+  diperiksa_at: string | null;
+  diperiksa_catatan: string;
 };
 export type KopRingkasan = {
   periode: string;
@@ -1390,8 +1397,10 @@ export const api = {
     req<{ count: number; bons: number }>("/api/koperasi/jual/batch", { method: "POST", body: JSON.stringify(body) }),
   kopBeliBatch: (body: { tanggal: string; evidence_id: string | null; update_harga: boolean; rows: { barang_kode: string; qty: number; harga: number; no_po: string; exp_iso?: string }[] }) =>
     req<{ count: number }>("/api/koperasi/beli/batch", { method: "POST", body: JSON.stringify(body) }),
-  kopRusak: (body: { tanggal: string; barang_kode: string; qty: number; keterangan: string; evidence_id: string | null }) =>
+  kopRusak: (body: { tanggal: string; barang_kode: string; qty: number; alasan: "EXPIRED" | "RUSAK"; keterangan: string; evidence_id: string | null }) =>
     req<{ success: boolean }>("/api/koperasi/rusak", { method: "POST", body: JSON.stringify(body) }),
+  kopPeriksaRusak: (id: number, body: { setuju: boolean; catatan: string }) =>
+    req<{ success: boolean }>(`/api/koperasi/rusak/${id}/periksa`, { method: "PUT", body: JSON.stringify(body) }),
   kopHapus: (id: number, bon = false) => req<{ success: boolean; n: number }>(`/api/koperasi/tx/${id}${bon ? "?bon=1" : ""}`, { method: "DELETE" }),
   kopSlip: (periode: string, kodes: string[]) =>
     req<{ periode: string; limit: number; jatuh_tempo: string; data: KopSlipLine[] }>(`/api/koperasi/slip?${new URLSearchParams({ periode, kode: kodes.join(",") })}`),

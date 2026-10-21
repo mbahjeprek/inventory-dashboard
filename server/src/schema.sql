@@ -840,3 +840,13 @@ ALTER TABLE koperasi_barang ADD COLUMN IF NOT EXISTS exp_iso TEXT;
 ALTER TABLE koperasi_barang ADD COLUMN IF NOT EXISTS catatan TEXT NOT NULL DEFAULT '';
 -- Tanggal expired of each arrival (Stock In row); the stock on hand is spread over them FEFO.
 ALTER TABLE koperasi_tx ADD COLUMN IF NOT EXISTS exp_iso TEXT;
+
+-- Barang Rusak / Expired (jenis RUSAK): alasan EXPIRED | RUSAK, and a check by a second account with
+-- Approve Koperasi (never the one who entered it): status MENUNGGU -> DISETUJUI / DITOLAK. MENUNGGU is
+-- already out of stock (the barang is pulled off the shelf, nobody can sell it); DITOLAK puts it back
+-- (kopStokSql). NULL = entered before this check, counted as approved. harga = harga beli then (the loss).
+ALTER TABLE koperasi_tx ADD COLUMN IF NOT EXISTS alasan TEXT;
+ALTER TABLE koperasi_tx ADD COLUMN IF NOT EXISTS status TEXT;
+ALTER TABLE koperasi_tx ADD COLUMN IF NOT EXISTS diperiksa_oleh INTEGER;
+ALTER TABLE koperasi_tx ADD COLUMN IF NOT EXISTS diperiksa_at TIMESTAMPTZ;
+ALTER TABLE koperasi_tx ADD COLUMN IF NOT EXISTS diperiksa_catatan TEXT NOT NULL DEFAULT '';
