@@ -17,6 +17,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { api, errorText, type GudangStockItem, type GudangStockSummary, type PickerItem } from "../lib/api";
+import { PinjamanCard } from "../components/PinjamanBanner";
 import { StatCard } from "../components/StatCard";
 import { ExportButtons } from "../components/ExportButtons";
 import { ActivityLogButton } from "../components/ActivityLogButton";
@@ -271,7 +272,7 @@ export function InventoryGudangStockPage({ gudang }: { gudang: string }) {
       ) : (
         <>
           {summary && (
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3">
               <StatCard
                 label="Total Item Barang"
                 value={summary.totalItems.toLocaleString("id-ID")}
@@ -305,6 +306,7 @@ export function InventoryGudangStockPage({ gudang }: { gudang: string }) {
                 active={stockFilter === "habis"}
                 onClick={() => toggleStockFilter("habis")}
               />
+              <PinjamanCard />
             </div>
           )}
 

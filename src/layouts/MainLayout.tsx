@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import { Menu } from "lucide-react";
 import { Sidebar } from "../components/Sidebar";
-import { PinjamanBanner } from "../components/PinjamanBanner";
+import { PinjamanBanner, PinjamanNotif } from "../components/PinjamanBanner";
 import { SessionExpiredModal } from "../components/SessionExpiredModal";
 import { useOpenPinjaman } from "../hooks/useOpenPinjaman";
 import { useTableDragScroll } from "../hooks/useDragScroll";
@@ -46,6 +46,7 @@ export function MainLayout() {
           <PinjamanBanner />
           <Outlet />
         </main>
+        <PinjamanNotif />
         <SessionExpiredModal />
       </div>
     </div>

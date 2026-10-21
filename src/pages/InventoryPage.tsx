@@ -22,6 +22,7 @@ import { QuickInOut } from "../components/QuickInOut";
 import { TransactionModal, type TransactionPreset } from "../components/TransactionModal";
 import { EditItemModal } from "../components/EditItemModal";
 import { ItemPickerModal } from "../components/ItemPickerModal";
+import { PinjamanCard } from "../components/PinjamanBanner";
 import { StatCard } from "../components/StatCard";
 import { ExportButtons } from "../components/ExportButtons";
 import { ActivityLogButton } from "../components/ActivityLogButton";
@@ -262,7 +263,7 @@ export function InventoryPage() {
       ) : (
         <>
           {summary && (
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3">
               <StatCard
                 label="Total Item Barang"
                 value={summary.totalItems.toLocaleString("id-ID")}
@@ -296,6 +297,7 @@ export function InventoryPage() {
                 active={stockFilter === "habis"}
                 onClick={() => toggleStockFilter("habis")}
               />
+              <PinjamanCard />
             </div>
           )}
 

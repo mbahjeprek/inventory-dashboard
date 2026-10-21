@@ -19,6 +19,7 @@ import {
   ArrowLeftRight,
 } from "lucide-react";
 import { api, errorText, type KlinikStockItem, type KlinikSummary, type PickerItem } from "../lib/api";
+import { PinjamanCard } from "../components/PinjamanBanner";
 import { StatCard } from "../components/StatCard";
 import { ExportButtons } from "../components/ExportButtons";
 import { ActivityLogButton } from "../components/ActivityLogButton";
@@ -317,7 +318,7 @@ export function InventoryKlinikPage({ klinik }: { klinik: string }) {
       ) : (
         <>
           {summary && (
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+            <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
               <StatCard
                 label="Total Item"
                 value={summary.totalItems.toLocaleString("id-ID")}
@@ -359,6 +360,7 @@ export function InventoryKlinikPage({ klinik }: { klinik: string }) {
                 active={stockFilter === "expired"}
                 onClick={() => toggleStockFilter("expired")}
               />
+              <PinjamanCard />
             </div>
           )}
 
