@@ -1,5 +1,5 @@
-import { Fragment, useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
-import { flushSync } from "react-dom";
+import { Fragment, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { createPortal, flushSync } from "react-dom";
 import { Copy, Plus, Trash2, X } from "lucide-react";
 import { ApiError, errorText } from "../lib/api";
 import { EvidenceInput, useEvidenceEnabled } from "./EvidenceInput";
@@ -115,7 +115,6 @@ export function BatchGrid({
   const [submitting, setSubmitting] = useState(false);
   const [suggestions, setSuggestions] = useState<Record<string, string[]>>({});
   const tableRef = useRef<HTMLTableSectionElement>(null);
-  const idBase = useId();
 
   // The draft's header values, once, when it was restored at open.
   useEffect(() => {
@@ -299,15 +298,6 @@ export function BatchGrid({
         )}
 
         <div className="px-5 py-3 overflow-auto flex-1 min-h-0">
-          {columns
-            .filter((col) => col.type !== "select" && (col.options || col.suggest))
-            .map((col) => (
-              <datalist key={col.key} id={`${idBase}-${col.key}`}>
-                {(col.suggest ? (suggestions[col.key] ?? []).map((v) => ({ value: v }) as Option) : optionsOf(col, {})).map((o) => (
-                  <option key={o.value} value={o.value} label={o.label} />
-                ))}
-              </datalist>
-            ))}
           <table className="w-full text-sm" style={{ minWidth }}>
             <thead>
               <tr className="text-left text-xs text-[var(--text-secondary)]">
@@ -349,12 +339,21 @@ export function BatchGrid({
                                   </option>
                                 ))}
                               </select>
+                            ) : col.options || col.suggest ? (
+                              <ComboCell
+                                common={common}
+                                value={value}
+                                options={col.suggest ? (suggestions[col.key] ?? []).map((v) => ({ value: v }) as Option) : optionsOf(col, r.c)}
+                                onChange={(v) => setCell(r.key, col, v)}
+                                onFocus={() => suggestFor(col, r.c)}
+                                placeholder={typeof col.placeholder === "function" ? col.placeholder(r.c) : col.placeholder}
+                                className={inputCls(r.key, col.align === "right" ? "text-right" : "")}
+                              />
                             ) : (
                               <input
                                 {...common}
                                 type={col.type === "date" ? "date" : "text"}
                                 inputMode={col.type === "number" ? "decimal" : undefined}
-                                list={col.options || col.suggest ? `${idBase}-${col.key}` : undefined}
                                 value={value}
                                 onChange={(e) => setCell(r.key, col, e.target.value)}
                                 onFocus={() => suggestFor(col, r.c)}
@@ -461,3 +460,137 @@ export function HeaderField({ label, children }: { label: string; children: Reac
   );
 }
 export const headerInputCls = "block text-sm rounded-md border border-[var(--border)] px-3 py-1.5 bg-white";
+
+// A text cell with choices (barang, NIK, alat...): typed freely, with its own list under it - the code in
+// bold and the label (name · stok) in full, filtered by every typed word over both. Drawn in a portal
+// so the modal's scrolling table can't clip it, and the same in every browser (the native datalist of
+// some browsers was as narrow as the cell and hid the labels). Arrow keys pick, Enter takes the choice
+// and moves on like the grid, Esc closes.
+function ComboCell({
+  common,
+  value,
+  options,
+  onChange,
+  onFocus,
+  placeholder,
+  className,
+}: {
+  common: { "data-r": number; "data-c": string; onKeyDown: (e: KeyboardEvent<HTMLElement>) => void };
+  value: string;
+  options: Option[];
+  onChange: (v: string) => void;
+  onFocus: () => void;
+  placeholder?: string;
+  className: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [hi, setHi] = useState(0);
+  const [box, setBox] = useState<{ left: number; top: number; width: number; up: boolean } | null>(null);
+  const ref = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const words = value.toLowerCase().split(/\s+/).filter(Boolean);
+  const exact = options.some((o) => o.value === value);
+  const shown = (exact ? options : options.filter((o) => words.every((w) => `${o.value} ${o.label ?? ""}`.toLowerCase().includes(w)))).slice(0, 60);
+
+  const place = () => {
+    const r = ref.current?.getBoundingClientRect();
+    if (!r) return;
+    const width = Math.min(Math.max(r.width, 460), window.innerWidth - 16);
+    const left = Math.max(8, Math.min(r.left, window.innerWidth - width - 8));
+    const up = r.bottom + 280 > window.innerHeight && r.top > 300;
+    setBox({ left, top: up ? r.top - 4 : r.bottom + 2, width, up });
+  };
+  useEffect(() => {
+    if (!open) return;
+    place();
+    const onMove = () => place();
+    window.addEventListener("resize", onMove);
+    window.addEventListener("scroll", onMove, true);
+    return () => {
+      window.removeEventListener("resize", onMove);
+      window.removeEventListener("scroll", onMove, true);
+    };
+  }, [open]);
+  useEffect(() => {
+    listRef.current?.querySelector(`[data-i="${hi}"]`)?.scrollIntoView({ block: "nearest" });
+  }, [hi]);
+
+  const pick = (o: Option) => {
+    flushSync(() => onChange(o.value));
+    setOpen(false);
+  };
+  const keyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (open && shown.length && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
+      e.preventDefault();
+      setHi((h) => (e.key === "ArrowDown" ? Math.min(h + 1, shown.length - 1) : Math.max(h - 1, 0)));
+      return;
+    }
+    if (e.key === "ArrowDown" && !open) {
+      setOpen(true);
+      return;
+    }
+    if (e.key === "Escape" && open) {
+      e.preventDefault();
+      e.stopPropagation();
+      setOpen(false);
+      return;
+    }
+    // Enter on an open list takes the highlighted choice (unless the typed text already is one), then moves on.
+    if (e.key === "Enter" && open && shown.length && !exact) pick(shown[Math.min(hi, shown.length - 1)]);
+    if (e.key === "Enter" || e.key === "Tab") setOpen(false);
+    common.onKeyDown(e);
+  };
+
+  return (
+    <>
+      <input
+        ref={ref}
+        data-r={common["data-r"]}
+        data-c={common["data-c"]}
+        type="text"
+        autoComplete="off"
+        value={value}
+        onChange={(e) => {
+          onChange(e.target.value);
+          setHi(0);
+          setOpen(true);
+        }}
+        onFocus={() => {
+          onFocus();
+          setHi(0);
+          setOpen(true);
+        }}
+        onBlur={() => setOpen(false)}
+        onKeyDown={keyDown}
+        placeholder={placeholder}
+        className={className}
+      />
+      {open &&
+        box &&
+        shown.length > 0 &&
+        createPortal(
+          <div
+            ref={listRef}
+            onMouseDown={(e) => e.preventDefault()}
+            style={{ position: "fixed", left: box.left, width: box.width, ...(box.up ? { bottom: window.innerHeight - box.top } : { top: box.top }), zIndex: 70 }}
+            className="max-h-72 overflow-auto rounded-md border border-[var(--border)] bg-white shadow-xl text-sm"
+          >
+            {shown.map((o, i) => (
+              <button
+                type="button"
+                key={o.value}
+                data-i={i}
+                onClick={() => pick(o)}
+                onMouseEnter={() => setHi(i)}
+                className={`w-full text-left px-3 py-1.5 border-b border-[var(--border)] last:border-0 ${i === hi ? "bg-[var(--accent-blue-bg)]" : "hover:bg-[#f8fafc]"}`}
+              >
+                <span className="font-semibold text-[var(--text-primary)]">{o.value}</span>
+                {o.label && <span className="ml-2 text-[var(--text-secondary)]">{o.label}</span>}
+              </button>
+            ))}
+          </div>,
+          document.body
+        )}
+    </>
+  );
+}
