@@ -215,6 +215,9 @@ export function LedgerHistory({ scope, type, refreshKey }: { scope: StockScope; 
                     <td className={`px-4 py-2.5 text-right font-medium whitespace-nowrap ${isOut ? "text-[var(--accent-red)]" : "text-[var(--accent-green)]"}`}>
                       {isOut ? "-" : "+"}
                       {r.qty.toLocaleString("id-ID")} {r.satuan}
+                      {r.saldo !== null && r.saldo !== undefined && (
+                        <div className="text-[11px] font-normal text-[var(--text-muted)]" title="Stok setelah transaksi ini">stok {r.saldo.toLocaleString("id-ID", { maximumFractionDigits: 3 })} {r.satuan}</div>
+                      )}
                     </td>
                     {showTujuan && <td className="px-4 py-2.5">{r.tujuan || <span className="text-[var(--text-muted)]">-</span>}</td>}
                     <td className="px-4 py-2.5 text-[var(--text-secondary)]">{r.penerima || "-"}</td>

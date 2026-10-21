@@ -1483,6 +1483,13 @@ async function deleteNilamTx(client: PoolClient, tx: any) {
   await execute("DELETE FROM transactions WHERE id = @id", { id: tx.id }, client);
   return removed;
 }
+// Gudang Nilam stock right after a Stock In / Out row: the item's stock now minus every later movement
+// (transactions). Only rows made in the app have a movement; imported history rows get null.
+const nilamSaldoSql = (table: "stock_in_log" | "stock_out_log") => `(
+  SELECT ROUND((i.stock_tersedia - COALESCE((SELECT SUM(CASE WHEN y.type = 'IN' THEN y.qty ELSE -y.qty END) FROM transactions y
+                 WHERE y.item_id = x.item_id AND (y.created_at, y.id) > (x.created_at, x.id)), 0))::numeric, 3)::float8
+  FROM transactions x JOIN items i ON i.id = x.item_id WHERE x.mirror_source = '${table}' AND x.mirror_id = ${table}.id LIMIT 1)`;
+
 // The manual transaction a Nilam Stock In / Out history row mirrors; null = imported history.
 const mirroredTx = (table: "stock_in_log" | "stock_out_log", id: unknown) =>
   queryOne<any>("SELECT * FROM transactions WHERE mirror_source = @t AND mirror_id = @id", { t: table, id });
@@ -1740,7 +1747,7 @@ app.get("/api/stock-in", requireEstate("NILAM"), async (req, res) => {
 
   const data = await queryMany(
     // Newest first; old imported rows without a date go last.
-    `SELECT * FROM stock_in_log ${where}
+    `SELECT stock_in_log.*, ${nilamSaldoSql("stock_in_log")} AS saldo FROM stock_in_log ${where}
      ORDER BY NULLIF(tanggal_terima_iso, '') DESC NULLS LAST, id DESC LIMIT @limit OFFSET @offset`,
     { ...params, limit, offset }
   );
@@ -1869,7 +1876,7 @@ app.get("/api/stock-out", requireEstate("NILAM"), async (req, res) => {
 
   const data = await queryMany(
     // Newest first; old imported rows without a date go last.
-    `SELECT * FROM stock_out_log ${where}
+    `SELECT stock_out_log.*, ${nilamSaldoSql("stock_out_log")} AS saldo FROM stock_out_log ${where}
      ORDER BY NULLIF(tanggal_keluar_iso, '') DESC NULLS LAST, id DESC LIMIT @limit OFFSET @offset`,
     { ...params, limit, offset }
   );
@@ -4727,12 +4734,12 @@ for (const lr of LEDGER_ROUTES) {
       conditions.push("(t.created_at AT TIME ZONE @tz)::date <= @dateTo::date");
       params.dateTo = dateTo;
     }
-    // The saldo runs over all of the item's movements here, before the date / search filters.
-    const txSql = kode
-      ? `(SELECT x.*, SUM(CASE WHEN x.type = 'IN' THEN x.qty ELSE -x.qty END) OVER (ORDER BY x.created_at, x.id)::float8 AS saldo
-          FROM ${l.tx} x WHERE x.${l.scope} = @scope AND x.${l.item} = @kode)`
-      : l.tx;
-    const fromSql = `FROM ${txSql} t JOIN ${master} m ON m.kode = t.${l.item} LEFT JOIN users u ON u.id = t.user_id WHERE ${conditions.join(" AND ")}`;
+    // The stock right after each movement: the stock now minus every later movement of that item here
+    // (so it matches the stock even when older history was imported without its movements).
+    const saldoSql = `(SELECT s.stock_tersedia FROM ${l.stock} s WHERE s.${l.scope} = t.${l.scope} AND s.${l.item} = t.${l.item})
+      - COALESCE((SELECT SUM(CASE WHEN y.type = 'IN' THEN y.qty ELSE -y.qty END) FROM ${l.tx} y
+                  WHERE y.${l.scope} = t.${l.scope} AND y.${l.item} = t.${l.item} AND (y.created_at, y.id) > (t.created_at, t.id)), 0)`;
+    const fromSql = `FROM ${l.tx} t JOIN ${master} m ON m.kode = t.${l.item} LEFT JOIN users u ON u.id = t.user_id WHERE ${conditions.join(" AND ")}`;
     const agg = (await queryOne<any>(
       `SELECT COUNT(*)::int c, COALESCE(SUM(t.qty), 0)::float8 q, COALESCE(SUM(t.qty) FILTER (WHERE t.type = 'IN'), 0)::float8 qin,
          COALESCE(SUM(t.qty) FILTER (WHERE t.type = 'OUT'), 0)::float8 qout ${fromSql}`,
@@ -4743,7 +4750,7 @@ for (const lr of LEDGER_ROUTES) {
     const data = await queryMany(
       `SELECT t.id, t.created_at, t.input_at, t.type, t.qty, t.tujuan, t.penerima, t.note, t.is_correction, t.evidence_id, t.pinjaman_id,
               ${l === GUDANG_LEDGER ? "t.transfer_from_id IS NOT NULL" : "false"} AS is_transfer,
-              ${l === KLINIK_LEDGER ? "t.alloc" : "NULL"} AS alloc, ${kode ? "t.saldo" : "NULL::float8 AS saldo"},
+              ${l === KLINIK_LEDGER ? "t.alloc" : "NULL"} AS alloc, ROUND((${saldoSql})::numeric, 3)::float8 AS saldo,
               m.kode, m.nama, m.satuan, COALESCE(u.nama, u.username, '') AS input_oleh
        ${fromSql} ORDER BY t.created_at DESC, t.id DESC LIMIT @limit OFFSET @offset`,
       { ...params, limit, offset }

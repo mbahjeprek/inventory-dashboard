@@ -208,6 +208,8 @@ export type StockInRecord = {
   tanggal_terima: string;
   tanggal_terima_iso: string | null;
   keterangan: string;
+  // Stock of the item right after this row (null = imported history, no movement of its own).
+  saldo?: number | null;
   created_at?: string | null;
   // When the row was typed (a back-dated entry's created_at holds its chosen date).
   input_at?: string | null;
@@ -234,6 +236,7 @@ export type StockOutRecord = {
   no_embrace_gudang: string;
   keterangan: string;
   nik_karyawan: string;
+  saldo?: number | null;
   created_at?: string | null;
   // When the row was typed (a back-dated entry's created_at holds its chosen date).
   input_at?: string | null;

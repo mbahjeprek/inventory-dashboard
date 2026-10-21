@@ -225,7 +225,12 @@ export function StockInPage({ embedded = false }: { embedded?: boolean }) {
                     <td className="col-grow px-4 py-2.5">{r.nama}</td>
                     <td className="px-4 py-2.5 text-[var(--text-secondary)]">{r.nama_vendor === "-" ? "-" : r.nama_vendor}</td>
                     <td className="px-4 py-2.5 text-[var(--text-secondary)] text-xs">{r.po_in_akss || r.no_pr || "-"}</td>
-                    <td className="px-4 py-2.5 text-right font-medium text-[var(--accent-green)]">+{r.qty} {r.satuan}</td>
+                    <td className="px-4 py-2.5 text-right font-medium text-[var(--accent-green)] whitespace-nowrap">
+                      +{r.qty} {r.satuan}
+                      {r.saldo !== null && r.saldo !== undefined && (
+                        <div className="text-[11px] font-normal text-[var(--text-muted)]" title="Stok setelah transaksi ini">stok {r.saldo.toLocaleString("id-ID", { maximumFractionDigits: 3 })} {r.satuan}</div>
+                      )}
+                    </td>
                     <td className="px-4 py-2.5">{r.tujuan || <span className="text-[var(--text-muted)]">-</span>}</td>
                     <td className="col-grow px-4 py-2.5 text-[var(--text-secondary)] text-xs whitespace-normal break-words" title={r.keterangan}>
                       {r.keterangan || "-"}

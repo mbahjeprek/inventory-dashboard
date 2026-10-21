@@ -247,6 +247,7 @@ CREATE INDEX IF NOT EXISTS idx_karyawan_estate ON karyawan(estate);
 CREATE INDEX IF NOT EXISTS idx_karyawan_status ON karyawan(status);
 CREATE INDEX IF NOT EXISTS idx_alat_berat_jenis ON alat_berat(jenis_unit);
 CREATE INDEX IF NOT EXISTS idx_tx_item ON transactions(item_id);
+CREATE INDEX IF NOT EXISTS idx_tx_mirror ON transactions(mirror_source, mirror_id);
 CREATE INDEX IF NOT EXISTS idx_stock_in_item ON stock_in_log(item_id);
 CREATE INDEX IF NOT EXISTS idx_stock_in_date ON stock_in_log(tanggal_terima_iso);
 CREATE INDEX IF NOT EXISTS idx_stock_in_tujuan ON stock_in_log(tujuan);
