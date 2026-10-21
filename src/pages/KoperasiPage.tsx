@@ -249,7 +249,7 @@ export function KoperasiPage() {
       {tab === "dashboard" && <KoperasiDashboard periode={periode} reload={reload} extraCard={expCard} />}
       {tab === "jual" && <TxTable jenis="JUAL" periode={periode} reload={reload} canEdit={canEdit} onChanged={done} />}
       {tab === "rekap" && <RekapTab periode={periode} reload={reload} canBayar={canBayar} onChanged={done} />}
-      {tab === "stok" && <StokTab reload={reload} canEdit={canEdit} onChanged={done} fokusExp={fokusExp} />}
+      {tab === "stok" && <StokTab reload={reload} canEdit={canEdit} canInput={canInput} onChanged={done} fokusExp={fokusExp} />}
       {tab === "opname" && <KoperasiOpname canInput={canInput} canEdit={canEdit} isSuperuser={user?.role === "superuser"} onChanged={done} />}
       {tab === "beli" && (
         <div className="space-y-4">
@@ -1285,7 +1285,7 @@ function TunggakanBanner({ reload, canBayar, onChanged }: { reload: number; canB
 }
 
 // ---- Stok Barang ----
-function StokTab({ reload, canEdit, onChanged, fokusExp = 0 }: { reload: number; canEdit: boolean; onChanged: () => void; fokusExp?: number }) {
+function StokTab({ reload, canEdit, canInput, onChanged, fokusExp = 0 }: { reload: number; canEdit: boolean; canInput: boolean; onChanged: () => void; fokusExp?: number }) {
   const [rows, setRows] = useState<KopBarang[] | null>(null);
   const [search, setSearch] = useState("");
   const [aktif, setAktif] = useState("1");
@@ -1296,6 +1296,8 @@ function StokTab({ reload, canEdit, onChanged, fokusExp = 0 }: { reload: number;
   }, [fokusExp]);
   const [editing, setEditing] = useState<KopBarang | "new" | null>(null);
   const [riwayat, setRiwayat] = useState<KopBarang | null>(null);
+  // An expired barang on hand: its row offers Catat expired (the Barang Rusak / Expired form, filled in).
+  const [catatExp, setCatatExp] = useState<KopBarang | null>(null);
   const [koreksi, setKoreksi] = useState<KopBarang | null>(null);
   useEffect(() => {
     setRows(null);
@@ -1452,6 +1454,15 @@ function StokTab({ reload, canEdit, onChanged, fokusExp = 0 }: { reload: number;
                   </td>
                   <td className="px-3 py-2 whitespace-nowrap text-xs text-[var(--text-secondary)]">{b.terakhir ? isoDisplay(b.terakhir) : "-"}</td>
                   <td className="px-3 py-2 text-right whitespace-nowrap">
+                    {canInput && b.lacak_stok && qtyExpired(b) > 0 && (
+                      <button
+                        onClick={() => setCatatExp(b)}
+                        title="Tarik dari rak, foto, lalu catat: diperiksa orang kedua sebelum dimusnahkan"
+                        className="text-xs mr-2 px-2 py-0.5 rounded border border-[var(--accent-red-border)] bg-[var(--accent-red-bg)] text-[var(--accent-red)] hover:opacity-90"
+                      >
+                        Catat expired
+                      </button>
+                    )}
                     <button onClick={() => setRiwayat(b)} className="text-xs text-[var(--accent-blue)] hover:underline mr-2">
                       Riwayat
                     </button>
@@ -1472,6 +1483,7 @@ function StokTab({ reload, canEdit, onChanged, fokusExp = 0 }: { reload: number;
           </tbody>
         </table>
       </div>
+      {catatExp && <RusakModal alasanAwal="EXPIRED" kodeAwal={catatExp.kode} onClose={() => setCatatExp(null)} onSuccess={() => (setCatatExp(null), onChanged())} />}
       {koreksi && <KoreksiModal barang={koreksi} onClose={() => setKoreksi(null)} onSuccess={() => (setKoreksi(null), onChanged())} />}
       {editing && <BarangModal barang={editing === "new" ? null : editing} onClose={() => setEditing(null)} onSuccess={() => (setEditing(null), onChanged())} />}
       {riwayat && (
@@ -1483,7 +1495,6 @@ function StokTab({ reload, canEdit, onChanged, fokusExp = 0 }: { reload: number;
   );
 }
 
-// Koreksi Stok of one barang: the stock becomes the counted figure, the difference is booked as a koreksi.
 // Koreksi Stok, counted blind: the form doesn't show the stok sistem (no number to write down); the selisih
 // shows after saving, and the stock only changes once a second account (Approve Koperasi) has checked it.
 const KOREKSI_ALASAN: Record<string, string> = {
@@ -2713,7 +2724,7 @@ function PeriksaRusakModal({ tx, onClose, onSuccess }: { tx: KopTx; onClose: () 
   );
 }
 
-function RusakModal({ alasanAwal, onClose, onSuccess }: { alasanAwal: "EXPIRED" | "RUSAK"; onClose: () => void; onSuccess: () => void }) {
+function RusakModal({ alasanAwal, kodeAwal, onClose, onSuccess }: { alasanAwal: "EXPIRED" | "RUSAK"; kodeAwal?: string; onClose: () => void; onSuccess: () => void }) {
   const barang = useBarangAktif();
   const fotoAktif = useEvidenceEnabled();
   const [alasan, setAlasan] = useState(alasanAwal);
@@ -2738,6 +2749,15 @@ function RusakModal({ alasanAwal, onClose, onSuccess }: { alasanAwal: "EXPIRED" 
     if (q > 0) setQty(String(q));
     if (tgl.length) setKeterangan(`Expired ${tgl.join(", ")}`);
   };
+  // Opened from a barang's row: that barang, with its expired qty and dates filled in.
+  const [awal, setAwal] = useState(kodeAwal ?? "");
+  useEffect(() => {
+    if (awal && barang.some((x) => x.kode === awal)) {
+      pilih(awal);
+      setAwal("");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [barang, awal]);
   const save = async () => {
     if (!kode) return setError("Pilih barang");
     if (!(parseNum(qty) > 0)) return setError("Jumlah harus lebih dari 0");
