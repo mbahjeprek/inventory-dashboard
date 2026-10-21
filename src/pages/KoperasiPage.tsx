@@ -131,7 +131,6 @@ export function KoperasiPage() {
   const canBayar = can(user, "koperasi.pelunasan");
   const [tab, setTab] = useState<Tab>("dashboard");
   const [rusakAlasan, setRusakAlasan] = useState<"EXPIRED" | "RUSAK">("RUSAK");
-  const [fokusExp, setFokusExp] = useState(0);
   const [periodes, setPeriodes] = useState<string[]>([]);
   const [periode, setPeriode] = useState(localToday().slice(0, 7));
   const [ringkasan, setRingkasan] = useState<KopRingkasan | null>(null);
@@ -148,7 +147,8 @@ export function KoperasiPage() {
     setModal("");
     setReload((n) => n + 1);
   };
-  const expCard = <ExpCard reload={reload} onLihat={() => (setTab("stok"), setFokusExp((n) => n + 1))} />;
+  // Opens the list where the expired barang are processed (tarik ke Barang Rusak / Expired).
+  const expCard = <ExpCard reload={reload} onLihat={() => setTab("beli")} />;
 
   return (
     <div className="space-y-4">
@@ -249,10 +249,11 @@ export function KoperasiPage() {
       {tab === "dashboard" && <KoperasiDashboard periode={periode} reload={reload} extraCard={expCard} />}
       {tab === "jual" && <TxTable jenis="JUAL" periode={periode} reload={reload} canEdit={canEdit} onChanged={done} />}
       {tab === "rekap" && <RekapTab periode={periode} reload={reload} canBayar={canBayar} onChanged={done} />}
-      {tab === "stok" && <StokTab reload={reload} canEdit={canEdit} canInput={canInput} onChanged={done} fokusExp={fokusExp} />}
+      {tab === "stok" && <StokTab reload={reload} canEdit={canEdit} canInput={canInput} onChanged={done} />}
       {tab === "opname" && <KoperasiOpname canInput={canInput} canEdit={canEdit} isSuperuser={user?.role === "superuser"} onChanged={done} />}
       {tab === "beli" && (
         <div className="space-y-4">
+          <ExpiredPerluDitarik reload={reload} canInput={canInput} onChanged={done} />
           <TxTable jenis="BELI" periode={periode} reload={reload} canEdit={canEdit} onChanged={done} />
           <h2 className="text-sm font-semibold text-[var(--text-primary)] pt-2">Barang Rusak / Expired</h2>
           <p className="text-xs text-[var(--text-muted)] -mt-2">
@@ -1285,15 +1286,11 @@ function TunggakanBanner({ reload, canBayar, onChanged }: { reload: number; canB
 }
 
 // ---- Stok Barang ----
-function StokTab({ reload, canEdit, canInput, onChanged, fokusExp = 0 }: { reload: number; canEdit: boolean; canInput: boolean; onChanged: () => void; fokusExp?: number }) {
+function StokTab({ reload, canEdit, canInput, onChanged }: { reload: number; canEdit: boolean; canInput: boolean; onChanged: () => void }) {
   const [rows, setRows] = useState<KopBarang[] | null>(null);
   const [search, setSearch] = useState("");
   const [aktif, setAktif] = useState("1");
-  const [only, setOnly] = useState<"" | "ada" | "kosong" | "menipis" | "exp">(fokusExp ? "exp" : "");
-  // The reminder's "Lihat" opens this tab on the expired / expiring barang.
-  useEffect(() => {
-    if (fokusExp) setOnly("exp");
-  }, [fokusExp]);
+  const [only, setOnly] = useState<"" | "ada" | "kosong" | "menipis" | "exp">("");
   const [editing, setEditing] = useState<KopBarang | "new" | null>(null);
   const [riwayat, setRiwayat] = useState<KopBarang | null>(null);
   // An expired barang on hand: its row offers Catat expired (the Barang Rusak / Expired form, filled in).
@@ -1460,7 +1457,7 @@ function StokTab({ reload, canEdit, canInput, onChanged, fokusExp = 0 }: { reloa
                         title="Tarik dari rak, foto, lalu catat: diperiksa orang kedua sebelum dimusnahkan"
                         className="text-xs mr-2 px-2 py-0.5 rounded border border-[var(--accent-red-border)] bg-[var(--accent-red-bg)] text-[var(--accent-red)] hover:opacity-90"
                       >
-                        Catat expired
+                        Tarik ke Rusak / Expired
                       </button>
                     )}
                     <button onClick={() => setRiwayat(b)} className="text-xs text-[var(--accent-blue)] hover:underline mr-2">
@@ -2231,6 +2228,75 @@ const expText = (b: KopBarang) => {
   const d = hariLagi((b.exp_terdekat ?? b.exp_iso)!);
   return d < 0 ? `expired ${-d} hari lalu` : d === 0 ? "expired hari ini" : `${d} hari lagi`;
 };
+
+// Top of Stock In, Rusak & Koreksi: every barang whose stock on hand is past its tanggal expired shows up
+// here by itself, to be pulled off the shelf and processed. Nothing is booked automatically: Tarik opens
+// the Barang Rusak / Expired form filled in (qty, dates), the physical count and a photo are still needed,
+// then the second person's check and the Berita Acara.
+function ExpiredPerluDitarik({ reload, canInput, onChanged }: { reload: number; canInput: boolean; onChanged: () => void }) {
+  const [rows, setRows] = useState<KopBarang[]>([]);
+  const [tarik, setTarik] = useState<KopBarang | null>(null);
+  useEffect(() => {
+    api
+      .kopBarang({ aktif: "1" })
+      .then((r) => setRows(r.filter((b) => b.lacak_stok && qtyExpired(b) > 0)))
+      .catch(() => setRows([]));
+  }, [reload]);
+  if (!rows.length) return null;
+  return (
+    <div className="bg-[var(--bg-card)] border border-[var(--accent-red-border)] rounded-lg">
+      <div className="flex flex-wrap items-center gap-2 px-4 py-3 border-b border-[var(--accent-red-border)] bg-[var(--accent-red-bg)] rounded-t-lg">
+        <CalendarClock size={18} className="text-[var(--accent-red)]" />
+        <h2 className="text-sm font-semibold text-[var(--accent-red)]">Expired, perlu ditarik ({rows.length} barang)</h2>
+        <span className="text-xs text-[var(--accent-red)] opacity-90">Masih tercatat sebagai stok. Tarik dari rak, hitung, foto, lalu klik Tarik; setelah diperiksa orang kedua masuk Berita Acara.</span>
+      </div>
+      <div className="table-scroll">
+        <table className="data-table text-sm">
+          <thead>
+            <tr className="text-left text-xs text-[var(--text-secondary)]">
+              <th className="px-3 py-2">Barang</th>
+              <th className="px-3 py-2 text-right">Stok expired</th>
+              <th className="px-3 py-2">Tanggal expired</th>
+              <th className="px-3 py-2 text-right">Nilai (harga beli)</th>
+              <th className="px-3 py-2" />
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-[var(--border)]">
+            {rows.map((b) => {
+              const q = qtyExpired(b);
+              const tgl = (b.exp_batches ?? []).filter((e) => hariLagi(e.exp) < 0);
+              return (
+                <tr key={b.kode}>
+                  <td className="col-grow px-3 py-2">
+                    <div className="text-[var(--text-primary)]">{b.nama}</div>
+                    <div className="text-[11px] text-[var(--text-muted)]">{b.kode}</div>
+                  </td>
+                  <td className="px-3 py-2 text-right whitespace-nowrap font-semibold text-[var(--accent-red)]">
+                    {fmtQty(q)} {b.satuan}
+                  </td>
+                  <td className="px-3 py-2 whitespace-nowrap text-xs text-[var(--accent-red)]">
+                    {tgl.map((e) => `${isoDisplay(e.exp)} (${-hariLagi(e.exp)} hari lalu)`).join(", ")}
+                  </td>
+                  <td className="px-3 py-2 text-right whitespace-nowrap">{rp(q * b.harga_beli)}</td>
+                  <td className="px-3 py-2 text-right whitespace-nowrap">
+                    {canInput ? (
+                      <button onClick={() => setTarik(b)} className="text-xs px-2.5 py-1 rounded-md bg-[var(--accent-red)] text-white hover:opacity-90">
+                        Tarik ke Rusak / Expired
+                      </button>
+                    ) : (
+                      <span className="text-[11px] text-[var(--text-muted)]">perlu hak Input Koperasi</span>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      {tarik && <RusakModal alasanAwal="EXPIRED" kodeAwal={tarik.kode} onClose={() => setTarik(null)} onSuccess={() => (setTarik(null), onChanged())} />}
+    </div>
+  );
+}
 
 // Card of the barang on hand that are expired or expire within 30 days (like Klinik's); opens that list.
 function ExpCard({ reload, onLihat }: { reload: number; onLihat: () => void }) {
