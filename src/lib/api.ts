@@ -481,6 +481,9 @@ export type KopBarang = {
   // Expiry of the stock on hand (nearest; null = none) and a free note.
   exp_iso: string | null;
   catatan: string;
+  // The stock on hand per tanggal expired (Stock In arrivals, FEFO; then the barang's own date), nearest first.
+  exp_batches: { exp: string; qty: number }[];
+  exp_terdekat: string | null;
   satuan: string;
   harga_jual: number;
   harga_beli: number;
@@ -590,7 +593,7 @@ export type KopOpname = {
   nilai_selisih?: number;
 };
 export type KopOpnameLine = { kode: string; nama: string; satuan: string; harga_beli: number; stok_sistem: number; fisik: number | null; keterangan: string };
-export type KopLineInput = { barang_kode: string; qty: number; harga: number };
+export type KopLineInput = { barang_kode: string; qty: number; harga: number; exp_iso?: string };
 
 export type PinjamanLogAksi = "PINJAM" | "TRANSFER" | "KEMBALI" | "LUNAS" | "BATAL";
 export type PinjamanLog = {
@@ -1381,7 +1384,7 @@ export const api = {
     req<{ success: boolean }>("/api/koperasi/beli", { method: "POST", body: JSON.stringify(body) }),
   kopJualBatch: (body: { tanggal: string; evidence_id: string | null; rows: { anggota_kode: string; barang_kode: string; qty: number; harga: number }[] }) =>
     req<{ count: number; bons: number }>("/api/koperasi/jual/batch", { method: "POST", body: JSON.stringify(body) }),
-  kopBeliBatch: (body: { tanggal: string; evidence_id: string | null; update_harga: boolean; rows: { barang_kode: string; qty: number; harga: number; no_po: string }[] }) =>
+  kopBeliBatch: (body: { tanggal: string; evidence_id: string | null; update_harga: boolean; rows: { barang_kode: string; qty: number; harga: number; no_po: string; exp_iso?: string }[] }) =>
     req<{ count: number }>("/api/koperasi/beli/batch", { method: "POST", body: JSON.stringify(body) }),
   kopRusak: (body: { tanggal: string; barang_kode: string; qty: number; keterangan: string; evidence_id: string | null }) =>
     req<{ success: boolean }>("/api/koperasi/rusak", { method: "POST", body: JSON.stringify(body) }),

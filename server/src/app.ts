@@ -7875,8 +7875,35 @@ app.get("/api/koperasi/barang", async (req, res) => {
       ORDER BY b.nama`,
     { k: KOPERASI, aktif, search, like: `%${search}%` }
   );
+  // Expiry per arrival: the Stock In rows that carry a tanggal expired, the stock on hand spread over them
+  // FEFO (what expires first was sold first, so the latest expiries are what is left). Stock beyond them
+  // (older arrivals without a date) keeps the barang's own tanggal expired.
+  const arrivals = await queryMany<{ kode: string; exp: string; qty: number }>(
+    `SELECT barang_kode AS kode, exp_iso AS exp, SUM(qty)::float8 AS qty FROM koperasi_tx
+      WHERE koperasi = @k AND jenis = 'BELI' AND exp_iso IS NOT NULL GROUP BY 1, 2 ORDER BY 1, 2 DESC`,
+    { k: KOPERASI }
+  );
+  const byKode = new Map<string, { exp: string; qty: number }[]>();
+  for (const a of arrivals) byKode.set(a.kode, [...(byKode.get(a.kode) ?? []), { exp: a.exp, qty: a.qty }]);
+  for (const b of data as any[]) {
+    let sisa = b.lacak_stok ? Math.max(Number(b.stok), 0) : 0;
+    const batches: { exp: string; qty: number }[] = [];
+    for (const a of byKode.get(b.kode) ?? []) {
+      if (sisa <= 1e-9) break;
+      const q = Math.min(a.qty, sisa);
+      batches.push({ exp: a.exp, qty: Math.round(q * 1000) / 1000 });
+      sisa -= q;
+    }
+    if (b.exp_iso && (sisa > 1e-9 || !b.lacak_stok)) batches.push({ exp: b.exp_iso, qty: b.lacak_stok ? Math.round(sisa * 1000) / 1000 : 0 });
+    batches.sort((x, y) => x.exp.localeCompare(y.exp));
+    b.exp_batches = batches;
+    b.exp_terdekat = batches[0]?.exp ?? null;
+  }
   res.json(data);
 });
+
+// A Stock In line's tanggal expired: a valid date or ''.
+const kopExp = (v: unknown) => (isIsoDate(v) ? v : "");
 
 const KOP_BARANG_LABELS = { exp_iso: "Tanggal Expired", catatan: "Catatan", nama: "Nama", satuan: "Satuan", harga_jual: "Harga Jual", harga_beli: "Harga Beli", stok_min: "Stok Minimum", aktif: "Aktif", lacak_stok: "Lacak Stok" };
 function kopBarangBody(b: any): { error: string } | Record<string, unknown> {
@@ -8170,7 +8197,8 @@ app.post("/api/koperasi/jual", async (req, res) => {
           ket: String(b.keterangan ?? "").trim(),
           evidence,
           uid: req.user!.id,
-          rows: JSON.stringify(v.lines.map((l) => ({ kode: l.barang_kode, qty: l.qty, harga: l.harga }))),
+          // Tanggal expired of this arrival (optional), kept on the Stock In row.
+          rows: JSON.stringify(v.lines.map((l, i) => ({ kode: l.barang_kode, qty: l.qty, harga: l.harga, exp: kopExp(b.items?.[i]?.exp_iso) }))),
         },
         client
       );
@@ -8204,9 +8232,9 @@ app.post("/api/koperasi/beli", async (req, res) => {
       const v = await kopLines(b.items, client);
       if ("error" in v) return v;
       await execute(
-        `INSERT INTO koperasi_tx (koperasi, jenis, tanggal_iso, periode, barang_kode, qty, harga, total, no_po, keterangan, evidence_id, user_id)
-         SELECT @k, 'BELI', @tanggal, @periode, x.kode, x.qty, x.harga, ROUND((x.qty * x.harga)::numeric, 2), @po, @ket, @evidence::uuid, @uid
-           FROM json_to_recordset(@rows::json) AS x(kode text, qty float8, harga float8)`,
+        `INSERT INTO koperasi_tx (koperasi, jenis, tanggal_iso, periode, barang_kode, qty, harga, total, no_po, keterangan, evidence_id, user_id, exp_iso)
+         SELECT @k, 'BELI', @tanggal, @periode, x.kode, x.qty, x.harga, ROUND((x.qty * x.harga)::numeric, 2), @po, @ket, @evidence::uuid, @uid, NULLIF(x.exp, '')
+           FROM json_to_recordset(@rows::json) AS x(kode text, qty float8, harga float8, exp text)`,
         {
           k: KOPERASI,
           tanggal: b.tanggal,
@@ -8387,7 +8415,8 @@ app.post("/api/koperasi/jual/batch", async (req, res) => {
 app.post("/api/koperasi/beli/batch", async (req, res) => {
   const b = req.body ?? {};
   if (!isIsoDate(b.tanggal) || b.tanggal > jakartaToday()) return res.status(400).json({ error: "Tanggal tidak valid (tidak boleh setelah hari ini)" });
-  const rows: { barang_kode: string; qty: number; harga: number; no_po: string }[] = (Array.isArray(b.rows) ? b.rows : []).map((r: any) => ({
+  const rows: { barang_kode: string; qty: number; harga: number; no_po: string; exp: string }[] = (Array.isArray(b.rows) ? b.rows : []).map((r: any) => ({
+    exp: kopExp(r?.exp_iso),
     barang_kode: String(r?.barang_kode ?? "").trim().toUpperCase(),
     qty: Number(r?.qty),
     harga: Number(r?.harga ?? 0),
@@ -8409,16 +8438,16 @@ app.post("/api/koperasi/beli/batch", async (req, res) => {
   try {
     await withTransaction(async (client) => {
       await execute(
-        `INSERT INTO koperasi_tx (koperasi, jenis, tanggal_iso, periode, barang_kode, qty, harga, total, no_po, keterangan, evidence_id, user_id)
-         SELECT @kop, 'BELI', @tanggal, @periode, x.kode, x.qty, x.harga, ROUND((x.qty * x.harga)::numeric, 2), x.po, 'Input banyak', @evidence::uuid, @uid
-           FROM json_to_recordset(@rows::json) AS x(kode text, qty float8, harga float8, po text)`,
+        `INSERT INTO koperasi_tx (koperasi, jenis, tanggal_iso, periode, barang_kode, qty, harga, total, no_po, keterangan, evidence_id, user_id, exp_iso)
+         SELECT @kop, 'BELI', @tanggal, @periode, x.kode, x.qty, x.harga, ROUND((x.qty * x.harga)::numeric, 2), x.po, 'Input banyak', @evidence::uuid, @uid, NULLIF(x.exp, '')
+           FROM json_to_recordset(@rows::json) AS x(kode text, qty float8, harga float8, po text, exp text)`,
         {
           kop: KOPERASI,
           tanggal: b.tanggal,
           periode: kopMonth(b.tanggal),
           evidence,
           uid: req.user!.id,
-          rows: JSON.stringify(rows.map((r) => ({ kode: r.barang_kode, qty: r.qty, harga: r.harga, po: r.no_po }))),
+          rows: JSON.stringify(rows.map((r) => ({ kode: r.barang_kode, qty: r.qty, harga: r.harga, po: r.no_po, exp: r.exp }))),
         },
         client
       );

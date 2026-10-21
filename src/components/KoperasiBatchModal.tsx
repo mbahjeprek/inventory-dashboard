@@ -257,10 +257,11 @@ export function KopBeliBatchModal({ onClose, onSuccess }: { onClose: () => void;
         return q > 0 && Number.isFinite(h) ? `= ${rp(q * h)}` : undefined;
       },
     },
+    { key: "exp", label: "Tgl Expired", width: 150, type: "date", copy: false },
     { key: "no_po", label: "No PO / Nota", width: 160, carry: true, placeholder: "opsional" },
   ];
   const blank = isBlankIn(columns);
-  const blankRow: Cells = { barang: "", jumlah: "", harga: "", no_po: "" };
+  const blankRow: Cells = { barang: "", jumlah: "", harga: "", exp: "", no_po: "" };
   const run = (rows: Cells[]) =>
     runningStock(rows, {
       start: (k) => byKode.get(k)?.stok ?? 0,
@@ -279,7 +280,7 @@ export function KopBeliBatchModal({ onClose, onSuccess }: { onClose: () => void;
       tanggal,
       evidence_id: evidenceId || null,
       update_harga: updateHarga,
-      rows: rows.map((c) => ({ barang_kode: itemOf(c)!.kode, qty: parseNum(c.jumlah), harga: hargaOf(c), no_po: (c.no_po ?? "").trim() })),
+      rows: rows.map((c) => ({ barang_kode: itemOf(c)!.kode, qty: parseNum(c.jumlah), harga: hargaOf(c), no_po: (c.no_po ?? "").trim(), ...(c.exp ? { exp_iso: c.exp } : {}) })),
     });
     return res.count;
   };

@@ -1255,7 +1255,7 @@ function StokTab({ reload, canEdit, onChanged, fokusExp = 0 }: { reload: number;
       harga_beli: (b) => b.harga_beli,
       harga_jual: (b) => b.harga_jual,
       terakhir: (b) => b.terakhir,
-      exp: (b) => b.exp_iso,
+      exp: (b) => b.exp_terdekat ?? b.exp_iso,
     }
   );
   const buildReport = async () => ({
@@ -1280,7 +1280,7 @@ function StokTab({ reload, canEdit, onChanged, fokusExp = 0 }: { reload: number;
       b.harga_beli,
       b.harga_jual,
       b.lacak_stok ? Math.max(b.stok, 0) * b.harga_beli : "",
-      b.exp_iso ? `${isoDisplay(b.exp_iso)}${expPerlu(b) ? ` (${expText(b)})` : ""}` : "",
+      (b.exp_batches ?? []).map((x) => `${isoDisplay(x.exp)}${b.lacak_stok && x.qty > 0 ? ` (${fmtQty(x.qty)} ${b.satuan})` : ""}`).join("; "),
       b.catatan,
     ]),
   });
@@ -1355,12 +1355,18 @@ function StokTab({ reload, canEdit, onChanged, fokusExp = 0 }: { reload: number;
                   <td className="px-3 py-2 text-right whitespace-nowrap">{rp(b.harga_beli)}</td>
                   <td className="px-3 py-2 text-right whitespace-nowrap">{rp(b.harga_jual)}</td>
                   <td className="px-3 py-2 whitespace-nowrap text-xs">
-                    {b.exp_iso ? (
+                    {b.exp_batches?.length ? (
                       <>
-                        <span className={expPerlu(b) === "lewat" ? "text-[var(--accent-red)] font-semibold" : expPerlu(b) ? "text-[var(--accent-amber)] font-semibold" : "text-[var(--text-secondary)]"}>
-                          {isoDisplay(b.exp_iso)}
-                        </span>
-                        {expPerlu(b) && <div className={`text-[10px] ${expPerlu(b) === "lewat" ? "text-[var(--accent-red)]" : "text-[var(--accent-amber)]"}`}>{expText(b)}</div>}
+                        {b.exp_batches.map((x) => {
+                          const d = hariLagi(x.exp);
+                          return (
+                            <div key={x.exp} className={d < 0 ? "text-[var(--accent-red)] font-semibold" : d <= EXP_HARI ? "text-[var(--accent-amber)] font-semibold" : "text-[var(--text-secondary)]"}>
+                              {isoDisplay(x.exp)}
+                              {b.lacak_stok && x.qty > 0 && <span className="font-normal"> · {fmtQty(x.qty)} {b.satuan}</span>}
+                            </div>
+                          );
+                        })}
+                        {expPerlu(b) && <div className={`text-[10px] ${expPerlu(b) === "lewat" ? "text-[var(--accent-red)]" : "text-[var(--accent-amber)]"}`}>terdekat: {expText(b)}</div>}
                       </>
                     ) : (
                       <span className="text-[var(--text-muted)]">-</span>
@@ -1524,9 +1530,9 @@ function BarangModal({ barang, onClose, onSuccess }: { barang: KopBarang | null;
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className={labelCls}>Tanggal expired (stok yang ada)</label>
+            <label className={labelCls}>Tanggal expired stok lama</label>
             <input type="date" value={f.exp_iso} onChange={set("exp_iso")} className={inputCls} />
-            <p className="text-[11px] text-[var(--text-muted)] mt-0.5">Isi yang paling dekat. Kosongkan bila tidak ada.</p>
+            <p className="text-[11px] text-[var(--text-muted)] mt-0.5">Untuk stok yang masuk sebelum ada tanggal per Stock In. Stok baru: isi tanggalnya di Stock In.</p>
           </div>
           <div>
             <label className={labelCls}>Catatan (opsional)</label>
@@ -1971,7 +1977,7 @@ function RpInput({ value, onChange, small = false }: { value: string; onChange: 
 }
 
 // ---- Forms: lines of barang (pengambilan uses harga jual, pembelian harga beli) ----
-type Line = { barang: KopBarang; qty: string; harga: string };
+type Line = { barang: KopBarang; qty: string; harga: string; exp?: string };
 
 // Barang lists: in stock first (a barang without stock tracking counts as available), coloured by it.
 const adaStok = (b: KopBarang) => !b.lacak_stok || b.stok > 0;
@@ -1982,12 +1988,13 @@ const stokCls = (b: KopBarang) => (adaStok(b) ? "text-[var(--accent-green)]" : "
 const EXP_HARI = 30;
 const hariLagi = (iso: string) => Math.round((Date.parse(iso) - Date.parse(localToday())) / 86400000);
 function expPerlu(b: KopBarang): "lewat" | "dekat" | null {
-  if (!b.exp_iso || !b.aktif || (b.lacak_stok && b.stok <= 0)) return null;
-  const d = hariLagi(b.exp_iso);
+  const exp = b.exp_terdekat ?? b.exp_iso;
+  if (!exp || !b.aktif || (b.lacak_stok && b.stok <= 0)) return null;
+  const d = hariLagi(exp);
   return d < 0 ? "lewat" : d <= EXP_HARI ? "dekat" : null;
 }
 const expText = (b: KopBarang) => {
-  const d = hariLagi(b.exp_iso!);
+  const d = hariLagi((b.exp_terdekat ?? b.exp_iso)!);
   return d < 0 ? `expired ${-d} hari lalu` : d === 0 ? "expired hari ini" : `${d} hari lagi`;
 };
 
@@ -2085,6 +2092,7 @@ function BarangLines({ lines, setLines, harga, checkStok }: { lines: Line[]; set
                 <th className="px-2 py-1.5">Barang</th>
                 <th className="px-2 py-1.5 w-24">Jumlah</th>
                 <th className="px-2 py-1.5 w-36">{harga === "jual" ? "Harga" : "Harga beli"}</th>
+                {harga === "beli" && <th className="px-2 py-1.5 w-36">Tgl expired</th>}
                 <th className="px-2 py-1.5 text-right">Subtotal</th>
                 <th className="w-8" />
               </tr>
@@ -2107,6 +2115,17 @@ function BarangLines({ lines, setLines, harga, checkStok }: { lines: Line[]; set
                     <td className="px-2 py-1.5">
                       {harga === "jual" ? <div className="text-right py-1 px-2 whitespace-nowrap">{rp(parseNum(l.harga) || 0)}</div> : <RpInput small value={l.harga} onChange={(v) => update(i, "harga", v)} />}
                     </td>
+                    {harga === "beli" && (
+                      <td className="px-2 py-1.5">
+                        <input
+                          type="date"
+                          value={l.exp ?? ""}
+                          onChange={(e) => setLines((x) => x.map((y, j) => (j === i ? { ...y, exp: e.target.value } : y)))}
+                          title="Tanggal expired barang yang datang ini (opsional)"
+                          className="w-full text-sm rounded border border-[var(--border)] px-1.5 py-1"
+                        />
+                      </td>
+                    )}
                     <td className="px-2 py-1.5 text-right whitespace-nowrap">{rp(qty * (parseNum(l.harga) || 0))}</td>
                     <td className="px-1 py-1.5">
                       <button onClick={() => setLines((x) => x.filter((_, j) => j !== i))} title="Hapus baris" className="p-1 rounded text-[var(--accent-red)] hover:bg-[var(--accent-red-bg)]">
@@ -2117,7 +2136,7 @@ function BarangLines({ lines, setLines, harga, checkStok }: { lines: Line[]; set
                 );
               })}
               <tr className="border-t border-[var(--border)] font-semibold">
-                <td colSpan={3} className="px-2 py-1.5 text-right">
+                <td colSpan={harga === "beli" ? 4 : 3} className="px-2 py-1.5 text-right">
                   Total
                 </td>
                 <td className="px-2 py-1.5 text-right whitespace-nowrap">{rp(total)}</td>
@@ -2131,7 +2150,7 @@ function BarangLines({ lines, setLines, harga, checkStok }: { lines: Line[]; set
   );
 }
 
-const linesBody = (lines: Line[]) => lines.map((l) => ({ barang_kode: l.barang.kode, qty: parseNum(l.qty), harga: parseNum(l.harga || "0") }));
+const linesBody = (lines: Line[]) => lines.map((l) => ({ barang_kode: l.barang.kode, qty: parseNum(l.qty), harga: parseNum(l.harga || "0"), ...(l.exp ? { exp_iso: l.exp } : {}) }));
 const linesError = (lines: Line[]) =>
   !lines.length ? "Tambahkan minimal satu barang" : lines.some((l) => !(parseNum(l.qty) > 0) || !(parseNum(l.harga || "0") >= 0)) ? "Jumlah harus lebih dari 0 dan harga diisi angka" : "";
 

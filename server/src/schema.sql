@@ -838,3 +838,5 @@ ALTER TABLE opname_line ADD COLUMN IF NOT EXISTS dihitung_at TIMESTAMPTZ;
 -- free note. Stok Barang colours it and the Koperasi page reminds of barang expired / expiring in 30 days.
 ALTER TABLE koperasi_barang ADD COLUMN IF NOT EXISTS exp_iso TEXT;
 ALTER TABLE koperasi_barang ADD COLUMN IF NOT EXISTS catatan TEXT NOT NULL DEFAULT '';
+-- Tanggal expired of each arrival (Stock In row); the stock on hand is spread over them FEFO.
+ALTER TABLE koperasi_tx ADD COLUMN IF NOT EXISTS exp_iso TEXT;
