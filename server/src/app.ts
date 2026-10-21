@@ -7902,6 +7902,36 @@ app.get("/api/koperasi/barang", async (req, res) => {
   res.json(data);
 });
 
+// The Stock In arrivals of a barang (newest first) with their tanggal expired, for the barang form.
+app.get("/api/koperasi/barang/:kode/kedatangan", async (req, res) => {
+  const data = await queryMany(
+    `SELECT id, tanggal_iso, qty::float8 qty, exp_iso, no_po, keterangan FROM koperasi_tx
+      WHERE koperasi = @k AND barang_kode = @kode AND jenis = 'BELI' ORDER BY tanggal_iso DESC, id DESC LIMIT 50`,
+    { k: KOPERASI, kode: req.params.kode }
+  );
+  res.json(data);
+});
+
+// Set / change / clear the tanggal expired of one Stock In arrival (Edit Koperasi).
+app.put("/api/koperasi/kedatangan/:id/exp", async (req, res) => {
+  const exp = String(req.body?.exp_iso ?? "").trim();
+  if (exp && !isIsoDate(exp)) return res.status(400).json({ error: "Tanggal expired tidak valid" });
+  const t = await queryOne<any>(
+    "SELECT t.id, t.tanggal_iso, t.exp_iso, t.qty, b.kode, b.nama FROM koperasi_tx t JOIN koperasi_barang b ON b.kode = t.barang_kode WHERE t.id = @id AND t.koperasi = @k AND t.jenis = 'BELI'",
+    { id: req.params.id, k: KOPERASI }
+  );
+  if (!t) return res.status(404).json({ error: "Stock In tidak ditemukan" });
+  await execute("UPDATE koperasi_tx SET exp_iso = @exp WHERE id = @id", { exp: exp || null, id: t.id });
+  await logActivity(req, {
+    module: "KOPERASI",
+    estate: KOPERASI,
+    aksi: "Ubah Tanggal Expired",
+    objek: `${t.kode} ${t.nama}`,
+    detail: `Stock In ${t.tanggal_iso} (${kopQty(Number(t.qty))}): ${t.exp_iso ?? "-"} → ${exp || "-"}`,
+  });
+  res.json({ success: true });
+});
+
 // A Stock In line's tanggal expired: a valid date or ''.
 const kopExp = (v: unknown) => (isIsoDate(v) ? v : "");
 

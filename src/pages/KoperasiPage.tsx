@@ -1539,6 +1539,7 @@ function BarangModal({ barang, onClose, onSuccess }: { barang: KopBarang | null;
             <input value={f.catatan} onChange={set("catatan")} placeholder="mis. simpan di rak 2, merek pengganti" className={inputCls} />
           </div>
         </div>
+        {barang && <KedatanganExp barang={barang} />}
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" checked={f.lacak_stok} onChange={set("lacak_stok")} /> Lacak stok (matikan untuk barang yang tidak dibeli, mis. air galon depo)
         </label>
@@ -1556,6 +1557,101 @@ function BarangModal({ barang, onClose, onSuccess }: { barang: KopBarang | null;
         </div>
       </div>
     </Modal>
+  );
+}
+
+// In the barang form: the stock on hand per tanggal expired (as in Stok Barang) and the barang's Stock In
+// arrivals, whose tanggal expired can be set or changed right here (saved as soon as it is picked).
+function KedatanganExp({ barang }: { barang: KopBarang }) {
+  const [rows, setRows] = useState<Awaited<ReturnType<typeof api.kopKedatangan>> | null>(null);
+  const [msg, setMsg] = useState("");
+  useEffect(() => {
+    api
+      .kopKedatangan(barang.kode)
+      .then(setRows)
+      .catch(() => setRows([]));
+  }, [barang.kode]);
+  const ubah = async (id: number, exp: string) => {
+    setMsg("");
+    try {
+      await api.kopKedatanganExp(id, exp);
+      setRows((r) => (r ?? []).map((x) => (x.id === id ? { ...x, exp_iso: exp || null } : x)));
+      setMsg("Tanggal expired tersimpan. Kolom Expired di tabel ikut berubah setelah klik Simpan (atau muat ulang).");
+    } catch (e) {
+      setMsg(errorText(e, "Gagal menyimpan tanggal expired"));
+    }
+  };
+  return (
+    <div className="rounded-md border border-[var(--border)] p-3 space-y-2">
+      <div>
+        <div className={labelCls}>Sisa stok per tanggal expired</div>
+        {barang.exp_batches?.length ? (
+          <div className="flex flex-wrap gap-1.5">
+            {barang.exp_batches.map((x) => {
+              const d = hariLagi(x.exp);
+              return (
+                <span
+                  key={x.exp}
+                  className={`text-xs px-2 py-0.5 rounded border ${
+                    d < 0
+                      ? "border-[var(--accent-red-border)] bg-[var(--accent-red-bg)] text-[var(--accent-red)]"
+                      : d <= EXP_HARI
+                        ? "border-[var(--accent-amber-border)] bg-[var(--accent-amber-bg)] text-[var(--accent-amber)]"
+                        : "border-[var(--border)] text-[var(--text-secondary)]"
+                  }`}
+                >
+                  {isoDisplay(x.exp)}
+                  {barang.lacak_stok && x.qty > 0 && ` · ${fmtQty(x.qty)} ${barang.satuan}`}
+                </span>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="text-xs text-[var(--text-muted)]">Belum ada tanggal expired.</p>
+        )}
+      </div>
+      <div>
+        <div className={labelCls}>Tanggal expired per kedatangan (Stock In)</div>
+        {rows === null ? (
+          <p className="text-xs text-[var(--text-muted)]">Memuat...</p>
+        ) : !rows.length ? (
+          <p className="text-xs text-[var(--text-muted)]">Belum ada Stock In barang ini.</p>
+        ) : (
+          <div className="max-h-48 overflow-auto rounded border border-[var(--border)]">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="bg-[#f8fafc] text-left text-[var(--text-secondary)]">
+                  <th className="px-2 py-1">Masuk</th>
+                  <th className="px-2 py-1 text-right">Jumlah</th>
+                  <th className="px-2 py-1">No PO</th>
+                  <th className="px-2 py-1">Tgl expired</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={r.id} className="border-t border-[var(--border)]">
+                    <td className="px-2 py-1 whitespace-nowrap">{isoDisplay(r.tanggal_iso)}</td>
+                    <td className="px-2 py-1 text-right whitespace-nowrap">
+                      {fmtQty(r.qty)} {barang.satuan}
+                    </td>
+                    <td className="px-2 py-1 text-[var(--text-secondary)]">{r.no_po || "-"}</td>
+                    <td className="px-2 py-1">
+                      <input
+                        type="date"
+                        defaultValue={r.exp_iso ?? ""}
+                        onBlur={(e) => e.target.value !== (r.exp_iso ?? "") && ubah(r.id, e.target.value)}
+                        className="text-xs rounded border border-[var(--border)] px-1.5 py-0.5"
+                      />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {msg && <p className="text-[11px] text-[var(--text-secondary)] mt-1">{msg}</p>}
+      </div>
+    </div>
   );
 }
 

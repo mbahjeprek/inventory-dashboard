@@ -1370,6 +1370,10 @@ export const api = {
   kopPeriode: () => req<string[]>("/api/koperasi/periode"),
   kopRingkasan: (periode: string) => req<KopRingkasan>(`/api/koperasi/ringkasan?periode=${periode}`),
   kopBarang: (params: { search?: string; aktif?: string } = {}) => req<KopBarang[]>(`/api/koperasi/barang?${new URLSearchParams(params as any)}`),
+  kopKedatangan: (kode: string) =>
+    req<{ id: number; tanggal_iso: string; qty: number; exp_iso: string | null; no_po: string; keterangan: string }[]>(`/api/koperasi/barang/${encodeURIComponent(kode)}/kedatangan`),
+  kopKedatanganExp: (id: number, exp_iso: string) =>
+    req<{ success: boolean }>(`/api/koperasi/kedatangan/${id}/exp`, { method: "PUT", body: JSON.stringify({ exp_iso }) }),
   kopSaveBarang: (kode: string | null, body: Partial<KopBarang>) =>
     req<{ kode?: string }>(kode ? `/api/koperasi/barang/${encodeURIComponent(kode)}` : "/api/koperasi/barang", { method: kode ? "PUT" : "POST", body: JSON.stringify(body) }),
   kopAnggota: (params: { search?: string; status?: string; jenis?: string } = {}) => req<KopAnggota[]>(`/api/koperasi/anggota?${new URLSearchParams(params as any)}`),
