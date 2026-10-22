@@ -15,7 +15,7 @@ const ESTATES_BY_MODULE = {
   KLINIK: ["NILAM", "FIRUS", "ZAMRUD", "KNS", "WJA"],
   OLI: ["NILAM", "FIRUS", "ZAMRUD", "KNS", "WJA"],
   KOPERASI: ["NILAM"],
-  KENDARAAN: ["NILAM", "ZAMRUD", "FIRUS"],
+  KENDARAAN: ["NILAM", "FIRUS", "ZAMRUD"],
 };
 // Module names in titles / text.
 const MODULE_NAME: Record<ActivityLog["module"], string> = { BARANG: "Gudang", BBM: "BBM", PUPUK: "Pupuk", KLINIK: "Klinik", OLI: "Oli", KOPERASI: "Koperasi", KENDARAAN: "Kendaraan & Alat Berat" };

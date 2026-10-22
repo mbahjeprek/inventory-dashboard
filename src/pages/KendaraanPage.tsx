@@ -18,7 +18,7 @@ const TABS: { key: Tab; label: string; icon: typeof List }[] = [
   { key: "unit", label: "Daftar Unit", icon: List },
   { key: "harian", label: "Kondisi Harian", icon: CalendarDays },
 ];
-const ESTATES = ["NILAM", "ZAMRUD", "FIRUS"];
+const ESTATES = ["NILAM", "FIRUS", "ZAMRUD"];
 const KONDISI: Record<string, { label: string; cls: string }> = {
   BAIK: { label: "Baik", cls: "bg-[var(--accent-green-bg)] border-[var(--accent-green-border)] text-[var(--accent-green)]" },
   RUSAK: { label: "Rusak", cls: "bg-[var(--accent-red-bg)] border-[var(--accent-red-border)] text-[var(--accent-red)]" },

@@ -19,8 +19,7 @@ type GudangStat = { totalItems: number; totalStock: number; lowStock: number; ou
 // One entry per estate with the page of each inventory it has.
 export const ESTATES = [
   { estate: "NILAM", label: "Nilam", gudang: "/inventory", bbm: "/inventory-bbm", pupuk: "/inventory-pupuk", klinik: "/inventory-klinik", oli: "/inventory-oli" },
-  { estate: "KNS", label: "KNS", gudang: "/inventory-kns", bbm: "/inventory-bbm-kns", pupuk: "/inventory-pupuk-kns", klinik: "/inventory-klinik-kns", oli: "/inventory-oli-kns" },
-  { estate: "WJA", label: "WJA", gudang: "/inventory-wja", bbm: "/inventory-bbm-wja", pupuk: "/inventory-pupuk-wja", klinik: "/inventory-klinik-wja", oli: "/inventory-oli-wja" },
+  { estate: "FIRUS", label: "Firus", gudang: "/inventory-firus", bbm: "/inventory-bbm-firus", pupuk: "/inventory-pupuk-firus", klinik: "/inventory-klinik-firus", oli: "/inventory-oli-firus" },
   {
     estate: "ZAMRUD",
     label: "Zamrud",
@@ -30,7 +29,8 @@ export const ESTATES = [
     klinik: "/inventory-klinik-zamrud",
     oli: "/inventory-oli-zamrud",
   },
-  { estate: "FIRUS", label: "Firus", gudang: "/inventory-firus", bbm: "/inventory-bbm-firus", pupuk: "/inventory-pupuk-firus", klinik: "/inventory-klinik-firus", oli: "/inventory-oli-firus" },
+  { estate: "KNS", label: "KNS", gudang: "/inventory-kns", bbm: "/inventory-bbm-kns", pupuk: "/inventory-pupuk-kns", klinik: "/inventory-klinik-kns", oli: "/inventory-oli-kns" },
+  { estate: "WJA", label: "WJA", gudang: "/inventory-wja", bbm: "/inventory-bbm-wja", pupuk: "/inventory-pupuk-wja", klinik: "/inventory-klinik-wja", oli: "/inventory-oli-wja" },
 ];
 type EstateInfo = (typeof ESTATES)[number];
 

@@ -3036,7 +3036,7 @@ app.delete("/api/bbm/:id", requireSuperuser, async (req, res) => {
 
 // ---- Inventory Pupuk (fertiliser), see schema.sql's pupuk_log ----
 // Estates with an Inventory Pupuk. KNS and WJA had no rows in the source sheet and start empty.
-const PUPUK_ESTATES = ["NILAM", "ZAMRUD", "FIRUS", "KNS", "WJA"];
+const PUPUK_ESTATES = ["NILAM", "FIRUS", "ZAMRUD", "KNS", "WJA"];
 
 function pupukFilters(q: Record<string, string>) {
   const conditions = ["estate = @estate"];
