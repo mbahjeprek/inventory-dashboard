@@ -140,6 +140,27 @@ export type KlinikStockItem = {
 };
 
 export type KlinikBatch = { id: number; expired_date: string; qty: number };
+// A batch past its expiry date that still holds stock (Klinik > Expired & Rusak).
+export type KlinikExpiredBatch = { kode: string; nama: string; satuan: string; expired_date: string; qty: number };
+// Obat / BHP pulled out (expired / rusak / retur) and its check by a second account; status null = thrown away before the check.
+export type KlinikTarik = {
+  id: number;
+  created_at: string;
+  kode: string;
+  nama: string;
+  satuan: string;
+  qty: number;
+  alloc: { exp: string; qty: number }[] | null;
+  note: string | null;
+  alasan: string | null;
+  status: "MENUNGGU" | "DISETUJUI" | "DITOLAK" | null;
+  evidence_id: string | null;
+  user_id: number | null;
+  oleh: string;
+  diperiksa_nama: string | null;
+  diperiksa_at: string | null;
+  diperiksa_catatan: string;
+};
 
 export type KlinikSummary = {
   totalItems: number;
@@ -1017,6 +1038,13 @@ export const api = {
     expired_date?: string;
   }) => req<{ success: boolean }>("/api/klinik-stock/transactions", { method: "POST", body: JSON.stringify(payload) }),
 
+  klinikExpired: (klinik: string) => req<KlinikExpiredBatch[]>(`/api/klinik-stock/expired?${new URLSearchParams({ klinik })}`),
+  klinikTarikList: (params: { klinik: string; status?: string; periode?: string }) =>
+    req<KlinikTarik[]>(`/api/klinik-stock/tarik?${new URLSearchParams(params as Record<string, string>)}`),
+  klinikTarik: (body: { klinik: string; obat_kode: string; qty: number; expired_date: string; alasan: string; note: string; evidence_id: string | null }) =>
+    req<{ success: boolean }>("/api/klinik-stock/tarik", { method: "POST", body: JSON.stringify(body) }),
+  klinikPeriksaTarik: (id: number, body: { setuju: boolean; catatan: string }) =>
+    req<{ success: boolean }>(`/api/klinik-stock/tarik/${id}/periksa`, { method: "PUT", body: JSON.stringify(body) }),
   klinikBatches: (klinik: string, obat_kode: string) =>
     req<KlinikBatch[]>(`/api/klinik-stock/batches?${new URLSearchParams({ klinik, obat_kode })}`),
 

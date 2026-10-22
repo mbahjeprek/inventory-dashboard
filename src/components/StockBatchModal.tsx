@@ -80,7 +80,6 @@ export function StockBatchModal({ scope, onClose, onSuccess }: { scope?: StockSc
       options: [
         { value: "OUT", label: "Stock Out" },
         { value: "IN", label: "Stock In" },
-        ...(klinik ? [{ value: "BUANG", label: "Buang (expired)" }] : []),
       ],
       tone: (c) => (masuk(c) ? "text-[var(--accent-green)]" : buang(c) ? "text-[var(--accent-amber)]" : "text-[var(--accent-red)]"),
     },

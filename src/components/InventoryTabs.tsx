@@ -1,13 +1,14 @@
 import { useSearchParams } from "react-router-dom";
-import { Boxes, ArrowDownCircle, ArrowUpCircle, HeartPulse } from "lucide-react";
+import { Boxes, ArrowDownCircle, ArrowUpCircle, HeartPulse, PackageX } from "lucide-react";
 
-// laporan = Laporan Harian pasien, only on the Klinik pages.
-export type InventoryTab = "stok" | "in" | "out" | "laporan";
+// laporan = Laporan Harian pasien and rusak = obat expired / rusak / retur, only on the Klinik pages.
+export type InventoryTab = "stok" | "in" | "out" | "rusak" | "laporan";
 
 const TABS: { key: InventoryTab; label: string; icon: typeof Boxes }[] = [
   { key: "stok", label: "Stok", icon: Boxes },
   { key: "in", label: "Stock In", icon: ArrowDownCircle },
   { key: "out", label: "Stock Out", icon: ArrowUpCircle },
+  { key: "rusak", label: "Expired & Rusak", icon: PackageX },
   { key: "laporan", label: "Laporan Harian", icon: HeartPulse },
 ];
 
@@ -15,7 +16,7 @@ const TABS: { key: InventoryTab; label: string; icon: typeof Boxes }[] = [
 export function useInventoryTab(): [InventoryTab, (t: InventoryTab) => void] {
   const [params, setParams] = useSearchParams();
   const raw = params.get("tab");
-  const tab: InventoryTab = raw === "in" || raw === "out" || raw === "laporan" ? raw : "stok";
+  const tab: InventoryTab = raw === "in" || raw === "out" || raw === "laporan" || raw === "rusak" ? raw : "stok";
   const setTab = (t: InventoryTab) =>
     setParams(
       (cur) => {
@@ -33,7 +34,7 @@ export function useInventoryTab(): [InventoryTab, (t: InventoryTab) => void] {
 export function InventoryTabs({ value, onChange, laporan = false }: { value: InventoryTab; onChange: (t: InventoryTab) => void; laporan?: boolean }) {
   return (
     <div className="flex gap-1 border-b border-[var(--border)]" role="tablist">
-      {TABS.filter((t) => laporan || t.key !== "laporan").map(({ key, label, icon: Icon }) => {
+      {TABS.filter((t) => laporan || (t.key !== "laporan" && t.key !== "rusak")).map(({ key, label, icon: Icon }) => {
         const active = value === key;
         return (
           <button

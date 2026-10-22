@@ -35,6 +35,7 @@ import { useAuth } from "../context/AuthContext";
 import { can } from "../lib/access";
 import { InventoryTabs, useInventoryTab } from "../components/InventoryTabs";
 import { KlinikLaporanTab } from "../components/KlinikLaporanTab";
+import { KlinikRusakTab, TarikModal } from "../components/KlinikRusakTab";
 import { LedgerHistory } from "../components/LedgerHistory";
 import { ItemRiwayatButton } from "../components/ItemRiwayat";
 import { StockBatchModal } from "../components/StockBatchModal";
@@ -146,6 +147,8 @@ export function InventoryKlinikPage({ klinik }: { klinik: string }) {
   const [selectedItem, setSelectedItem] = useState<PickerItem | null>(null);
   // Set when the form was opened from a row shortcut (e.g. "Buang" on an expired batch).
   const [txPreset, setTxPreset] = useState<TransactionPreset | undefined>(undefined);
+  // "Tarik" on an expired batch: the Expired & Rusak form, filled in.
+  const [tarikBatch, setTarikBatch] = useState<{ kode: string; nama: string; satuan: string; exp: string; qty: number } | null>(null);
   const [tab, setTab] = useInventoryTab();
   // Bumped after a new transaction so an open Stock In/Out tab reloads.
   const [historyKey, setHistoryKey] = useState(0);
@@ -313,6 +316,8 @@ export function InventoryKlinikPage({ klinik }: { klinik: string }) {
 
       {tab === "laporan" ? (
         <KlinikLaporanTab key={klinik} klinik={klinik} />
+      ) : tab === "rusak" ? (
+        <KlinikRusakTab key={klinik} klinik={klinik} refreshKey={historyKey} onChanged={() => (load(), loadSummary())} />
       ) : tab !== "stok" ? (
         <LedgerHistory scope={{ kind: "klinik", name: klinik }} type={tab === "in" ? "IN" : "OUT"} refreshKey={historyKey} />
       ) : (
@@ -475,19 +480,11 @@ export function InventoryKlinikPage({ klinik }: { klinik: string }) {
                                     )}
                                     {st === "expired" && canInput && b.qty > 0 && (
                                       <button
-                                        onClick={() =>
-                                          openTx(item, {
-                                            mode: "OUT",
-                                            batchOut: b.expired_date,
-                                            buang: true,
-                                            qty: b.qty,
-                                            note: `Obat expired ${formatTanggal(b.expired_date)} dibuang`,
-                                          })
-                                        }
-                                        title={`Stock Out ${b.qty} ${item.satuan} batch ini sebagai obat expired yang dibuang`}
+                                        onClick={() => setTarikBatch({ kode: item.kode, nama: item.nama, satuan: item.satuan, exp: b.expired_date, qty: b.qty })}
+                                        title={`Tarik ${b.qty} ${item.satuan} batch ini ke karantina (Expired & Rusak), lalu diperiksa orang kedua`}
                                         className="ml-2 align-middle text-[11px] font-medium px-1.5 py-0.5 rounded border border-[var(--accent-red-border)] bg-[var(--accent-red-bg)] text-[var(--accent-red)] hover:opacity-80"
                                       >
-                                        Buang
+                                        Tarik
                                       </button>
                                     )}
                                   </div>
@@ -585,6 +582,20 @@ export function InventoryKlinikPage({ klinik }: { klinik: string }) {
             setShowPicker(false);
             setTxPreset(undefined);
             setSelectedItem(item);
+          }}
+        />
+      )}
+
+      {tarikBatch && (
+        <TarikModal
+          klinik={klinik}
+          preset={tarikBatch}
+          onClose={() => setTarikBatch(null)}
+          onSuccess={() => {
+            setTarikBatch(null);
+            setHistoryKey((k) => k + 1);
+            load();
+            loadSummary();
           }}
         />
       )}

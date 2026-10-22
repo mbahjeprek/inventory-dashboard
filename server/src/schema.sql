@@ -850,3 +850,13 @@ ALTER TABLE koperasi_tx ADD COLUMN IF NOT EXISTS status TEXT;
 ALTER TABLE koperasi_tx ADD COLUMN IF NOT EXISTS diperiksa_oleh INTEGER;
 ALTER TABLE koperasi_tx ADD COLUMN IF NOT EXISTS diperiksa_at TIMESTAMPTZ;
 ALTER TABLE koperasi_tx ADD COLUMN IF NOT EXISTS diperiksa_catatan TEXT NOT NULL DEFAULT '';
+
+-- Klinik obat / BHP pulled out (tujuan DIBUANG): alasan EXPIRED | RUSAK | RETUR and a check by a second
+-- account with Approve Klinik (never the one who entered it): status MENUNGGU -> DISETUJUI / DITOLAK.
+-- MENUNGGU already took the stock out of its batch (quarantined, can't go to a patient); DITOLAK puts it
+-- back where it came from (alloc). NULL = thrown away before this check, counted as approved.
+ALTER TABLE klinik_stock_tx ADD COLUMN IF NOT EXISTS alasan TEXT;
+ALTER TABLE klinik_stock_tx ADD COLUMN IF NOT EXISTS status TEXT;
+ALTER TABLE klinik_stock_tx ADD COLUMN IF NOT EXISTS diperiksa_oleh INTEGER;
+ALTER TABLE klinik_stock_tx ADD COLUMN IF NOT EXISTS diperiksa_at TIMESTAMPTZ;
+ALTER TABLE klinik_stock_tx ADD COLUMN IF NOT EXISTS diperiksa_catatan TEXT NOT NULL DEFAULT '';

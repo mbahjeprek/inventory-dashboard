@@ -184,6 +184,8 @@ function requiredPerms(req: express.Request): Need {
   if (is(/^\/bbm(\/|$)/)) return [`bbm.${act}`];
   if (is(/^\/pupuk(\/|$)/)) return [`pupuk.${act}`];
   if (is(/^\/oli(\/|$)/)) return [`oli.${act}`];
+  // Obat expired / rusak / retur: checked (Setujui / Tolak) by a second account with Approve Klinik.
+  if (is(/^\/klinik-stock\/tarik\/\d+\/periksa$/)) return ["klinik.approve"];
   if (is(/^\/klinik-stock(\/|$)/)) return [`klinik.${act}`];
   // Klinik > Laporan Harian: Lihat / Input / Edit / Hapus kunjungan (estate checked in the route).
   if (is(/^\/klinik-laporan(\/|$)/)) return [`klinik.${act}`];
@@ -278,6 +280,9 @@ async function stockLocations(req: express.Request): Promise<StockLocation[]> {
   // Input Banyak rows with "ke" also book stock into that estate, so its opname locks them too.
   const kirimKe = <T,>(f: (e: unknown) => T[]) => (Array.isArray(b.rows) ? b.rows : []).flatMap((r: any) => (r?.ke ? f(r.ke) : []));
   if (/^\/klinik-stock\/(transactions|transactions\/batch|correction)$/.test(p)) return [...K(b.klinik), ...kirimKe(K)];
+  if (p === "/klinik-stock/tarik" && m === "POST") return K(b.klinik);
+  if (/^\/klinik-stock\/tarik\/\d+\/periksa$/.test(p))
+    return K((await queryOne<{ v: string }>("SELECT klinik v FROM klinik_stock_tx WHERE id = @id", { id: p.split("/")[3] }))?.v);
   if (/^\/klinik-stock\/batch\/\d+$/.test(p)) return K(await col("klinik_batch", "klinik"));
   if (/^\/klinik-stock\/\d+$/.test(p) && m === "DELETE") return K(await col("klinik_stock", "klinik"));
   if (/^\/klinik-stock\/\d+\/batches$/.test(p))
@@ -3484,6 +3489,9 @@ async function recordKlinikMove(
     note: string | null;
     is_correction: number;
     evidenceId?: string | null;
+    // Obat expired / rusak / retur (tujuan DIBUANG): why, and MENUNGGU until a second account checks it.
+    alasan?: string | null;
+    status?: string | null;
   }
 ): Promise<string | null> {
   try {
@@ -3499,9 +3507,9 @@ type KlinikMove = Parameters<typeof recordKlinikMove>[1];
 async function klinikMoveTx(client: PoolClient, req: express.Request, m: KlinikMove) {
   const alloc = await klinikApply(client, m.klinik, m.obat, m.type, m.qty, m.exp);
   await execute(
-    `INSERT INTO klinik_stock_tx (klinik, obat_kode, type, qty, tujuan, penerima, note, is_correction, user_id, alloc, evidence_id)
-     VALUES (@klinik, @obat, @type, @qty, @tujuan, @penerima, @note, @is_correction, @user_id, @alloc::jsonb, @evidenceId::uuid)`,
-    { ...m, evidenceId: m.evidenceId ?? null, user_id: req.user!.id, alloc: JSON.stringify(alloc) },
+    `INSERT INTO klinik_stock_tx (klinik, obat_kode, type, qty, tujuan, penerima, note, is_correction, user_id, alloc, evidence_id, alasan, status)
+     VALUES (@klinik, @obat, @type, @qty, @tujuan, @penerima, @note, @is_correction, @user_id, @alloc::jsonb, @evidenceId::uuid, @alasan, @status)`,
+    { ...m, evidenceId: m.evidenceId ?? null, user_id: req.user!.id, alloc: JSON.stringify(alloc), alasan: m.alasan ?? null, status: m.status ?? null },
     client
   );
   await syncKlinikStock(client, m.klinik, m.obat);
@@ -4474,6 +4482,7 @@ app.post("/api/klinik-stock/transactions", async (req, res) => {
   const obat = await queryOne<any>("SELECT kode, nama FROM obat WHERE kode = @obat_kode", { obat_kode });
   if (!obat) return res.status(404).json({ error: "Obat tidak ditemukan di master data" });
 
+  if (tujuan === TUJUAN_DIBUANG) return res.status(400).json({ error: "Obat expired / rusak dikeluarkan lewat tab Expired & Rusak (Tarik), supaya diperiksa orang kedua" });
   const exp = type === "IN" ? expired_date || "" : typeof expired_date === "string" ? expired_date : undefined;
   const evidenceId = await claimEvidence(req, res);
   if (evidenceId === undefined) return;
@@ -4514,6 +4523,131 @@ app.get("/api/klinik-stock/batches", async (req, res) => {
     { klinik, obat_kode }
   );
   res.json(rows);
+});
+
+// ---- Obat / BHP expired, rusak or retur (Klinik): pulled out of its batch with a photo (quarantined:
+// it can't go to a patient any more), then checked by a second account with Approve Klinik - Setujui
+// (goes on the Berita Acara Pemusnahan) or Tolak (the stock goes back to its batch). ----
+const KLINIK_TARIK_ALASAN: Record<string, string> = { EXPIRED: "Expired", RUSAK: "Rusak", RETUR: "Retur ke supplier" };
+
+// Batches past their expiry date that still hold stock: to be pulled.
+app.get("/api/klinik-stock/expired", async (req, res) => {
+  const klinik = String(req.query.klinik ?? "");
+  if (!checkKlinik(req, res, klinik)) return;
+  const rows = await queryMany(
+    `SELECT b.obat_kode AS kode, o.nama, o.satuan, b.expired_date, b.qty
+       FROM klinik_batch b JOIN obat o ON o.kode = b.obat_kode
+      WHERE b.klinik = @klinik AND b.qty > 0 AND b.expired_date <> '' AND b.expired_date < @today
+      ORDER BY b.expired_date, o.nama`,
+    { klinik, today: jakartaToday() }
+  );
+  res.json(rows);
+});
+
+// What was pulled out (and the obat thrown away before this check), newest first; periode = 'YYYY-MM'.
+app.get("/api/klinik-stock/tarik", async (req, res) => {
+  const { klinik = "", status = "", periode = "" } = req.query as Record<string, string>;
+  if (!checkKlinik(req, res, klinik)) return;
+  const cond = ["t.klinik = @klinik", "t.type = 'OUT'", "t.tujuan = 'DIBUANG'"];
+  if (["MENUNGGU", "DITOLAK"].includes(status)) cond.push("t.status = @status");
+  if (status === "DISETUJUI") cond.push("COALESCE(t.status, 'DISETUJUI') = 'DISETUJUI'");
+  if (/^\d{4}-\d{2}$/.test(periode)) cond.push("to_char(t.created_at AT TIME ZONE 'Asia/Jakarta', 'YYYY-MM') = @periode");
+  const rows = await queryMany(
+    `SELECT t.id, t.created_at, t.obat_kode AS kode, o.nama, o.satuan, t.qty, t.alloc, t.note, t.alasan, t.status, t.evidence_id, t.user_id,
+            COALESCE(u.nama, u.username, '') AS oleh, COALESCE(p.nama, p.username) AS diperiksa_nama, t.diperiksa_at, t.diperiksa_catatan
+       FROM klinik_stock_tx t JOIN obat o ON o.kode = t.obat_kode
+       LEFT JOIN users u ON u.id = t.user_id LEFT JOIN users p ON p.id = t.diperiksa_oleh
+      WHERE ${cond.join(" AND ")} ORDER BY t.created_at DESC, t.id DESC LIMIT 500`,
+    { klinik, status, periode }
+  );
+  res.json(rows);
+});
+
+app.post("/api/klinik-stock/tarik", async (req, res) => {
+  const b = req.body ?? {};
+  const klinik = String(b.klinik ?? "");
+  if (!checkKlinik(req, res, klinik)) return;
+  const qty = Number(b.qty);
+  const alasan = String(b.alasan ?? "");
+  const note = String(b.note ?? "").trim();
+  if (!Number.isInteger(qty) || qty <= 0) return res.status(400).json({ error: "Jumlah harus bilangan bulat lebih dari 0" });
+  if (!KLINIK_TARIK_ALASAN[alasan]) return res.status(400).json({ error: "Pilih alasannya: Expired, Rusak atau Retur" });
+  if (!note) return res.status(400).json({ error: "Isi keterangannya" });
+  const exp = typeof b.expired_date === "string" ? b.expired_date : undefined;
+  if (exp === undefined) return res.status(400).json({ error: "Pilih batch-nya" });
+  if (exp && !ISO_DATE.test(exp)) return res.status(400).json({ error: "Tanggal expired tidak valid" });
+  const obat = await queryOne<any>("SELECT kode, nama, satuan FROM obat WHERE kode = @kode", { kode: String(b.obat_kode ?? "") });
+  if (!obat) return res.status(404).json({ error: "Obat tidak ditemukan di master data" });
+  // The photo (tanggal expired / kerusakan and the qty visible) is what the pemeriksa checks it against.
+  const evidenceId = await claimEvidence(req, res);
+  if (evidenceId === undefined) return;
+  const err = await recordKlinikMove(req, {
+    klinik,
+    obat: obat.kode,
+    type: "OUT",
+    qty,
+    exp,
+    tujuan: TUJUAN_DIBUANG,
+    penerima: "",
+    note,
+    is_correction: 0,
+    evidenceId,
+    alasan,
+    status: "MENUNGGU",
+  });
+  if (err) {
+    await releaseEvidence(evidenceId);
+    return res.status(400).json({ error: err });
+  }
+  await logActivity(req, {
+    module: "KLINIK",
+    estate: klinik,
+    aksi: `Tarik Obat ${KLINIK_TARIK_ALASAN[alasan]}`,
+    objek: `${obat.kode} - ${obat.nama}`,
+    detail: `${qty} ${obat.satuan} · batch ${expText(exp)} · ${note} · menunggu pemeriksaan`,
+  });
+  res.json({ success: true });
+});
+
+app.put("/api/klinik-stock/tarik/:id/periksa", async (req, res) => {
+  const setuju = req.body?.setuju === true;
+  const catatan = String(req.body?.catatan ?? "").trim();
+  if (!setuju && !catatan) return res.status(400).json({ error: "Tulis alasan penolakannya" });
+  let t: any;
+  try {
+    await withTransaction(async (client) => {
+      t = await queryOne(
+        "SELECT t.*, o.nama, o.satuan FROM klinik_stock_tx t JOIN obat o ON o.kode = t.obat_kode WHERE t.id = @id AND t.tujuan = 'DIBUANG' FOR UPDATE OF t",
+        { id: req.params.id },
+        client
+      );
+      if (!t) throw new StockError("Data tidak ditemukan");
+      if (!estateAllowed(req.user!, t.klinik)) throw new StockError("Akses ditolak");
+      if (t.status !== "MENUNGGU") throw new StockError("Sudah diperiksa");
+      if (t.user_id === req.user!.id) throw new StockError("Yang memeriksa harus orang lain, bukan yang menginput");
+      // Tolak: the stock goes back to the batches it was taken from.
+      if (!setuju) {
+        await klinikReverse(client, t);
+        await syncKlinikStock(client, t.klinik, t.obat_kode);
+      }
+      await execute(
+        "UPDATE klinik_stock_tx SET status = @status, diperiksa_oleh = @uid, diperiksa_at = now(), diperiksa_catatan = @catatan WHERE id = @id",
+        { status: setuju ? "DISETUJUI" : "DITOLAK", uid: req.user!.id, catatan, id: t.id },
+        client
+      );
+    });
+  } catch (e) {
+    if (e instanceof StockError) return res.status(400).json({ error: e.message });
+    throw e;
+  }
+  await logActivity(req, {
+    module: "KLINIK",
+    estate: t.klinik,
+    aksi: `${setuju ? "Setujui" : "Tolak"} Tarik Obat ${KLINIK_TARIK_ALASAN[t.alasan] ?? ""}`.trim(),
+    objek: `${t.obat_kode} - ${t.nama}`,
+    detail: `${t.qty} ${t.satuan}${setuju ? "" : " · stok kembali ke batch-nya"}${catatan ? ` · ${catatan}` : ""}`,
+  });
+  res.json({ success: true });
 });
 
 // Fix a batch's expiry date (typo); a batch that ends up on an existing date is merged into it.
@@ -6669,7 +6803,9 @@ app.post("/api/klinik-stock/transactions/batch", async (req, res) => {
     if (!["IN", "OUT"].includes(r?.type)) return refuseRow(res, i, "tipe transaksi tidak valid");
     if (!Number.isInteger(r?.qty) || r.qty <= 0) return refuseRow(res, i, "jumlah harus bilangan bulat lebih dari 0");
     if (exp && !ISO_DATE.test(exp)) return refuseRow(res, i, "tanggal expired tidak valid");
-    const buang = r.type === "OUT" && r.buang === true;
+    // Obat expired / rusak goes through Tarik (tab Expired & Rusak), with a second account's check.
+    if (r.type === "OUT" && r.buang === true) return refuseRow(res, i, "obat expired / rusak dikeluarkan lewat tab Expired & Rusak (Tarik), bukan Input Banyak");
+    const buang = false;
     const ke = r.type === "OUT" && !buang ? String(r?.ke ?? "").trim() : "";
     let item: LoanItem | undefined;
     if (ke) {

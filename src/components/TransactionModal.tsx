@@ -85,7 +85,8 @@ export function TransactionModal({
   const [batches, setBatches] = useState<KlinikBatch[]>([]);
   const [expIn, setExpIn] = useState("");
   const [batchOut, setBatchOut] = useState(preset?.batchOut ?? FEFO);
-  const [buang, setBuang] = useState(!!preset?.buang);
+  // Obat expired / rusak is no longer a Stock Out here: it goes through Klinik > Expired & Rusak (Tarik).
+  const buang = false;
   const kirim = isKlinik && scope.name === PEMASOK && mode === "OUT" && !buang && !!ke;
   const [batchKor, setBatchKor] = useState(NEW_BATCH);
   const [newExp, setNewExp] = useState("");
@@ -365,10 +366,7 @@ export function TransactionModal({
                   ))}
                 </select>
               </div>
-              <label className="flex items-center gap-2 text-xs text-[var(--text-secondary)] cursor-pointer">
-                <input type="checkbox" checked={buang} onChange={(e) => setBuang(e.target.checked)} />
-                Buang obat expired (tidak dihitung sebagai pemakaian)
-              </label>
+              <p className="text-[11px] text-[var(--text-muted)]">Obat expired / rusak: pakai tab Expired & Rusak (Tarik), diperiksa orang kedua.</p>
             </div>
           )}
 
