@@ -31,7 +31,7 @@ import { useAuth } from "../context/AuthContext";
 import { useEstateFilter } from "../hooks/useEstateFilter";
 import { useOpenPinjaman } from "../hooks/useOpenPinjaman";
 import { ChangePasswordModal } from "./ChangePasswordModal";
-import { canModule, koperasiOnly, pageAllowed, userEstates, OPNAME_PATH, PINJAMAN_PATH, PASIEN_PATH, KOPERASI_PATH, DOKUMEN_PATH, type Module } from "../lib/access";
+import { canModule, koperasiOnly, pageAllowed, userEstates, OPNAME_PATH, PINJAMAN_PATH, PASIEN_PATH, KOPERASI_PATH, KENDARAAN_PATH, DOKUMEN_PATH, type Module } from "../lib/access";
 
 // subtitle: shown only on the active menu, which grows into a gold card (see NavRow).
 type NavItem = { to: string; label: string; icon: typeof Package; subtitle?: string };
@@ -84,6 +84,7 @@ const navSections: NavSection[] = [
     ],
   },
   { title: "Koperasi", items: [{ to: KOPERASI_PATH, label: "Koperasi PT.AKSS", icon: ShoppingBasket, subtitle: "Stock Out & Potong Gaji" }] },
+  { title: "Kendaraan", items: [{ to: KENDARAAN_PATH, label: "Kendaraan & Alat Berat", icon: Truck, subtitle: "Unit, kondisi & downtime PT.AKSS" }] },
   {
     title: "Master Data",
     collapsible: true,

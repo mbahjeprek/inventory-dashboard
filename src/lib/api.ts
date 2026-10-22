@@ -423,7 +423,7 @@ export type PupukSummary = {
 export type ActivityLog = {
   id: number;
   created_at: string;
-  module: "BARANG" | "BBM" | "PUPUK" | "KLINIK" | "OLI" | "KOPERASI";
+  module: "BARANG" | "BBM" | "PUPUK" | "KLINIK" | "OLI" | "KOPERASI" | "KENDARAAN";
   estate: string | null;
   aksi: string;
   objek: string | null;
@@ -565,6 +565,31 @@ export type KopTx = {
   diperiksa_at: string | null;
   diperiksa_catatan: string;
 };
+// Kendaraan & Alat Berat: one unit (see schema.sql kendaraan_unit) and a cell of the kondisi harian.
+export type KdUnit = {
+  id: number;
+  pt: string;
+  kode: string;
+  id_unit: string;
+  status: "INTERNAL" | "EKSTERNAL";
+  grup: string;
+  jenis: string;
+  nama: string;
+  kepemilikan: string;
+  tgl_perolehan: string | null;
+  pemilik: string;
+  alokasi: string;
+  info: string;
+  kondisi: "" | "BAIK" | "RUSAK" | "STANDBY" | "MANGKRAK";
+  tgl_rusak: string | null;
+  tgl_selesai: string | null;
+  keterangan: string;
+  aktif: boolean;
+  updated_at: string;
+};
+export type KdHarian = { unit_id: number; tanggal: string; kondisi: "R" | "S" | "B" };
+export type KdUnitInput = Omit<KdUnit, "id" | "pt" | "updated_at">;
+
 export type KopRingkasan = {
   periode: string;
   jual: number;
@@ -1423,6 +1448,13 @@ export const api = {
   kopPickAnggota: (search: string) => req<KopAnggota[]>(`/api/koperasi/anggota/pick?${new URLSearchParams({ search })}`),
   kopAddAnggota: (body: Partial<KopAnggota>) => req<{ kode: string }>("/api/koperasi/anggota", { method: "POST", body: JSON.stringify(body) }),
   kopSaveAnggota: (kode: string, body: Partial<KopAnggota>) => req<{ success: boolean }>(`/api/koperasi/anggota/${encodeURIComponent(kode)}`, { method: "PUT", body: JSON.stringify(body) }),
+  kdUnits: () => req<KdUnit[]>("/api/kendaraan/unit"),
+  kdTambahUnit: (body: KdUnitInput) => req<{ success: boolean; id: number }>("/api/kendaraan/unit", { method: "POST", body: JSON.stringify(body) }),
+  kdEditUnit: (id: number, body: KdUnitInput) => req<{ success: boolean }>(`/api/kendaraan/unit/${id}`, { method: "PUT", body: JSON.stringify(body) }),
+  kdKondisi: (id: number, body: { kondisi: string; tgl_rusak: string | null; tgl_selesai: string | null; keterangan: string }) =>
+    req<{ success: boolean }>(`/api/kendaraan/unit/${id}/kondisi`, { method: "PUT", body: JSON.stringify(body) }),
+  kdHarian: (bulan: string) => req<KdHarian[]>(`/api/kendaraan/harian?bulan=${bulan}`),
+  kdSetHarian: (body: { unit_id: number; tanggal: string; kondisi: string }) => req<{ success: boolean }>("/api/kendaraan/harian", { method: "PUT", body: JSON.stringify(body) }),
   kopTx: (params: Record<string, string | number>) =>
     req<{ data: KopTx[]; total: number; sum_total: number; sum_qty: number }>(`/api/koperasi/tx?${new URLSearchParams(params as any)}`),
   kopJual: (body: { tanggal: string; anggota_kode: string; bayar: KopBayar; keterangan: string; evidence_id: string | null; items: KopLineInput[] }) =>

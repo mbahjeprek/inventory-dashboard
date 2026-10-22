@@ -14,6 +14,7 @@ import { MasterBlokPage } from "./pages/MasterBlokPage";
 import { PetaBlokPage } from "./pages/PetaBlokPage";
 import { MasterBarangPage } from "./pages/MasterBarangPage";
 import { KoperasiPage } from "./pages/KoperasiPage";
+import { KendaraanPage } from "./pages/KendaraanPage";
 import { UsersPage } from "./pages/UsersPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { InventoryPupukPage } from "./pages/InventoryPupukPage";
@@ -312,6 +313,14 @@ function App() {
                 element={
                   <RequirePageAccess>
                     <KoperasiPage />
+                  </RequirePageAccess>
+                }
+              />
+              <Route
+                path="/kendaraan"
+                element={
+                  <RequirePageAccess>
+                    <KendaraanPage />
                   </RequirePageAccess>
                 }
               />

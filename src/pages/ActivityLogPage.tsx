@@ -15,9 +15,10 @@ const ESTATES_BY_MODULE = {
   KLINIK: ["NILAM", "KNS", "WJA", "ZAMRUD", "FIRUS"],
   OLI: ["NILAM", "KNS", "WJA", "ZAMRUD", "FIRUS"],
   KOPERASI: ["NILAM"],
+  KENDARAAN: ["NILAM", "ZAMRUD", "FIRUS"],
 };
 // Module names in titles / text.
-const MODULE_NAME: Record<ActivityLog["module"], string> = { BARANG: "Gudang", BBM: "BBM", PUPUK: "Pupuk", KLINIK: "Klinik", OLI: "Oli", KOPERASI: "Koperasi" };
+const MODULE_NAME: Record<ActivityLog["module"], string> = { BARANG: "Gudang", BBM: "BBM", PUPUK: "Pupuk", KLINIK: "Klinik", OLI: "Oli", KOPERASI: "Koperasi", KENDARAAN: "Kendaraan & Alat Berat" };
 
 const formatWaktu = (iso: string) =>
   new Date(iso).toLocaleString("id-ID", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
@@ -47,7 +48,7 @@ export function ActivityLogPage({
   const isSuperuser = user?.role === "superuser";
   // The account's estates, narrowed to the ones picked on the dashboard, if any.
   const { estates: ownEstates, param: pickedEstates } = useShownEstates();
-  const estateLabel = module === "BBM" ? "Lokasi" : module === "PUPUK" || module === "OLI" || module === "KOPERASI" ? "Estate" : module === "KLINIK" ? "Klinik" : "Gudang";
+  const estateLabel = module === "BBM" ? "Lokasi" : module === "PUPUK" || module === "OLI" || module === "KOPERASI" || module === "KENDARAAN" ? "Estate" : module === "KLINIK" ? "Klinik" : "Gudang";
   const title = `${module === "BARANG" ? "Log Activity Barang" : `Log Activity ${MODULE_NAME[module]}`}${estateLock ? ` - ${estateLock}` : ""}`;
 
   const [rows, setRows] = useState<ActivityLog[]>([]);
@@ -139,7 +140,7 @@ export function ActivityLogPage({
         <div>
           <h1 className="text-xl font-semibold text-[var(--text-primary)]">{title}</h1>
           <p className="text-sm text-[var(--text-secondary)]">
-            Riwayat perubahan data {module === "KOPERASI" ? "Koperasi" : `Inventory ${MODULE_NAME[module]}`} (tambah, edit, hapus, transaksi) beserta
+            Riwayat perubahan data {module === "KOPERASI" || module === "KENDARAAN" ? MODULE_NAME[module] : `Inventory ${MODULE_NAME[module]}`} (tambah, edit, hapus, transaksi) beserta
             siapa yang melakukannya
           </p>
         </div>

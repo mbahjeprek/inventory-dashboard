@@ -56,6 +56,14 @@ export const OTHER_PERMS: { group: string; items: { key: string; label: string }
       { key: "koperasi.approve", label: "Approve Koperasi (periksa barang rusak / expired dan koreksi stok, selesaikan stok opname; bukan yang menginput)" },
     ],
   },
+  {
+    group: "Kendaraan & Alat Berat",
+    items: [
+      { key: "kendaraan.view", label: "Lihat Kendaraan & Alat Berat" },
+      { key: "kendaraan.input", label: "Input Kendaraan (kondisi harian, unit rusak / selesai)" },
+      { key: "kendaraan.edit", label: "Edit Kendaraan (tambah / ubah data unit)" },
+    ],
+  },
 ];
 
 export const ALL_PERMS: string[] = [
@@ -174,6 +182,8 @@ export const PASIEN_PATH = "/master-pasien";
 
 // Koperasi karyawan: only Nilam runs one for now; seen with Lihat Koperasi by an account with Nilam.
 export const KOPERASI_PATH = "/koperasi";
+// Kendaraan & Alat Berat (PT.AKSS): seen with Lihat Kendaraan.
+export const KENDARAAN_PATH = "/kendaraan";
 
 // Dokumen & Link: every account sees the links of its estates; Kelola Dokumen adds / edits them.
 export const DOKUMEN_PATH = "/dokumen";
@@ -196,6 +206,7 @@ export function pageAllowed(user: AuthUser | null, path: string): boolean {
   if (path === PASIEN_PATH) return canModule(user, "KLINIK");
   if (path === DOKUMEN_PATH) return true;
   if (path === KOPERASI_PATH) return can(user, "koperasi.view") && userEstates(user).includes(KOPERASI_ESTATE);
+  if (path === KENDARAAN_PATH) return can(user, "kendaraan.view");
   // Peta Blok: seen with Lihat Peta Blok, Ubah Peta Blok or Master Blok.
   if (path === "/peta-blok") return ["master.peta", "master.peta_edit", "master.blok"].some((p) => can(user, p));
   return !!PAGE_PERMS[path] && can(user, PAGE_PERMS[path]);

@@ -48,6 +48,10 @@ export const ALL_PERMS: string[] = [
   "koperasi.pelunasan",
   // Approve: check (Setujui / Tolak) a Barang Rusak / Expired entered by someone else.
   "koperasi.approve",
+  // Kendaraan & Alat Berat: Lihat, Input (kondisi harian, rusak / selesai), Edit (tambah / ubah unit).
+  "kendaraan.view",
+  "kendaraan.input",
+  "kendaraan.edit",
 ];
 
 // Session: the token only identifies the account; estates and perms are re-read from the users

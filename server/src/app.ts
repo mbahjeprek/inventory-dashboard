@@ -150,7 +150,7 @@ app.use("/api", async (req, res, next) => {
 // path (without the /api prefix), the action from the method. "super" = superusers
 // only; null = any logged-in account (the route still checks the estate itself).
 type Need = string[] | "super" | null;
-const ACTIVITY_PERM: Record<string, string> = { BARANG: "gudang", BBM: "bbm", PUPUK: "pupuk", KLINIK: "klinik", OLI: "oli", KOPERASI: "koperasi" };
+const ACTIVITY_PERM: Record<string, string> = { BARANG: "gudang", BBM: "bbm", PUPUK: "pupuk", KLINIK: "klinik", OLI: "oli", KOPERASI: "koperasi", KENDARAAN: "kendaraan" };
 function requiredPerms(req: express.Request): Need {
   // Inside app.use("/api") req.path is relative to the mount, inside a route it is the full path.
   const p = (req.baseUrl + req.path).replace(/^\/api/, "");
@@ -207,6 +207,12 @@ function requiredPerms(req: express.Request): Need {
   if (is(/^\/user-activity$/)) return ["monitor.log_user"];
   // Koperasi: Lihat; Input = pengambilan / pembelian / barang rusak; Edit = hapus transaksi and the master barang / anggota.
   // Stok opname: start / fill in the counts with Input; Selesai / Batal and Koreksi Stok with Edit.
+  // Kendaraan & Alat Berat: Lihat; Input = kondisi harian and a unit's rusak / selesai; Edit = add / change units.
+  if (is(/^\/kendaraan(\/|$)/)) {
+    if (m === "GET") return ["kendaraan.view"];
+    if (is(/^\/kendaraan\/harian$/) || is(/^\/kendaraan\/unit\/\d+\/kondisi$/)) return ["kendaraan.input"];
+    return ["kendaraan.edit"];
+  }
   if (is(/^\/koperasi(\/|$)/)) {
     if (m === "GET") return ["koperasi.view"];
     // Pelunasan (record / tandai lunas / delete a payment): its own tick, given to HR only.
@@ -222,7 +228,7 @@ function requiredPerms(req: express.Request): Need {
 }
 
 // "bbm.edit" -> "Edit BBM", for telling the user which tick in Pengguna is missing.
-const PERM_MODUL: Record<string, string> = { gudang: "Gudang", bbm: "BBM", pupuk: "Pupuk", klinik: "Klinik", oli: "Oli", koperasi: "Koperasi" };
+const PERM_MODUL: Record<string, string> = { gudang: "Gudang", bbm: "BBM", pupuk: "Pupuk", klinik: "Klinik", oli: "Oli", koperasi: "Koperasi", kendaraan: "Kendaraan" };
 const PERM_AKSI: Record<string, string> = { view: "Lihat", input: "Input", edit: "Edit", delete: "Hapus", koreksi: "Koreksi", opname: "Opname", approve: "Approve", pelunasan: "Pelunasan" };
 const permLabel = (p: string) => {
   const [m, a] = p.split(".");
@@ -424,7 +430,7 @@ function requireEstate(estate: string) {
 }
 
 // ---- Activity log (audit trail), see schema.sql's activity_log ----
-type LogModule = "BARANG" | "BBM" | "PUPUK" | "KLINIK" | "OLI" | "KOPERASI";
+type LogModule = "BARANG" | "BBM" | "PUPUK" | "KLINIK" | "OLI" | "KOPERASI" | "KENDARAAN";
 
 // Records who changed what. Called after the change succeeded; a logging failure is reported but
 // never fails the user's action itself.
@@ -5095,7 +5101,7 @@ app.get("/api/user-activity", requireSuperuser, async (req, res) => {
 app.get("/api/activity-log", async (req, res) => {
   const { module = "", estate = "", estates = "", aksi = "", search = "", dateFrom = "", dateTo = "", tz = "", page = "1", pageSize = "50" } =
     req.query as Record<string, string>;
-  if (!["BARANG", "BBM", "PUPUK", "KLINIK", "OLI", "KOPERASI"].includes(module)) return res.status(400).json({ error: "Modul tidak valid" });
+  if (!["BARANG", "BBM", "PUPUK", "KLINIK", "OLI", "KOPERASI", "KENDARAAN"].includes(module)) return res.status(400).json({ error: "Modul tidak valid" });
 
   const conditions = ["module = @module"];
   const params: any = { module };
@@ -7880,6 +7886,157 @@ app.get("/api/pemakaian/detail", async (req, res) => {
     { ...p.params, bulan }
   );
   res.json({ data });
+});
+
+// ---- Kendaraan & Alat Berat (see schema.sql kendaraan_unit / kendaraan_harian): PT.AKSS for now ----
+const KENDARAAN_PT = ["AKSS"];
+const KENDARAAN_KONDISI = ["", "BAIK", "RUSAK", "STANDBY", "MANGKRAK"];
+const kdPt = (v: unknown) => (KENDARAAN_PT.includes(String(v ?? "")) ? String(v) : KENDARAAN_PT[0]);
+const kdDate = (v: unknown) => (v === null || v === undefined || v === "" ? null : isIsoDate(v) ? String(v) : undefined);
+// Log rows are scoped by estate: the unit's estate, or Nilam for one serving all estates.
+const kdLogEstate = (alokasi: unknown) => (["NILAM", "ZAMRUD", "FIRUS"].includes(String(alokasi)) ? String(alokasi) : "NILAM");
+const KD_COLS = "id, pt, kode, id_unit, status, grup, jenis, nama, kepemilikan, tgl_perolehan, pemilik, alokasi, info, kondisi, tgl_rusak, tgl_selesai, keterangan, aktif, updated_at";
+
+app.get("/api/kendaraan/unit", async (req, res) => {
+  res.json(await queryMany(`SELECT ${KD_COLS} FROM kendaraan_unit WHERE pt = @pt ORDER BY status, jenis, kode`, { pt: kdPt(req.query.pt) }));
+});
+
+// The fields of a unit form (add / edit); undefined = refused (the error is sent).
+function kdUnitBody(res: express.Response, b: any) {
+  const t = (v: unknown) => String(v ?? "").trim();
+  const u = {
+    kode: t(b.kode).toUpperCase(),
+    id_unit: t(b.id_unit),
+    status: t(b.status) === "EKSTERNAL" ? "EKSTERNAL" : "INTERNAL",
+    grup: t(b.grup).toUpperCase(),
+    jenis: t(b.jenis).toUpperCase(),
+    nama: t(b.nama),
+    kepemilikan: t(b.kepemilikan).toUpperCase(),
+    tgl_perolehan: kdDate(b.tgl_perolehan),
+    pemilik: t(b.pemilik),
+    alokasi: t(b.alokasi).toUpperCase(),
+    info: t(b.info),
+    kondisi: t(b.kondisi).toUpperCase(),
+    tgl_rusak: kdDate(b.tgl_rusak),
+    tgl_selesai: kdDate(b.tgl_selesai),
+    keterangan: t(b.keterangan),
+    aktif: b.aktif !== false,
+  };
+  if (!u.kode || !u.nama || !u.jenis) return void res.status(400).json({ error: "Kode unit, nama dan jenis wajib diisi" });
+  if (!KENDARAAN_KONDISI.includes(u.kondisi)) return void res.status(400).json({ error: "Kondisi tidak valid" });
+  if (u.tgl_perolehan === undefined || u.tgl_rusak === undefined || u.tgl_selesai === undefined) return void res.status(400).json({ error: "Tanggal tidak valid" });
+  if (u.tgl_rusak && u.tgl_selesai && u.tgl_selesai < u.tgl_rusak) return void res.status(400).json({ error: "Tanggal selesai tidak boleh sebelum tanggal rusak" });
+  return u;
+}
+const kdText = (u: any) => `${u.jenis} · ${u.status} · ${u.alokasi || "-"} · ${u.kondisi || "kondisi -"}`;
+
+app.post("/api/kendaraan/unit", async (req, res) => {
+  const u = kdUnitBody(res, req.body ?? {});
+  if (!u) return;
+  const pt = kdPt(req.body?.pt);
+  try {
+    const row = await queryOne<{ id: number }>(
+      `INSERT INTO kendaraan_unit (pt, kode, id_unit, status, grup, jenis, nama, kepemilikan, tgl_perolehan, pemilik, alokasi, info, kondisi, tgl_rusak, tgl_selesai, keterangan, aktif)
+       VALUES (@pt, @kode, @id_unit, @status, @grup, @jenis, @nama, @kepemilikan, @tgl_perolehan, @pemilik, @alokasi, @info, @kondisi, @tgl_rusak, @tgl_selesai, @keterangan, @aktif) RETURNING id`,
+      { pt, ...u }
+    );
+    await logActivity(req, { module: "KENDARAAN", estate: kdLogEstate(u.alokasi), aksi: "Tambah Unit", objek: `${u.kode} - ${u.nama}`, detail: kdText(u) });
+    res.json({ success: true, id: row!.id });
+  } catch (e: any) {
+    if (e.code === "23505") return res.status(409).json({ error: `Kode unit ${u.kode} sudah dipakai` });
+    throw e;
+  }
+});
+
+app.put("/api/kendaraan/unit/:id", async (req, res) => {
+  const before = await queryOne("SELECT * FROM kendaraan_unit WHERE id = @id", { id: req.params.id });
+  if (!before) return res.status(404).json({ error: "Unit tidak ditemukan" });
+  const u = kdUnitBody(res, req.body ?? {});
+  if (!u) return;
+  try {
+    await execute(
+      `UPDATE kendaraan_unit SET kode = @kode, id_unit = @id_unit, status = @status, grup = @grup, jenis = @jenis, nama = @nama, kepemilikan = @kepemilikan,
+         tgl_perolehan = @tgl_perolehan, pemilik = @pemilik, alokasi = @alokasi, info = @info, kondisi = @kondisi, tgl_rusak = @tgl_rusak,
+         tgl_selesai = @tgl_selesai, keterangan = @keterangan, aktif = @aktif, updated_at = now() WHERE id = @id`,
+      { ...u, id: before.id }
+    );
+  } catch (e: any) {
+    if (e.code === "23505") return res.status(409).json({ error: `Kode unit ${u.kode} sudah dipakai` });
+    throw e;
+  }
+  const changed = (Object.keys(u) as (keyof typeof u)[]).filter((k) => String(before[k] ?? "") !== String(u[k] ?? "")).map((k) => `${k}: ${before[k] ?? "-"} → ${u[k] ?? "-"}`);
+  await logActivity(req, { module: "KENDARAAN", estate: kdLogEstate(u.alokasi), aksi: "Edit Unit", objek: `${u.kode} - ${u.nama}`, detail: changed.join("; ") || "Tidak ada perubahan" });
+  res.json({ success: true });
+});
+
+// Kondisi of a unit now (rusak / selesai): Input.
+app.put("/api/kendaraan/unit/:id/kondisi", async (req, res) => {
+  const before = await queryOne("SELECT * FROM kendaraan_unit WHERE id = @id", { id: req.params.id });
+  if (!before) return res.status(404).json({ error: "Unit tidak ditemukan" });
+  const b = req.body ?? {};
+  const kondisi = String(b.kondisi ?? "").toUpperCase();
+  const tgl_rusak = kdDate(b.tgl_rusak);
+  const tgl_selesai = kdDate(b.tgl_selesai);
+  const keterangan = String(b.keterangan ?? "").trim();
+  if (!KENDARAAN_KONDISI.includes(kondisi) || !kondisi) return res.status(400).json({ error: "Pilih kondisinya" });
+  if (tgl_rusak === undefined || tgl_selesai === undefined) return res.status(400).json({ error: "Tanggal tidak valid" });
+  if ((tgl_rusak && tgl_rusak > jakartaToday()) || (tgl_selesai && tgl_selesai > jakartaToday())) return res.status(400).json({ error: "Tanggal tidak boleh setelah hari ini" });
+  if (kondisi !== "BAIK" && !tgl_rusak) return res.status(400).json({ error: "Isi tanggal rusaknya" });
+  if (tgl_rusak && tgl_selesai && tgl_selesai < tgl_rusak) return res.status(400).json({ error: "Tanggal selesai tidak boleh sebelum tanggal rusak" });
+  await execute("UPDATE kendaraan_unit SET kondisi = @kondisi, tgl_rusak = @tgl_rusak, tgl_selesai = @tgl_selesai, keterangan = @keterangan, updated_at = now() WHERE id = @id", {
+    kondisi,
+    tgl_rusak,
+    tgl_selesai: kondisi === "BAIK" ? tgl_selesai : null,
+    keterangan,
+    id: before.id,
+  });
+  await logActivity(req, {
+    module: "KENDARAAN",
+    estate: kdLogEstate(before.alokasi),
+    aksi: "Update Kondisi Unit",
+    objek: `${before.kode} - ${before.nama}`,
+    detail: `${before.kondisi || "-"} → ${kondisi}${tgl_rusak ? ` · rusak ${tgl_rusak}` : ""}${kondisi === "BAIK" && tgl_selesai ? ` · selesai ${tgl_selesai}` : ""}${keterangan ? ` · ${keterangan}` : ""}`,
+  });
+  res.json({ success: true });
+});
+
+// Kondisi harian of a month (bulan = 'YYYY-MM'): every cell R / S / B.
+app.get("/api/kendaraan/harian", async (req, res) => {
+  const bulan = String(req.query.bulan ?? "");
+  if (!/^\d{4}-\d{2}$/.test(bulan)) return res.status(400).json({ error: "Bulan tidak valid" });
+  const cells = await queryMany(
+    `SELECT h.unit_id, h.tanggal, h.kondisi FROM kendaraan_harian h JOIN kendaraan_unit u ON u.id = h.unit_id
+      WHERE u.pt = @pt AND h.tanggal LIKE @like`,
+    { pt: kdPt(req.query.pt), like: `${bulan}-%` }
+  );
+  res.json(cells);
+});
+
+// One cell: kondisi R / S / B, or '' to clear it.
+app.put("/api/kendaraan/harian", async (req, res) => {
+  const b = req.body ?? {};
+  const kondisi = String(b.kondisi ?? "").toUpperCase();
+  if (!isIsoDate(b.tanggal) || b.tanggal > jakartaToday()) return res.status(400).json({ error: "Tanggal tidak valid (tidak boleh setelah hari ini)" });
+  if (!["", "R", "S", "B"].includes(kondisi)) return res.status(400).json({ error: "Kondisi harus R, S atau B" });
+  const u = await queryOne("SELECT id, kode, nama, alokasi, pt FROM kendaraan_unit WHERE id = @id", { id: Number(b.unit_id) || 0 });
+  if (!u) return res.status(404).json({ error: "Unit tidak ditemukan" });
+  const before = await queryOne<{ kondisi: string }>("SELECT kondisi FROM kendaraan_harian WHERE unit_id = @id AND tanggal = @tgl", { id: u.id, tgl: b.tanggal });
+  if ((before?.kondisi ?? "") === kondisi) return res.json({ success: true });
+  if (kondisi)
+    await execute(
+      `INSERT INTO kendaraan_harian (unit_id, tanggal, kondisi, user_id) VALUES (@id, @tgl, @k, @uid)
+       ON CONFLICT (unit_id, tanggal) DO UPDATE SET kondisi = EXCLUDED.kondisi, user_id = EXCLUDED.user_id, updated_at = now()`,
+      { id: u.id, tgl: b.tanggal, k: kondisi, uid: req.user!.id }
+    );
+  else await execute("DELETE FROM kendaraan_harian WHERE unit_id = @id AND tanggal = @tgl", { id: u.id, tgl: b.tanggal });
+  await logActivity(req, {
+    module: "KENDARAAN",
+    estate: kdLogEstate(u.alokasi),
+    aksi: "Kondisi Harian",
+    objek: `${u.kode} - ${u.nama}`,
+    detail: `${b.tanggal}: ${before?.kondisi || "-"} → ${kondisi || "-"}`,
+  });
+  res.json({ success: true });
 });
 
 // ---- Koperasi karyawan (see schema.sql koperasi_*): Nilam only for now ----

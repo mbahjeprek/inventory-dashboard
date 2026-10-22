@@ -864,3 +864,41 @@ ALTER TABLE klinik_stock_tx ADD COLUMN IF NOT EXISTS diperiksa_catatan TEXT NOT 
 -- Edit bulan lalu, sementara: until this moment the account may edit (not delete, not approve) the
 -- transactions of earlier months in the modules and estates it already has. NULL = only the current month.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS edit_lampau_until TIMESTAMPTZ;
+
+-- Kendaraan & Alat Berat (PT.AKSS for now; pt keeps room for UKM). kode = the unit code also used by BBM
+-- (BAP01, DT01, MT15 ...); eksternal (sewa) units without one get EXT-<jenis>-<n>. id_unit = the ID from the
+-- old sheet (AK-DMTR-1 ...). kondisi BAIK / RUSAK / STANDBY / MANGKRAK ('' = belum diisi) with the dates of
+-- the current breakdown; downtime = days since tgl_rusak while not BAIK.
+CREATE TABLE IF NOT EXISTS kendaraan_unit (
+  id SERIAL PRIMARY KEY,
+  pt TEXT NOT NULL DEFAULT 'AKSS',
+  kode TEXT NOT NULL,
+  id_unit TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'INTERNAL',
+  grup TEXT NOT NULL DEFAULT '',
+  jenis TEXT NOT NULL DEFAULT '',
+  nama TEXT NOT NULL DEFAULT '',
+  kepemilikan TEXT NOT NULL DEFAULT '',
+  tgl_perolehan TEXT,
+  pemilik TEXT NOT NULL DEFAULT '',
+  alokasi TEXT NOT NULL DEFAULT '',
+  info TEXT NOT NULL DEFAULT '',
+  kondisi TEXT NOT NULL DEFAULT '',
+  tgl_rusak TEXT,
+  tgl_selesai TEXT,
+  keterangan TEXT NOT NULL DEFAULT '',
+  aktif BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (pt, kode)
+);
+-- Kondisi harian of a unit: R = running, S = standby / breakdown sebagian, B = breakdown.
+CREATE TABLE IF NOT EXISTS kendaraan_harian (
+  unit_id INTEGER NOT NULL REFERENCES kendaraan_unit(id) ON DELETE CASCADE,
+  tanggal TEXT NOT NULL,
+  kondisi TEXT NOT NULL CHECK (kondisi IN ('R', 'S', 'B')),
+  user_id INTEGER,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (unit_id, tanggal)
+);
+CREATE INDEX IF NOT EXISTS idx_kendaraan_harian_tanggal ON kendaraan_harian(tanggal);
