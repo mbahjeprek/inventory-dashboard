@@ -565,6 +565,28 @@ export type KopTx = {
   diperiksa_at: string | null;
   diperiksa_catatan: string;
 };
+// Berita Acara Pemusnahan (Klinik / Koperasi): the stored document and its approval (capture WA) and closing.
+export type BeritaAcara = {
+  id: number;
+  modul: "KLINIK" | "KOPERASI";
+  unit: string;
+  nomor: string;
+  tanggal: string;
+  isian: Record<string, any>;
+  items: { id: number; nama: string; kode: string; tgl: string; qty: number; satuan: string; alasan: string; keterangan: string; info: string; nilai?: number }[];
+  status: "MENUNGGU" | "DISETUJUI" | "SELESAI" | "BATAL";
+  created_at: string;
+  dibuat_nama: string;
+  disetujui_nama: string;
+  disetujui_jabatan: string;
+  disetujui_tgl: string | null;
+  evidence_id: string | null;
+  selesai_tgl: string | null;
+  selesai_catatan: string;
+  foto_musnah: string | null;
+  batal_alasan: string;
+};
+
 // Kendaraan & Alat Berat: one unit (see schema.sql kendaraan_unit) and a cell of the kondisi harian.
 export type KdUnit = {
   id: number;
@@ -1448,6 +1470,14 @@ export const api = {
   kopPickAnggota: (search: string) => req<KopAnggota[]>(`/api/koperasi/anggota/pick?${new URLSearchParams({ search })}`),
   kopAddAnggota: (body: Partial<KopAnggota>) => req<{ kode: string }>("/api/koperasi/anggota", { method: "POST", body: JSON.stringify(body) }),
   kopSaveAnggota: (kode: string, body: Partial<KopAnggota>) => req<{ success: boolean }>(`/api/koperasi/anggota/${encodeURIComponent(kode)}`, { method: "PUT", body: JSON.stringify(body) }),
+  baList: (modul: string, unit: string) => req<{ data: BeritaAcara[]; terpakai: number[] }>(`/api/berita-acara?${new URLSearchParams({ modul, unit })}`),
+  baBuat: (body: { modul: string; unit: string; tanggal: string; isian: Record<string, any>; ref_ids: number[] }) =>
+    req<{ id: number; nomor: string }>("/api/berita-acara", { method: "POST", body: JSON.stringify(body) }),
+  baSetuju: (id: number, body: { nama: string; jabatan: string; tanggal: string; evidence_id: string | null }) =>
+    req<{ success: boolean }>(`/api/berita-acara/${id}/setuju`, { method: "PUT", body: JSON.stringify(body) }),
+  baSelesai: (id: number, body: { tanggal: string; catatan: string; evidence_id: string | null }) =>
+    req<{ success: boolean }>(`/api/berita-acara/${id}/selesai`, { method: "PUT", body: JSON.stringify(body) }),
+  baBatal: (id: number, alasan: string) => req<{ success: boolean }>(`/api/berita-acara/${id}/batal`, { method: "PUT", body: JSON.stringify({ alasan }) }),
   kdUnits: () => req<KdUnit[]>("/api/kendaraan/unit"),
   kdTambahUnit: (body: KdUnitInput) => req<{ success: boolean; id: number }>("/api/kendaraan/unit", { method: "POST", body: JSON.stringify(body) }),
   kdEditUnit: (id: number, body: KdUnitInput) => req<{ success: boolean }>(`/api/kendaraan/unit/${id}`, { method: "PUT", body: JSON.stringify(body) }),

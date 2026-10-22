@@ -164,6 +164,8 @@ function requiredPerms(req: express.Request): Need {
   if (is(/^\/stock-opname(\/|$)/)) return null;
   // Log Stok Opname: the route lists the modules / estates whose opnames the account may see.
   if (is(/^\/stock-opname-log$/)) return null;
+  // Berita Acara Pemusnahan: each route checks the modul's permission (Klinik / Koperasi) and the unit itself.
+  if (is(/^\/berita-acara(\/|$)/)) return null;
   // Pinjaman antar estate: each route checks the loan's module (view / input) and estates itself.
   if (is(/^\/pinjaman(\/|$)/)) return null;
   // Perbandingan antar estate: the route checks the module's Lihat and the estates itself.
@@ -5025,6 +5027,8 @@ for (const lr of LEDGER_ROUTES) {
     if (!estateAllowed(req.user!, existing[l.scope])) return res.status(403).json({ error: "Akses ditolak" });
     if (editTooLate(req, res, l === KLINIK_LEDGER ? "klinik" : "gudang", existing)) return;
     if (existing.transfer_from_id) return res.status(400).json({ error: TRANSFER_LOCKED });
+    const diBa = l === KLINIK_LEDGER && existing.tujuan === TUJUAN_DIBUANG ? await baAktifUntuk("KLINIK", existing.id) : null;
+    if (diBa) return res.status(400).json({ error: `Obat ini ada di Berita Acara ${diBa}; batalkan BA-nya dulu` });
     try {
       await withTransaction(async (client) => {
         await lockMovement(client, l.tx, existing);
@@ -7888,6 +7892,174 @@ app.get("/api/pemakaian/detail", async (req, res) => {
   res.json({ data });
 });
 
+// ---- Berita Acara Pemusnahan (see schema.sql berita_acara): Klinik obat / BHP and Koperasi barang rusak ----
+type BaModul = "KLINIK" | "KOPERASI";
+const BA_ALASAN: Record<string, string> = { EXPIRED: "Kedaluwarsa", RUSAK: "Rusak", RETUR: "Retur ke supplier" };
+// The nomor of a BA of an active (not BATAL) Berita Acara that holds this row, or null.
+async function baAktifUntuk(modul: BaModul, refId: number, client?: PoolClient) {
+  const r = await queryOne<{ nomor: string }>(
+    "SELECT b.nomor FROM berita_acara_item i JOIN berita_acara b ON b.id = i.ba_id WHERE i.modul = @modul AND i.ref_id = @id AND b.status <> 'BATAL' LIMIT 1",
+    { modul, id: refId },
+    client
+  );
+  return r?.nomor ?? null;
+}
+// Who may work on a BA of this modul / unit: Klinik = its estate + Input Klinik (Edit for Batal), Koperasi =
+// Input Koperasi (Edit for Batal). Sends the refusal and returns false.
+function baBoleh(req: express.Request, res: express.Response, modul: string, unit: string, aksi: "view" | "input" | "edit") {
+  const u = req.user!;
+  if (modul !== "KLINIK" && modul !== "KOPERASI") return void res.status(400).json({ error: "Modul tidak valid" }), false;
+  const okUnit = modul === "KLINIK" ? KLINIK_OPTIONS.includes(unit) && estateAllowed(u, unit) : unit === KOPERASI && estateAllowed(u, KOPERASI);
+  if (!okUnit) return void res.status(403).json({ error: "Akses ditolak" }), false;
+  const perm = `${modul.toLowerCase()}.${aksi}`;
+  if (u.role !== "superuser" && !u.perms.includes(perm)) return void res.status(403).json({ error: `Akun ini tidak punya hak ${permLabel(perm)}` }), false;
+  return true;
+}
+const baLog = (req: express.Request, ba: { modul: string; unit: string; nomor: string }, aksi: string, detail: string) =>
+  logActivity(req, { module: ba.modul === "KLINIK" ? "KLINIK" : "KOPERASI", estate: ba.unit, aksi, objek: `BA ${ba.nomor}`, detail });
+const BA_COLS = `b.id, b.modul, b.unit, b.nomor, b.tanggal, b.isian, b.items, b.status, b.created_at, COALESCE(u.nama, u.username, '') AS dibuat_nama,
+  b.disetujui_nama, b.disetujui_jabatan, b.disetujui_tgl, b.evidence_id, b.selesai_tgl, b.selesai_catatan, b.foto_musnah, b.batal_alasan`;
+
+app.get("/api/berita-acara", async (req, res) => {
+  const modul = String(req.query.modul ?? "");
+  const unit = String(req.query.unit ?? "");
+  if (!baBoleh(req, res, modul, unit, "view")) return;
+  const data = await queryMany(`SELECT ${BA_COLS} FROM berita_acara b LEFT JOIN users u ON u.id = b.dibuat_oleh WHERE b.modul = @modul AND b.unit = @unit ORDER BY b.id DESC LIMIT 200`, { modul, unit });
+  const terpakai = (
+    await queryMany<{ ref_id: number }>("SELECT i.ref_id FROM berita_acara_item i JOIN berita_acara b ON b.id = i.ba_id WHERE b.modul = @modul AND b.unit = @unit AND b.status <> 'BATAL'", { modul, unit })
+  ).map((r) => r.ref_id);
+  res.json({ data, terpakai });
+});
+
+app.post("/api/berita-acara", async (req, res) => {
+  const b = req.body ?? {};
+  const modul = String(b.modul ?? "") as BaModul;
+  const unit = String(b.unit ?? "");
+  if (!baBoleh(req, res, modul, unit, "input")) return;
+  if (!isIsoDate(b.tanggal)) return res.status(400).json({ error: "Tanggal pemusnahan tidak valid" });
+  const ids = [...new Set((Array.isArray(b.ref_ids) ? b.ref_ids : []).map(Number).filter((n: number) => Number.isInteger(n) && n > 0))] as number[];
+  if (!ids.length) return res.status(400).json({ error: "Pilih minimal satu barang" });
+  const isian = b.isian && typeof b.isian === "object" ? b.isian : {};
+  const nama = (k: string) => String(isian?.[k]?.nama ?? "").trim();
+  if (!nama("pj") || !nama("saksi1") || !nama("saksi2")) return res.status(400).json({ error: "Isi nama yang menyerahkan dan kedua saksi" });
+  try {
+    const ba = await withTransaction(async (client) => {
+      await client.query("SELECT pg_advisory_xact_lock(hashtext('berita_acara'))");
+      // The rows: approved, of this unit, not on another active BA. Snapshot for the letter.
+      const rows =
+        modul === "KLINIK"
+          ? await queryMany(
+              `SELECT t.id, t.obat_kode AS kode, o.nama, o.satuan, t.qty, t.alloc, t.note, t.alasan, t.created_at, COALESCE(p.nama, p.username) AS diperiksa_nama
+                 FROM klinik_stock_tx t JOIN obat o ON o.kode = t.obat_kode LEFT JOIN users p ON p.id = t.diperiksa_oleh
+                WHERE t.id = ANY(@ids::int[]) AND t.klinik = @unit AND t.type = 'OUT' AND t.tujuan = 'DIBUANG' AND COALESCE(t.status, 'DISETUJUI') = 'DISETUJUI' ORDER BY t.created_at, t.id`,
+              { ids, unit },
+              client
+            )
+          : await queryMany(
+              `SELECT t.id, t.barang_kode AS kode, b.nama, b.satuan, t.qty, t.total, t.tanggal_iso, t.keterangan, t.alasan, COALESCE(u.nama, u.username, '') AS oleh, COALESCE(p.nama, p.username) AS diperiksa_nama
+                 FROM koperasi_tx t JOIN koperasi_barang b ON b.kode = t.barang_kode LEFT JOIN users u ON u.id = t.user_id LEFT JOIN users p ON p.id = t.diperiksa_oleh
+                WHERE t.id = ANY(@ids::int[]) AND t.koperasi = @unit AND t.jenis = 'RUSAK' AND COALESCE(t.status, 'DISETUJUI') = 'DISETUJUI' ORDER BY t.tanggal_iso, t.id`,
+              { ids, unit },
+              client
+            );
+      if (rows.length !== ids.length) throw new StockError("Ada barang yang belum disetujui pemeriksa atau bukan dari unit ini; muat ulang halaman");
+      const dipakai = await queryOne<{ nomor: string }>(
+        "SELECT b.nomor FROM berita_acara_item i JOIN berita_acara b ON b.id = i.ba_id WHERE i.modul = @modul AND i.ref_id = ANY(@ids::int[]) AND b.status <> 'BATAL' LIMIT 1",
+        { modul, ids },
+        client
+      );
+      if (dipakai) throw new StockError(`Ada barang yang sudah masuk Berita Acara ${dipakai.nomor}`);
+      const dmy = (iso: string) => iso.split("-").reverse().join("/");
+      const jkt = (d: Date) => new Date(d.getTime() + 7 * 3600_000).toISOString().slice(0, 10);
+      const items = rows.map((t: any) =>
+        modul === "KLINIK"
+          ? {
+              id: t.id, nama: t.nama, kode: t.kode, satuan: t.satuan, qty: Number(t.qty),
+              tgl: (t.alloc ?? []).map((a: any) => (a.exp ? dmy(a.exp) : "-")).join(", ") || "-",
+              alasan: BA_ALASAN[t.alasan ?? ""] ?? "Kedaluwarsa", keterangan: t.note ?? "",
+              info: `ditarik ${dmy(jkt(t.created_at))}${t.diperiksa_nama ? ` · diperiksa ${t.diperiksa_nama}` : ""}`,
+            }
+          : {
+              id: t.id, nama: t.nama, kode: t.kode, satuan: t.satuan, qty: Number(t.qty), tgl: dmy(t.tanggal_iso),
+              alasan: t.alasan === "EXPIRED" ? "Kedaluwarsa" : "Rusak", keterangan: t.keterangan,
+              info: `oleh ${t.oleh || "-"}${t.diperiksa_nama ? ` · diperiksa ${t.diperiksa_nama}` : ""}`, nilai: Number(t.total),
+            }
+      );
+      const tahun = Number(b.tanggal.slice(0, 4));
+      const urut = (await queryOne<{ n: number }>("SELECT COALESCE(MAX(urut), 0) + 1 AS n FROM berita_acara WHERE modul = @modul AND unit = @unit AND tahun = @tahun", { modul, unit, tahun }, client))!.n;
+      const nomor = `${String(urut).padStart(3, "0")}/BA-PMS/${modul === "KLINIK" ? `KLINIK-${unit}` : "KOPERASI"}/${b.tanggal.slice(5, 7)}/${tahun}`;
+      const r = await queryOne<{ id: number }>(
+        `INSERT INTO berita_acara (modul, unit, tahun, urut, nomor, tanggal, isian, items, dibuat_oleh)
+         VALUES (@modul, @unit, @tahun, @urut, @nomor, @tanggal, @isian::jsonb, @items::jsonb, @uid) RETURNING id`,
+        { modul, unit, tahun, urut, nomor, tanggal: b.tanggal, isian: JSON.stringify(isian), items: JSON.stringify(items), uid: req.user!.id },
+        client
+      );
+      for (const id of ids) await execute("INSERT INTO berita_acara_item (ba_id, modul, ref_id) VALUES (@ba, @modul, @id)", { ba: r!.id, modul, id }, client);
+      return { id: r!.id, nomor, n: items.length };
+    });
+    await baLog(req, { modul, unit, nomor: ba.nomor }, "Buat Berita Acara", `${ba.n} barang · rencana pemusnahan ${b.tanggal} · menunggu persetujuan manager`);
+    res.json(ba);
+  } catch (e) {
+    if (e instanceof StockError) return res.status(400).json({ error: e.message });
+    throw e;
+  }
+});
+
+// Persetujuan: the manager / perwakilan agreed (outside the app, e.g. a WhatsApp reply); its capture is the proof.
+app.put("/api/berita-acara/:id/setuju", async (req, res) => {
+  const ba = await queryOne<any>("SELECT * FROM berita_acara WHERE id = @id", { id: req.params.id });
+  if (!ba) return res.status(404).json({ error: "Berita acara tidak ditemukan" });
+  if (!baBoleh(req, res, ba.modul, ba.unit, "input")) return;
+  if (ba.status !== "MENUNGGU") return res.status(409).json({ error: "Berita acara ini tidak sedang menunggu persetujuan" });
+  const b = req.body ?? {};
+  const nama = String(b.nama ?? "").trim();
+  if (!nama) return res.status(400).json({ error: "Isi nama manager / perwakilan yang menyetujui" });
+  if (!isIsoDate(b.tanggal) || b.tanggal > jakartaToday()) return res.status(400).json({ error: "Tanggal persetujuan tidak valid" });
+  if (!b.evidence_id) return res.status(400).json({ error: "Lampirkan capture balasan WhatsApp persetujuannya" });
+  const evidence = await claimEvidence(req, res);
+  if (evidence === undefined) return;
+  await execute(
+    `UPDATE berita_acara SET status = 'DISETUJUI', disetujui_nama = @nama, disetujui_jabatan = @jabatan, disetujui_tgl = @tgl, evidence_id = @ev::uuid, disetujui_input_oleh = @uid WHERE id = @id`,
+    { nama, jabatan: String(b.jabatan ?? "").trim(), tgl: b.tanggal, ev: evidence, uid: req.user!.id, id: ba.id }
+  );
+  await baLog(req, ba, "Persetujuan Berita Acara", `disetujui ${nama}${b.jabatan ? ` (${b.jabatan})` : ""} tanggal ${b.tanggal} · bukti capture terlampir`);
+  res.json({ success: true });
+});
+
+// Selesai: the barang were destroyed (after the approval); an optional photo of it.
+app.put("/api/berita-acara/:id/selesai", async (req, res) => {
+  const ba = await queryOne<any>("SELECT * FROM berita_acara WHERE id = @id", { id: req.params.id });
+  if (!ba) return res.status(404).json({ error: "Berita acara tidak ditemukan" });
+  if (!baBoleh(req, res, ba.modul, ba.unit, "input")) return;
+  if (ba.status !== "DISETUJUI") return res.status(409).json({ error: ba.status === "MENUNGGU" ? "Berita acara ini belum disetujui manager" : "Berita acara ini sudah ditutup / dibatalkan" });
+  const b = req.body ?? {};
+  if (!isIsoDate(b.tanggal) || b.tanggal > jakartaToday()) return res.status(400).json({ error: "Tanggal pemusnahan tidak valid" });
+  const foto = b.evidence_id ? await claimEvidence(req, res) : null;
+  if (foto === undefined) return;
+  await execute(`UPDATE berita_acara SET status = 'SELESAI', selesai_tgl = @tgl, selesai_catatan = @cat, foto_musnah = @foto::uuid, selesai_oleh = @uid WHERE id = @id`, {
+    tgl: b.tanggal,
+    cat: String(b.catatan ?? "").trim(),
+    foto,
+    uid: req.user!.id,
+    id: ba.id,
+  });
+  await baLog(req, ba, "Tutup Berita Acara", `barang dimusnahkan tanggal ${b.tanggal}${b.catatan ? ` · ${String(b.catatan).trim()}` : ""}${foto ? " · foto terlampir" : ""}`);
+  res.json({ success: true });
+});
+
+// Batal (before it is closed): its barang can go on another BA.
+app.put("/api/berita-acara/:id/batal", async (req, res) => {
+  const ba = await queryOne<any>("SELECT * FROM berita_acara WHERE id = @id", { id: req.params.id });
+  if (!ba) return res.status(404).json({ error: "Berita acara tidak ditemukan" });
+  if (!baBoleh(req, res, ba.modul, ba.unit, "edit")) return;
+  if (!["MENUNGGU", "DISETUJUI"].includes(ba.status)) return res.status(409).json({ error: "Berita acara yang sudah ditutup tidak bisa dibatalkan" });
+  const alasan = String(req.body?.alasan ?? "").trim();
+  if (!alasan) return res.status(400).json({ error: "Tulis alasan pembatalannya" });
+  await execute("UPDATE berita_acara SET status = 'BATAL', batal_oleh = @uid, batal_alasan = @alasan WHERE id = @id", { uid: req.user!.id, alasan, id: ba.id });
+  await baLog(req, ba, "Batal Berita Acara", alasan);
+  res.json({ success: true });
+});
+
 // ---- Kendaraan & Alat Berat (see schema.sql kendaraan_unit / kendaraan_harian): PT.AKSS for now ----
 const KENDARAAN_PT = ["AKSS"];
 const KENDARAAN_KONDISI = ["", "BAIK", "RUSAK", "STANDBY", "MANGKRAK"];
@@ -8966,6 +9138,8 @@ app.delete("/api/koperasi/tx/:id", async (req, res) => {
   const result = await withTransaction(async (client) => {
     // A koreksi from a stok opname belongs to that opname: changing it here would leave the opname showing a selisih nobody booked.
     if (t.opname_id) return { error: `Koreksi ini dari Stok Opname #${t.opname_id}; ubah lewat opname itu` };
+    const diBa = t.jenis === "RUSAK" ? await baAktifUntuk("KOPERASI", t.id, client) : null;
+    if (diBa) return { error: `Barang rusak ini ada di Berita Acara ${diBa}; batalkan BA-nya dulu` };
     // An approved Barang Rusak / Expired is on a Berita Acara: only a Super User takes it back.
     if ((t.jenis === "RUSAK" || t.jenis === "KOREKSI") && t.status === "DISETUJUI" && req.user!.role !== "superuser")
       return { error: `${t.jenis === "RUSAK" ? "Barang rusak" : "Koreksi"} ini sudah disetujui pemeriksa; hanya Super User yang bisa menghapusnya` };
@@ -9818,7 +9992,7 @@ app.get("/api/evidence/:id", async (req, res) => {
 // photo storage isn't set up on this server (SUPABASE_URL / SUPABASE_SERVICE_KEY), so no photo is
 // asked and transactions keep working until it is.
 // Every table whose rows keep a foto bukti (schema.sql evidence_id columns).
-const EVIDENCE_HOLDERS = ["transactions", "stock_in_log", "stock_out_log", "gudang_stock_tx", "klinik_stock_tx", "bbm_log", "pupuk_log", "oli_log", "pinjaman", "pinjaman_kembali", "klinik_kunjungan", "koperasi_tx"];
+const EVIDENCE_HOLDERS = ["transactions", "stock_in_log", "stock_out_log", "gudang_stock_tx", "klinik_stock_tx", "bbm_log", "pupuk_log", "oli_log", "pinjaman", "pinjaman_kembali", "klinik_kunjungan", "koperasi_tx", "berita_acara"];
 
 async function claimEvidence(req: express.Request, res: express.Response): Promise<string | null | undefined> {
   if (!evidenceEnabled()) return null;

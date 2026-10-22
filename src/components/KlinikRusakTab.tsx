@@ -4,7 +4,7 @@ import { api, errorText, type KlinikBatch, type KlinikExpiredBatch, type KlinikT
 import { useAuth } from "../context/AuthContext";
 import { can } from "../lib/access";
 import { EvidenceInput, EvidenceLink, useEvidenceEnabled } from "./EvidenceInput";
-import { BaPemusnahanModal } from "./BaPemusnahan";
+import { BaDaftar, itemsKlinik, jenisKlinik } from "./BaPemusnahan";
 import { isoDisplay, localToday } from "../lib/opname";
 
 // Klinik > Expired & Rusak: obat / BHP past its expiry shows up here by itself (per batch); Tarik takes it
@@ -405,9 +405,7 @@ export function KlinikRusakTab({ klinik, refreshKey, onChanged }: { klinik: stri
   const [tarik, setTarik] = useState<{ preset?: KlinikExpiredBatch } | null>(null);
   const [periksa, setPeriksa] = useState<KlinikTarik | null>(null);
   const [detail, setDetail] = useState<KlinikTarik | null>(null);
-  const [ba, setBa] = useState(false);
   const [reload, setReload] = useState(0);
-  const [error, setError] = useState("");
   const done = () => {
     setTarik(null);
     setPeriksa(null);
@@ -491,10 +489,9 @@ export function KlinikRusakTab({ klinik, refreshKey, onChanged }: { klinik: stri
           {status !== "MENUNGGU" && (
             <input type="month" value={periode} max={localToday().slice(0, 7)} onChange={(e) => e.target.value && setPeriode(e.target.value)} className="text-sm rounded-md border border-[var(--border)] px-3 py-1.5 bg-white" aria-label="Periode" />
           )}
-          {error && <span className="text-xs text-[var(--accent-red)]">{error}</span>}
           <div className="ml-auto flex flex-wrap gap-2">
             <button
-              onClick={() => (setError(""), setBa(true))}
+              onClick={() => document.getElementById("ba-daftar")?.scrollIntoView({ behavior: "smooth", block: "start" })}
               className={btnOutline}
               title="Yang sudah disetujui di periode ini, dengan kolom cara pemusnahan dan tanda tangan"
             >
@@ -598,11 +595,13 @@ export function KlinikRusakTab({ klinik, refreshKey, onChanged }: { klinik: stri
           t={detail}
           bisaPeriksa={detail.status === "MENUNGGU" && canApprove && detail.user_id !== user?.id}
           onPeriksa={() => (setPeriksa(detail), setDetail(null))}
-          onBa={() => (setDetail(null), setBa(true))}
+          onBa={() => (setDetail(null), setTimeout(() => document.getElementById("ba-daftar")?.scrollIntoView({ behavior: "smooth", block: "start" }), 50))}
           onClose={() => setDetail(null)}
         />
       )}
-      {ba && <BaPemusnahanModal klinik={klinik} periode={periode} onClose={() => setBa(false)} />}
+      <div id="ba-daftar">
+        <BaDaftar jenis={jenisKlinik(klinik)} items={itemsKlinik(klinik)} reload={reload + refreshKey} />
+      </div>
     </div>
   );
 }

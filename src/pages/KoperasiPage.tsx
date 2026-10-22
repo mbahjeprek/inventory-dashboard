@@ -21,7 +21,7 @@ import { ExportButtons } from "../components/ExportButtons";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { EvidenceInput, EvidenceLink, useEvidenceEnabled } from "../components/EvidenceInput";
 import { printTable } from "../lib/printTable";
-import { BaKoperasiModal } from "../components/BaPemusnahan";
+import { BaDaftar, itemsKoperasi, jenisKoperasi } from "../components/BaPemusnahan";
 import { fmtQty, isoDisplay, localToday } from "../lib/opname";
 import { tanggalWaktu } from "../lib/datetime";
 import { KopBeliBatchModal, KopJualBatchModal } from "../components/KoperasiBatchModal";
@@ -262,6 +262,9 @@ export function KoperasiPage() {
             Diinput dengan foto, lalu diperiksa orang kedua (hak Approve Koperasi) yang mencocokkan barang fisiknya. Yang disetujui masuk Berita Acara Pemusnahan; pemusnahan disaksikan minimal 2 orang.
           </p>
           <TxTable jenis="RUSAK" periode={periode} reload={reload} canEdit={canEdit} onChanged={done} />
+          <div id="ba-daftar">
+            <BaDaftar jenis={jenisKoperasi()} items={itemsKoperasi} reload={reload} />
+          </div>
           <h2 className="text-sm font-semibold text-[var(--text-primary)] pt-2">Koreksi Stok</h2>
           <p className="text-xs text-[var(--text-muted)] -mt-2">
             Dihitung tanpa melihat stok sistem, dengan foto. Stok baru berubah setelah diperiksa orang kedua (hak Approve Koperasi). Koreksi dari Stok Opname ikut tercatat di sini.
@@ -308,7 +311,6 @@ function TxTable({
   const [periksa, setPeriksa] = useState<KopTx | null>(null);
   // Barang Rusak / Koreksi: a row opens its process; the Berita Acara of Barang Rusak is a form + formal letter.
   const [detail, setDetail] = useState<KopTx | null>(null);
-  const [baRusak, setBaRusak] = useState(false);
   // A month whose rekap went to HRD (from the 1st) is locked for Stock Out changes, except for HR / Super User.
   const { user } = useAuth();
   const bukaKunci = user?.role === "superuser" || can(user, "koperasi.pelunasan");
@@ -440,7 +442,7 @@ function TxTable({
           )}
           {rusak && (
             <button
-              onClick={() => (koreksi ? cetakBeritaAcara("KOREKSI", periode).catch((e) => setError(errorText(e, "Gagal mencetak"))) : setBaRusak(true))}
+              onClick={() => (koreksi ? cetakBeritaAcara("KOREKSI", periode).catch((e) => setError(errorText(e, "Gagal mencetak"))) : (() => document.getElementById("ba-daftar")?.scrollIntoView({ behavior: "smooth", block: "start" }))())}
               className={btnOutline}
               title={`${koreksi ? "Koreksi stok" : "Barang rusak / expired"} yang sudah disetujui di periode ini, dengan kolom tanda tangan`}
             >
@@ -669,11 +671,10 @@ function TxTable({
           t={detail}
           bisaPeriksa={detail.status === "MENUNGGU" && canApprove && detail.user_id !== user?.id}
           onPeriksa={() => (setPeriksa(detail), setDetail(null))}
-          onBa={detail.jenis === "RUSAK" ? () => (setDetail(null), setBaRusak(true)) : undefined}
+          onBa={detail.jenis === "RUSAK" ? () => (setDetail(null), setTimeout(() => document.getElementById("ba-daftar")?.scrollIntoView({ behavior: "smooth", block: "start" }), 50)) : undefined}
           onClose={() => setDetail(null)}
         />
       )}
-      {baRusak && <BaKoperasiModal periode={periode} onClose={() => setBaRusak(false)} />}
       {periksa && (
         <PeriksaRusakModal
           tx={periksa}

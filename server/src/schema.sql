@@ -902,3 +902,42 @@ CREATE TABLE IF NOT EXISTS kendaraan_harian (
   PRIMARY KEY (unit_id, tanggal)
 );
 CREATE INDEX IF NOT EXISTS idx_kendaraan_harian_tanggal ON kendaraan_harian(tanggal);
+
+-- Berita Acara Pemusnahan (Klinik obat / BHP, Koperasi barang rusak): nomor = urut per modul + unit + tahun
+-- (001/BA-PMS/KLINIK-NILAM/10/2026), isian = the form (company, place, cara, signatories), items = a
+-- snapshot of the approved rows it covers (berita_acara_item keeps each row in one active BA only).
+-- status MENUNGGU (made, printed, sent to the manager) -> DISETUJUI (evidence_id = capture of the
+-- manager's WhatsApp reply) -> SELESAI (destroyed; foto_musnah optional), or BATAL (items free again).
+CREATE TABLE IF NOT EXISTS berita_acara (
+  id SERIAL PRIMARY KEY,
+  modul TEXT NOT NULL,
+  unit TEXT NOT NULL,
+  tahun INTEGER NOT NULL,
+  urut INTEGER NOT NULL,
+  nomor TEXT NOT NULL UNIQUE,
+  tanggal TEXT NOT NULL,
+  isian JSONB NOT NULL,
+  items JSONB NOT NULL,
+  status TEXT NOT NULL DEFAULT 'MENUNGGU',
+  dibuat_oleh INTEGER,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  disetujui_nama TEXT NOT NULL DEFAULT '',
+  disetujui_jabatan TEXT NOT NULL DEFAULT '',
+  disetujui_tgl TEXT,
+  evidence_id UUID,
+  disetujui_input_oleh INTEGER,
+  selesai_tgl TEXT,
+  selesai_catatan TEXT NOT NULL DEFAULT '',
+  foto_musnah UUID,
+  selesai_oleh INTEGER,
+  batal_oleh INTEGER,
+  batal_alasan TEXT NOT NULL DEFAULT '',
+  UNIQUE (modul, unit, tahun, urut)
+);
+CREATE TABLE IF NOT EXISTS berita_acara_item (
+  ba_id INTEGER NOT NULL REFERENCES berita_acara(id) ON DELETE CASCADE,
+  modul TEXT NOT NULL,
+  ref_id INTEGER NOT NULL,
+  PRIMARY KEY (ba_id, ref_id)
+);
+CREATE INDEX IF NOT EXISTS idx_ba_item_ref ON berita_acara_item(modul, ref_id);
