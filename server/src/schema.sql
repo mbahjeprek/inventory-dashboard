@@ -860,3 +860,7 @@ ALTER TABLE klinik_stock_tx ADD COLUMN IF NOT EXISTS status TEXT;
 ALTER TABLE klinik_stock_tx ADD COLUMN IF NOT EXISTS diperiksa_oleh INTEGER;
 ALTER TABLE klinik_stock_tx ADD COLUMN IF NOT EXISTS diperiksa_at TIMESTAMPTZ;
 ALTER TABLE klinik_stock_tx ADD COLUMN IF NOT EXISTS diperiksa_catatan TEXT NOT NULL DEFAULT '';
+
+-- Edit bulan lalu, sementara: until this moment the account may edit (not delete, not approve) the
+-- transactions of earlier months in the modules and estates it already has. NULL = only the current month.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS edit_lampau_until TIMESTAMPTZ;

@@ -21,6 +21,8 @@ export type AuthUser = {
   // gets every estate and permission.
   estates: string[];
   perms: string[];
+  // Until when it may edit (not delete) earlier months' transactions; null = only the current month.
+  editLampauUntil?: string | null;
 };
 
 export type UserAccount = {
@@ -33,6 +35,8 @@ export type UserAccount = {
   perms: string | null;
   // Temporary full inventory access in its own estates until this moment (null = none).
   temp_full_until?: string | null;
+  // Edit bulan lalu (edit only) until this moment; null = none.
+  edit_lampau_until?: string | null;
   created_at: string;
 };
 
@@ -1379,7 +1383,7 @@ export const api = {
 
   updateUser: (
     id: number,
-    payload: { username: string; nama: string; password?: string; role: Role; estates?: string[]; perms?: string[] }
+    payload: { username: string; nama: string; password?: string; role: Role; estates?: string[]; perms?: string[]; edit_lampau_until?: string | null }
   ) => req<{ success: boolean }>(`/api/users/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
 
   deleteUser: (id: number) => req<{ success: boolean }>(`/api/users/${id}`, { method: "DELETE" }),

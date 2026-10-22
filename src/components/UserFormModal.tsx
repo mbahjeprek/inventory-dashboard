@@ -26,6 +26,11 @@ export function UserFormModal({
   const [role, setRole] = useState<Role>(user?.role ?? "estate");
   const [estates, setEstates] = useState<string[]>((user?.estates ?? "").split(",").filter(Boolean));
   const [perms, setPerms] = useState<string[]>((user?.perms ?? "").split(",").filter(Boolean));
+  // Edit bulan lalu sementara (Super User): the last day (WIB) it may edit earlier months; "" = closed.
+  const wibDay = (iso: string) => new Date(new Date(iso).getTime() + 7 * 3600_000).toISOString().slice(0, 10);
+  const today = wibDay(new Date().toISOString());
+  const lampauAwal = user?.edit_lampau_until && new Date(user.edit_lampau_until) > new Date() ? wibDay(user.edit_lampau_until) : "";
+  const [lampau, setLampau] = useState(lampauAwal);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
@@ -66,7 +71,7 @@ export function UserFormModal({
         perms: role === "estate" ? perms : undefined,
       };
       if (isEdit) {
-        await api.updateUser(user.id, { ...payload, password: password || undefined });
+        await api.updateUser(user.id, { ...payload, password: password || undefined, ...(meSuper && role === "estate" ? { edit_lampau_until: lampau || null } : {}) });
       } else {
         await api.createUser({ ...payload, password });
       }
@@ -241,6 +246,25 @@ export function UserFormModal({
                 </div>
               ))}
             </>
+          )}
+
+          {isEdit && meSuper && role === "estate" && (
+            <div className="rounded-md border border-[var(--accent-amber-border)] bg-[var(--accent-amber-bg)] p-3 space-y-2">
+              <div className="text-sm font-medium text-[var(--accent-amber)]">Edit transaksi bulan lalu (sementara)</div>
+              <p className="text-[11px] text-[var(--text-secondary)]">
+                Sampai tanggal ini akun boleh <b>mengedit</b> transaksi bulan-bulan sebelumnya di modul dan estate yang sudah dicentang di atas. Tidak termasuk hapus atau
+                approve. Tertutup sendiri setelah tanggal itu; setiap edit tetap tercatat di Log.
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <input type="date" value={lampau} min={today} onChange={(e) => setLampau(e.target.value)} className="text-sm rounded-md border border-[var(--border)] px-3 py-1.5 bg-white" />
+                {lampau && (
+                  <button type="button" onClick={() => setLampau("")} className="text-xs text-[var(--accent-red)] hover:underline">
+                    Tutup sekarang
+                  </button>
+                )}
+                <span className="text-[11px] text-[var(--text-muted)]">{lampau ? `terbuka s/d ${lampau.split("-").reverse().join("/")} pukul 23.59 WIB` : "tertutup (hanya bulan berjalan)"}</span>
+              </div>
+            </div>
           )}
 
           {error && <p className="text-xs text-[var(--accent-red)]">{error}</p>}

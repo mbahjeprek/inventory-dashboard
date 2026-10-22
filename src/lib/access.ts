@@ -101,6 +101,8 @@ const rowDay = (row: Record<string, any>): string => {
 export function canEditRow(user: AuthUser | null, m: Module, row: object, action: "edit" | "delete" = "edit"): boolean {
   if (!can(user, modulePerm(m, action))) return false;
   if (user!.role === "superuser" || can(user, modulePerm(m, "approve"))) return true;
+  // Edit bulan lalu, given for a while by a Super User: edit only, never delete.
+  if (action === "edit" && user!.editLampauUntil && new Date(user!.editLampauUntil) > new Date()) return true;
   const now = new Date();
   return rowDay(row as Record<string, any>).slice(0, 7) === `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
 }
@@ -201,7 +203,7 @@ export function pageAllowed(user: AuthUser | null, path: string): boolean {
 
 // One-line summary of an account's access for lists and reports, e.g.
 // "ZAMRUD, FIRUS · Gudang (Lihat, Input) · BBM (Lihat) · Master Obat".
-export function accessSummary(u: { role: string; estates: string | null; perms: string | null; temp_full_until?: string | null }): string {
+export function accessSummary(u: { role: string; estates: string | null; perms: string | null; temp_full_until?: string | null; edit_lampau_until?: string | null }): string {
   if (u.role === "superuser") return "Super User (semua akses)";
   const temp = u.temp_full_until && new Date(u.temp_full_until) > new Date() ? new Date(u.temp_full_until) : null;
   const perms = (u.perms ?? "").split(",").filter(Boolean);
@@ -212,5 +214,7 @@ export function accessSummary(u: { role: string; estates: string | null; perms: 
   for (const g of OTHER_PERMS) for (const i of g.items) if (perms.includes(i.key)) parts.push(`${g.group === "Master Data" ? "Master " : ""}${i.label}`);
   const estates = (u.estates ?? "").split(",").filter(Boolean).join(", ") || "tanpa estate";
   const tempNote = temp ? ` · AKSES PENUH SEMENTARA (modul di atas) s/d ${temp.toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" })}` : "";
-  return `${estates} · ${parts.join(" · ") || "tanpa hak akses"}${tempNote}`;
+  const lampau = u.edit_lampau_until && new Date(u.edit_lampau_until) > new Date() ? new Date(u.edit_lampau_until) : null;
+  const lampauNote = lampau ? ` · EDIT BULAN LALU s/d ${lampau.toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Jakarta" })}` : "";
+  return `${estates} · ${parts.join(" · ") || "tanpa hak akses"}${tempNote}${lampauNote}`;
 }

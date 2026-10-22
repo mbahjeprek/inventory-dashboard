@@ -52,7 +52,17 @@ export const ALL_PERMS: string[] = [
 
 // Session: the token only identifies the account; estates and perms are re-read from the users
 // table on every request (see loadSessionUser in app.ts) so a change applies without re-login.
-export type SessionUser = { id: number; username: string; nama: string; role: Role; estate: Estate | null; estates: string[]; perms: string[] };
+export type SessionUser = {
+  id: number;
+  username: string;
+  nama: string;
+  role: Role;
+  estate: Estate | null;
+  estates: string[];
+  perms: string[];
+  // Until when it may edit earlier months' transactions (users.edit_lampau_until), only while that is ahead.
+  editLampauUntil?: string | null;
+};
 
 // Comma separated users.estates / users.perms -> list of known values.
 export function parseList(v: string | null | undefined, known: readonly string[]): string[] {

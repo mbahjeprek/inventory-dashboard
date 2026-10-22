@@ -40,6 +40,7 @@ type UserRow = {
   perms: string | null;
   temp_full_until: Date | null;
   temp_full_modules?: string | null;
+  edit_lampau_until?: Date | null;
 };
 
 // Temporary full access (users.temp_full_until): until it expires, every action (edit, hapus,
@@ -67,6 +68,7 @@ function toSessionUser(row: UserRow): SessionUser {
     perms: superuser
       ? [...ALL_PERMS]
       : withTempFull(parseList(row.perms, ALL_PERMS), row.temp_full_until, row.temp_full_modules),
+    editLampauUntil: row.edit_lampau_until && row.edit_lampau_until > new Date() ? row.edit_lampau_until.toISOString() : null,
   };
 }
 
@@ -87,7 +89,7 @@ async function sessionFromCookie(req: express.Request, res?: express.Response): 
   };
   const hit = sessionCache.get(claims.id);
   if (hit && Date.now() - hit.at < SESSION_TTL_MS) return renew(hit.user);
-  const row = await queryOne<UserRow>("SELECT id, username, nama, role, estate, estates, perms, temp_full_until, temp_full_modules FROM users WHERE id = @id", { id: claims.id });
+  const row = await queryOne<UserRow>("SELECT id, username, nama, role, estate, estates, perms, temp_full_until, temp_full_modules, edit_lampau_until FROM users WHERE id = @id", { id: claims.id });
   if (!row) return null;
   const user = toSessionUser(row);
   sessionCache.set(user.id, { user, at: Date.now() });
@@ -374,8 +376,9 @@ function requireSuperuser(req: express.Request, res: express.Response, next: exp
 
 // Edit / hapus bulan berjalan: an account that isn't a supervisor of the module (its Approve) may
 // change or delete a transaction only while its date is in the current month (Jakarta), and an edit
-// may not move it out of that month; an earlier month goes through a supervisor or Super User.
-// Every change is still logged with its before / after.
+// may not move it out of that month; an earlier month goes through a supervisor or Super User - or the
+// account itself while a Super User gave it "edit bulan lalu" for a while (users.edit_lampau_until):
+// edit only, never delete. Every change is still logged with its before / after.
 const jakartaDay = (v: unknown) =>
   v instanceof Date || (typeof v === "string" && v.includes("T"))
     ? new Date(new Date(v as string).getTime() + 7 * 3600_000).toISOString().slice(0, 10)
@@ -384,6 +387,7 @@ const rowDay = (row: Record<string, any>) => jakartaDay(row.tanggal_iso ?? row.t
 function editTooLate(req: express.Request, res: express.Response, module: string, row: Record<string, any>) {
   const u = req.user!;
   if (u.role === "superuser" || u.perms.includes(`${module}.approve`)) return false;
+  if (req.method === "PUT" && u.editLampauUntil && new Date(u.editLampauUntil) > new Date()) return false;
   const month = jakartaToday().slice(0, 7);
   const b = req.method === "PUT" ? req.body ?? {} : {};
   const moved = b.tanggal_iso ?? b.tanggal_keluar_iso ?? b.tanggal_terima_iso;
@@ -2020,7 +2024,7 @@ app.get("/api/users", requireSuperuser, async (req, res) => {
   const offset = (Math.max(parseInt(page) || 1, 1) - 1) * limit;
 
   const data = await queryMany(
-    `SELECT id, username, nama, role, estates, perms, temp_full_until, created_at FROM users ${where} ORDER BY ${sortCol} ${dir} LIMIT @limit OFFSET @offset`,
+    `SELECT id, username, nama, role, estates, perms, temp_full_until, edit_lampau_until, created_at FROM users ${where} ORDER BY ${sortCol} ${dir} LIMIT @limit OFFSET @offset`,
     { ...params, limit, offset }
   );
 
@@ -2113,11 +2117,19 @@ app.put("/api/users/:id", requireSuperuser, async (req, res) => {
       return res.status(403).json({ error: "Hak akses akun sendiri hanya bisa diubah oleh Super User" });
   }
   if (await usernameTaken(String(username).trim(), existing.id)) return res.status(409).json({ error: "Username sudah digunakan" });
+  // Edit bulan lalu sementara: a date (until its end, WIB), or empty to close it; Super User only.
+  const lampauRaw = req.body.edit_lampau_until;
+  const lampauGiven = lampauRaw !== undefined;
+  if (lampauGiven && lampauRaw !== null && lampauRaw !== "" && !(isIsoDate(lampauRaw) && lampauRaw >= jakartaToday()))
+    return res.status(400).json({ error: "Tanggal batas edit bulan lalu tidak valid (paling cepat hari ini)" });
+  if (lampauGiven && req.user!.role !== "superuser" && String(lampauRaw ?? "") !== jakartaDay(existing.edit_lampau_until ?? ""))
+    return res.status(403).json({ error: "Edit bulan lalu sementara hanya bisa diatur Super User" });
+  const lampau = !lampauGiven ? existing.edit_lampau_until : lampauRaw ? `${lampauRaw}T23:59:59+07:00` : null;
 
   try {
     await execute(
       `UPDATE users SET username = @username, nama = @nama, password_hash = @password_hash, role = @role,
-         estate = @estate, estates = @estates, perms = @perms, modules = NULL WHERE id = @id`,
+         estate = @estate, estates = @estates, perms = @perms, modules = NULL, edit_lampau_until = @lampau WHERE id = @id`,
       {
         username: String(username).trim(),
         nama: String(nama).trim(),
@@ -2126,6 +2138,7 @@ app.put("/api/users/:id", requireSuperuser, async (req, res) => {
         estate: access.estates.split(",")[0] || null,
         estates: access.estates || null,
         perms: access.role === "estate" ? access.perms : null,
+        lampau,
         id: req.params.id,
       }
     );
@@ -2136,6 +2149,21 @@ app.put("/api/users/:id", requireSuperuser, async (req, res) => {
     throw e;
   }
   sessionCache.delete(Number(req.params.id));
+  const sebelum = existing.edit_lampau_until ? jakartaDay(existing.edit_lampau_until) : "";
+  // Logged in the Log of every module / estate the account works in, where its edits will show up.
+  if (lampauGiven && String(lampauRaw ?? "") !== sebelum) {
+    const LOG_OF: Record<string, LogModule> = { gudang: "BARANG", bbm: "BBM", pupuk: "PUPUK", klinik: "KLINIK", oli: "OLI" };
+    const mods = [...new Set(String(access.perms).split(",").map((x) => LOG_OF[x.split(".")[0]]).filter(Boolean))];
+    for (const module of mods)
+      for (const estate of String(access.estates).split(",").filter(Boolean))
+        await logActivity(req, {
+          module,
+          estate,
+          aksi: lampauRaw ? "Buka Edit Bulan Lalu" : "Tutup Edit Bulan Lalu",
+          objek: `${existing.username} - ${existing.nama}`,
+          detail: lampauRaw ? `sampai ${String(lampauRaw).split("-").reverse().join("/")} (edit saja, tanpa hapus)` : `sebelumnya sampai ${sebelum.split("-").reverse().join("/")}`,
+        });
+  }
   res.json({ success: true });
 });
 
