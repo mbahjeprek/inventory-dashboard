@@ -3,6 +3,7 @@ import { CheckCircle2, FileText, Printer, ShieldCheck, X } from "lucide-react";
 import { api, errorText, type BeritaAcara, type KlinikTarik, type KopTx } from "../lib/api";
 import { printDocument } from "../lib/printTable";
 import { isoDisplay, localToday } from "../lib/opname";
+import { BULAN, HARI, escHtml, terbilang } from "../lib/surat";
 import { useAuth } from "../context/AuthContext";
 import { can } from "../lib/access";
 import { EvidenceInput, EvidenceLink, useEvidenceEnabled } from "./EvidenceInput";
@@ -32,26 +33,13 @@ export type BaJenis = {
   catatanPilih?: string;
 };
 
-const HARI = ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"];
-const BULAN = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
-const SATUAN = ["", "satu", "dua", "tiga", "empat", "lima", "enam", "tujuh", "delapan", "sembilan", "sepuluh", "sebelas"];
-// Terbilang for the written-out date (up to the thousands of a year).
-function terbilang(n: number): string {
-  if (n < 12) return SATUAN[n];
-  if (n < 20) return `${terbilang(n - 10)} belas`;
-  if (n < 100) return `${terbilang(Math.floor(n / 10))} puluh${n % 10 ? ` ${terbilang(n % 10)}` : ""}`;
-  if (n < 200) return `seratus${n - 100 ? ` ${terbilang(n - 100)}` : ""}`;
-  if (n < 1000) return `${terbilang(Math.floor(n / 100))} ratus${n % 100 ? ` ${terbilang(n % 100)}` : ""}`;
-  if (n < 2000) return `seribu${n - 1000 ? ` ${terbilang(n - 1000)}` : ""}`;
-  return `${terbilang(Math.floor(n / 1000))} ribu${n % 1000 ? ` ${terbilang(n % 1000)}` : ""}`;
-}
-const esc = (v: unknown) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
+const esc = escHtml;
 const rp = (n: number) => `Rp ${Math.round(n).toLocaleString("id-ID")}`;
 const PERAN: Peran[] = ["pj", "pelaksana", "saksi1", "saksi2", "mengetahui"];
 const waktu = (iso: string) => new Date(iso).toLocaleDateString("id-ID", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "Asia/Jakarta" });
 
 // The letter of a stored BA (also reprinted later, with its approval / closing when there is one).
-function baHtml(j: BaJenis, ba: Pick<BeritaAcara, "nomor" | "tanggal" | "items" | "status" | "disetujui_nama" | "disetujui_jabatan" | "disetujui_tgl" | "selesai_tgl">, f: Isian) {
+export function baHtml(j: BaJenis, ba: Pick<BeritaAcara, "nomor" | "tanggal" | "items" | "status" | "disetujui_nama" | "disetujui_jabatan" | "disetujui_tgl" | "selesai_tgl">, f: Isian) {
   const rows = ba.items;
   const d = new Date(`${ba.tanggal}T00:00:00`);
   const tgl = `${HARI[d.getDay()]} tanggal ${terbilang(d.getDate())} bulan ${BULAN[d.getMonth()]} tahun ${terbilang(d.getFullYear())} (${isoDisplay(ba.tanggal)})`;

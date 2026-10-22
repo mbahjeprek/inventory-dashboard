@@ -3810,6 +3810,15 @@ async function klinikOpnameDay(klinik: string, c?: PoolClient) {
   );
 }
 const AUTO_NOTE = "(Laporan Harian)";
+// The visit's foto (bukti obat keluar) goes on the Stock Out rows it booked itself, so they show it in
+// Stock Out too; a linked manual Stock Out keeps its own foto.
+async function kunjunganFotoKeStok(id: number) {
+  await execute(
+    `UPDATE klinik_stock_tx t SET evidence_id = k.evidence_id FROM klinik_kunjungan k
+      WHERE k.id = @id AND t.kunjungan_id = k.id AND t.note LIKE @auto AND t.evidence_id IS DISTINCT FROM k.evidence_id`,
+    { id, auto: `%${AUTO_NOTE}` }
+  );
+}
 // Unlinked manual Stock Out rows of this patient + obat from the day before to 14 days after the visit
 // (an admin catching up enters them days later),
 // nearest the visit day first, linked to it: one row with exactly the terapi qty, else the nearest
@@ -4172,8 +4181,9 @@ app.post("/api/klinik-laporan/kunjungan", async (req, res) => {
     estate: klinik,
     aksi: "Input Kunjungan",
     objek: kunjunganObjek(p.data!),
-    detail: [kunjunganDetail(p.data!, p.obat!), stokSyncText(stok)].filter(Boolean).join("; "),
+    detail: [kunjunganDetail(p.data!, p.obat!), stokSyncText(stok), evidenceId && "foto bukti obat keluar"].filter(Boolean).join("; "),
   });
+  await kunjunganFotoKeStok(id);
   res.json({ success: true, id });
 });
 
@@ -4209,6 +4219,7 @@ app.put("/api/klinik-laporan/kunjungan/:id", async (req, res) => {
     throw e;
   }
   await useEditEvidence(newEvidence, [{ table: "klinik_kunjungan", where: "id = @id", params: { id: existing.id } }]);
+  await kunjunganFotoKeStok(existing.id);
   const labels: Record<string, string> = {
     tanggal_iso: "Tanggal", jenis_kunjungan: "Jenis Kunjungan", nama_pasien: "Nama", jenis_kelamin: "L/P", tanggal_lahir_iso: "Tanggal Lahir", usia: "Usia",
     status_pasien: "Status", penanggung: "Yang Menanggung", jabatan: "Jabatan", divisi: "Divisi", tempat_tinggal: "Tempat Tinggal", asal_pasien: "Asal Pasien",

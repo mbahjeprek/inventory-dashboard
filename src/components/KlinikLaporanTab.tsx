@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, BedDouble, ChevronLeft, ChevronRight, ClipboardList, Hospital, LayoutDashboard, Pencil, Pill, Plus, Search, Stethoscope, Table2, Trash2 } from "lucide-react";
+import { AlertTriangle, BedDouble, ChevronLeft, ChevronRight, ClipboardList, FileText, Hospital, LayoutDashboard, Pencil, Pill, Plus, Search, Stethoscope, Table2, Trash2 } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { api, errorText, type Kunjungan, type LaporanCount, type LaporanKlinikSummary } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
@@ -9,6 +9,7 @@ import { ExportButtons } from "./ExportButtons";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { EvidenceLink } from "./EvidenceInput";
 import { KunjunganModal } from "./KunjunganModal";
+import { SuratSakitModal } from "./SuratSakit";
 import { CocokkanObatModal } from "./CocokkanObatModal";
 import { KonsumsiObatPanel } from "./KonsumsiObatPanel";
 import { fetchAllRows, type ReportSection, type SectionReport, type TableReport } from "../lib/printTable";
@@ -123,6 +124,7 @@ export function KlinikLaporanTab({ klinik }: { klinik: string }) {
   const [search, setSearch] = useState("");
   const [flag, setFlag] = useState<Flag>("");
   const [editing, setEditing] = useState<Kunjungan | null | "new">(null);
+  const [surat, setSurat] = useState<Kunjungan | null>(null);
   const [deleting, setDeleting] = useState<Kunjungan | null>(null);
   const [actionError, setActionError] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
@@ -399,6 +401,15 @@ export function KlinikLaporanTab({ klinik }: { klinik: string }) {
   };
   const rowActions = (k: Kunjungan) => (
     <div className="inline-flex gap-1.5">
+      {canInput && (
+        <button
+          onClick={() => setSurat(k)}
+          title="Surat Keterangan Sakit"
+          className={`p-1.5 rounded-md border ${k.istirahat ? "border-[var(--accent-blue-border)] text-[var(--accent-blue)]" : "border-[var(--border)] text-[var(--text-secondary)]"} hover:bg-[#f1f5f9]`}
+        >
+          <FileText size={14} />
+        </button>
+      )}
       {canEditRow(user, "KLINIK", k) && (
         <button onClick={() => setEditing(k)} title="Edit kunjungan" className="p-1.5 rounded-md border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[#f1f5f9]">
           <Pencil size={14} />
@@ -785,7 +796,7 @@ export function KlinikLaporanTab({ klinik }: { klinik: string }) {
                       {k.detail_kejadian} {k.evidence_id && <EvidenceLink id={k.evidence_id} />}
                     </div>
                   )}
-                  {(canEdit || canDelete) && <div className="flex justify-end">{rowActions(k)}</div>}
+                  {(canInput || canEdit || canDelete) && <div className="flex justify-end">{rowActions(k)}</div>}
                 </div>
               ))
             )}
@@ -805,7 +816,7 @@ export function KlinikLaporanTab({ klinik }: { klinik: string }) {
                   <th className="px-3 py-2.5 text-left">Medis</th>
                   <th className="px-3 py-2.5 text-left">Terapi</th>
                   <th className="px-3 py-2.5 text-left">Dokumentasi</th>
-                  {(canEdit || canDelete) && <th className="px-3 py-2.5 text-right">Aksi</th>}
+                  {(canInput || canEdit || canDelete) && <th className="px-3 py-2.5 text-right">Aksi</th>}
                 </tr>
               </thead>
               <tbody>
@@ -864,7 +875,7 @@ export function KlinikLaporanTab({ klinik }: { klinik: string }) {
                         {k.detail_kejadian && <div className="text-[11px] text-[var(--text-muted)]">{k.detail_kejadian}</div>}
                         {!k.evidence_id && !k.detail_kejadian && "-"}
                       </td>
-                      {(canEdit || canDelete) && (
+                      {(canInput || canEdit || canDelete) && (
                         <td className="px-3 py-2 text-right">{rowActions(k)}</td>
                       )}
                     </tr>
@@ -890,6 +901,7 @@ export function KlinikLaporanTab({ klinik }: { klinik: string }) {
       )}
 
       {cocokkan && <CocokkanObatModal klinik={klinik} onClose={() => setCocokkan(false)} onChanged={() => setReloadKey((n) => n + 1)} />}
+      {surat && <SuratSakitModal k={surat} onClose={() => setSurat(null)} />}
       {editing && <KunjunganModal klinik={klinik} kunjungan={editing === "new" ? null : editing} onClose={() => setEditing(null)} onSaved={() => setReloadKey((k) => k + 1)} />}
       {deleting && (
         <ConfirmDialog

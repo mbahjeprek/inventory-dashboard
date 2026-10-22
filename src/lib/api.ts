@@ -819,6 +819,8 @@ export type Kunjungan = KunjunganInput & {
   evidence_id: string | null;
   created_at: string | null;
   created_by: string;
+  // NIK (from the old Daily Report sheet; often empty for visits entered in the app).
+  nik?: string;
 };
 // Master Pasien: one patient of an estate's clinic, with their visit count.
 export type Pasien = {
