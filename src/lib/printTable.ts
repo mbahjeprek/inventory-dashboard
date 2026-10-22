@@ -152,6 +152,12 @@ export function printTable(report: AnyReport) {
     ${"signatures" in report && report.signatures?.length ? `<div class="sign">${report.signatures.map((s) => `<div>${escapeHtml(s.label)}<span></span><b>${escapeHtml(s.nama || " ")}</b></div>`).join("")}</div>` : ""}
   </body></html>`;
 
+  printDocument(html);
+}
+
+// Prints a whole HTML document through a hidden iframe (the browser's print dialog: printer or PDF),
+// once its images are decoded. Also used for documents that aren't tables (a Berita Acara).
+export function printDocument(html: string) {
   const iframe = document.createElement("iframe");
   iframe.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;";
   document.body.appendChild(iframe);

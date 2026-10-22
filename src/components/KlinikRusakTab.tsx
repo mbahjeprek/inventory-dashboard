@@ -1,10 +1,10 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { CalendarClock, FileText, PackageX, X } from "lucide-react";
+import { CalendarClock, Check, ClipboardCheck, FileText, PackageX, ShieldCheck, Trash2, X } from "lucide-react";
 import { api, errorText, type KlinikBatch, type KlinikExpiredBatch, type KlinikTarik, type PickerItem } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { can } from "../lib/access";
 import { EvidenceInput, EvidenceLink, useEvidenceEnabled } from "./EvidenceInput";
-import { printTable } from "../lib/printTable";
+import { BaPemusnahanModal } from "./BaPemusnahan";
 import { isoDisplay, localToday } from "../lib/opname";
 
 // Klinik > Expired & Rusak: obat / BHP past its expiry shows up here by itself (per batch); Tarik takes it
@@ -258,47 +258,140 @@ function PeriksaModal({ t, onClose, onSuccess }: { t: KlinikTarik; onClose: () =
   );
 }
 
-async function cetakBeritaAcara(klinik: string, periode: string) {
-  const all = await api.klinikTarikList({ klinik, status: "DISETUJUI", periode });
-  if (!all.length) throw new Error(`Belum ada obat / BHP ditarik yang disetujui di ${periodeLabel(periode)}`);
-  const uniq = (v: (string | null)[]) => [...new Set(v.filter(Boolean))].join(", ");
-  printTable({
-    title: "Berita Acara Pemusnahan / Retur Obat & BHP",
-    subtitle: [
-      `Klinik ${klinik} · Periode ${periodeLabel(periode)} · ${all.length} baris`,
-      "Obat / BHP di bawah ini sudah diperiksa dan dicocokkan fisiknya. Cara: [ ] Insinerator   [ ] Pihak ketiga pengelola limbah B3, nama: .........................   [ ] Retur ke supplier: .........................   Tanggal: ....................",
-    ],
-    columns: [
-      { label: "No", align: "right" },
-      { label: "Tanggal" },
-      { label: "Kode" },
-      { label: "Nama Obat / BHP" },
-      { label: "Batch (Exp)" },
-      { label: "Jumlah", align: "right" },
-      { label: "Alasan" },
-      { label: "Keterangan" },
-      { label: "Input / Diperiksa" },
-    ],
-    rows: all.map((t, i) => [
-      i + 1,
-      waktu(t.created_at),
-      t.kode,
-      t.nama,
-      batchText(t),
-      `${t.qty.toLocaleString("id-ID")} ${t.satuan}`,
-      TARIK_ALASAN[t.alasan ?? ""] ?? "Expired (dibuang)",
-      t.note ?? "",
-      `${t.oleh || "-"} / ${t.diperiksa_nama || "-"}`,
-    ]),
-    landscape: true,
-    signatures: [
-      { label: "Penanggung Jawab Klinik", nama: "" },
-      { label: "Pemeriksa", nama: uniq(all.map((t) => t.diperiksa_nama)) },
-      { label: "Saksi 1", nama: "" },
-      { label: "Saksi 2", nama: "" },
-      { label: "Mengetahui", nama: "" },
-    ],
-  });
+const jam = (iso: string) =>
+  new Date(iso).toLocaleString("id-ID", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Jakarta" });
+
+// The four steps on top of the tab, with how many are at each one; a step's count filters the list.
+function AlurProses({ menunggu, disetujui, ditolak, expired, onStatus }: { menunggu: number; disetujui: number; ditolak: number; expired: number; onStatus: (s: string) => void }) {
+  const langkah = [
+    { icon: PackageX, judul: "1. Tarik & karantina", isi: "Petugas klinik: pisahkan ke kotak karantina, hitung, foto, klik Tarik", angka: expired ? `${expired} batch perlu ditarik` : "", st: "" },
+    { icon: ClipboardCheck, judul: "2. Periksa", isi: "Orang kedua (hak Approve Klinik) cocokkan fisik & foto", angka: menunggu ? `${menunggu} menunggu` : "", st: "MENUNGGU" },
+    { icon: ShieldCheck, judul: "3. Disetujui", isi: "Stok resmi keluar; ditolak = stok kembali ke batch", angka: `${disetujui} disetujui${ditolak ? ` · ${ditolak} ditolak` : ""}`, st: "DISETUJUI" },
+    { icon: Trash2, judul: "4. Berita Acara", isi: "Musnahkan (limbah B3 / insinerator) disaksikan 2 orang, cetak & tanda tangani BA", angka: "", st: "" },
+  ];
+  return (
+    <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+      {langkah.map((l, i) => (
+        <button
+          key={l.judul}
+          type="button"
+          onClick={() => l.st && onStatus(l.st)}
+          className={`relative text-left rounded-lg border px-3 py-2.5 bg-[var(--bg-card)] ${l.st ? "hover:border-[var(--accent-blue-border)] cursor-pointer" : "cursor-default"} ${
+            i === 1 && menunggu ? "border-[var(--accent-amber-border)] bg-[var(--accent-amber-bg)]" : "border-[var(--border)]"
+          }`}
+        >
+          <div className="flex items-center gap-2 text-sm font-semibold text-[var(--text-primary)]">
+            <l.icon size={16} className="text-[var(--accent-blue)]" /> {l.judul}
+          </div>
+          <div className="mt-0.5 text-[11px] text-[var(--text-secondary)]">{l.isi}</div>
+          {l.angka && <div className={`mt-1 text-xs font-medium ${i === 1 ? "text-[var(--accent-amber)]" : i === 0 ? "text-[var(--accent-red)]" : "text-[var(--accent-green)]"}`}>{l.angka}</div>}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// One pulled-out obat: each step of its process (tarik, pemeriksaan, berita acara) with who, when, foto and catatan.
+function DetailProses({ t, bisaPeriksa, onPeriksa, onBa, onClose }: { t: KlinikTarik; bisaPeriksa: boolean; onPeriksa: () => void; onBa: () => void; onClose: () => void }) {
+  const st = t.status ?? "DISETUJUI";
+  const lama = !t.status;
+  const langkah: { judul: string; selesai: boolean; aktif?: boolean; merah?: boolean; isi: ReactNode }[] = [
+    {
+      judul: lama ? "Dibuang (sebelum ada pemeriksaan)" : "Ditarik & dikarantina",
+      selesai: true,
+      isi: (
+        <>
+          <div>
+            {jam(t.created_at)} · oleh <b>{t.oleh || "-"}</b>
+          </div>
+          <div>
+            {t.qty.toLocaleString("id-ID")} {t.satuan} · batch exp {batchText(t)} · {TARIK_ALASAN[t.alasan ?? ""] ?? "Expired"}
+          </div>
+          <div className="text-[var(--text-secondary)]">
+            {t.note || "-"} <EvidenceLink id={t.evidence_id} label="lihat foto" />
+          </div>
+        </>
+      ),
+    },
+    {
+      judul: st === "MENUNGGU" ? "Menunggu pemeriksaan" : st === "DITOLAK" ? "Ditolak pemeriksa" : lama ? "Pemeriksaan" : "Diperiksa & disetujui",
+      selesai: st !== "MENUNGGU",
+      aktif: st === "MENUNGGU",
+      merah: st === "DITOLAK",
+      isi: lama ? (
+        <div className="text-[var(--text-muted)]">Dicatat sebelum ada tahap pemeriksaan; dianggap disetujui.</div>
+      ) : st === "MENUNGGU" ? (
+        <div className="text-[var(--accent-amber)]">Stok sudah dikarantina (tidak bisa keluar ke pasien). Perlu diperiksa orang lain yang punya hak Approve Klinik.</div>
+      ) : (
+        <>
+          <div>
+            {t.diperiksa_at ? jam(t.diperiksa_at) : "-"} · oleh <b>{t.diperiksa_nama || "-"}</b>
+          </div>
+          {t.diperiksa_catatan && <div className="text-[var(--text-secondary)]">Catatan: {t.diperiksa_catatan}</div>}
+          {st === "DITOLAK" && <div className="text-[var(--accent-red)]">Stok dikembalikan ke batch asalnya.</div>}
+        </>
+      ),
+    },
+    ...(st === "DITOLAK"
+      ? []
+      : [
+          {
+            judul: "Pemusnahan & Berita Acara",
+            selesai: false,
+            aktif: st === "DISETUJUI",
+            isi: (
+              <div className="text-[var(--text-secondary)]">
+                {st === "DISETUJUI" ? "Siap dimusnahkan (limbah B3 / insinerator, disaksikan 2 orang) lalu cetak Berita Acara-nya." : "Setelah disetujui."}
+              </div>
+            ),
+          },
+        ]),
+  ];
+  return (
+    <Modal title={t.nama} subtitle={`${t.kode} · proses penarikan`} onClose={onClose}>
+      <ol className="relative space-y-4">
+        {langkah.map((l, i) => (
+          <li key={l.judul} className="flex gap-3">
+            <div className="flex flex-col items-center">
+              <span
+                className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold border ${
+                  l.merah
+                    ? "bg-[var(--accent-red-bg)] border-[var(--accent-red-border)] text-[var(--accent-red)]"
+                    : l.selesai
+                      ? "bg-[var(--accent-green-bg)] border-[var(--accent-green-border)] text-[var(--accent-green)]"
+                      : l.aktif
+                        ? "bg-[var(--accent-amber-bg)] border-[var(--accent-amber-border)] text-[var(--accent-amber)]"
+                        : "bg-white border-[var(--border)] text-[var(--text-muted)]"
+                }`}
+              >
+                {l.merah ? <X size={14} /> : l.selesai ? <Check size={14} /> : i + 1}
+              </span>
+              {i < langkah.length - 1 && <span className="flex-1 w-px bg-[var(--border)] mt-1" />}
+            </div>
+            <div className="flex-1 pb-1 text-sm">
+              <div className="font-semibold text-[var(--text-primary)]">{l.judul}</div>
+              <div className="mt-0.5 space-y-0.5 text-xs">{l.isi}</div>
+            </div>
+          </li>
+        ))}
+      </ol>
+      <div className="mt-4 flex justify-end gap-2">
+        {bisaPeriksa && (
+          <button onClick={onPeriksa} className={btnPrimary}>
+            <ClipboardCheck size={15} /> Periksa sekarang
+          </button>
+        )}
+        {st === "DISETUJUI" && (
+          <button onClick={onBa} className={btnOutline}>
+            <FileText size={15} /> Berita Acara
+          </button>
+        )}
+        <button onClick={onClose} className={btnOutline}>
+          Tutup
+        </button>
+      </div>
+    </Modal>
+  );
 }
 
 export function KlinikRusakTab({ klinik, refreshKey, onChanged }: { klinik: string; refreshKey: number; onChanged: () => void }) {
@@ -311,6 +404,8 @@ export function KlinikRusakTab({ klinik, refreshKey, onChanged }: { klinik: stri
   const [rows, setRows] = useState<KlinikTarik[] | null>(null);
   const [tarik, setTarik] = useState<{ preset?: KlinikExpiredBatch } | null>(null);
   const [periksa, setPeriksa] = useState<KlinikTarik | null>(null);
+  const [detail, setDetail] = useState<KlinikTarik | null>(null);
+  const [ba, setBa] = useState(false);
   const [reload, setReload] = useState(0);
   const [error, setError] = useState("");
   const done = () => {
@@ -333,8 +428,10 @@ export function KlinikRusakTab({ klinik, refreshKey, onChanged }: { klinik: stri
       .catch(() => setRows([]));
   }, [klinik, status, periode, reload, refreshKey]);
 
+  const n = (st: string) => (rows ?? []).filter((t) => (t.status ?? "DISETUJUI") === st).length;
   return (
     <div className="space-y-4">
+      <AlurProses menunggu={n("MENUNGGU")} disetujui={n("DISETUJUI")} ditolak={n("DITOLAK")} expired={expired.length} onStatus={setStatus} />
       {expired.length > 0 && (
         <div className="bg-[var(--bg-card)] border border-[var(--accent-red-border)] rounded-lg">
           <div className="flex flex-wrap items-center gap-2 px-4 py-3 border-b border-[var(--accent-red-border)] bg-[var(--accent-red-bg)] rounded-t-lg">
@@ -397,7 +494,7 @@ export function KlinikRusakTab({ klinik, refreshKey, onChanged }: { klinik: stri
           {error && <span className="text-xs text-[var(--accent-red)]">{error}</span>}
           <div className="ml-auto flex flex-wrap gap-2">
             <button
-              onClick={() => (setError(""), cetakBeritaAcara(klinik, periode).catch((e) => setError(errorText(e, "Gagal mencetak"))))}
+              onClick={() => (setError(""), setBa(true))}
               className={btnOutline}
               title="Yang sudah disetujui di periode ini, dengan kolom cara pemusnahan dan tanda tangan"
             >
@@ -439,7 +536,7 @@ export function KlinikRusakTab({ klinik, refreshKey, onChanged }: { klinik: stri
                 rows.map((t) => {
                   const st = STATUS[t.status ?? "DISETUJUI"];
                   return (
-                    <tr key={t.id} className="align-top">
+                    <tr key={t.id} className="align-top cursor-pointer hover:bg-[#f8fafc]" onClick={() => setDetail(t)} title="Lihat proses">
                       <td className="px-3 py-2 whitespace-nowrap">{waktu(t.created_at)}</td>
                       <td className="col-grow px-3 py-2">
                         <div className="text-[var(--text-primary)]">{t.nama}</div>
@@ -454,7 +551,10 @@ export function KlinikRusakTab({ klinik, refreshKey, onChanged }: { klinik: stri
                           <span className={`mr-1 text-[10px] px-1.5 py-0.5 rounded border ${t.alasan === "RETUR" ? "border-[var(--border)]" : "border-[var(--accent-red-border)] text-[var(--accent-red)]"}`}>
                             {TARIK_ALASAN[t.alasan ?? ""] ?? "Dibuang"}
                           </span>
-                          {t.note || "-"} <EvidenceLink id={t.evidence_id} label="foto" />
+                          {t.note || "-"}{" "}
+                          <span onClick={(e) => e.stopPropagation()}>
+                            <EvidenceLink id={t.evidence_id} label="foto" />
+                          </span>
                         </div>
                         <div className="text-[var(--text-muted)]">oleh {t.oleh || "-"}</div>
                       </td>
@@ -468,7 +568,7 @@ export function KlinikRusakTab({ klinik, refreshKey, onChanged }: { klinik: stri
                         )}
                         {t.status === "MENUNGGU" &&
                           (canApprove && t.user_id !== user?.id ? (
-                            <button onClick={() => setPeriksa(t)} className="mt-1 block text-[11px] px-2 py-0.5 rounded border border-[var(--accent-blue)] text-[var(--accent-blue)] hover:bg-[#eef4ff]">
+                            <button onClick={(e) => (e.stopPropagation(), setPeriksa(t))} className="mt-1 block text-[11px] px-2 py-0.5 rounded border border-[var(--accent-blue)] text-[var(--accent-blue)] hover:bg-[#eef4ff]">
                               Periksa
                             </button>
                           ) : (
@@ -493,6 +593,16 @@ export function KlinikRusakTab({ klinik, refreshKey, onChanged }: { klinik: stri
         />
       )}
       {periksa && <PeriksaModal t={periksa} onClose={() => setPeriksa(null)} onSuccess={done} />}
+      {detail && (
+        <DetailProses
+          t={detail}
+          bisaPeriksa={detail.status === "MENUNGGU" && canApprove && detail.user_id !== user?.id}
+          onPeriksa={() => (setPeriksa(detail), setDetail(null))}
+          onBa={() => (setDetail(null), setBa(true))}
+          onClose={() => setDetail(null)}
+        />
+      )}
+      {ba && <BaPemusnahanModal klinik={klinik} periode={periode} onClose={() => setBa(false)} />}
     </div>
   );
 }
