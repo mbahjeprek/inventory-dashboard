@@ -10,6 +10,7 @@ import { ConfirmDialog } from "./ConfirmDialog";
 import { EvidenceLink } from "./EvidenceInput";
 import { KunjunganModal } from "./KunjunganModal";
 import { SuratSakitModal } from "./SuratSakit";
+import { SuratRujukanModal } from "./SuratRujukan";
 import { CocokkanObatModal } from "./CocokkanObatModal";
 import { KonsumsiObatPanel } from "./KonsumsiObatPanel";
 import { fetchAllRows, type ReportSection, type SectionReport, type TableReport } from "../lib/printTable";
@@ -125,6 +126,7 @@ export function KlinikLaporanTab({ klinik }: { klinik: string }) {
   const [flag, setFlag] = useState<Flag>("");
   const [editing, setEditing] = useState<Kunjungan | null | "new">(null);
   const [surat, setSurat] = useState<Kunjungan | null>(null);
+  const [rujukan, setRujukan] = useState<Kunjungan | null>(null);
   const [deleting, setDeleting] = useState<Kunjungan | null>(null);
   const [actionError, setActionError] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
@@ -408,6 +410,15 @@ export function KlinikLaporanTab({ klinik }: { klinik: string }) {
           className={`p-1.5 rounded-md border ${k.istirahat ? "border-[var(--accent-blue-border)] text-[var(--accent-blue)]" : "border-[var(--border)] text-[var(--text-secondary)]"} hover:bg-[#f1f5f9]`}
         >
           <FileText size={14} />
+        </button>
+      )}
+      {canInput && (
+        <button
+          onClick={() => setRujukan(k)}
+          title="Surat Rujukan"
+          className={`p-1.5 rounded-md border ${k.rujukan ? "border-[var(--accent-red-border)] text-[var(--accent-red)]" : "border-[var(--border)] text-[var(--text-secondary)]"} hover:bg-[#f1f5f9]`}
+        >
+          <Hospital size={14} />
         </button>
       )}
       {canEditRow(user, "KLINIK", k) && (
@@ -902,6 +913,7 @@ export function KlinikLaporanTab({ klinik }: { klinik: string }) {
 
       {cocokkan && <CocokkanObatModal klinik={klinik} onClose={() => setCocokkan(false)} onChanged={() => setReloadKey((n) => n + 1)} />}
       {surat && <SuratSakitModal k={surat} onClose={() => setSurat(null)} />}
+      {rujukan && <SuratRujukanModal k={rujukan} onClose={() => setRujukan(null)} />}
       {editing && <KunjunganModal klinik={klinik} kunjungan={editing === "new" ? null : editing} onClose={() => setEditing(null)} onSaved={() => setReloadKey((k) => k + 1)} />}
       {deleting && (
         <ConfirmDialog
