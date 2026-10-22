@@ -1453,7 +1453,7 @@ export const api = {
   kdEditUnit: (id: number, body: KdUnitInput) => req<{ success: boolean }>(`/api/kendaraan/unit/${id}`, { method: "PUT", body: JSON.stringify(body) }),
   kdKondisi: (id: number, body: { kondisi: string; tgl_rusak: string | null; tgl_selesai: string | null; keterangan: string }) =>
     req<{ success: boolean; harian: number }>(`/api/kendaraan/unit/${id}/kondisi`, { method: "PUT", body: JSON.stringify(body) }),
-  kdIsiHarian: (body: { tanggal: string; mode: "kemarin" | "semua" }) => req<{ success: boolean; n: number }>("/api/kendaraan/harian/isi", { method: "POST", body: JSON.stringify(body) }),
+  kdIsiHarian: (body: { tanggal: string; mode: "kemarin" | "semua" | "kosongkan" }) => req<{ success: boolean; n: number }>("/api/kendaraan/harian/isi", { method: "POST", body: JSON.stringify(body) }),
   kdHarian: (bulan: string) => req<KdHarian[]>(`/api/kendaraan/harian?bulan=${bulan}`),
   kdSetHarian: (body: { unit_id: number; tanggal: string; kondisi: string }) => req<{ success: boolean }>("/api/kendaraan/harian", { method: "PUT", body: JSON.stringify(body) }),
   kopTx: (params: Record<string, string | number>) =>

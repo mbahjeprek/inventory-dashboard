@@ -633,13 +633,14 @@ function HarianTab({ units, canInput }: { units: KdUnit[]; canInput: boolean }) 
       .catch(() => setCells(new Map()));
   }, [bulan, muat]);
   // One date for all units at once; only empty cells are filled, so a typed S / B stays.
-  const isi = async (mode: "kemarin" | "semua") => {
+  const isi = async (mode: "kemarin" | "semua" | "kosongkan") => {
+    if (mode === "kosongkan" && !window.confirm(`Hapus kondisi harian SEMUA unit pada ${isoDisplay(tglIsi)}?`)) return;
     setBusy(true);
     setError("");
     setNote("");
     try {
       const r = await api.kdIsiHarian({ tanggal: tglIsi, mode });
-      setNote(r.n ? `${r.n} unit diisi untuk ${isoDisplay(tglIsi)}` : `Tidak ada sel kosong yang bisa diisi untuk ${isoDisplay(tglIsi)}${mode === "kemarin" ? " (kemarin kosong?)" : ""}`);
+      setNote(mode === "kosongkan" ? `${r.n} sel tanggal ${isoDisplay(tglIsi)} dikosongkan` : r.n ? `${r.n} unit diisi untuk ${isoDisplay(tglIsi)}` : `Tidak ada sel kosong yang bisa diisi untuk ${isoDisplay(tglIsi)}${mode === "kemarin" ? " (kemarin kosong?)" : ""}`);
       if (tglIsi.slice(0, 7) !== bulan) setBulan(tglIsi.slice(0, 7));
       else setMuat((n) => n + 1);
     } catch (e) {
@@ -722,6 +723,14 @@ function HarianTab({ units, canInput }: { units: KdUnit[]; canInput: boolean }) 
           </button>
           <button onClick={() => isi("semua")} disabled={busy} className={btnPrimary} title="R untuk semua unit; B untuk yang tercatat rusak / mangkrak, S untuk yang standby">
             Isi semua R (rusak = B)
+          </button>
+          <button
+            onClick={() => isi("kosongkan")}
+            disabled={busy}
+            className="inline-flex items-center gap-1.5 text-sm px-3.5 py-2 rounded-md border border-[var(--accent-red-border)] bg-white text-[var(--accent-red)] hover:bg-[var(--accent-red-bg)] disabled:opacity-50"
+            title="Hapus kondisi semua unit pada tanggal ini (mis. membatalkan Isi semua)"
+          >
+            Kosongkan tanggal
           </button>
           <span className="text-xs text-[var(--text-secondary)]">Hanya sel yang masih kosong; yang sudah diisi tidak berubah. Setelah itu klik sel yang berbeda.</span>
           {note && <span className="text-xs text-[var(--accent-green)]">{note}</span>}

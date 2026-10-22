@@ -8028,10 +8028,16 @@ app.get("/api/kendaraan/harian", async (req, res) => {
 // before; "semua" puts R, or B / S for a unit recorded rusak / mangkrak / standby on that date.
 app.post("/api/kendaraan/harian/isi", async (req, res) => {
   const b = req.body ?? {};
-  const mode = b.mode === "kemarin" ? "kemarin" : b.mode === "semua" ? "semua" : "";
+  const mode = b.mode === "kemarin" ? "kemarin" : b.mode === "semua" ? "semua" : b.mode === "kosongkan" ? "kosongkan" : "";
   if (!mode) return res.status(400).json({ error: "Pilih cara mengisi" });
   if (!isIsoDate(b.tanggal) || b.tanggal > jakartaToday()) return res.status(400).json({ error: "Tanggal tidak valid (tidak boleh setelah hari ini)" });
   const pt = kdPt(b.pt);
+  // Kosongkan: every cell of that date (all internal units) is cleared, e.g. to undo an Isi semua.
+  if (mode === "kosongkan") {
+    const n = (await execute("DELETE FROM kendaraan_harian h USING kendaraan_unit u WHERE u.id = h.unit_id AND u.pt = @pt AND h.tanggal = @tgl", { pt, tgl: b.tanggal })).rowCount ?? 0;
+    if (n) await logActivity(req, { module: "KENDARAAN", estate: "NILAM", aksi: "Kondisi Harian", objek: `Semua unit internal ${b.tanggal}`, detail: `dikosongkan · ${n} sel dihapus` });
+    return res.json({ success: true, n });
+  }
   const sql =
     mode === "kemarin"
       ? `INSERT INTO kendaraan_harian (unit_id, tanggal, kondisi, user_id)
