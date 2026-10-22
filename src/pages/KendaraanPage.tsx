@@ -621,13 +621,33 @@ function HarianTab({ units, canInput }: { units: KdUnit[]; canInput: boolean }) 
   const [cells, setCells] = useState<Map<string, string> | null>(null);
   const [jenis, setJenis] = useState("");
   const [error, setError] = useState("");
+  const [note, setNote] = useState("");
+  const [tglIsi, setTglIsi] = useState(localToday());
+  const [busy, setBusy] = useState(false);
+  const [muat, setMuat] = useState(0);
   useEffect(() => {
     setCells(null);
     api
       .kdHarian(bulan)
       .then((r: KdHarian[]) => setCells(new Map(r.map((c) => [`${c.unit_id}|${c.tanggal}`, c.kondisi]))))
       .catch(() => setCells(new Map()));
-  }, [bulan]);
+  }, [bulan, muat]);
+  // One date for all units at once; only empty cells are filled, so a typed S / B stays.
+  const isi = async (mode: "kemarin" | "semua") => {
+    setBusy(true);
+    setError("");
+    setNote("");
+    try {
+      const r = await api.kdIsiHarian({ tanggal: tglIsi, mode });
+      setNote(r.n ? `${r.n} unit diisi untuk ${isoDisplay(tglIsi)}` : `Tidak ada sel kosong yang bisa diisi untuk ${isoDisplay(tglIsi)}${mode === "kemarin" ? " (kemarin kosong?)" : ""}`);
+      if (tglIsi.slice(0, 7) !== bulan) setBulan(tglIsi.slice(0, 7));
+      else setMuat((n) => n + 1);
+    } catch (e) {
+      setError(errorText(e, "Gagal mengisi"));
+    } finally {
+      setBusy(false);
+    }
+  };
   const hari = new Date(Number(bulan.slice(0, 4)), Number(bulan.slice(5, 7)), 0).getDate();
   const days = Array.from({ length: hari }, (_, i) => `${bulan}-${String(i + 1).padStart(2, "0")}`);
   const today = localToday();
@@ -693,6 +713,21 @@ function HarianTab({ units, canInput }: { units: KdUnit[]; canInput: boolean }) 
   });
   return (
     <div className="space-y-4">
+      {canInput && (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-[var(--accent-blue-border)] bg-[var(--accent-blue-bg)] px-4 py-3 text-sm">
+          <span className="font-medium text-[var(--accent-blue)]">Isi sekaligus untuk tanggal</span>
+          <input type="date" value={tglIsi} max={today} onChange={(e) => e.target.value && setTglIsi(e.target.value)} className="text-sm rounded-md border border-[var(--border)] px-3 py-1.5 bg-white" />
+          <button onClick={() => isi("kemarin")} disabled={busy} className={btnOutline} title="Kondisi semua unit sama dengan hari sebelumnya">
+            Salin dari kemarin
+          </button>
+          <button onClick={() => isi("semua")} disabled={busy} className={btnPrimary} title="R untuk semua unit; B untuk yang tercatat rusak / mangkrak, S untuk yang standby">
+            Isi semua R (rusak = B)
+          </button>
+          <span className="text-xs text-[var(--text-secondary)]">Hanya sel yang masih kosong; yang sudah diisi tidak berubah. Setelah itu klik sel yang berbeda.</span>
+          {note && <span className="text-xs text-[var(--accent-green)]">{note}</span>}
+        </div>
+      )}
+
       <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg">
         <div className="flex flex-wrap items-center gap-2 p-3 border-b border-[var(--border)]">
           <input type="month" value={bulan} max={today.slice(0, 7)} onChange={(e) => e.target.value && setBulan(e.target.value)} className="text-sm rounded-md border border-[var(--border)] px-3 py-1.5 bg-white" aria-label="Bulan" />

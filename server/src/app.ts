@@ -210,7 +210,7 @@ function requiredPerms(req: express.Request): Need {
   // Kendaraan & Alat Berat: Lihat; Input = kondisi harian and a unit's rusak / selesai; Edit = add / change units.
   if (is(/^\/kendaraan(\/|$)/)) {
     if (m === "GET") return ["kendaraan.view"];
-    if (is(/^\/kendaraan\/harian$/) || is(/^\/kendaraan\/unit\/\d+\/kondisi$/)) return ["kendaraan.input"];
+    if (is(/^\/kendaraan\/harian(\/isi)?$/) || is(/^\/kendaraan\/unit\/\d+\/kondisi$/)) return ["kendaraan.input"];
     return ["kendaraan.edit"];
   }
   if (is(/^\/koperasi(\/|$)/)) {
@@ -7990,14 +7990,26 @@ app.put("/api/kendaraan/unit/:id/kondisi", async (req, res) => {
     keterangan,
     id: before.id,
   });
+  // Not baik: its kondisi harian from tgl_rusak up to today becomes B (S for standby) where still empty,
+  // so the breakdown isn't typed twice. Cells already filled keep what was entered.
+  let harianDiisi = 0;
+  if (kondisi !== "BAIK" && tgl_rusak && before.status === "INTERNAL")
+    harianDiisi = (
+      await execute(
+        `INSERT INTO kendaraan_harian (unit_id, tanggal, kondisi, user_id)
+         SELECT @id, to_char(d, 'YYYY-MM-DD'), @k, @uid FROM generate_series(@dari::text::date, @sampai::text::date, interval '1 day') d
+         ON CONFLICT (unit_id, tanggal) DO NOTHING`,
+        { id: before.id, k: kondisi === "STANDBY" ? "S" : "B", uid: req.user!.id, dari: tgl_rusak, sampai: jakartaToday() }
+      )
+    ).rowCount ?? 0;
   await logActivity(req, {
     module: "KENDARAAN",
     estate: kdLogEstate(before.alokasi),
     aksi: "Update Kondisi Unit",
     objek: `${before.kode} - ${before.nama}`,
-    detail: `${before.kondisi || "-"} → ${kondisi}${tgl_rusak ? ` · rusak ${tgl_rusak}` : ""}${kondisi === "BAIK" && tgl_selesai ? ` · selesai ${tgl_selesai}` : ""}${keterangan ? ` · ${keterangan}` : ""}`,
+    detail: `${before.kondisi || "-"} → ${kondisi}${tgl_rusak ? ` · rusak ${tgl_rusak}` : ""}${kondisi === "BAIK" && tgl_selesai ? ` · selesai ${tgl_selesai}` : ""}${keterangan ? ` · ${keterangan}` : ""}${harianDiisi ? ` · ${harianDiisi} hari kondisi harian diisi ${kondisi === "STANDBY" ? "S" : "B"}` : ""}`,
   });
-  res.json({ success: true });
+  res.json({ success: true, harian: harianDiisi });
 });
 
 // Kondisi harian of a month (bulan = 'YYYY-MM'): every cell R / S / B.
@@ -8010,6 +8022,41 @@ app.get("/api/kendaraan/harian", async (req, res) => {
     { pt: kdPt(req.query.pt), like: `${bulan}-%` }
   );
   res.json(cells);
+});
+
+// Fill one date for every active internal unit, only where the cell is still empty: "kemarin" copies the day
+// before; "semua" puts R, or B / S for a unit recorded rusak / mangkrak / standby on that date.
+app.post("/api/kendaraan/harian/isi", async (req, res) => {
+  const b = req.body ?? {};
+  const mode = b.mode === "kemarin" ? "kemarin" : b.mode === "semua" ? "semua" : "";
+  if (!mode) return res.status(400).json({ error: "Pilih cara mengisi" });
+  if (!isIsoDate(b.tanggal) || b.tanggal > jakartaToday()) return res.status(400).json({ error: "Tanggal tidak valid (tidak boleh setelah hari ini)" });
+  const pt = kdPt(b.pt);
+  const sql =
+    mode === "kemarin"
+      ? `INSERT INTO kendaraan_harian (unit_id, tanggal, kondisi, user_id)
+         SELECT h.unit_id, @tgl::text, h.kondisi, @uid FROM kendaraan_harian h JOIN kendaraan_unit u ON u.id = h.unit_id
+          WHERE u.pt = @pt AND u.aktif AND u.status = 'INTERNAL' AND h.tanggal = to_char(@tgl::text::date - 1, 'YYYY-MM-DD')
+         ON CONFLICT (unit_id, tanggal) DO NOTHING`
+      : `INSERT INTO kendaraan_harian (unit_id, tanggal, kondisi, user_id)
+         SELECT u.id, @tgl,
+                CASE WHEN u.kondisi IN ('RUSAK', 'MANGKRAK', 'STANDBY') AND (u.tgl_rusak IS NULL OR u.tgl_rusak <= @tgl)
+                     THEN CASE WHEN u.kondisi = 'STANDBY' THEN 'S' ELSE 'B' END
+                     WHEN u.kondisi = 'BAIK' AND u.tgl_rusak IS NOT NULL AND u.tgl_rusak <= @tgl AND (u.tgl_selesai IS NULL OR u.tgl_selesai > @tgl) THEN 'B'
+                     ELSE 'R' END,
+                @uid
+           FROM kendaraan_unit u WHERE u.pt = @pt AND u.aktif AND u.status = 'INTERNAL'
+         ON CONFLICT (unit_id, tanggal) DO NOTHING`;
+  const n = (await execute(sql, { tgl: b.tanggal, uid: req.user!.id, pt })).rowCount ?? 0;
+  if (n)
+    await logActivity(req, {
+      module: "KENDARAAN",
+      estate: "NILAM",
+      aksi: "Kondisi Harian",
+      objek: `Semua unit internal ${b.tanggal}`,
+      detail: `${mode === "kemarin" ? "salin dari kemarin" : "isi R (rusak = B, standby = S)"} · ${n} unit diisi (yang sudah terisi tidak diubah)`,
+    });
+  res.json({ success: true, n });
 });
 
 // One cell: kondisi R / S / B, or '' to clear it.
