@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, Banknote, Boxes, ChevronRight, ChevronsDownUp, ChevronsUpDown, CalendarClock, ClipboardCheck, FileText, HandCoins, LayoutDashboard, ListPlus, Lock, Package, Receipt, PackageX, Pencil, Plus, Search, ShoppingBasket, Trash2, Truck, UserPlus, Users, X } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, Banknote, Boxes, ChevronRight, ChevronsDownUp, ChevronsUpDown, CalendarClock, Check, ClipboardCheck, FileText, HandCoins, ShieldCheck, LayoutDashboard, ListPlus, Lock, Package, Receipt, PackageX, Pencil, Plus, Search, ShoppingBasket, Trash2, Truck, UserPlus, Users, X } from "lucide-react";
 import {
   api,
   errorText,
@@ -21,6 +21,7 @@ import { ExportButtons } from "../components/ExportButtons";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { EvidenceInput, EvidenceLink, useEvidenceEnabled } from "../components/EvidenceInput";
 import { printTable } from "../lib/printTable";
+import { BaKoperasiModal } from "../components/BaPemusnahan";
 import { fmtQty, isoDisplay, localToday } from "../lib/opname";
 import { tanggalWaktu } from "../lib/datetime";
 import { KopBeliBatchModal, KopJualBatchModal } from "../components/KoperasiBatchModal";
@@ -256,6 +257,7 @@ export function KoperasiPage() {
           <ExpiredPerluDitarik reload={reload} canInput={canInput} onChanged={done} />
           <TxTable jenis="BELI" periode={periode} reload={reload} canEdit={canEdit} onChanged={done} />
           <h2 className="text-sm font-semibold text-[var(--text-primary)] pt-2">Barang Rusak / Expired</h2>
+          <KopAlurRusak periode={periode} reload={reload} />
           <p className="text-xs text-[var(--text-muted)] -mt-2">
             Diinput dengan foto, lalu diperiksa orang kedua (hak Approve Koperasi) yang mencocokkan barang fisiknya. Yang disetujui masuk Berita Acara Pemusnahan; pemusnahan disaksikan minimal 2 orang.
           </p>
@@ -304,6 +306,9 @@ function TxTable({
   const [hapus, setHapus] = useState<{ tx: KopTx; bon: boolean } | null>(null);
   const [edit, setEdit] = useState<KopTx | null>(null);
   const [periksa, setPeriksa] = useState<KopTx | null>(null);
+  // Barang Rusak / Koreksi: a row opens its process; the Berita Acara of Barang Rusak is a form + formal letter.
+  const [detail, setDetail] = useState<KopTx | null>(null);
+  const [baRusak, setBaRusak] = useState(false);
   // A month whose rekap went to HRD (from the 1st) is locked for Stock Out changes, except for HR / Super User.
   const { user } = useAuth();
   const bukaKunci = user?.role === "superuser" || can(user, "koperasi.pelunasan");
@@ -435,7 +440,7 @@ function TxTable({
           )}
           {rusak && (
             <button
-              onClick={() => cetakBeritaAcara(koreksi ? "KOREKSI" : "RUSAK", periode).catch((e) => setError(errorText(e, "Gagal mencetak")))}
+              onClick={() => (koreksi ? cetakBeritaAcara("KOREKSI", periode).catch((e) => setError(errorText(e, "Gagal mencetak"))) : setBaRusak(true))}
               className={btnOutline}
               title={`${koreksi ? "Koreksi stok" : "Barang rusak / expired"} yang sudah disetujui di periode ini, dengan kolom tanda tangan`}
             >
@@ -535,7 +540,11 @@ function TxTable({
                 const sameBon = li > 0;
                 const foldable = jual && g.length > 1;
                 return (
-                  <tr key={t.id} className={`align-top ${sameBon ? "" : jual && gi > 0 ? "border-t-2 border-t-[var(--border)]" : ""} ${foldable ? "bg-[#fafcff]" : ""}`}>
+                  <tr
+                    key={t.id}
+                    {...(rusak && !t.opname_id ? { onClick: () => setDetail(t), title: "Lihat proses" } : {})}
+                    className={`align-top ${sameBon ? "" : jual && gi > 0 ? "border-t-2 border-t-[var(--border)]" : ""} ${foldable ? "bg-[#fafcff]" : ""} ${rusak && !t.opname_id ? "cursor-pointer hover:bg-[#f8fafc]" : ""}`}
+                  >
                     <td className="px-3 py-2 whitespace-nowrap">
                       {!sameBon &&
                         (foldable ? (
@@ -579,7 +588,10 @@ function TxTable({
                     <td className="col-grow px-3 py-2 text-xs text-[var(--text-secondary)]">
                       <div>
                         {rusak && t.alasan && <span className={`mr-1 text-[10px] px-1.5 py-0.5 rounded border ${["EXPIRED", "HILANG"].includes(t.alasan) ? "border-[var(--accent-red-border)] text-[var(--accent-red)]" : "border-[var(--border)]"}`}>{ALASAN_LABEL[t.alasan] ?? t.alasan}</span>}
-                        {t.keterangan || (t.sumber?.startsWith("IMPORT") ? "" : "-")} <EvidenceLink id={t.evidence_id} label="foto" />
+                        {t.keterangan || (t.sumber?.startsWith("IMPORT") ? "" : "-")}{" "}
+                        <span onClick={(e) => e.stopPropagation()}>
+                          <EvidenceLink id={t.evidence_id} label="foto" />
+                        </span>
                       </div>
                       <div className="text-[var(--text-muted)]">{t.sumber?.startsWith("IMPORT") ? "dari spreadsheet" : `oleh ${t.oleh || "-"}`}</div>
                     </td>
@@ -600,7 +612,7 @@ function TxTable({
                         )}
                         {t.status === "MENUNGGU" &&
                           (canApprove && t.user_id !== user?.id ? (
-                            <button onClick={() => setPeriksa(t)} className="mt-1 block text-[11px] px-2 py-0.5 rounded border border-[var(--accent-blue)] text-[var(--accent-blue)] hover:bg-[#eef4ff]">
+                            <button onClick={(e) => (e.stopPropagation(), setPeriksa(t))} className="mt-1 block text-[11px] px-2 py-0.5 rounded border border-[var(--accent-blue)] text-[var(--accent-blue)] hover:bg-[#eef4ff]">
                               Periksa
                             </button>
                           ) : (
@@ -609,7 +621,7 @@ function TxTable({
                       </td>
                     )}
                     {canEdit && (
-                      <td className="px-3 py-2 text-right whitespace-nowrap">
+                      <td className="px-3 py-2 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                         {terkunci(t) ? (
                           !sameBon && kunciIcon
                         ) : (
@@ -652,6 +664,16 @@ function TxTable({
           </button>
         </div>
       )}
+      {detail && (
+        <KopDetailProses
+          t={detail}
+          bisaPeriksa={detail.status === "MENUNGGU" && canApprove && detail.user_id !== user?.id}
+          onPeriksa={() => (setPeriksa(detail), setDetail(null))}
+          onBa={detail.jenis === "RUSAK" ? () => (setDetail(null), setBaRusak(true)) : undefined}
+          onClose={() => setDetail(null)}
+        />
+      )}
+      {baRusak && <BaKoperasiModal periode={periode} onClose={() => setBaRusak(false)} />}
       {periksa && (
         <PeriksaRusakModal
           tx={periksa}
@@ -2710,6 +2732,148 @@ function RusakMenungguBanner({ reload, canApprove, onLihat }: { reload: number; 
         Lihat
       </button>
     </div>
+  );
+}
+
+const jamKop = (iso: string) =>
+  new Date(iso).toLocaleString("id-ID", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Jakarta" });
+
+// The four steps of a Barang Rusak / Expired above its list, with how many wait for the check and how
+// many were approved this periode.
+function KopAlurRusak({ periode, reload }: { periode: string; reload: number }) {
+  const [n, setN] = useState<{ menunggu: number; disetujui: number; ditolak: number } | null>(null);
+  useEffect(() => {
+    const hitung = (status: string, p = "") => api.kopTx({ jenis: "RUSAK", status, periode: p, page: 1, pageSize: 1 }).then((r) => r.total);
+    Promise.all([hitung("MENUNGGU"), hitung("DISETUJUI", periode), hitung("DITOLAK", periode)])
+      .then(([menunggu, disetujui, ditolak]) => setN({ menunggu, disetujui, ditolak }))
+      .catch(() => setN(null));
+  }, [periode, reload]);
+  const langkah = [
+    { icon: PackageX, judul: "1. Tarik & simpan", isi: "Petugas: tarik dari rak, hitung, foto, catat Rusak / Expired (stok langsung ditahan)", angka: "" },
+    { icon: ClipboardCheck, judul: "2. Periksa", isi: "Orang kedua (hak Approve Koperasi) cocokkan fisik & foto", angka: n?.menunggu ? `${n.menunggu} menunggu` : "" },
+    { icon: ShieldCheck, judul: "3. Disetujui", isi: "Stok resmi keluar; ditolak = stok kembali", angka: n ? `${n.disetujui} disetujui${n.ditolak ? ` · ${n.ditolak} ditolak` : ""} (${periodeLabel(periode)})` : "" },
+    { icon: FileText, judul: "4. Berita Acara", isi: "Musnahkan disaksikan 2 orang, cetak & tanda tangani BA", angka: "" },
+  ];
+  return (
+    <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 -mt-1">
+      {langkah.map((l, i) => (
+        <div key={l.judul} className={`rounded-lg border px-3 py-2.5 ${i === 1 && n?.menunggu ? "border-[var(--accent-amber-border)] bg-[var(--accent-amber-bg)]" : "border-[var(--border)] bg-[var(--bg-card)]"}`}>
+          <div className="flex items-center gap-2 text-sm font-semibold text-[var(--text-primary)]">
+            <l.icon size={16} className="text-[var(--accent-blue)]" /> {l.judul}
+          </div>
+          <div className="mt-0.5 text-[11px] text-[var(--text-secondary)]">{l.isi}</div>
+          {l.angka && <div className={`mt-1 text-xs font-medium ${i === 1 ? "text-[var(--accent-amber)]" : "text-[var(--accent-green)]"}`}>{l.angka}</div>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// One Barang Rusak / Expired or Koreksi Stok: each step with who, when, foto and catatan, and what is left.
+function KopDetailProses({ t, bisaPeriksa, onPeriksa, onBa, onClose }: { t: KopTx; bisaPeriksa: boolean; onPeriksa: () => void; onBa?: () => void; onClose: () => void }) {
+  const kor = t.jenis === "KOREKSI";
+  const st = t.status ?? "DISETUJUI";
+  const lama = !t.status;
+  const langkah: { judul: string; selesai: boolean; aktif?: boolean; merah?: boolean; isi: ReactNode }[] = [
+    {
+      judul: kor ? "Dihitung & dicatat" : "Ditarik & dicatat",
+      selesai: true,
+      isi: (
+        <>
+          <div>
+            {jamKop(t.created_at)} · oleh <b>{t.oleh || "-"}</b>
+          </div>
+          <div>
+            {kor && t.qty > 0 ? "+" : ""}
+            {fmtQty(t.qty)} {t.satuan} · {t.alasan ? (ALASAN_LABEL[t.alasan] ?? t.alasan) : kor ? "Koreksi" : "Rusak"}
+            {t.total ? ` · ${rp(t.total)}` : ""}
+          </div>
+          <div className="text-[var(--text-secondary)]">
+            {t.keterangan || "-"} <EvidenceLink id={t.evidence_id} label="lihat foto" />
+          </div>
+        </>
+      ),
+    },
+    {
+      judul: st === "MENUNGGU" ? "Menunggu pemeriksaan" : st === "DITOLAK" ? "Ditolak pemeriksa" : lama ? "Pemeriksaan" : "Diperiksa & disetujui",
+      selesai: st !== "MENUNGGU",
+      aktif: st === "MENUNGGU",
+      merah: st === "DITOLAK",
+      isi: lama ? (
+        <div className="text-[var(--text-muted)]">Dicatat sebelum ada tahap pemeriksaan; dianggap disetujui.</div>
+      ) : st === "MENUNGGU" ? (
+        <div className="text-[var(--accent-amber)]">
+          {kor ? "Stok belum berubah sampai disetujui." : "Stok sudah ditahan (tidak bisa dijual)."} Perlu diperiksa orang lain yang punya hak Approve Koperasi.
+        </div>
+      ) : (
+        <>
+          <div>
+            {t.diperiksa_at ? jamKop(t.diperiksa_at) : "-"} · oleh <b>{t.diperiksa_nama || "-"}</b>
+          </div>
+          {t.diperiksa_catatan && <div className="text-[var(--text-secondary)]">Catatan: {t.diperiksa_catatan}</div>}
+          {st === "DITOLAK" && <div className="text-[var(--accent-red)]">{kor ? "Stok tidak diubah." : "Stok dikembalikan."}</div>}
+        </>
+      ),
+    },
+    ...(st === "DITOLAK"
+      ? []
+      : [
+          {
+            judul: kor ? "Berita Acara Selisih Stok" : "Pemusnahan & Berita Acara",
+            selesai: false,
+            aktif: st === "DISETUJUI",
+            isi: (
+              <div className="text-[var(--text-secondary)]">
+                {st !== "DISETUJUI" ? "Setelah disetujui." : kor ? "Masuk Berita Acara Selisih Stok periode ini." : "Siap dimusnahkan (disaksikan 2 orang) lalu cetak Berita Acara-nya."}
+              </div>
+            ),
+          },
+        ]),
+  ];
+  return (
+    <Modal title={t.barang_nama} subtitle={`${t.barang_kode} · proses ${kor ? "koreksi stok" : "barang rusak / expired"}`} onClose={onClose}>
+      <ol className="space-y-4">
+        {langkah.map((l, i) => (
+          <li key={l.judul} className="flex gap-3">
+            <div className="flex flex-col items-center">
+              <span
+                className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold border ${
+                  l.merah
+                    ? "bg-[var(--accent-red-bg)] border-[var(--accent-red-border)] text-[var(--accent-red)]"
+                    : l.selesai
+                      ? "bg-[var(--accent-green-bg)] border-[var(--accent-green-border)] text-[var(--accent-green)]"
+                      : l.aktif
+                        ? "bg-[var(--accent-amber-bg)] border-[var(--accent-amber-border)] text-[var(--accent-amber)]"
+                        : "bg-white border-[var(--border)] text-[var(--text-muted)]"
+                }`}
+              >
+                {l.merah ? <X size={14} /> : l.selesai ? <Check size={14} /> : i + 1}
+              </span>
+              {i < langkah.length - 1 && <span className="flex-1 w-px bg-[var(--border)] mt-1" />}
+            </div>
+            <div className="flex-1 pb-1 text-sm">
+              <div className="font-semibold text-[var(--text-primary)]">{l.judul}</div>
+              <div className="mt-0.5 space-y-0.5 text-xs">{l.isi}</div>
+            </div>
+          </li>
+        ))}
+      </ol>
+      <div className="mt-4 flex justify-end gap-2">
+        {bisaPeriksa && (
+          <button onClick={onPeriksa} className={btnPrimary}>
+            <ClipboardCheck size={15} /> Periksa sekarang
+          </button>
+        )}
+        {st === "DISETUJUI" && onBa && (
+          <button onClick={onBa} className={btnOutline}>
+            <FileText size={15} /> Berita Acara
+          </button>
+        )}
+        <button onClick={onClose} className={btnOutline}>
+          Tutup
+        </button>
+      </div>
+    </Modal>
   );
 }
 
