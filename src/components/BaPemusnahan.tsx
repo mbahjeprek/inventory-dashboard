@@ -3,7 +3,7 @@ import { CheckCircle2, FileText, Printer, ShieldCheck, X } from "lucide-react";
 import { api, errorText, type BeritaAcara, type KlinikTarik, type KopTx } from "../lib/api";
 import { printDocument } from "../lib/printTable";
 import { isoDisplay, localToday } from "../lib/opname";
-import { BULAN, HARI, escHtml, terbilang } from "../lib/surat";
+import { BULAN, HARI, KOP_CSS, PERUSAHAAN, escHtml, kopHtml, terbilang } from "../lib/surat";
 import { useAuth } from "../context/AuthContext";
 import { can } from "../lib/access";
 import { EvidenceInput, EvidenceLink, useEvidenceEnabled } from "./EvidenceInput";
@@ -63,10 +63,7 @@ export function baHtml(j: BaJenis, ba: Pick<BeritaAcara, "nomor" | "tanggal" | "
     @page { size: A4 portrait; margin: 15mm 15mm 15mm 18mm; }
     * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     body { font-family: "Times New Roman", Times, serif; color: #000; font-size: 11pt; line-height: 1.45; margin: 0; }
-    .kop { display: flex; align-items: center; gap: 12px; border-bottom: 3px double #000; padding-bottom: 6px; }
-    .kop img { width: 58px; height: 58px; object-fit: contain; }
-    .kop .pt { font-size: 14pt; font-weight: bold; text-transform: uppercase; }
-    .kop .unit { font-size: 11pt; }
+    ${KOP_CSS}
     h1 { text-align: center; font-size: 13pt; margin: 16px 0 0; text-decoration: underline; text-transform: uppercase; }
     .nomor { text-align: center; margin: 2px 0 14px; }
     p { margin: 0 0 8px; text-align: justify; }
@@ -85,7 +82,7 @@ export function baHtml(j: BaJenis, ba: Pick<BeritaAcara, "nomor" | "tanggal" | "
     .ttd .ruang { height: 64px; }
     .ttd .nama { font-weight: bold; text-decoration: underline; }
   </style></head><body>
-    <div class="kop"><img src="${esc(location.origin)}/logo-agro.png" alt=""><div><div class="pt">${esc(f.perusahaan)}</div><div class="unit">${esc(j.unitLabel)}</div></div></div>
+    ${kopHtml(f.perusahaan, j.unitLabel)}
     <h1>${esc(j.judul)}</h1>
     <div class="nomor">Nomor: ${esc(ba.nomor)}</div>
     <p>Pada hari ini, ${esc(tgl)}, bertempat di ${esc(f.tempat)}, kami yang bertanda tangan di bawah ini:</p>
@@ -137,7 +134,7 @@ function Shell({ title, subtitle, onClose, children, wide = false }: { title: st
 export function BaForm({ jenis: j, items, onClose, onSaved }: { jenis: BaJenis; items: BaItem[] | null; onClose: () => void; onSaved: () => void }) {
   const awal = (): Isian => {
     const kosong = {
-      perusahaan: "PT. Anugerah Kembang Sawit Sejahtera",
+      perusahaan: PERUSAHAAN,
       tempat: j.tempat,
       cara: j.cara[0],
       pihakKetiga: "",

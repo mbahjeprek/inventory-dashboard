@@ -18,3 +18,16 @@ export const tanggalPanjang = (iso: string) => {
   const d = new Date(`${iso}T00:00:00`);
   return `${d.getDate()} ${BULAN[d.getMonth()]} ${d.getFullYear()}`;
 };
+
+// The kop of every formal letter: the AKSS logo on the left, the company and unit centred, a double rule
+// under it (a same-width spacer on the right keeps the text centred on the page).
+export const KOP_CSS = `
+  .kop { display: flex; align-items: center; gap: 10px; border-bottom: 3px double #000; padding-bottom: 6px; margin-bottom: 4px; }
+  .kop-logo { width: 112px; height: auto; flex: none; }
+  .kop-spasi { width: 112px; flex: none; }
+  .kop-teks { flex: 1; text-align: center; line-height: 1.3; }
+  .kop-pt { font-weight: bold; font-size: 14pt; text-transform: uppercase; letter-spacing: 0.3px; }
+  .kop-unit { font-weight: bold; font-size: 12pt; text-transform: uppercase; }`;
+export const kopHtml = (perusahaan: string, unit: string) =>
+  `<div class="kop"><img class="kop-logo" src="${escHtml(location.origin)}/logo-akss.png" alt="AKSS"><div class="kop-teks"><div class="kop-pt">${escHtml(perusahaan)}</div><div class="kop-unit">${escHtml(unit)}</div></div><div class="kop-spasi"></div></div>`;
+export const PERUSAHAAN = "PT. Anugrah Kembang Sawit Sejahtera";

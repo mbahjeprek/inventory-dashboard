@@ -3,7 +3,7 @@ import { FileText, X } from "lucide-react";
 import type { Kunjungan } from "../lib/api";
 import { printDocument } from "../lib/printTable";
 import { isoDisplay } from "../lib/opname";
-import { escHtml as esc, tanggalPanjang, terbilang } from "../lib/surat";
+import { KOP_CSS, PERUSAHAAN, escHtml as esc, kopHtml, tanggalPanjang, terbilang } from "../lib/surat";
 
 // Surat Keterangan Sakit from a kunjungan: the patient's data, the rest days from the visit and the
 // examiner's signature, as a formal letter. The nomor follows from the visit (same nomor on a reprint);
@@ -29,9 +29,7 @@ export function suratHtml(k: Kunjungan, f: Isian) {
     @page { size: A4 portrait; margin: 18mm 18mm 18mm 20mm; }
     * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     body { font-family: "Times New Roman", Times, serif; color: #000; font-size: 12pt; line-height: 1.6; margin: 0; }
-    .kop { display: flex; align-items: center; gap: 12px; border-bottom: 3px double #000; padding-bottom: 6px; }
-    .kop img { width: 60px; height: 60px; object-fit: contain; }
-    .kop .pt { font-size: 14pt; font-weight: bold; text-transform: uppercase; }
+    ${KOP_CSS}
     h1 { text-align: center; font-size: 14pt; margin: 22px 0 0; text-decoration: underline; }
     .nomor { text-align: center; margin: 0 0 20px; }
     p { margin: 0 0 10px; text-align: justify; }
@@ -43,7 +41,7 @@ export function suratHtml(k: Kunjungan, f: Isian) {
     .ttd .nama { font-weight: bold; text-decoration: underline; }
     .kecil { font-size: 9pt; color: #333; margin-top: 30px; }
   </style></head><body>
-    <div class="kop"><img src="${esc(location.origin)}/logo-agro.png" alt=""><div><div class="pt">${esc(f.perusahaan)}</div><div>Klinik Estate ${esc(k.klinik)}</div></div></div>
+    ${kopHtml(f.perusahaan, `Klinik Estate ${k.klinik}`)}
     <h1>SURAT KETERANGAN SAKIT</h1>
     <div class="nomor">Nomor: ${esc(nomorSks(k))}</div>
     <p>Yang bertanda tangan di bawah ini, ${esc(f.jabatan || "petugas kesehatan")} Klinik Estate ${esc(k.klinik)}, menerangkan bahwa:</p>
@@ -82,7 +80,7 @@ export function SuratSakitModal({ k, onClose }: { k: Kunjungan; onClose: () => v
       /* no storage */
     }
     return {
-      perusahaan: ingat.perusahaan || "PT. Anugerah Kembang Sawit Sejahtera",
+      perusahaan: ingat.perusahaan || PERUSAHAAN,
       pemeriksa: ingat.pemeriksa || k.created_by || "",
       jabatan: ingat.jabatan || "Bidan / Mantri Jaga",
       hari: k.istirahat && k.hari_istirahat > 0 ? k.hari_istirahat : 1,

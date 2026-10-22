@@ -1,3 +1,5 @@
+import { KOP_CSS, PERUSAHAAN, kopHtml } from "./surat";
+
 export type PrintColumn = { label: string; align?: "left" | "right"; nowrap?: boolean };
 type Cell = string | number | null | undefined;
 
@@ -121,6 +123,8 @@ export function printTable(report: AnyReport) {
     return `${h}${pic}<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>${foot}`;
   };
 
+  // A report with signature boxes is a Berita Acara: it gets the company kop with the logo.
+  const signed = "signatures" in report && !!report.signatures?.length;
   const html = `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>
     @page { size: A4 ${landscape ? "landscape" : "portrait"}; margin: 10mm; }
     * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
@@ -144,7 +148,9 @@ export function printTable(report: AnyReport) {
     .sign div { flex: 1 1 150px; text-align: center; font-size: 8.5pt; }
     .sign span { display: block; height: 52px; }
     .sign b { display: block; border-top: 1px solid #1a2634; padding-top: 2px; font-weight: 600; }
+    ${signed ? `${KOP_CSS} .kop { margin-bottom: 10px; } .kop-pt { font-size: 12pt; } .kop-unit { font-size: 10pt; } .kop-logo, .kop-spasi { width: 90px; } h1 { text-align: center; }` : ""}
   </style></head><body>
+    ${signed ? kopHtml(PERUSAHAAN, "") : ""}
     <h1>${escapeHtml(title)}</h1>
     ${subtitle.map((s) => `<p class="meta">${escapeHtml(s)}</p>`).join("")}
     <p class="meta">Dicetak: ${escapeHtml(printedAtText())}${rowCount(report)}</p>

@@ -3,7 +3,7 @@ import { FileText, X } from "lucide-react";
 import type { Kunjungan } from "../lib/api";
 import { printDocument } from "../lib/printTable";
 import { isoDisplay } from "../lib/opname";
-import { escHtml as esc, tanggalPanjang } from "../lib/surat";
+import { KOP_CSS, PERUSAHAAN, escHtml as esc, kopHtml, tanggalPanjang } from "../lib/surat";
 
 // Surat Rujukan from a kunjungan, in the clinics' own format: kop "PT. ANUGRAH KEMBANG SAWIT SEJAHTERA /
 // DEPARTEMEN KLINIK ESTATE <estate>", nomor <visit>/AKSS-<kode estate>/<bulan romawi>/<tahun>, Kepada Yth.
@@ -49,7 +49,7 @@ export function rujukanHtml(k: Kunjungan, f: Isian) {
     @page { size: A4 portrait; margin: 16mm 18mm 16mm 20mm; }
     * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     body { font-family: Calibri, "Segoe UI", Arial, sans-serif; color: #000; font-size: 11.5pt; line-height: 1.5; margin: 0; }
-    .kop { text-align: center; font-weight: bold; font-size: 12.5pt; line-height: 1.35; border-bottom: 2px solid #000; padding-bottom: 8px; }
+    ${KOP_CSS}
     h1 { text-align: center; font-size: 12.5pt; margin: 16px 0 0; text-decoration: underline; }
     .nomor { text-align: center; font-weight: bold; margin: 0 0 14px; }
     p { margin: 0 0 6px; }
@@ -65,7 +65,7 @@ export function rujukanHtml(k: Kunjungan, f: Isian) {
     .ttd .ruang { height: 66px; }
     .ttd .nama { font-weight: bold; text-decoration: underline; }
   </style></head><body>
-    <div class="kop">${esc(f.perusahaan.toUpperCase())}<br>DEPARTEMEN KLINIK ESTATE ${esc(k.klinik)}</div>
+    ${kopHtml(f.perusahaan, `Departemen Klinik Estate ${k.klinik}`)}
     <h1>SURAT RUJUKAN</h1>
     <div class="nomor">Nomor : ${esc(nomorRujukan(k))}</div>
     <p>Kepada<br>Yth. ${esc(f.kepada || "Dokter Jaga")}<br>Di ${esc(f.tujuan || "......................................")}</p>
@@ -114,7 +114,7 @@ export function SuratRujukanModal({ k, onClose }: { k: Kunjungan; onClose: () =>
     .map((o) => `- ${o.nama_obat}${o.qty !== null && o.qty !== undefined ? ` ${o.qty}${o.satuan ? ` ${o.satuan.toLowerCase()}` : ""}` : ""} (jam ......)`)
     .join("\n");
   const [f, setF] = useState<Isian>({
-    perusahaan: ingat.perusahaan || "PT. Anugrah Kembang Sawit Sejahtera",
+    perusahaan: ingat.perusahaan || PERUSAHAAN,
     tujuan: k.provider || tujuanList[0] || "",
     kepada: "Dokter Jaga",
     alamat: k.tempat_tinggal || `Camp PT. AKSS Estate ${kotaOf(k.klinik)}`,
