@@ -9,7 +9,7 @@ if (!JWT_SECRET) {
 }
 
 export type Role = "superuser" | "estate";
-export const ESTATES = ["NILAM", "KNS", "WJA", "ZAMRUD", "FIRUS"] as const;
+export const ESTATES = ["NILAM", "FIRUS", "ZAMRUD", "KNS", "WJA"] as const;
 export type Estate = (typeof ESTATES)[number];
 
 // Checkable permissions of an estate account (a superuser has all of them). Each inventory module

@@ -10,7 +10,7 @@ import { fetchAllRows, type TableReport } from "../lib/printTable";
 import { EvidenceLink } from "../components/EvidenceInput";
 import { tanggalWaktu } from "../lib/datetime";
 
-const TUJUAN_OPTIONS = ["NILAM", "KNS", "WJA", "ZAMRUD", "FIRUS"];
+const TUJUAN_OPTIONS = ["NILAM", "FIRUS", "ZAMRUD", "KNS", "WJA"];
 
 // Nilam's gudang Stock Out history, shown as a tab of Inventory Gudang - Nilam
 // (`embedded` drops the page title there).

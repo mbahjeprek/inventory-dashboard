@@ -11,7 +11,7 @@ import { EvidenceLink } from "../components/EvidenceInput";
 import { tanggalWaktu, waktu } from "../lib/datetime";
 import { loanTag } from "../lib/opname";
 
-const TUJUAN_OPTIONS = ["NILAM", "KNS", "WJA", "ZAMRUD", "FIRUS"];
+const TUJUAN_OPTIONS = ["NILAM", "FIRUS", "ZAMRUD", "KNS", "WJA"];
 
 const SOURCE_LABEL: Record<Movement["source"], string> = {
   STOCK_IN: "Penerimaan Vendor",

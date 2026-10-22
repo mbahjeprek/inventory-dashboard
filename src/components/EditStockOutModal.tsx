@@ -3,7 +3,7 @@ import { X } from "lucide-react";
 import { api, type StockOutRecord } from "../lib/api";
 import { EditEvidenceField } from "./EvidenceInput";
 
-const TUJUAN_OPTIONS = ["NILAM", "KNS", "WJA", "ZAMRUD", "FIRUS"];
+const TUJUAN_OPTIONS = ["NILAM", "FIRUS", "ZAMRUD", "KNS", "WJA"];
 
 export function EditStockOutModal({
   record,

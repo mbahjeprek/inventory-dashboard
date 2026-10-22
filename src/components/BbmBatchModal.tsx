@@ -6,7 +6,7 @@ import { PEMASOK, tujuanColumn } from "../lib/kirim";
 import { BatchGrid, HeaderField, fmtNum, headerInputCls, isBlankIn, localToday, parseNum, runningStock, type Cells, type GridCol } from "./BatchGrid";
 
 // Input Banyak BBM: the day's usage of one lokasi, one row per vehicle / genset (see BatchGrid).
-const LOKASI = ["NILAM", "WJA", "KNS", "ZAMRUD", "FIRUS"];
+const LOKASI = ["NILAM", "FIRUS", "ZAMRUD", "KNS", "WJA"];
 
 export function BbmBatchModal({
   summary,

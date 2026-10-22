@@ -3,7 +3,7 @@ import { api, type OpnameModule, type PinjamanBarang } from "../lib/api";
 import { OPNAME_MODULE_LABEL } from "../lib/opname";
 import { BatchGrid, HeaderField, fmtNum, headerInputCls, isBlankIn, localToday, parseNum, runningStock, type Cells, type GridCol } from "./BatchGrid";
 
-const ESTATES = ["NILAM", "KNS", "WJA", "ZAMRUD", "FIRUS"];
+const ESTATES = ["NILAM", "FIRUS", "ZAMRUD", "KNS", "WJA"];
 // Nilam's gudang and Klinik are counted in whole units; BBM, pupuk, oli and the other gudang take decimals (as loanWhole on the server).
 const whole = (m: OpnameModule, a: string, b: string) => m === "KLINIK" || (m === "GUDANG" && (a === "NILAM" || b === "NILAM"));
 

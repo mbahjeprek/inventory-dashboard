@@ -12,7 +12,7 @@ import { isiOf, kemasanName, kemasanText, split } from "../lib/kemasan";
 
 // Gudang Nilam supplies every estate (a Stok Keluar to another estate becomes Stok Masuk in that
 // estate's gudang); the other gudang only supply their own estate and its sub-estates.
-const NILAM_TUJUAN = ["NILAM", "KNS", "WJA", "ZAMRUD", "FIRUS"];
+const NILAM_TUJUAN = ["NILAM", "FIRUS", "ZAMRUD", "KNS", "WJA"];
 
 type Mode = "IN" | "OUT" | "KOREKSI";
 

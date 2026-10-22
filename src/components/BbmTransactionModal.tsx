@@ -11,8 +11,8 @@ const JENIS_OPTIONS = ["SOLAR", "BENSIN"] as const;
 // BBM storage sites (see BBM_LOKASI_OPTIONS in server/src/app.ts). Sub-locations like AKSS/UKM are
 // distribution destinations picked via the Estate field, not separate storage.
 const LOKASI_BY_JENIS: Record<string, string[]> = {
-  SOLAR: ["NILAM", "WJA", "KNS", "ZAMRUD", "FIRUS"],
-  BENSIN: ["NILAM", "WJA", "KNS", "ZAMRUD", "FIRUS"],
+  SOLAR: ["NILAM", "FIRUS", "ZAMRUD", "KNS", "WJA"],
+  BENSIN: ["NILAM", "FIRUS", "ZAMRUD", "KNS", "WJA"],
 };
 
 // Local date (toISOString is UTC, which is still yesterday before 07:00 WIB).

@@ -9,11 +9,11 @@ import { EditActivityLogModal } from "../components/EditActivityLogModal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 
 const ESTATES_BY_MODULE = {
-  BARANG: ["NILAM", "KNS", "WJA", "ZAMRUD", "FIRUS"],
-  BBM: ["NILAM", "WJA", "KNS", "ZAMRUD", "FIRUS"],
-  PUPUK: ["NILAM", "KNS", "WJA", "ZAMRUD", "FIRUS"],
-  KLINIK: ["NILAM", "KNS", "WJA", "ZAMRUD", "FIRUS"],
-  OLI: ["NILAM", "KNS", "WJA", "ZAMRUD", "FIRUS"],
+  BARANG: ["NILAM", "FIRUS", "ZAMRUD", "KNS", "WJA"],
+  BBM: ["NILAM", "FIRUS", "ZAMRUD", "KNS", "WJA"],
+  PUPUK: ["NILAM", "FIRUS", "ZAMRUD", "KNS", "WJA"],
+  KLINIK: ["NILAM", "FIRUS", "ZAMRUD", "KNS", "WJA"],
+  OLI: ["NILAM", "FIRUS", "ZAMRUD", "KNS", "WJA"],
   KOPERASI: ["NILAM"],
   KENDARAAN: ["NILAM", "ZAMRUD", "FIRUS"],
 };

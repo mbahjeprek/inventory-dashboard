@@ -1,5 +1,5 @@
 export type Role = "superuser" | "estate";
-export const ESTATES = ["NILAM", "KNS", "WJA", "ZAMRUD", "FIRUS"] as const;
+export const ESTATES = ["NILAM", "FIRUS", "ZAMRUD", "KNS", "WJA"] as const;
 export type Estate = (typeof ESTATES)[number];
 
 // The estates each non-Nilam site supplies (KNS and WJA each supply two): Stok Keluar tujuan of

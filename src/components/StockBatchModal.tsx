@@ -10,7 +10,7 @@ import { BatchGrid, HeaderField, fmtNum, headerInputCls, isBlankIn, localToday, 
 // Nilam Stok Keluar to another estate becomes that gudang's Stok Masuk, Klinik Stok Masuk goes to the
 // batch of its expiry date and Stok Keluar / Buang takes the batches that expire first. These
 // movements are timestamped when saved.
-const NILAM_TUJUAN = ["NILAM", "KNS", "WJA", "ZAMRUD", "FIRUS"];
+const NILAM_TUJUAN = ["NILAM", "FIRUS", "ZAMRUD", "KNS", "WJA"];
 const PAGE = 500;
 
 // Every barang / obat of the scope with its stock, for the row's picker.

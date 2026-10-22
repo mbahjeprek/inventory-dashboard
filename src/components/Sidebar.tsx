@@ -41,10 +41,10 @@ type NavSection = { title?: string; collapsible?: boolean; items: NavItem[] };
 // per module, so switching estate (same module) or module (same estate) is a single click.
 const ESTATES = [
   { code: "NILAM", label: "Nilam", suffix: "" },
+  { code: "FIRUS", label: "Firus", suffix: "-firus" },
+  { code: "ZAMRUD", label: "Zamrud", suffix: "-zamrud" },
   { code: "KNS", label: "KNS", suffix: "-kns" },
   { code: "WJA", label: "WJA", suffix: "-wja" },
-  { code: "ZAMRUD", label: "Zamrud", suffix: "-zamrud" },
-  { code: "FIRUS", label: "Firus", suffix: "-firus" },
 ];
 
 type ModuleLink = { key: Module; icon: typeof Package; title: string; base: string; subtitle: string; slug: string };

@@ -480,14 +480,14 @@ function describeChanges(before: Record<string, any>, after: Record<string, any>
 
 // Nilam/Zamrud/Firus are consumer/destination estates, NOT separate physical warehouses.
 // There is only one physical stock pool (the main warehouse, located at Nilam).
-const TUJUAN_OPTIONS = ["NILAM", "KNS", "WJA", "ZAMRUD", "FIRUS"];
+const TUJUAN_OPTIONS = ["NILAM", "FIRUS", "ZAMRUD", "KNS", "WJA"];
 
 // BBM (fuel, Solar & Bensin) physical storage/gudang sites. Nilam, WJA and KNS hold the imported
 // history; Zamrud and Firus were added later as their own lokasi so they can record their own stock
 // from the first delivery on (their older Solar sheets stay filed under NILAM, estate=ZAMRUD/FIRUS).
 // Zamrud/Firus/AKSS/UKM (under Nilam), LUBAKAN/TAGUL (under WJA) and MALAPIAK/TAGANG (under KNS)
 // are distribution/consumption destinations, not separate warehouses - see `estate`.
-const BBM_LOKASI_OPTIONS = ["NILAM", "WJA", "KNS", "ZAMRUD", "FIRUS"];
+const BBM_LOKASI_OPTIONS = ["NILAM", "FIRUS", "ZAMRUD", "KNS", "WJA"];
 
 function isoToDisplay(iso: string): string {
   const m = (iso || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
@@ -844,7 +844,7 @@ app.delete("/api/items/:id", (req, res, next) => (req.user!.perms.includes("mast
 // ---- Inventory Gudang for the non-Nilam warehouses (KNS/WJA/ZAMRUD/FIRUS) ----
 // Nilam's stock lives directly on `items`; these gudang instead keep their own buffer/stock
 // quantities in `gudang_stock`, picking the item name/satuan from that same master item list.
-const GUDANG_STOCK_OPTIONS = ["KNS", "WJA", "ZAMRUD", "FIRUS"];
+const GUDANG_STOCK_OPTIONS = ["FIRUS", "ZAMRUD", "KNS", "WJA"];
 // The estates each of these sites supplies (KNS and WJA each supply two): the Stok Keluar tujuan of
 // their gudang and the BBM Estate choices of their lokasi. Only Gudang Nilam supplies other estates.
 // Keep in sync with GUDANG_TUJUAN in src/lib/api.ts.
@@ -3383,7 +3383,7 @@ app.delete("/api/obat/:id", requireSuperuser, async (req, res) => {
 });
 
 // ---- Inventory Klinik per estate ----
-const KLINIK_OPTIONS = ["NILAM", "KNS", "WJA", "ZAMRUD", "FIRUS"];
+const KLINIK_OPTIONS = ["NILAM", "FIRUS", "ZAMRUD", "KNS", "WJA"];
 
 // Days before expiry that count as "segera expired" on the Klinik page.
 const EXPIRY_WARNING_DAYS = 30;
@@ -6285,7 +6285,7 @@ app.post("/api/stock-opname/:id/cancel", async (req, res) => {
 // ---- Inventory Oli (lubricant), see schema.sql's oli_log ----
 // Same shape as Inventory Pupuk: a running saldo per estate + jenis oli. Nilam was imported from its
 // "STOK OLI" sheet; the other estates start empty.
-const OLI_ESTATES = ["NILAM", "KNS", "WJA", "ZAMRUD", "FIRUS"];
+const OLI_ESTATES = ["NILAM", "FIRUS", "ZAMRUD", "KNS", "WJA"];
 // A master oli jenis is used at @estate: listed for it, or for every estate (estates '').
 const OLI_AT_ESTATE = "(estates = '' OR @estate = ANY(string_to_array(estates, ',')))";
 

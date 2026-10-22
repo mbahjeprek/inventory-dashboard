@@ -5,7 +5,7 @@ import type { Cells, GridCol } from "../components/BatchGrid";
 // names where the goods go. Another estate = a Transfer, so that estate's Stock In is booked at once
 // and it doesn't type one itself.
 export const PEMASOK = "NILAM";
-export const ESTATE_TUJUAN = ["NILAM", "KNS", "WJA", "ZAMRUD", "FIRUS"];
+export const ESTATE_TUJUAN = ["NILAM", "FIRUS", "ZAMRUD", "KNS", "WJA"];
 
 // Books a Stock Out with a Tujuan as a Transfer (the sender's Stock Out and the receiver's Stock In).
 export const kirimKe = (p: { module: OpnameModule; dari: string; ke: string; kode: string; qty: number; note: string; tanggal_iso: string; evidence_id: string | null }) =>

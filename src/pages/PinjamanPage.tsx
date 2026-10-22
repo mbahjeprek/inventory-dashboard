@@ -12,7 +12,7 @@ import { tanggalWaktu } from "../lib/datetime";
 import { PinjamanBatchModal } from "../components/PinjamanBatchModal";
 import { parseNum } from "../components/BatchGrid";
 
-const ESTATES = ["NILAM", "KNS", "WJA", "ZAMRUD", "FIRUS"];
+const ESTATES = ["NILAM", "FIRUS", "ZAMRUD", "KNS", "WJA"];
 const inputCls = "w-full text-sm rounded-md border border-[var(--border)] px-3 py-2";
 const labelCls = "text-xs text-[var(--text-secondary)] mb-1 block";
 const selectCls = "text-sm rounded-md border border-[var(--border)] px-3 py-2 bg-white";
