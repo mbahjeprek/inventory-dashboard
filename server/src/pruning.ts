@@ -1,6 +1,6 @@
-// Rekap Pruning PT.AKSS: reads the "AKSS - BLOCK DETAIL" pruning sheet (one row per blok, then per
-// year and month the pokok (PKK) and Ha pruned) into pruning_blok / pruning_bulan. Pure parsing here;
-// app.ts fetches the sheet and stores the result (see syncPruning there).
+// Rekap Pruning PT.AKSS: reads the old "AKSS - BLOCK DETAIL" pruning sheet (one row per blok, then per
+// year and month the pokok (PKK) and Ha pruned). Pure parsing here; importPruning.ts brought it into
+// the app once (pruning_target / pruning_log), where pruning is entered since.
 import { parse } from "csv-parse/sync";
 
 export const PRUNING_SHEET = "https://docs.google.com/spreadsheets/d/1c8DmOgN2L56OJsmvDgOJPr8ImG4oaZZd_FSOGJq75Xs/export?format=csv&gid=993841382";

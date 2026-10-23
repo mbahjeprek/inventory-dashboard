@@ -8,6 +8,7 @@ const HALAMAN: Record<string, string> = {
   "/": "Dashboard",
   "/koperasi": "Koperasi",
   "/kendaraan": "Kendaraan & Alat Berat",
+  "/pruning": "Pruning PT.AKSS",
   "/stok-opname": "Stok Opname",
   "/pinjaman": "Pinjaman & Transfer",
   "/dokumen": "Dokumen & Link",

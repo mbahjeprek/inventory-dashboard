@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Download, Eraser, ExternalLink, Hand, Lock, LockOpen, Maximize2, Minimize2, Minus, Paintbrush, Plus, RefreshCw, Save, Search, Trash2 } from "lucide-react";
+import { Link } from "react-router-dom";
+import { Download, Eraser, Hand, Lock, LockOpen, Maximize2, Minimize2, Minus, Paintbrush, Plus, Save, Scissors, Search, Trash2 } from "lucide-react";
 import { api, errorText, type PetaBlok, type PetaCell, type PetaLegend, type PetaPruning, type PruningBlok } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
-import { can } from "../lib/access";
+import { can, pageAllowed, PRUNING_PATH } from "../lib/access";
 
 const ESTATE_LABEL: Record<string, string> = { NILAM: "Nilam", KNS: "KNS", WJA: "WJA", ZAMRUD: "Zamrud", FIRUS: "Firus" };
 const fmt = (n: number | null | undefined, d = 0) => (n === null || n === undefined ? "-" : n.toLocaleString("id-ID", { minimumFractionDigits: d, maximumFractionDigits: d }));
@@ -18,11 +19,10 @@ const textOn = (hex: string) => {
 };
 const pctOf = (c: PetaCell) => (c.pkk ? ((c.kg ?? 0) / c.pkk) * 100 : null);
 const BULAN = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
-const yyyymm = (n: number | null) => (n ? `${BULAN[(n % 100) - 1]} ${Math.floor(n / 100)}` : "-");
+// "2026-09-01" -> "Sep 2026" (the old sheet's months are dated the 1st, so only the month is shown).
+const bulanTahun = (iso: string | null) => (iso ? `${BULAN[Number(iso.slice(5, 7)) - 1]} ${iso.slice(0, 4)}` : "-");
 const keyOf = (estate: string | null, blok: string) => `${estate}|${blok.toUpperCase()}`;
 const pruningPct = (p: PruningBlok | undefined) => (p?.target ? (p.pkk / p.target) * 100 : null);
-const jamTgl = (iso: string) =>
-  new Date(iso).toLocaleString("id-ID", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Jakarta" });
 
 type Mode = "progress" | "pruning" | "bebas";
 type Preset = "semua" | "tahun" | "6" | "custom";
@@ -69,7 +69,6 @@ export function PetaBlokPage() {
   const [legend, setLegend] = useState<PetaLegend[]>([]);
   const [pruning, setPruning] = useState<PetaPruning | null>(null);
   const [tahun, setTahun] = useState<number | null>(null);
-  const [syncing, setSyncing] = useState(false);
   const [legendDirty, setLegendDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -149,14 +148,11 @@ export function PetaBlokPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data, mode]);
   // Pruning: loaded with the tab (the server re-reads the sheet when its copy is old), or now.
-  const loadPruning = (sync = false) => {
-    setSyncing(sync);
-    return api
-      .petaPruning(tahun, sync)
+  const loadPruning = () =>
+    api
+      .petaPruning(tahun)
       .then(setPruning)
-      .catch((e) => setError(errorText(e, "Gagal memuat data pruning")))
-      .finally(() => setSyncing(false));
-  };
+      .catch((e) => setError(errorText(e, "Gagal memuat data pruning")));
   useEffect(() => {
     if (mode === "pruning") loadPruning();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -392,14 +388,14 @@ export function PetaBlokPage() {
                 </option>
               ))}
             </select>
-            <button
-              onClick={() => loadPruning(true)}
-              disabled={syncing}
-              title="Ambil data terbaru dari sheet Rekap Pruning sekarang"
-              className="inline-flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border border-[var(--border)] hover:bg-[#f1f5f9] disabled:opacity-50"
-            >
-              <RefreshCw size={14} className={syncing ? "animate-spin" : ""} /> {syncing ? "Menyinkronkan..." : "Sinkron sekarang"}
-            </button>
+            {pageAllowed(user, PRUNING_PATH) && (
+              <Link
+                to={PRUNING_PATH}
+                className="inline-flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border border-[var(--border)] hover:bg-[#f1f5f9]"
+              >
+                <Scissors size={14} /> {can(user, "pruning.input") ? "Input pruning" : "Rekap pruning"}
+              </Link>
+            )}
           </>
         )}
         <div className="ml-auto flex items-center gap-1">
@@ -414,18 +410,8 @@ export function PetaBlokPage() {
       </div>
 
       {error && <p className="text-xs text-[var(--accent-red)]">{error}</p>}
-      {mode === "pruning" && pruning && (
-        <p className="text-xs text-[var(--text-secondary)] flex flex-wrap items-center gap-x-2 gap-y-1">
-          <span>
-            Data dari sheet Rekap Pruning
-            {pruning.sync?.synced_at ? ` · diperbarui ${jamTgl(pruning.sync.synced_at)} (${pruning.sync.baris} baris)` : " · belum pernah tersinkron"}
-            {" · mengikuti isian baru di sheet otomatis (dicek tiap 10 menit)"}
-          </span>
-          <a href={pruning.sheet} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[var(--accent-blue)] hover:underline">
-            Buka sheet <ExternalLink size={12} />
-          </a>
-          {pruning.sync?.error && <span className="text-[var(--accent-red)]">Gagal membaca sheet terakhir: {pruning.sync.error}</span>}
-        </p>
+      {mode === "pruning" && (
+        <p className="text-xs text-[var(--text-secondary)]">Data dari menu Kebun › Pruning PT.AKSS: setiap input pruning langsung tampil di peta ini.</p>
       )}
 
       <div className="grid gap-3 xl:grid-cols-[1fr_20rem] items-start">
@@ -438,7 +424,7 @@ export function PetaBlokPage() {
                 {hover.divisi && ` · Div ${hover.divisi}`}
                 {hover.tahun_tanam && ` · TT ${hover.tahun_tanam}`}
                 {mode === "pruning"
-                  ? hpr && ` · pruning ${pruning?.tahun}: ${fmt(hpr.pkk)} / ${fmt(hpr.target)} pokok (${fmt(pruningPct(hpr), 1)}%) · terakhir ${yyyymm(hpr.terakhir)}`
+                  ? hpr && ` · pruning ${pruning?.tahun}: ${fmt(hpr.pkk)} / ${fmt(hpr.target)} pokok (${fmt(pruningPct(hpr), 1)}%) · terakhir ${bulanTahun(hpr.terakhir)}`
                   : hover.pkk !== null && ` · ${fmt(hover.ha, 2)} Ha · ${fmt(hover.pkk)} pokok · pupuk ${fmt(hover.kg ?? 0)} kg (${fmt(hp, 1)}%)`}
                 {mode !== "pruning" && hover.terakhir && ` · terakhir dipupuk ${hover.terakhir.split("-").reverse().join("/")}`}
               </span>
@@ -565,7 +551,6 @@ export function PetaBlokPage() {
                     <>
                       <div className="text-[var(--text-secondary)]">
                         Divisi {hpr.divisi || "-"}
-                        {hpr.kondisi && /[a-z]/i.test(hpr.kondisi) && ` · kondisi ${hpr.kondisi}`}
                       </div>
                       <div className="grid grid-cols-2 gap-x-2 mt-1">
                         <span className="text-[var(--text-muted)]">Luas</span>
@@ -590,7 +575,7 @@ export function PetaBlokPage() {
                             .join(" · ")}
                         </div>
                       )}
-                      <div className="text-[var(--text-muted)] mt-1">{hpr.terakhir ? `Terakhir pruning ${yyyymm(hpr.terakhir)}` : "Belum pernah pruning"}</div>
+                      <div className="text-[var(--text-muted)] mt-1">{hpr.terakhir ? `Terakhir pruning ${bulanTahun(hpr.terakhir)}` : "Belum pernah pruning"}</div>
                     </>
                   )
                 ) : hover.pkk === null ? (

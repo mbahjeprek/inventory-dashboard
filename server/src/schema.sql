@@ -683,37 +683,37 @@ SELECT * FROM (VALUES (0::float8, 'Belum pruning', '#ff0000', 'pruning'), (1, 'S
   (50, '50 - 99%', '#ffff00', 'pruning'), (100, 'Selesai (≥ 100%)', '#6aa84f', 'pruning')) v
 WHERE NOT EXISTS (SELECT 1 FROM peta_legend WHERE jenis = 'pruning');
 
--- Rekap Pruning PT.AKSS, copied from its Google Sheet (server/src/pruning.ts) and refreshed from it
--- automatically: one pruning_blok per sheet row (a blok can have two rows), the pokok (PKK) and Ha
--- pruned per month in pruning_bulan. pruning_sync = when the sheet was last read and how it went.
-CREATE TABLE IF NOT EXISTS pruning_blok (
+-- Pruning PT.AKSS, entered in the app (Kebun > Pruning). The history up to Oct 2026 came once from the
+-- old Rekap Pruning sheet (server/src/importPruning.ts, sumber 'sheet', one row per blok per month on
+-- the 1st). pruning_log = pokok (and Ha) pruned in a blok on a date; pruning_target = the Ha and SPH a
+-- blok's progress is measured against (Ha x SPH pokok, as the sheet's mapping did), editable in the
+-- Rekap; a blok without one falls back to its Master Blok Ha x SPH.
+CREATE TABLE IF NOT EXISTS pruning_target (
   id SERIAL PRIMARY KEY,
   estate TEXT NOT NULL,
-  divisi TEXT NOT NULL DEFAULT '',
   blok TEXT NOT NULL,
-  planting_material TEXT NOT NULL DEFAULT '',
-  tahun_tanam INTEGER,
+  divisi TEXT NOT NULL DEFAULT '',
   ha DOUBLE PRECISION,
   sph DOUBLE PRECISION,
-  kondisi TEXT NOT NULL DEFAULT '',
   urut INTEGER NOT NULL DEFAULT 0
 );
-CREATE INDEX IF NOT EXISTS idx_pruning_blok_estate ON pruning_blok(estate, blok);
-CREATE TABLE IF NOT EXISTS pruning_bulan (
-  blok_id INTEGER NOT NULL REFERENCES pruning_blok(id) ON DELETE CASCADE,
-  tahun INTEGER NOT NULL,
-  bulan INTEGER NOT NULL,
+CREATE UNIQUE INDEX IF NOT EXISTS idx_pruning_target_blok ON pruning_target(estate, upper(blok));
+CREATE TABLE IF NOT EXISTS pruning_log (
+  id SERIAL PRIMARY KEY,
+  estate TEXT NOT NULL,
+  blok TEXT NOT NULL,
+  tanggal_iso TEXT NOT NULL,
   pkk DOUBLE PRECISION NOT NULL DEFAULT 0,
-  ha DOUBLE PRECISION NOT NULL DEFAULT 0
+  ha DOUBLE PRECISION NOT NULL DEFAULT 0,
+  keterangan TEXT NOT NULL DEFAULT '',
+  sumber TEXT NOT NULL DEFAULT 'app',
+  user_id INTEGER,
+  created_by TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ
 );
-CREATE INDEX IF NOT EXISTS idx_pruning_bulan_blok ON pruning_bulan(blok_id, tahun);
-CREATE TABLE IF NOT EXISTS pruning_sync (
-  id INTEGER PRIMARY KEY DEFAULT 1,
-  checked_at TIMESTAMPTZ,
-  synced_at TIMESTAMPTZ,
-  baris INTEGER,
-  error TEXT
-);
+CREATE INDEX IF NOT EXISTS idx_pruning_log_blok ON pruning_log(estate, upper(blok), tanggal_iso);
+CREATE INDEX IF NOT EXISTS idx_pruning_log_tanggal ON pruning_log(tanggal_iso);
 ALTER TABLE master_oli ADD COLUMN IF NOT EXISTS estates TEXT NOT NULL DEFAULT '';
 
 -- ---- Koperasi karyawan (for now Nilam only; `koperasi` = the estate running it) ----

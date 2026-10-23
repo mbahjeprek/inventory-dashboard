@@ -52,6 +52,10 @@ export const ALL_PERMS: string[] = [
   "kendaraan.view",
   "kendaraan.input",
   "kendaraan.edit",
+  // Pruning PT.AKSS: Lihat (riwayat, rekap), Input (pruning baru), Edit (ubah / hapus, target blok).
+  "pruning.view",
+  "pruning.input",
+  "pruning.edit",
 ];
 
 // Session: the token only identifies the account; estates and perms are re-read from the users

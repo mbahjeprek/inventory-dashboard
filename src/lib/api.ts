@@ -312,27 +312,40 @@ export type PetaCell = {
 };
 export type PetaLegend = { id: number; dari: number; label: string; warna: string };
 export type PetaBlok = { estates: string[]; cells: PetaCell[]; legend: PetaLegend[]; pruningLegend: PetaLegend[] };
-// Rekap Pruning per blok for one year (synced from the pruning Google Sheet). target = Ha x SPH,
-// pkk = pokok pruned that year, bulan = the 12 months' pokok, terakhir = yyyymm of the last pruning.
+// Pruning per blok for one year (Kebun > Pruning). target = Ha x SPH (target_sumber: the blok's own
+// pruning target or its Master Blok), pkk / ha_pruning = pruned that year, bulan / ha_bulan = per
+// month, terakhir = date of the last pruning in any year (the old sheet's months are on the 1st).
 export type PruningBlok = {
   estate: string;
   blok: string;
   divisi: string | null;
   ha: number | null;
+  sph: number | null;
   target: number | null;
-  kondisi: string | null;
+  target_sumber: "pruning" | "master";
   pkk: number;
   ha_pruning: number;
   bulan: number[];
-  terakhir: number | null;
+  ha_bulan: number[];
+  terakhir: string | null;
+  entri: number;
 };
-export type PetaPruning = {
-  tahun: number;
-  tahunList: number[];
-  blok: PruningBlok[];
-  sync: { synced_at: string | null; checked_at: string | null; baris: number | null; error: string | null } | null;
-  sheet: string;
+export type PetaPruning = { tahun: number; tahunList: number[]; blok: PruningBlok[] };
+export type PruningLog = {
+  id: number;
+  estate: string;
+  blok: string;
+  tanggal_iso: string;
+  pkk: number;
+  ha: number;
+  keterangan: string;
+  sumber: "app" | "sheet";
+  user_id: number | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string | null;
 };
+export type PruningBlokOption = { estate: string; blok: string; divisi: string | null; ha: number | null; sph: number | null; sumber: "pruning" | "master" };
 
 export type AlatBerat = {
   id: number;
@@ -444,7 +457,7 @@ export type PupukSummary = {
 export type ActivityLog = {
   id: number;
   created_at: string;
-  module: "BARANG" | "BBM" | "PUPUK" | "KLINIK" | "OLI" | "KOPERASI" | "KENDARAAN";
+  module: "BARANG" | "BBM" | "PUPUK" | "KLINIK" | "OLI" | "KOPERASI" | "KENDARAAN" | "PRUNING";
   estate: string | null;
   aksi: string;
   objek: string | null;
@@ -1403,8 +1416,21 @@ export const api = {
     req<{ success: boolean }>("/api/peta-blok/warna", { method: "PUT", body: JSON.stringify({ ids, warna }) }),
   petaBlokLegend: (items: { dari: number; label: string; warna: string }[], jenis: "pupuk" | "pruning" = "pupuk") =>
     req<{ success: boolean }>("/api/peta-blok/legend", { method: "PUT", body: JSON.stringify({ items, jenis }) }),
-  petaPruning: (tahun: number | null, sync = false) =>
-    req<PetaPruning>(`/api/peta-blok/pruning?${new URLSearchParams({ ...(tahun ? { tahun: String(tahun) } : {}), ...(sync ? { sync: "1" } : {}) })}`),
+  petaPruning: (tahun: number | null) => req<PetaPruning>(`/api/peta-blok/pruning?${new URLSearchParams(tahun ? { tahun: String(tahun) } : {})}`),
+  pruningRekap: (tahun: number | null, estate: string) =>
+    req<PetaPruning>(`/api/pruning/rekap?${new URLSearchParams({ ...(tahun ? { tahun: String(tahun) } : {}), estate })}`),
+  pruningBlokOptions: () => req<PruningBlokOption[]>("/api/pruning/blok-options"),
+  pruningList: (params: Record<string, string | number>) =>
+    req<{ rows: PruningLog[]; total: number; pkk: number; ha: number }>(
+      `/api/pruning?${new URLSearchParams(Object.entries(params).map(([k, v]) => [k, String(v)]))}`
+    ),
+  pruningCreate: (payload: { estate: string; tanggal_iso: string; rows: { blok: string; pkk: number; ha: number; keterangan: string }[] }) =>
+    req<{ success: boolean }>("/api/pruning", { method: "POST", body: JSON.stringify(payload) }),
+  pruningUpdate: (id: number, payload: { blok: string; tanggal_iso: string; pkk: number; ha: number; keterangan: string }) =>
+    req<{ success: boolean }>(`/api/pruning/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
+  pruningDelete: (id: number) => req<{ success: boolean }>(`/api/pruning/${id}`, { method: "DELETE" }),
+  pruningTarget: (payload: { estate: string; blok: string; ha: number | null; sph: number | null }) =>
+    req<{ success: boolean }>("/api/pruning/target", { method: "PUT", body: JSON.stringify(payload) }),
 
   bbmSummary: (lokasi?: string, range?: { dateFrom?: string; dateTo?: string; asOf?: string }) => {
     const qs = new URLSearchParams(

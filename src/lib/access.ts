@@ -64,6 +64,14 @@ export const OTHER_PERMS: { group: string; items: { key: string; label: string }
       { key: "kendaraan.edit", label: "Edit Kendaraan (tambah / ubah data unit)" },
     ],
   },
+  {
+    group: "Pruning PT.AKSS",
+    items: [
+      { key: "pruning.view", label: "Lihat Pruning (riwayat & rekap per blok)" },
+      { key: "pruning.input", label: "Input Pruning" },
+      { key: "pruning.edit", label: "Edit Pruning (ubah / hapus input, target Ha & SPH blok)" },
+    ],
+  },
 ];
 
 export const ALL_PERMS: string[] = [
@@ -185,6 +193,9 @@ export const KOPERASI_PATH = "/koperasi";
 // Kendaraan & Alat Berat (PT.AKSS): seen with Lihat Kendaraan.
 export const KENDARAAN_PATH = "/kendaraan";
 
+// Pruning PT.AKSS: seen with Lihat, Input or Edit Pruning.
+export const PRUNING_PATH = "/pruning";
+
 // Dokumen & Link: every account sees the links of its estates; Kelola Dokumen adds / edits them.
 export const DOKUMEN_PATH = "/dokumen";
 export const KOPERASI_ESTATE = "NILAM";
@@ -195,6 +206,7 @@ export const KOPERASI_ESTATE = "NILAM";
 const LANDING_PAGES = [
   KOPERASI_PATH,
   KENDARAAN_PATH,
+  PRUNING_PATH,
   "/log-user",
   "/users",
   "/karyawan",
@@ -226,6 +238,7 @@ export function pageAllowed(user: AuthUser | null, path: string): boolean {
   if (path === DOKUMEN_PATH) return true;
   if (path === KOPERASI_PATH) return can(user, "koperasi.view") && userEstates(user).includes(KOPERASI_ESTATE);
   if (path === KENDARAAN_PATH) return can(user, "kendaraan.view");
+  if (path === PRUNING_PATH) return ["pruning.view", "pruning.input", "pruning.edit"].some((p) => can(user, p));
   // Peta Blok: seen with Lihat Peta Blok, Ubah Peta Blok or Master Blok.
   if (path === "/peta-blok") return ["master.peta", "master.peta_edit", "master.blok"].some((p) => can(user, p));
   return !!PAGE_PERMS[path] && can(user, PAGE_PERMS[path]);

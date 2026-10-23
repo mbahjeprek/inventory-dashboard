@@ -5,7 +5,6 @@ import cookieParser from "cookie-parser";
 import type { PoolClient } from "pg";
 import { queryMany, queryOne, execute, withTransaction, txTime } from "./db.js";
 import { canonProvider, labelKey, splitDiagnosis } from "./klinikLaporan.js";
-import { parsePruning, PRUNING_SHEET } from "./pruning.js";
 import { namaKey, namaMirip, sameTahun } from "./pasien.js";
 import { COOKIE_NAME, hashPassword, verifyPassword, signSession, verifySession, ESTATES, ALL_PERMS, MODULE_PERMS, parseList, type SessionUser } from "./auth.js";
 
@@ -162,7 +161,7 @@ app.use("/api", async (req, res, next) => {
 // path (without the /api prefix), the action from the method. "super" = superusers
 // only; null = any logged-in account (the route still checks the estate itself).
 type Need = string[] | "super" | null;
-const ACTIVITY_PERM: Record<string, string> = { BARANG: "gudang", BBM: "bbm", PUPUK: "pupuk", KLINIK: "klinik", OLI: "oli", KOPERASI: "koperasi", KENDARAAN: "kendaraan" };
+const ACTIVITY_PERM: Record<string, string> = { BARANG: "gudang", BBM: "bbm", PUPUK: "pupuk", KLINIK: "klinik", OLI: "oli", KOPERASI: "koperasi", KENDARAAN: "kendaraan", PRUNING: "pruning" };
 function requiredPerms(req: express.Request): Need {
   // Inside app.use("/api") req.path is relative to the mount, inside a route it is the full path.
   const p = (req.baseUrl + req.path).replace(/^\/api/, "");
@@ -224,6 +223,8 @@ function requiredPerms(req: express.Request): Need {
   // Koperasi: Lihat; Input = pengambilan / pembelian / barang rusak; Edit = hapus transaksi and the master barang / anggota.
   // Stok opname: start / fill in the counts with Input; Selesai / Batal and Koreksi Stok with Edit.
   // Kendaraan & Alat Berat: Lihat; Input = kondisi harian and a unit's rusak / selesai; Edit = add / change units.
+  // Pruning PT.AKSS: Lihat (riwayat, rekap); Input = new entries; Edit = change / delete entries and a blok's target.
+  if (is(/^\/pruning(\/|$)/)) return m === "GET" ? ["pruning.view", "pruning.input", "pruning.edit"] : m === "POST" && is(/^\/pruning$/) ? ["pruning.input"] : ["pruning.edit"];
   if (is(/^\/kendaraan(\/|$)/)) {
     if (m === "GET") return ["kendaraan.view"];
     if (is(/^\/kendaraan\/harian(\/isi)?$/) || is(/^\/kendaraan\/unit\/\d+\/kondisi$/)) return ["kendaraan.input"];
@@ -244,7 +245,7 @@ function requiredPerms(req: express.Request): Need {
 }
 
 // "bbm.edit" -> "Edit BBM", for telling the user which tick in Pengguna is missing.
-const PERM_MODUL: Record<string, string> = { gudang: "Gudang", bbm: "BBM", pupuk: "Pupuk", klinik: "Klinik", oli: "Oli", koperasi: "Koperasi", kendaraan: "Kendaraan" };
+const PERM_MODUL: Record<string, string> = { gudang: "Gudang", bbm: "BBM", pupuk: "Pupuk", klinik: "Klinik", oli: "Oli", koperasi: "Koperasi", kendaraan: "Kendaraan", pruning: "Pruning" };
 const PERM_AKSI: Record<string, string> = { view: "Lihat", input: "Input", edit: "Edit", delete: "Hapus", koreksi: "Koreksi", opname: "Opname", approve: "Approve", pelunasan: "Pelunasan" };
 const permLabel = (p: string) => {
   const [m, a] = p.split(".");
@@ -446,7 +447,7 @@ function requireEstate(estate: string) {
 }
 
 // ---- Activity log (audit trail), see schema.sql's activity_log ----
-type LogModule = "BARANG" | "BBM" | "PUPUK" | "KLINIK" | "OLI" | "KOPERASI" | "KENDARAAN";
+type LogModule = "BARANG" | "BBM" | "PUPUK" | "KLINIK" | "OLI" | "KOPERASI" | "KENDARAAN" | "PRUNING";
 
 // Records who changed what. Called after the change succeeded; a logging failure is reported but
 // never fails the user's action itself.
@@ -2591,95 +2592,240 @@ app.get("/api/peta-blok", async (req, res) => {
   res.json({ estates, cells, legend, pruningLegend });
 });
 
-// ---- Rekap Pruning (see schema.sql pruning_blok / pruning_bulan and pruning.ts) ----
-// The sheet stays the place where pruning is filled in; the app re-reads it when its copy is older
-// than PRUNING_TTL (on the first look at the map after that), or on Sinkron sekarang. One sync at a
-// time (advisory lock); a failed read keeps the last good copy and shows the error.
-const PRUNING_TTL = 10 * 60_000;
-async function syncPruning(force: boolean): Promise<void> {
-  const fresh = (at: Date | null, ms: number) => !!at && Date.now() - new Date(at).getTime() < ms;
-  const st = await queryOne<{ checked_at: Date | null }>("SELECT checked_at FROM pruning_sync WHERE id = 1");
-  if (fresh(st?.checked_at ?? null, force ? 20_000 : PRUNING_TTL)) return;
-  let parsed: ReturnType<typeof parsePruning>;
-  try {
-    const r = await fetch(PRUNING_SHEET, { redirect: "follow", signal: AbortSignal.timeout(20_000) });
-    if (!r.ok) throw new Error(`Sheet tidak bisa dibaca (HTTP ${r.status}); pastikan aksesnya "siapa saja yang memiliki link"`);
-    parsed = parsePruning(await r.text());
-  } catch (e: any) {
-    const msg = e?.name === "TimeoutError" ? "Sheet terlalu lama merespons" : String(e?.message ?? e);
-    await execute(
-      `INSERT INTO pruning_sync (id, checked_at, error) VALUES (1, now(), @msg)
-       ON CONFLICT (id) DO UPDATE SET checked_at = now(), error = @msg`,
-      { msg }
-    );
-    return;
-  }
-  const { rows } = parsed;
-  await withTransaction(async (c) => {
-    await c.query("SELECT pg_advisory_xact_lock(hashtext('pruning_sync'))");
-    // Another request synced while this one was reading the sheet.
-    const again = await queryOne<{ checked_at: Date | null }>("SELECT checked_at FROM pruning_sync WHERE id = 1", {}, c);
-    if (fresh(again?.checked_at ?? null, 20_000)) return;
-    await execute("DELETE FROM pruning_blok", {}, c);
-    const ids = await queryMany<{ id: number; urut: number }>(
-      `INSERT INTO pruning_blok (estate, divisi, blok, planting_material, tahun_tanam, ha, sph, kondisi, urut)
-       SELECT * FROM unnest(@estate::text[], @divisi::text[], @blok::text[], @pm::text[], @tt::int[], @ha::float8[], @sph::float8[], @kondisi::text[], @urut::int[])
-       RETURNING id, urut`,
-      {
-        estate: rows.map((r) => r.estate),
-        divisi: rows.map((r) => r.divisi),
-        blok: rows.map((r) => r.blok),
-        pm: rows.map((r) => r.planting_material),
-        tt: rows.map((r) => (r.tahun_tanam === null ? null : Math.round(r.tahun_tanam))),
-        ha: rows.map((r) => r.ha),
-        sph: rows.map((r) => r.sph),
-        kondisi: rows.map((r) => r.kondisi),
-        urut: rows.map((r) => r.urut),
-      },
-      c
-    );
-    const idOf = new Map(ids.map((x) => [x.urut, x.id]));
-    const b = rows.flatMap((r) => r.bulan.map((m) => ({ ...m, blok_id: idOf.get(r.urut)! })));
-    await execute(
-      `INSERT INTO pruning_bulan (blok_id, tahun, bulan, pkk, ha)
-       SELECT * FROM unnest(@blok_id::int[], @tahun::int[], @bulan::int[], @pkk::float8[], @ha::float8[])`,
-      { blok_id: b.map((x) => x.blok_id), tahun: b.map((x) => x.tahun), bulan: b.map((x) => x.bulan), pkk: b.map((x) => x.pkk), ha: b.map((x) => x.ha) },
-      c
-    );
-    await execute(
-      `INSERT INTO pruning_sync (id, checked_at, synced_at, baris, error) VALUES (1, now(), now(), @n, NULL)
-       ON CONFLICT (id) DO UPDATE SET checked_at = now(), synced_at = now(), baris = @n, error = NULL`,
-      { n: rows.length },
-      c
-    );
-  });
+// ---- Pruning PT.AKSS (see schema.sql pruning_log / pruning_target) ----
+// Entered per date and blok in Kebun > Pruning (the history came once from the old sheet). A blok's
+// progress = pokok pruned in the year / (Ha x SPH) of its pruning_target, else of its Master Blok.
+const PRUNING_ISO = /^\d{4}-\d{2}-\d{2}$/;
+const pruningEstates = (req: express.Request, estate: string) => blokEstates(req).filter((e) => !estate || e === estate);
+const numOrNull = (v: unknown) => (v === null || v === undefined || v === "" ? null : Number(v));
+
+// The blok a pruning entry can be for: those with a target and those in Master Blok, with Ha / SPH.
+async function pruningBlokList(estates: string[]) {
+  return queryMany<{ estate: string; blok: string; divisi: string | null; ha: number | null; sph: number | null; sumber: "pruning" | "master"; urut: number }>(
+    `SELECT estate, blok, NULLIF(divisi, '') divisi, ha, sph, 'pruning' sumber, urut FROM pruning_target WHERE estate = ANY(@estates)
+     UNION ALL
+     SELECT m.estate, min(m.blok), string_agg(DISTINCT NULLIF(m.divisi, ''), ' / '), SUM(m.ha)::float8,
+       (SUM(m.ha * m.sph) / NULLIF(SUM(m.ha), 0))::float8, 'master', 100000 + min(m.urut)
+     FROM master_blok m
+     WHERE m.estate = ANY(@estates)
+       AND NOT EXISTS (SELECT 1 FROM pruning_target t WHERE t.estate = m.estate AND upper(t.blok) = upper(m.blok))
+     GROUP BY m.estate, upper(m.blok)
+     ORDER BY 7, 1`,
+    { estates }
+  );
 }
 
-// Pruning per blok of the account's estates for one year (as the mapping sheet: realisasi pokok vs
-// Ha x SPH), with the months of that year and the last month pruned in any year. ?sync=1 re-reads
-// the sheet now.
+// Per blok for one year: target, pokok / Ha pruned, the 12 months, and the last pruning (any year).
+async function pruningRekap(estates: string[], tahun: number) {
+  const months = Array.from({ length: 12 }, (_, i) => `${tahun}-${String(i + 1).padStart(2, "0")}`);
+  const perBulan = (col: string) => `ARRAY[${months.map((m) => `COALESCE(SUM(${col}) FILTER (WHERE left(tanggal_iso, 7) = '${m}'), 0)`).join(", ")}]::float8[]`;
+  const [blok, logs] = await Promise.all([
+    pruningBlokList(estates),
+    queryMany<{ estate: string; b: string; blok: string; pkk: number; ha_pruning: number; bulan: number[]; ha_bulan: number[]; terakhir: string | null; entri: number }>(
+      `SELECT estate, upper(blok) b, min(blok) blok,
+         COALESCE(SUM(pkk) FILTER (WHERE left(tanggal_iso, 4) = @y), 0)::float8 pkk,
+         COALESCE(SUM(ha) FILTER (WHERE left(tanggal_iso, 4) = @y), 0)::float8 ha_pruning,
+         ${perBulan("pkk")} bulan, ${perBulan("ha")} ha_bulan,
+         max(tanggal_iso) FILTER (WHERE pkk > 0) terakhir,
+         COUNT(*) FILTER (WHERE left(tanggal_iso, 4) = @y)::int entri
+       FROM pruning_log WHERE estate = ANY(@estates) GROUP BY 1, 2`,
+      { estates, y: String(tahun) }
+    ),
+  ]);
+  const byKey = new Map(logs.map((l) => [`${l.estate}|${l.b}`, l]));
+  const empty = Array(12).fill(0);
+  const rows = blok.map((b) => {
+    const l = byKey.get(`${b.estate}|${b.blok.toUpperCase()}`);
+    byKey.delete(`${b.estate}|${b.blok.toUpperCase()}`);
+    return {
+      estate: b.estate,
+      blok: b.blok,
+      divisi: b.divisi,
+      ha: b.ha,
+      sph: b.sph,
+      target: b.ha !== null && b.sph !== null ? b.ha * b.sph : null,
+      target_sumber: b.sumber,
+      pkk: l?.pkk ?? 0,
+      ha_pruning: l?.ha_pruning ?? 0,
+      bulan: l?.bulan ?? empty,
+      ha_bulan: l?.ha_bulan ?? empty,
+      terakhir: l?.terakhir ?? null,
+      entri: l?.entri ?? 0,
+    };
+  });
+  // Entries for a blok that is in neither list (renamed / removed later) still count, without a target.
+  for (const l of byKey.values())
+    rows.push({ estate: l.estate, blok: l.blok, divisi: null, ha: null, sph: null, target: null, target_sumber: "master", pkk: l.pkk, ha_pruning: l.ha_pruning, bulan: l.bulan, ha_bulan: l.ha_bulan, terakhir: l.terakhir, entri: l.entri });
+  const tahunList = (await queryMany<{ t: number }>("SELECT DISTINCT left(tanggal_iso, 4)::int t FROM pruning_log WHERE estate = ANY(@estates) ORDER BY 1", { estates })).map((r) => r.t);
+  const now = Number(jakartaToday().slice(0, 4));
+  if (!tahunList.includes(now)) tahunList.push(now);
+  return { tahun, tahunList, blok: rows };
+}
+const pruningTahun = (q: unknown) => {
+  const t = Number(q);
+  return Number.isInteger(t) && t >= 2000 && t <= 2100 ? t : Number(jakartaToday().slice(0, 4));
+};
+
 app.get("/api/peta-blok/pruning", async (req, res) => {
-  await syncPruning(req.query.sync === "1");
-  const estates = blokEstates(req);
-  const tahunList = (await queryMany<{ t: number }>("SELECT DISTINCT tahun t FROM pruning_bulan ORDER BY 1")).map((r) => r.t);
-  const now = new Date().getFullYear();
-  const tahun = Number(req.query.tahun) || now;
-  const blok = await queryMany(
-    `SELECT b.estate, upper(b.blok) blok, string_agg(DISTINCT NULLIF(b.divisi, ''), ' / ') divisi,
-       SUM(b.ha)::float8 ha, SUM(b.ha * b.sph)::float8 target, string_agg(DISTINCT NULLIF(b.kondisi, ''), ' / ') kondisi,
-       COALESCE(SUM(y.pkk), 0)::float8 pkk, COALESCE(SUM(y.ha), 0)::float8 ha_pruning,
-       (SELECT array_agg(COALESCE(x.s, 0) ORDER BY g.m) FROM generate_series(1, 12) g(m)
-          LEFT JOIN (SELECT pb.bulan, SUM(pb.pkk)::float8 s FROM pruning_bulan pb
-                     WHERE pb.blok_id = ANY(array_agg(b.id)) AND pb.tahun = @tahun GROUP BY 1) x ON x.bulan = g.m) bulan,
-       (SELECT max(pb.tahun * 100 + pb.bulan) FROM pruning_bulan pb WHERE pb.blok_id = ANY(array_agg(b.id)) AND pb.pkk > 0) terakhir
-     FROM pruning_blok b
-     LEFT JOIN (SELECT blok_id, SUM(pkk) pkk, SUM(ha) ha FROM pruning_bulan WHERE tahun = @tahun GROUP BY 1) y ON y.blok_id = b.id
-     WHERE b.estate = ANY(@estates)
-     GROUP BY 1, 2`,
-    { estates, tahun }
+  res.json(await pruningRekap(blokEstates(req), pruningTahun(req.query.tahun)));
+});
+app.get("/api/pruning/rekap", async (req, res) => {
+  res.json(await pruningRekap(pruningEstates(req, String(req.query.estate ?? "")), pruningTahun(req.query.tahun)));
+});
+app.get("/api/pruning/blok-options", async (req, res) => {
+  res.json(await pruningBlokList(blokEstates(req)));
+});
+
+// Riwayat: the entries, newest first, filtered by estate / month (yyyy-mm) or year / blok / text.
+app.get("/api/pruning", async (req, res) => {
+  const q = req.query as Record<string, string>;
+  const estates = pruningEstates(req, q.estate ?? "");
+  const where = ["estate = ANY(@estates)"];
+  const params: Record<string, any> = { estates, limit: Math.min(Number(q.limit) || 50, 500), offset: Math.max(Number(q.offset) || 0, 0) };
+  if (/^\d{4}(-\d{2})?$/.test(q.periode ?? "")) {
+    where.push("tanggal_iso LIKE @periode");
+    params.periode = `${q.periode}%`;
+  }
+  if (q.blok) {
+    where.push("upper(blok) = upper(@blok)");
+    params.blok = q.blok;
+  }
+  if (q.sumber === "app" || q.sumber === "sheet") {
+    where.push("sumber = @sumber");
+    params.sumber = q.sumber;
+  }
+  wordSearch(q.search ?? "", ["blok", "keterangan", "created_by"], where, params);
+  const w = `WHERE ${where.join(" AND ")}`;
+  const sum = await queryOne(`SELECT COUNT(*)::int total, COALESCE(SUM(pkk), 0)::float8 pkk, COALESCE(SUM(ha), 0)::float8 ha FROM pruning_log ${w}`, params);
+  const rows = await queryMany(
+    `SELECT id, estate, blok, tanggal_iso, pkk, ha, keterangan, sumber, user_id, created_by, created_at, updated_at
+     FROM pruning_log ${w} ORDER BY tanggal_iso DESC, id DESC LIMIT @limit OFFSET @offset`,
+    params
   );
-  const sync = await queryOne("SELECT synced_at, checked_at, baris, error FROM pruning_sync WHERE id = 1");
-  res.json({ tahun, tahunList, blok, sync, sheet: PRUNING_SHEET.replace(/\/export\?format=csv&gid=(\d+)$/, "/edit#gid=$1") });
+  res.json({ rows, ...sum });
+});
+
+// Checks one entry's fields; the error text, or null when fine.
+async function pruningInvalid(estate: string, blok: string, tanggal: string, pkk: number, ha: number): Promise<string | null> {
+  if (!PRUNING_ISO.test(tanggal)) return "Tanggal tidak valid";
+  if (tanggal > jakartaToday()) return "Tanggal tidak boleh lewat dari hari ini";
+  if (!Number.isFinite(pkk) || pkk <= 0) return `Blok ${blok}: jumlah pokok harus lebih dari 0`;
+  if (!Number.isFinite(ha) || ha < 0) return `Blok ${blok}: Ha tidak valid`;
+  const known = await queryOne(
+    `SELECT 1 FROM pruning_target WHERE estate = @estate AND upper(blok) = upper(@blok)
+     UNION ALL SELECT 1 FROM master_blok WHERE estate = @estate AND upper(blok) = upper(@blok) LIMIT 1`,
+    { estate, blok }
+  );
+  return known ? null : `Blok ${blok} tidak ada di Master Blok ${estate}`;
+}
+
+// Input: one date, one estate, one or more blok.
+app.post("/api/pruning", async (req, res) => {
+  const estate = String(req.body?.estate ?? "");
+  const tanggal = String(req.body?.tanggal_iso ?? "");
+  if (!estateAllowed(req.user!, estate) || !blokEstates(req).includes(estate)) return res.status(403).json({ error: "Akses estate ditolak" });
+  const rows = (Array.isArray(req.body?.rows) ? req.body.rows : []).slice(0, 200).map((r: any) => ({
+    blok: String(r?.blok ?? "").trim(),
+    pkk: Number(r?.pkk),
+    ha: Number(r?.ha ?? 0) || 0,
+    keterangan: String(r?.keterangan ?? "").trim().slice(0, 300),
+  }));
+  if (!rows.length) return res.status(400).json({ error: "Isi minimal satu blok" });
+  for (const r of rows) {
+    const bad = await pruningInvalid(estate, r.blok, tanggal, r.pkk, r.ha);
+    if (bad) return res.status(400).json({ error: bad });
+  }
+  // The blok as written in its master (case), so the rekap groups it with the rest.
+  const list = await pruningBlokList([estate]);
+  const canon = new Map(list.map((b) => [b.blok.toUpperCase(), b.blok]));
+  const u = req.user!;
+  await withTransaction(async (c) => {
+    for (const r of rows)
+      await execute(
+        `INSERT INTO pruning_log (estate, blok, tanggal_iso, pkk, ha, keterangan, sumber, user_id, created_by)
+         VALUES (@estate, @blok, @tanggal, @pkk, @ha, @keterangan, 'app', @uid, @nama)`,
+        { estate, blok: canon.get(r.blok.toUpperCase()) ?? r.blok, tanggal, pkk: r.pkk, ha: r.ha, keterangan: r.keterangan, uid: u.id, nama: u.nama },
+        c
+      );
+  });
+  await logActivity(req, {
+    module: "PRUNING",
+    estate,
+    aksi: "Input Pruning",
+    objek: `${rows.length} blok · ${tanggal.split("-").reverse().join("/")}`,
+    detail: rows.map((r: any) => `${r.blok}: ${r.pkk} pokok${r.ha ? ` / ${r.ha} Ha` : ""}${r.keterangan ? ` (${r.keterangan})` : ""}`).join("; "),
+  });
+  res.json({ success: true });
+});
+
+// Target of a blok (Ha, SPH): set in the Rekap; a blok that only had its Master Blok one gets its own.
+app.put("/api/pruning/target", async (req, res) => {
+  const estate = String(req.body?.estate ?? "");
+  const blok = String(req.body?.blok ?? "").trim();
+  const ha = numOrNull(req.body?.ha);
+  const sph = numOrNull(req.body?.sph);
+  if (!estateAllowed(req.user!, estate) || !blokEstates(req).includes(estate)) return res.status(403).json({ error: "Akses estate ditolak" });
+  if (!blok) return res.status(400).json({ error: "Blok kosong" });
+  if ((ha !== null && !(ha >= 0)) || (sph !== null && !(sph >= 0))) return res.status(400).json({ error: "Ha / SPH harus angka ≥ 0" });
+  const old = (await pruningBlokList([estate])).find((b) => b.blok.toUpperCase() === blok.toUpperCase());
+  if (!old) return res.status(400).json({ error: `Blok ${blok} tidak ada di Master Blok ${estate}` });
+  await execute(
+    `INSERT INTO pruning_target (estate, blok, divisi, ha, sph, urut)
+     VALUES (@estate, @blok, @divisi, @ha, @sph, (SELECT COALESCE(MAX(urut), 0) + 1 FROM pruning_target))
+     ON CONFLICT (estate, upper(blok)) DO UPDATE SET ha = EXCLUDED.ha, sph = EXCLUDED.sph`,
+    { estate, blok: old.blok, divisi: old.divisi ?? "", ha, sph }
+  );
+  await logActivity(req, {
+    module: "PRUNING",
+    estate,
+    aksi: "Ubah Target Pruning",
+    objek: old.blok,
+    detail: `Ha: ${old.ha ?? "-"} → ${ha ?? "-"}; SPH: ${old.sph === null ? "-" : Math.round(old.sph * 100) / 100} → ${sph ?? "-"}`,
+  });
+  res.json({ success: true });
+});
+
+app.put("/api/pruning/:id", async (req, res) => {
+  const ex = await queryOne<any>("SELECT * FROM pruning_log WHERE id = @id", { id: Number(req.params.id) || 0 });
+  if (!ex) return res.status(404).json({ error: "Data tidak ditemukan" });
+  if (!estateAllowed(req.user!, ex.estate)) return res.status(403).json({ error: "Akses estate ditolak" });
+  const v = {
+    blok: String(req.body?.blok ?? ex.blok).trim(),
+    tanggal: String(req.body?.tanggal_iso ?? ex.tanggal_iso),
+    pkk: Number(req.body?.pkk ?? ex.pkk),
+    ha: Number(req.body?.ha ?? ex.ha) || 0,
+    keterangan: String(req.body?.keterangan ?? ex.keterangan).trim().slice(0, 300),
+  };
+  const bad = await pruningInvalid(ex.estate, v.blok, v.tanggal, v.pkk, v.ha);
+  if (bad) return res.status(400).json({ error: bad });
+  await execute(
+    "UPDATE pruning_log SET blok = @blok, tanggal_iso = @tanggal, pkk = @pkk, ha = @ha, keterangan = @keterangan, updated_at = now() WHERE id = @id",
+    { ...v, id: ex.id }
+  );
+  const diff = [
+    ex.blok !== v.blok && `Blok: ${ex.blok} → ${v.blok}`,
+    ex.tanggal_iso !== v.tanggal && `Tanggal: ${ex.tanggal_iso} → ${v.tanggal}`,
+    ex.pkk !== v.pkk && `Pokok: ${ex.pkk} → ${v.pkk}`,
+    ex.ha !== v.ha && `Ha: ${ex.ha} → ${v.ha}`,
+    ex.keterangan !== v.keterangan && `Keterangan: ${ex.keterangan || "-"} → ${v.keterangan || "-"}`,
+  ].filter(Boolean);
+  if (diff.length) await logActivity(req, { module: "PRUNING", estate: ex.estate, aksi: "Edit Pruning", objek: `${v.blok} · ${v.tanggal.split("-").reverse().join("/")}`, detail: diff.join("; ") });
+  res.json({ success: true });
+});
+
+app.delete("/api/pruning/:id", async (req, res) => {
+  const ex = await queryOne<any>("SELECT * FROM pruning_log WHERE id = @id", { id: Number(req.params.id) || 0 });
+  if (!ex) return res.status(404).json({ error: "Data tidak ditemukan" });
+  if (!estateAllowed(req.user!, ex.estate)) return res.status(403).json({ error: "Akses estate ditolak" });
+  await execute("DELETE FROM pruning_log WHERE id = @id", { id: ex.id });
+  await logActivity(req, {
+    module: "PRUNING",
+    estate: ex.estate,
+    aksi: "Hapus Pruning",
+    objek: `${ex.blok} · ${ex.tanggal_iso.split("-").reverse().join("/")}`,
+    detail: `${ex.pkk} pokok${ex.ha ? ` / ${ex.ha} Ha` : ""}${ex.keterangan ? ` (${ex.keterangan})` : ""}`,
+  });
+  res.json({ success: true });
 });
 
 // Warna Bebas: paint (or clear, warna null) a set of boxes.
