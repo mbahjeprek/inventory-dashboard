@@ -2,15 +2,14 @@ import { Navigate, useLocation } from "react-router-dom";
 import type { ReactNode } from "react";
 import { useAuth } from "../context/AuthContext";
 import type { AuthUser } from "../lib/api";
-import { canModule, koperasiOnly, KOPERASI_PATH, moduleOfPath, pageAllowed, userEstates } from "../lib/access";
+import { canModule, hasDashboard, landingPath, moduleOfPath, pageAllowed, userEstates } from "../lib/access";
 
-// Everyone lands on the dashboard ("/"), which shows only what the account may open. An account
-// with no estate and no page permission has nowhere to go, so it's sent back to /login (which
+// An account with an inventory module lands on the dashboard ("/"); one without lands on the first
+// page it can open (landingPath, e.g. Koperasi). An account with no estate and no page permission has nowhere to go, so it's sent back to /login (which
 // offers "Keluar").
 export function homeRouteFor(user: AuthUser | null): string {
   if (!user) return "/login";
-  if (koperasiOnly(user)) return KOPERASI_PATH;
-  if (user.role === "superuser" || userEstates(user).length || (user.perms ?? []).length) return "/";
+  if (user.role === "superuser" || userEstates(user).length || (user.perms ?? []).length) return landingPath(user);
   return "/login";
 }
 
@@ -25,11 +24,11 @@ export function RequireEstate({ estate, children }: { estate: string; children: 
   return <Navigate to={homeRouteFor(user)} replace />;
 }
 
-// The main Dashboard ("/"): a Koperasi-only account goes to the Koperasi page instead.
+// The main Dashboard ("/"): an account without any inventory module goes to its landing page instead.
 export function HomeGate({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   if (!user) return null;
-  if (koperasiOnly(user)) return <Navigate to={KOPERASI_PATH} replace />;
+  if (!hasDashboard(user)) return <Navigate to={landingPath(user)} replace />;
   return <>{children}</>;
 }
 

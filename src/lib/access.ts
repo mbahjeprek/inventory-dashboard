@@ -189,12 +189,31 @@ export const KENDARAAN_PATH = "/kendaraan";
 export const DOKUMEN_PATH = "/dokumen";
 export const KOPERASI_ESTATE = "NILAM";
 
-// An account that only has Koperasi ticks (e.g. the koperasi admin, HR): it lands on the Koperasi
-// page instead of the main Dashboard, which has nothing for it.
-export function koperasiOnly(user: AuthUser | null): boolean {
-  if (!user || user.role === "superuser") return false;
-  const perms = user.perms ?? [];
-  return perms.length > 0 && perms.every((p) => p.startsWith("koperasi.")) && pageAllowed(user, KOPERASI_PATH);
+// The main Dashboard only shows inventory modules. An account without any module (e.g. the koperasi
+// admin, HR, a Kendaraan-only account) has nothing there, so it lands on the first page it can open
+// instead - Koperasi first, Dokumen & Link (open to everyone) last.
+const LANDING_PAGES = [
+  KOPERASI_PATH,
+  KENDARAAN_PATH,
+  "/log-user",
+  "/users",
+  "/karyawan",
+  "/master-barang",
+  "/master-obat",
+  "/master-oli",
+  "/master-pupuk",
+  "/alat-berat",
+  "/master-blok",
+  "/peta-blok",
+  DOKUMEN_PATH,
+];
+export function hasDashboard(user: AuthUser | null): boolean {
+  if (!user) return false;
+  return user.role === "superuser" || MODULES.some((m) => canModule(user, m));
+}
+export function landingPath(user: AuthUser | null): string {
+  if (hasDashboard(user)) return "/";
+  return LANDING_PAGES.find((p) => pageAllowed(user, p)) ?? DOKUMEN_PATH;
 }
 
 // Whether a non-inventory page (sidebar / router) may be opened.
