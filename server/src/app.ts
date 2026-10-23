@@ -2203,10 +2203,19 @@ app.put("/api/users/:id", requireSuperuser, async (req, res) => {
       await execute("UPDATE opname SET approved_by_nama = @baru WHERE approved_by = @uid AND approved_by_nama = @lama", { baru: namaBaru, lama, uid }, c);
       await execute("UPDATE klinik_permintaan SET created_by = @baru WHERE user_id = @uid AND created_by = @lama", { baru: namaBaru, lama, uid }, c);
       await execute("UPDATE pruning_log SET created_by = @baru WHERE user_id = @uid AND created_by = @lama", { baru: namaBaru, lama, uid }, c);
+      // The Log Aktivitas and the counters of stok opname show the account by its current name too.
+      await execute("UPDATE activity_log SET nama = @baru WHERE user_id = @uid AND nama <> @baru", { baru: namaBaru, uid }, c);
+      await execute("UPDATE opname_line SET dihitung_oleh_nama = @baru WHERE dihitung_oleh = @uid AND dihitung_oleh_nama = @lama", { baru: namaBaru, lama, uid }, c);
+      await execute("UPDATE opname SET dibuka_oleh_nama = @baru WHERE dibuka_oleh_nama = @lama", { baru: namaBaru, lama }, c);
+      await execute("UPDATE gudang_stock_tx SET penerima = @baru WHERE penerima = @lama AND user_id = @uid", { baru: namaBaru, lama, uid }, c);
+      await execute("UPDATE klinik_laporan_sumber SET synced_by = @baru WHERE synced_by = @lama", { baru: namaBaru, lama }, c);
     });
-    for (const estate of ests.filter((e) => KLINIK_OPTIONS.includes(e)).slice(0, 5))
-      if (String(existing.perms ?? "").includes("klinik.") || existing.role === "superuser")
-        await logActivity(req, { module: "KLINIK", estate, aksi: "Ubah Nama Akun", objek: existing.username, detail: `${lama} → ${namaBaru} (ikut diperbarui di kunjungan, penerima obat, stok opname dan permintaan obat)` });
+    // Logged (after the rename, so under the new name) in the Log of the modules / estates the account works in.
+    const LOG_OF: Record<string, LogModule> = { gudang: "BARANG", bbm: "BBM", pupuk: "PUPUK", klinik: "KLINIK", oli: "OLI", koperasi: "KOPERASI" };
+    const mods = [...new Set(String(existing.perms ?? "").split(",").map((x) => LOG_OF[x.split(".")[0]]).filter(Boolean))].slice(0, 6);
+    for (const module of mods)
+      for (const estate of ests.slice(0, 5))
+        await logActivity(req, { module, estate, aksi: "Ubah Nama Akun", objek: existing.username, detail: `${lama} → ${namaBaru} (nama lama di log, transaksi, stok opname dan surat ikut diperbarui)` });
   }
   const sebelum = existing.edit_lampau_until ? jakartaDay(existing.edit_lampau_until) : "";
   // Logged in the Log of every module / estate the account works in, where its edits will show up.
