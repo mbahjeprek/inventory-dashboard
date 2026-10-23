@@ -344,7 +344,29 @@ export type PruningLog = {
   created_by: string;
   created_at: string;
   updated_at: string | null;
+  baris_id: number | null;
+  tahun_tanam: number | null;
+  divisi: string | null;
+  dua_baris: boolean;
 };
+// The Rekap Pruning rows, the sheet's BLOCK DETAIL row for row; bulan = "yyyy-mm" -> [pokok, Ha] pruned.
+export type PruningRekapBaris = {
+  id: number;
+  estate: string;
+  divisi: string;
+  blok: string;
+  planting_material: string;
+  tahun_tanam: number | null;
+  ha: number | null;
+  sph: number | null;
+  pkk: number | null;
+  kondisi: string;
+  field_number: string;
+  urut: number;
+  bulan: Record<string, [number, number]>;
+  terakhir: string | null;
+};
+export type PruningRekapData = { tahunAwal: number; tahunAkhir: number; sekarang: number; baris: PruningRekapBaris[] };
 // Lengkapi Data: a month's transactions still missing a field the form asks for / a foto bukti.
 export type LengkapiKind = "bbm" | "pupuk" | "oli" | "gudang" | "klinik" | "nilam_masuk" | "nilam_keluar";
 export type LengkapiRow = {
@@ -371,7 +393,16 @@ export type PruningImportRow = {
   status: "ok" | "duplikat" | "error";
   error?: string;
 };
-export type PruningBlokOption = { estate: string; blok: string; divisi: string | null; ha: number | null; sph: number | null; sumber: "pruning" | "master" };
+// baris = the blok's Rekap rows (two when planted in two years / divisi); empty for a Master Blok one not in the Rekap yet.
+export type PruningBlokOption = {
+  estate: string;
+  blok: string;
+  divisi: string | null;
+  ha: number | null;
+  sph: number | null;
+  sumber: "pruning" | "master";
+  baris: { id: number; divisi: string; tahun_tanam: number | null; ha: number | null; sph: number | null }[];
+};
 
 export type AlatBerat = {
   id: number;
@@ -1443,28 +1474,31 @@ export const api = {
   petaBlokLegend: (items: { dari: number; label: string; warna: string }[], jenis: "pupuk" | "pruning" = "pupuk") =>
     req<{ success: boolean }>("/api/peta-blok/legend", { method: "PUT", body: JSON.stringify({ items, jenis }) }),
   petaPruning: (tahun: number | null) => req<PetaPruning>(`/api/peta-blok/pruning?${new URLSearchParams(tahun ? { tahun: String(tahun) } : {})}`),
-  pruningRekap: (tahun: number | null, estate: string) =>
-    req<PetaPruning>(`/api/pruning/rekap?${new URLSearchParams({ ...(tahun ? { tahun: String(tahun) } : {}), estate })}`),
+  pruningRekap: (estate: string) => req<PruningRekapData>(`/api/pruning/rekap?${new URLSearchParams({ estate })}`),
+  pruningPerBlok: (tahun: number | null, estate: string) =>
+    req<PetaPruning>(`/api/pruning/per-blok?${new URLSearchParams({ ...(tahun ? { tahun: String(tahun) } : {}), estate })}`),
   pruningBlokOptions: () => req<PruningBlokOption[]>("/api/pruning/blok-options"),
   pruningList: (params: Record<string, string | number>) =>
     req<{ rows: PruningLog[]; total: number; pkk: number; ha: number }>(
       `/api/pruning?${new URLSearchParams(Object.entries(params).map(([k, v]) => [k, String(v)]))}`
     ),
-  pruningCreate: (payload: { estate: string; tanggal_iso: string; rows: { blok: string; pkk: number; ha: number; keterangan: string }[] }) =>
+  pruningCreate: (payload: { estate: string; tanggal_iso: string; rows: { blok: string; baris_id?: number; pkk: number; ha: number; keterangan: string }[] }) =>
     req<{ success: boolean }>("/api/pruning", { method: "POST", body: JSON.stringify(payload) }),
   lengkapiList: (kind: LengkapiKind, estate: string, bulan: string) => req<LengkapiList>(`/api/lengkapi/${kind}?${new URLSearchParams({ estate, bulan })}`),
   lengkapiSave: (kind: LengkapiKind, estate: string, bulan: string, rows: { id: number; values: Record<string, string>; evidence_id?: string }[]) =>
     req<{ success: boolean; saved: number; foto: number }>(`/api/lengkapi/${kind}`, { method: "PUT", body: JSON.stringify({ estate, bulan, rows }) }),
-  pruningImport: (rows: { row: number; tanggal_iso: string; estate: string; blok: string; pkk: number | null; ha: number | null; keterangan: string }[], dryRun: boolean) =>
+  pruningImport: (rows: { row: number; tanggal_iso: string; estate: string; blok: string; tahun_tanam?: number | null; pkk: number | null; ha: number | null; keterangan: string }[], dryRun: boolean) =>
     req<{ rows: PruningImportRow[]; ok: number; duplikat: number; error: number; saved: number }>("/api/pruning/import", {
       method: "POST",
       body: JSON.stringify({ rows, dryRun }),
     }),
-  pruningUpdate: (id: number, payload: { blok: string; tanggal_iso: string; pkk: number; ha: number; keterangan: string }) =>
+  pruningUpdate: (id: number, payload: { blok: string; baris_id?: number | null; tanggal_iso: string; pkk: number; ha: number; keterangan: string }) =>
     req<{ success: boolean }>(`/api/pruning/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
   pruningDelete: (id: number) => req<{ success: boolean }>(`/api/pruning/${id}`, { method: "DELETE" }),
-  pruningTarget: (payload: { estate: string; blok: string; ha: number | null; sph: number | null }) =>
-    req<{ success: boolean }>("/api/pruning/target", { method: "PUT", body: JSON.stringify(payload) }),
+  pruningBarisUpdate: (
+    id: number,
+    payload: { divisi: string; planting_material: string; tahun_tanam: number | null; ha: number | null; sph: number | null; kondisi: string; field_number: string }
+  ) => req<{ success: boolean }>(`/api/pruning/baris/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
 
   bbmSummary: (lokasi?: string, range?: { dateFrom?: string; dateTo?: string; asOf?: string }) => {
     const qs = new URLSearchParams(

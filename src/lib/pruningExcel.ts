@@ -5,7 +5,7 @@ import type { PruningBlokOption } from "./api";
 // /api/pruning/import, which checks and saves them.
 
 const ESTATE_LABEL: Record<string, string> = { NILAM: "Nilam", KNS: "KNS", WJA: "WJA", ZAMRUD: "Zamrud", FIRUS: "Firus" };
-const HEAD = ["Tanggal", "Estate", "Blok", "Pokok", "Ha", "Keterangan"];
+const HEAD = ["Tanggal", "Estate", "Blok", "Tahun Tanam", "Pokok", "Ha", "Keterangan"];
 const border = { style: "thin" as const, color: { argb: "FFD5DDE6" } };
 
 export async function downloadPruningTemplate(blokList: PruningBlokOption[]) {
@@ -14,7 +14,7 @@ export async function downloadPruningTemplate(blokList: PruningBlokOption[]) {
   const ws = wb.addWorksheet("Pruning");
   ws.addRow(["Input Pruning PT.AKSS"]).font = { bold: true, size: 13 };
   ws.addRow([
-    "Satu baris = satu blok pada satu tanggal. Tanggal dd/mm/yyyy, Estate Nilam / Zamrud / Firus, Pokok wajib, Ha boleh kosong (dihitung pokok ÷ SPH). Hapus baris contoh sebelum upload.",
+    "Satu baris = satu blok pada satu tanggal. Tanggal dd/mm/yyyy, Estate Nilam / Zamrud / Firus, Pokok wajib, Ha boleh kosong (dihitung pokok ÷ SPH). Tahun Tanam hanya untuk blok yang ada dua baris di rekap (lihat sheet Daftar Blok), selain itu kosongkan. Hapus baris contoh sebelum upload.",
   ]).font = { size: 9, color: { argb: "FF5B6B7C" } };
   ws.addRow([]);
   const hr = ws.addRow(HEAD);
@@ -24,23 +24,35 @@ export async function downloadPruningTemplate(blokList: PruningBlokOption[]) {
     c.border = { top: { style: "thin" }, bottom: { style: "thin" }, left: { style: "thin" }, right: { style: "thin" } };
   });
   const contoh = blokList[0];
-  const r = ws.addRow([new Date(), contoh ? ESTATE_LABEL[contoh.estate] ?? contoh.estate : "Nilam", contoh?.blok ?? "I-5", 150, null, "contoh - hapus baris ini"]);
+  const r = ws.addRow([new Date(), contoh ? ESTATE_LABEL[contoh.estate] ?? contoh.estate : "Nilam", contoh?.blok ?? "I-5", null, 150, null, "contoh - hapus baris ini"]);
   r.getCell(1).numFmt = "dd/mm/yyyy";
   r.font = { italic: true, color: { argb: "FF94A3B8" } };
   ws.getColumn(1).numFmt = "dd/mm/yyyy";
-  [14, 12, 12, 10, 10, 40].forEach((w, i) => (ws.getColumn(i + 1).width = w));
+  [14, 12, 12, 12, 10, 10, 40].forEach((w, i) => (ws.getColumn(i + 1).width = w));
   ws.views = [{ state: "frozen", ySplit: 4 }];
 
   const ref = wb.addWorksheet("Daftar Blok");
-  const rh = ref.addRow(["Estate", "Divisi", "Blok", "Ha", "SPH", "Target pokok"]);
+  const rh = ref.addRow(["Estate", "Divisi", "Blok", "Tahun Tanam", "Ha", "SPH", "PKK", "Isi Tahun Tanam?"]);
   rh.font = { bold: true };
   for (const b of blokList) {
-    const x = ref.addRow([ESTATE_LABEL[b.estate] ?? b.estate, b.divisi ?? "", b.blok, b.ha, b.sph === null ? null : Math.round(b.sph * 100) / 100, b.ha && b.sph ? Math.round(b.ha * b.sph) : null]);
-    x.eachCell({ includeEmpty: true }, (c) => (c.border = { top: border, bottom: border, left: border, right: border }));
+    const rows = b.baris.length ? b.baris : [{ id: 0, divisi: b.divisi ?? "", tahun_tanam: null, ha: b.ha, sph: b.sph }];
+    for (const x of rows) {
+      const row = ref.addRow([
+        ESTATE_LABEL[b.estate] ?? b.estate,
+        x.divisi ?? "",
+        b.blok,
+        x.tahun_tanam,
+        x.ha,
+        x.sph === null ? null : Math.round(x.sph * 100) / 100,
+        x.ha && x.sph ? Math.round(x.ha * x.sph) : null,
+        b.baris.length > 1 ? "YA - blok ada 2 baris" : "",
+      ]);
+      row.eachCell({ includeEmpty: true }, (c) => (c.border = { top: border, bottom: border, left: border, right: border }));
+    }
   }
-  [10, 14, 10, 10, 10, 14].forEach((w, i) => (ref.getColumn(i + 1).width = w));
+  [10, 14, 10, 12, 10, 10, 12, 22].forEach((w, i) => (ref.getColumn(i + 1).width = w));
   ref.views = [{ state: "frozen", ySplit: 1 }];
-  ref.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: 6 } };
+  ref.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: 8 } };
 
   const buf = await wb.xlsx.writeBuffer();
   const url = URL.createObjectURL(new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
@@ -53,7 +65,7 @@ export async function downloadPruningTemplate(blokList: PruningBlokOption[]) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-export type PruningUploadRow = { row: number; tanggal_iso: string; estate: string; blok: string; pkk: number | null; ha: number | null; keterangan: string };
+export type PruningUploadRow = { row: number; tanggal_iso: string; estate: string; blok: string; tahun_tanam: number | null; pkk: number | null; ha: number | null; keterangan: string };
 
 const cellText = (v: unknown): string => {
   if (v === null || v === undefined) return "";
@@ -106,6 +118,7 @@ export async function readPruningUpload(file: File, estateDefault: string): Prom
       if (t.startsWith("tanggal") || t === "tgl") found.tanggal = i;
       else if (t === "estate" || t === "kebun") found.estate = i;
       else if (t === "blok" || t === "block") found.blok = i;
+      else if (t.startsWith("tahun tanam") || t === "tt") found.tt = i;
       else if (t.startsWith("pokok") || t === "pkk") found.pkk = i;
       else if (t === "ha" || t.startsWith("ha ") || t === "luas") found.ha = i;
       else if (t.startsWith("keterangan") || t === "ket") found.ket = i;
@@ -131,6 +144,7 @@ export async function readPruningUpload(file: File, estateDefault: string): Prom
       tanggal_iso: cellDate(row.getCell(col.tanggal).value),
       estate: col.estate ? cellText(row.getCell(col.estate).value) || estateDefault : estateDefault,
       blok,
+      tahun_tanam: col.tt ? cellNumber(row.getCell(col.tt).value) || null : null,
       pkk: pkk !== null && Number.isNaN(pkk) ? -1 : pkk,
       ha: ha !== null && Number.isNaN(ha) ? -1 : ha,
       keterangan: ket,

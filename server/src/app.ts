@@ -2598,114 +2598,176 @@ app.get("/api/peta-blok", async (req, res) => {
   res.json({ estates, cells, legend, pruningLegend });
 });
 
-// ---- Pruning PT.AKSS (see schema.sql pruning_log / pruning_target) ----
-// Entered per date and blok in Kebun > Pruning (the history came once from the old sheet). A blok's
-// progress = pokok pruned in the year / (Ha x SPH) of its pruning_target, else of its Master Blok.
+// ---- Pruning PT.AKSS (see schema.sql pruning_baris / pruning_log) ----
+// Entered per date and blok in Kebun > Pruning (the history came once from the old sheet). The Rekap is
+// the sheet's BLOCK DETAIL row for row (pruning_baris); every entry belongs to one row (baris_id). The
+// map adds a blok's rows up, as the mapping sheet does: progress = pokok pruned / (Ha x SPH).
 const PRUNING_ISO = /^\d{4}-\d{2}-\d{2}$/;
 const pruningEstates = (req: express.Request, estate: string) => blokEstates(req).filter((e) => !estate || e === estate);
 const numOrNull = (v: unknown) => (v === null || v === undefined || v === "" ? null : Number(v));
+type PBaris = {
+  id: number;
+  estate: string;
+  divisi: string;
+  blok: string;
+  planting_material: string;
+  tahun_tanam: number | null;
+  ha: number | null;
+  sph: number | null;
+  pkk: number | null;
+  kondisi: string;
+  field_number: string;
+  urut: number;
+};
+const pruningBaris = (estates: string[], c?: PoolClient) =>
+  queryMany<PBaris>("SELECT * FROM pruning_baris WHERE estate = ANY(@estates) ORDER BY urut, id", { estates }, c);
 
-// The blok a pruning entry can be for: those with a target and those in Master Blok, with Ha / SPH.
+// The blok an entry can be for: the Rekap's (with its rows, when it has two) and the other Master Blok ones.
 async function pruningBlokList(estates: string[]) {
-  return queryMany<{ estate: string; blok: string; divisi: string | null; ha: number | null; sph: number | null; sumber: "pruning" | "master"; urut: number }>(
-    `SELECT estate, blok, NULLIF(divisi, '') divisi, ha, sph, 'pruning' sumber, urut FROM pruning_target WHERE estate = ANY(@estates)
-     UNION ALL
-     SELECT m.estate, min(m.blok), string_agg(DISTINCT NULLIF(m.divisi, ''), ' / '), SUM(m.ha)::float8,
-       (SUM(m.ha * m.sph) / NULLIF(SUM(m.ha), 0))::float8, 'master', 100000 + min(m.urut)
-     FROM master_blok m
-     WHERE m.estate = ANY(@estates)
-       AND NOT EXISTS (SELECT 1 FROM pruning_target t WHERE t.estate = m.estate AND upper(t.blok) = upper(m.blok))
-     GROUP BY m.estate, upper(m.blok)
-     ORDER BY 7, 1`,
+  const baris = await pruningBaris(estates);
+  const out = new Map<string, { estate: string; blok: string; divisi: string | null; ha: number | null; sph: number | null; sumber: "pruning" | "master"; baris: { id: number; divisi: string; tahun_tanam: number | null; ha: number | null; sph: number | null }[] }>();
+  for (const b of baris) {
+    const k = `${b.estate}|${b.blok.toUpperCase()}`;
+    const o = out.get(k) ?? { estate: b.estate, blok: b.blok, divisi: b.divisi || null, ha: b.ha, sph: b.sph, sumber: "pruning" as const, baris: [] };
+    o.baris.push({ id: b.id, divisi: b.divisi, tahun_tanam: b.tahun_tanam, ha: b.ha, sph: b.sph });
+    out.set(k, o);
+  }
+  const master = await queryMany<{ estate: string; blok: string; divisi: string | null; ha: number | null; sph: number | null }>(
+    `SELECT estate, min(blok) blok, string_agg(DISTINCT NULLIF(divisi, ''), ' / ') divisi, SUM(ha)::float8 ha, (SUM(ha * sph) / NULLIF(SUM(ha), 0))::float8 sph
+     FROM master_blok WHERE estate = ANY(@estates) GROUP BY estate, upper(blok) ORDER BY estate, min(urut)`,
     { estates }
   );
+  for (const m of master) {
+    const k = `${m.estate}|${m.blok.toUpperCase()}`;
+    if (!out.has(k)) out.set(k, { ...m, sumber: "master", baris: [] });
+  }
+  return [...out.values()];
 }
 
-// Per blok for one year: target, pokok / Ha pruned, the 12 months, and the last pruning (any year).
-async function pruningRekap(estates: string[], tahun: number) {
-  const months = Array.from({ length: 12 }, (_, i) => `${tahun}-${String(i + 1).padStart(2, "0")}`);
-  const perBulan = (col: string) => `ARRAY[${months.map((m) => `COALESCE(SUM(${col}) FILTER (WHERE left(tanggal_iso, 7) = '${m}'), 0)`).join(", ")}]::float8[]`;
-  const [blok, logs] = await Promise.all([
-    pruningBlokList(estates),
-    queryMany<{ estate: string; b: string; blok: string; pkk: number; ha_pruning: number; bulan: number[]; ha_bulan: number[]; terakhir: string | null; entri: number }>(
-      `SELECT estate, upper(blok) b, min(blok) blok,
-         COALESCE(SUM(pkk) FILTER (WHERE left(tanggal_iso, 4) = @y), 0)::float8 pkk,
-         COALESCE(SUM(ha) FILTER (WHERE left(tanggal_iso, 4) = @y), 0)::float8 ha_pruning,
-         ${perBulan("pkk")} bulan, ${perBulan("ha")} ha_bulan,
-         max(tanggal_iso) FILTER (WHERE pkk > 0) terakhir,
-         COUNT(*) FILTER (WHERE left(tanggal_iso, 4) = @y)::int entri
-       FROM pruning_log WHERE estate = ANY(@estates) GROUP BY 1, 2`,
-      { estates, y: String(tahun) }
-    ),
-  ]);
-  const byKey = new Map(logs.map((l) => [`${l.estate}|${l.b}`, l]));
-  const empty = Array(12).fill(0);
-  const rows = blok.map((b) => {
-    const l = byKey.get(`${b.estate}|${b.blok.toUpperCase()}`);
-    byKey.delete(`${b.estate}|${b.blok.toUpperCase()}`);
-    return {
-      estate: b.estate,
-      blok: b.blok,
-      divisi: b.divisi,
-      ha: b.ha,
-      sph: b.sph,
-      target: b.ha !== null && b.sph !== null ? b.ha * b.sph : null,
-      target_sumber: b.sumber,
-      pkk: l?.pkk ?? 0,
-      ha_pruning: l?.ha_pruning ?? 0,
-      bulan: l?.bulan ?? empty,
-      ha_bulan: l?.ha_bulan ?? empty,
-      terakhir: l?.terakhir ?? null,
-      entri: l?.entri ?? 0,
-    };
-  });
-  // Entries for a blok that is in neither list (renamed / removed later) still count, without a target.
-  for (const l of byKey.values())
-    rows.push({ estate: l.estate, blok: l.blok, divisi: null, ha: null, sph: null, target: null, target_sumber: "master", pkk: l.pkk, ha_pruning: l.ha_pruning, bulan: l.bulan, ha_bulan: l.ha_bulan, terakhir: l.terakhir, entri: l.entri });
-  const tahunList = (await queryMany<{ t: number }>("SELECT DISTINCT left(tanggal_iso, 4)::int t FROM pruning_log WHERE estate = ANY(@estates) ORDER BY 1", { estates })).map((r) => r.t);
-  const now = Number(jakartaToday().slice(0, 4));
-  if (!tahunList.includes(now)) tahunList.push(now);
-  return { tahun, tahunList, blok: rows };
+// The Rekap row an entry goes to: the one asked for (baris_id, same blok), else the blok's first; a blok
+// not in the Rekap yet gets its row from Master Blok (as a new sheet row would be added).
+async function pruningBarisFor(c: PoolClient, estate: string, blok: string, barisId?: unknown): Promise<{ id: number; blok: string } | null> {
+  const id = Number(barisId);
+  if (Number.isInteger(id) && id > 0) {
+    const b = await queryOne<{ id: number; blok: string }>("SELECT id, blok FROM pruning_baris WHERE id = @id AND estate = @estate AND upper(blok) = upper(@blok)", { id, estate, blok }, c);
+    if (b) return b;
+  }
+  const first = await queryOne<{ id: number; blok: string }>(
+    "SELECT id, blok FROM pruning_baris WHERE estate = @estate AND upper(blok) = upper(@blok) ORDER BY urut, id LIMIT 1",
+    { estate, blok },
+    c
+  );
+  if (first) return first;
+  const made = await queryOne<{ id: number; blok: string }>(
+    `INSERT INTO pruning_baris (estate, divisi, blok, planting_material, tahun_tanam, ha, sph, pkk, urut)
+     SELECT estate, COALESCE(string_agg(DISTINCT NULLIF(divisi, ''), ' / '), ''), min(blok), COALESCE(string_agg(DISTINCT NULLIF(planting_material, ''), ' / '), ''),
+       min(tahun_tanam), SUM(ha), SUM(ha * sph) / NULLIF(SUM(ha), 0), round(SUM(ha * sph))::int, (SELECT COALESCE(MAX(urut), 0) + 1 FROM pruning_baris)
+     FROM master_blok WHERE estate = @estate AND upper(blok) = upper(@blok) GROUP BY estate
+     RETURNING id, blok`,
+    { estate, blok },
+    c
+  );
+  return made ?? null;
 }
+
 const pruningTahun = (q: unknown) => {
   const t = Number(q);
   return Number.isInteger(t) && t >= 2000 && t <= 2100 ? t : Number(jakartaToday().slice(0, 4));
 };
 
-app.get("/api/peta-blok/pruning", async (req, res) => {
-  res.json(await pruningRekap(blokEstates(req), pruningTahun(req.query.tahun)));
-});
+// Rekap per Blok, the sheet's layout: every row with its pokok / Ha per month of every year (sparse:
+// "yyyy-mm" -> [pkk, ha]) and its last pruning; the totals are worked out on the page like the sheet's.
 app.get("/api/pruning/rekap", async (req, res) => {
-  res.json(await pruningRekap(pruningEstates(req, String(req.query.estate ?? "")), pruningTahun(req.query.tahun)));
+  const estates = pruningEstates(req, String(req.query.estate ?? ""));
+  const [baris, bulan] = await Promise.all([
+    pruningBaris(estates),
+    queryMany<{ baris_id: number; m: string; pkk: number; ha: number }>(
+      `SELECT baris_id, left(tanggal_iso, 7) m, SUM(pkk)::float8 pkk, SUM(ha)::float8 ha FROM pruning_log WHERE estate = ANY(@estates) GROUP BY 1, 2`,
+      { estates }
+    ),
+  ]);
+  const per = new Map<number, Record<string, [number, number]>>();
+  const last = new Map<number, string>();
+  for (const b of bulan) {
+    const o = per.get(b.baris_id) ?? {};
+    o[b.m] = [b.pkk, Math.round(b.ha * 10000) / 10000];
+    per.set(b.baris_id, o);
+    if (b.pkk > 0 && b.m > (last.get(b.baris_id) ?? "")) last.set(b.baris_id, b.m);
+  }
+  const now = Number(jakartaToday().slice(0, 4));
+  const years = bulan.map((b) => Number(b.m.slice(0, 4)));
+  res.json({
+    tahunAwal: Math.min(2020, ...years),
+    tahunAkhir: Math.max(now, ...years),
+    sekarang: now,
+    baris: baris.map((b) => ({ ...b, bulan: per.get(b.id) ?? {}, terakhir: last.get(b.id) ?? null })),
+  });
+});
+
+// Per blok for one year (the map, and the hint next to an input row): a blok's rows added up.
+async function pruningPerBlok(estates: string[], tahun: number) {
+  const months = Array.from({ length: 12 }, (_, i) => `${tahun}-${String(i + 1).padStart(2, "0")}`);
+  const perBulan = (col: string) => `ARRAY[${months.map((m) => `COALESCE(SUM(l.${col}) FILTER (WHERE left(l.tanggal_iso, 7) = '${m}'), 0)`).join(", ")}]::float8[]`;
+  const blok = await queryMany(
+    `WITH b AS (
+       SELECT estate, upper(blok) k, min(blok) blok, string_agg(DISTINCT NULLIF(divisi, ''), ' / ') divisi, SUM(ha)::float8 ha,
+         SUM(ha * sph)::float8 target, min(urut) urut, array_agg(id) ids
+       FROM pruning_baris WHERE estate = ANY(@estates) GROUP BY estate, upper(blok)
+     )
+     SELECT b.estate, b.blok, b.divisi, b.ha, b.target, (b.target / NULLIF(b.ha, 0))::float8 sph, 'pruning' target_sumber,
+       COALESCE(SUM(l.pkk) FILTER (WHERE left(l.tanggal_iso, 4) = @y), 0)::float8 pkk,
+       COALESCE(SUM(l.ha) FILTER (WHERE left(l.tanggal_iso, 4) = @y), 0)::float8 ha_pruning,
+       ${perBulan("pkk")} bulan, ${perBulan("ha")} ha_bulan,
+       max(l.tanggal_iso) FILTER (WHERE l.pkk > 0) terakhir,
+       COUNT(l.id) FILTER (WHERE left(l.tanggal_iso, 4) = @y)::int entri
+     FROM b LEFT JOIN pruning_log l ON l.baris_id = ANY(b.ids)
+     GROUP BY b.estate, b.blok, b.divisi, b.ha, b.target, b.urut
+     ORDER BY b.urut`,
+    { estates, y: String(tahun) }
+  );
+  const tahunList = (await queryMany<{ t: number }>("SELECT DISTINCT left(tanggal_iso, 4)::int t FROM pruning_log WHERE estate = ANY(@estates) ORDER BY 1", { estates })).map((r) => r.t);
+  const now = Number(jakartaToday().slice(0, 4));
+  if (!tahunList.includes(now)) tahunList.push(now);
+  return { tahun, tahunList, blok };
+}
+app.get("/api/peta-blok/pruning", async (req, res) => {
+  res.json(await pruningPerBlok(blokEstates(req), pruningTahun(req.query.tahun)));
+});
+app.get("/api/pruning/per-blok", async (req, res) => {
+  res.json(await pruningPerBlok(pruningEstates(req, String(req.query.estate ?? "")), pruningTahun(req.query.tahun)));
 });
 app.get("/api/pruning/blok-options", async (req, res) => {
   res.json(await pruningBlokList(blokEstates(req)));
 });
 
-// Riwayat: the entries, newest first, filtered by estate / month (yyyy-mm) or year / blok / text.
+// Riwayat: the entries, newest first, filtered by estate / month (yyyy-mm) or year / blok / text; with
+// their Rekap row (tahun tanam / divisi, shown for a blok that has two rows).
 app.get("/api/pruning", async (req, res) => {
   const q = req.query as Record<string, string>;
   const estates = pruningEstates(req, q.estate ?? "");
-  const where = ["estate = ANY(@estates)"];
+  const where = ["l.estate = ANY(@estates)"];
   const params: Record<string, any> = { estates, limit: Math.min(Number(q.limit) || 50, 500), offset: Math.max(Number(q.offset) || 0, 0) };
   if (/^\d{4}(-\d{2})?$/.test(q.periode ?? "")) {
-    where.push("tanggal_iso LIKE @periode");
+    where.push("l.tanggal_iso LIKE @periode");
     params.periode = `${q.periode}%`;
   }
   if (q.blok) {
-    where.push("upper(blok) = upper(@blok)");
+    where.push("upper(l.blok) = upper(@blok)");
     params.blok = q.blok;
   }
   if (q.sumber === "app" || q.sumber === "sheet") {
-    where.push("sumber = @sumber");
+    where.push("l.sumber = @sumber");
     params.sumber = q.sumber;
   }
-  wordSearch(q.search ?? "", ["blok", "keterangan", "created_by"], where, params);
+  wordSearch(q.search ?? "", ["l.blok", "l.keterangan", "l.created_by"], where, params);
   const w = `WHERE ${where.join(" AND ")}`;
-  const sum = await queryOne(`SELECT COUNT(*)::int total, COALESCE(SUM(pkk), 0)::float8 pkk, COALESCE(SUM(ha), 0)::float8 ha FROM pruning_log ${w}`, params);
+  const sum = await queryOne(`SELECT COUNT(*)::int total, COALESCE(SUM(l.pkk), 0)::float8 pkk, COALESCE(SUM(l.ha), 0)::float8 ha FROM pruning_log l ${w}`, params);
   const rows = await queryMany(
-    `SELECT id, estate, blok, tanggal_iso, pkk, ha, keterangan, sumber, user_id, created_by, created_at, updated_at
-     FROM pruning_log ${w} ORDER BY tanggal_iso DESC, id DESC LIMIT @limit OFFSET @offset`,
+    `SELECT l.id, l.estate, l.blok, l.tanggal_iso, l.pkk, l.ha, l.keterangan, l.sumber, l.user_id, l.created_by, l.created_at, l.updated_at, l.baris_id,
+       b.tahun_tanam, NULLIF(b.divisi, '') divisi,
+       (SELECT COUNT(*) FROM pruning_baris x WHERE x.estate = l.estate AND upper(x.blok) = upper(l.blok))::int > 1 AS dua_baris
+     FROM pruning_log l LEFT JOIN pruning_baris b ON b.id = l.baris_id
+     ${w} ORDER BY l.tanggal_iso DESC, l.id DESC LIMIT @limit OFFSET @offset`,
     params
   );
   res.json({ rows, ...sum });
@@ -2718,20 +2780,21 @@ async function pruningInvalid(estate: string, blok: string, tanggal: string, pkk
   if (!Number.isFinite(pkk) || pkk <= 0) return `Blok ${blok}: jumlah pokok harus lebih dari 0`;
   if (!Number.isFinite(ha) || ha < 0) return `Blok ${blok}: Ha tidak valid`;
   const known = await queryOne(
-    `SELECT 1 FROM pruning_target WHERE estate = @estate AND upper(blok) = upper(@blok)
+    `SELECT 1 FROM pruning_baris WHERE estate = @estate AND upper(blok) = upper(@blok)
      UNION ALL SELECT 1 FROM master_blok WHERE estate = @estate AND upper(blok) = upper(@blok) LIMIT 1`,
     { estate, blok }
   );
   return known ? null : `Blok ${blok} tidak ada di Master Blok ${estate}`;
 }
 
-// Input: one date, one estate, one or more blok.
+// Input: one date, one estate, one or more blok (baris_id = which row of a blok that has two).
 app.post("/api/pruning", async (req, res) => {
   const estate = String(req.body?.estate ?? "");
   const tanggal = String(req.body?.tanggal_iso ?? "");
   if (!estateAllowed(req.user!, estate) || !blokEstates(req).includes(estate)) return res.status(403).json({ error: "Akses estate ditolak" });
   const rows = (Array.isArray(req.body?.rows) ? req.body.rows : []).slice(0, 200).map((r: any) => ({
     blok: String(r?.blok ?? "").trim(),
+    baris_id: r?.baris_id,
     pkk: Number(r?.pkk),
     ha: Number(r?.ha ?? 0) || 0,
     keterangan: String(r?.keterangan ?? "").trim().slice(0, 300),
@@ -2741,18 +2804,17 @@ app.post("/api/pruning", async (req, res) => {
     const bad = await pruningInvalid(estate, r.blok, tanggal, r.pkk, r.ha);
     if (bad) return res.status(400).json({ error: bad });
   }
-  // The blok as written in its master (case), so the rekap groups it with the rest.
-  const list = await pruningBlokList([estate]);
-  const canon = new Map(list.map((b) => [b.blok.toUpperCase(), b.blok]));
   const u = req.user!;
   await withTransaction(async (c) => {
-    for (const r of rows)
+    for (const r of rows) {
+      const b = await pruningBarisFor(c, estate, r.blok, r.baris_id);
       await execute(
-        `INSERT INTO pruning_log (estate, blok, tanggal_iso, pkk, ha, keterangan, sumber, user_id, created_by)
-         VALUES (@estate, @blok, @tanggal, @pkk, @ha, @keterangan, 'app', @uid, @nama)`,
-        { estate, blok: canon.get(r.blok.toUpperCase()) ?? r.blok, tanggal, pkk: r.pkk, ha: r.ha, keterangan: r.keterangan, uid: u.id, nama: u.nama },
+        `INSERT INTO pruning_log (estate, blok, baris_id, tanggal_iso, pkk, ha, keterangan, sumber, user_id, created_by)
+         VALUES (@estate, @blok, @baris, @tanggal, @pkk, @ha, @keterangan, 'app', @uid, @nama)`,
+        { estate, blok: b?.blok ?? r.blok, baris: b?.id ?? null, tanggal, pkk: r.pkk, ha: r.ha, keterangan: r.keterangan, uid: u.id, nama: u.nama },
         c
       );
+    }
   });
   await logActivity(req, {
     module: "PRUNING",
@@ -2765,9 +2827,10 @@ app.post("/api/pruning", async (req, res) => {
 });
 
 // Upload Excel: rows of any date / estate / blok. Every row is checked (estate of the account, date not in
-// the future, blok known, pokok > 0); Ha left empty is estimated as pokok / SPH. A row that is already in
-// (same estate, blok, date, pokok and Ha - e.g. the same file uploaded twice) is skipped. dryRun = only
-// the check, for the preview; otherwise the OK rows are saved.
+// the future, blok known, pokok > 0); Ha left empty is estimated as pokok / SPH; Tahun Tanam (optional)
+// picks the row of a blok that has two, else its first. A row that is already in (same estate, blok,
+// date, pokok and Ha - e.g. the same file uploaded twice) is skipped. dryRun = only the check, for the
+// preview; otherwise the OK rows are saved.
 const PRUNING_ESTATE: Record<string, string> = { NILAM: "NILAM", ZAMRUD: "ZAMRUD", FIRUS: "FIRUS", KNS: "KNS", WJA: "WJA" };
 app.post("/api/pruning/import", async (req, res) => {
   const input = Array.isArray(req.body?.rows) ? req.body.rows : [];
@@ -2777,16 +2840,19 @@ app.post("/api/pruning/import", async (req, res) => {
   const list = await pruningBlokList(allowed);
   const blokOf = new Map(list.map((b) => [`${b.estate}|${b.blok.toUpperCase()}`, b]));
   const today = jakartaToday();
-  type Row = { row: number; estate: string; blok: string; tanggal_iso: string; pkk: number; ha: number; keterangan: string; status: "ok" | "duplikat" | "error"; error?: string };
+  type Row = { row: number; estate: string; blok: string; baris_id: number | null; tanggal_iso: string; pkk: number; ha: number; keterangan: string; status: "ok" | "duplikat" | "error"; error?: string };
   const rows: Row[] = input.map((r: any, i: number) => {
     const estate = PRUNING_ESTATE[String(r?.estate ?? "").trim().toUpperCase()] ?? String(r?.estate ?? "").trim();
     const blokRaw = String(r?.blok ?? "").trim();
     const b = blokOf.get(`${estate}|${blokRaw.toUpperCase()}`);
+    const tt = numOrNull(r?.tahun_tanam);
+    const baris = b?.baris.length ? (tt ? b.baris.find((x) => x.tahun_tanam === tt) : b.baris[0]) : undefined;
     const tanggal = String(r?.tanggal_iso ?? "").trim();
     const pkk = Number(r?.pkk);
+    const sph = baris?.sph ?? b?.sph;
     const haIn = r?.ha === null || r?.ha === undefined || r?.ha === "" ? null : Number(r.ha);
-    const ha = haIn ?? (b?.sph && pkk > 0 ? Math.round((pkk / b.sph) * 100) / 100 : 0);
-    const out: Row = { row: Number(r?.row) || i + 1, estate, blok: b?.blok ?? blokRaw, tanggal_iso: tanggal, pkk, ha, keterangan: String(r?.keterangan ?? "").trim().slice(0, 300), status: "ok" };
+    const ha = haIn ?? (sph && pkk > 0 ? Math.round((pkk / sph) * 100) / 100 : 0);
+    const out: Row = { row: Number(r?.row) || i + 1, estate, blok: b?.blok ?? blokRaw, baris_id: baris?.id ?? null, tanggal_iso: tanggal, pkk, ha, keterangan: String(r?.keterangan ?? "").trim().slice(0, 300), status: "ok" };
     const err = !estate
       ? "Estate kosong"
       : !allowed.includes(estate)
@@ -2799,11 +2865,13 @@ app.post("/api/pruning/import", async (req, res) => {
               ? "Blok kosong"
               : !b
                 ? `Blok ${blokRaw} tidak ada di Master Blok ${estate}`
-                : !Number.isFinite(pkk) || pkk <= 0
-                  ? "Pokok harus lebih dari 0"
-                  : !Number.isFinite(ha) || ha < 0
-                    ? "Ha tidak valid"
-                    : null;
+                : tt && b.baris.length && !baris
+                  ? `Blok ${b.blok} tidak punya baris tahun tanam ${tt} (ada: ${b.baris.map((x) => x.tahun_tanam ?? "-").join(", ")})`
+                  : !Number.isFinite(pkk) || pkk <= 0
+                    ? "Pokok harus lebih dari 0"
+                    : !Number.isFinite(ha) || ha < 0
+                      ? "Ha tidak valid"
+                      : null;
     if (err) Object.assign(out, { status: "error", error: err });
     return out;
   });
@@ -2828,20 +2896,17 @@ app.post("/api/pruning/import", async (req, res) => {
   if (req.body?.dryRun || !save.length) return res.json({ rows, ...count, saved: 0 });
 
   const u = req.user!;
-  await execute(
-    `INSERT INTO pruning_log (estate, blok, tanggal_iso, pkk, ha, keterangan, sumber, user_id, created_by)
-     SELECT e, b, d, p, h, k, 'app', @uid, @nama FROM unnest(@estate::text[], @blok::text[], @tanggal::text[], @pkk::float8[], @ha::float8[], @ket::text[]) AS x(e, b, d, p, h, k)`,
-    {
-      estate: save.map((r) => r.estate),
-      blok: save.map((r) => r.blok),
-      tanggal: save.map((r) => r.tanggal_iso),
-      pkk: save.map((r) => r.pkk),
-      ha: save.map((r) => r.ha),
-      ket: save.map((r) => r.keterangan),
-      uid: u.id,
-      nama: u.nama,
+  await withTransaction(async (c) => {
+    for (const r of save) {
+      const b = await pruningBarisFor(c, r.estate, r.blok, r.baris_id);
+      await execute(
+        `INSERT INTO pruning_log (estate, blok, baris_id, tanggal_iso, pkk, ha, keterangan, sumber, user_id, created_by)
+         VALUES (@estate, @blok, @baris, @tanggal, @pkk, @ha, @ket, 'app', @uid, @nama)`,
+        { estate: r.estate, blok: b?.blok ?? r.blok, baris: b?.id ?? null, tanggal: r.tanggal_iso, pkk: r.pkk, ha: r.ha, ket: r.keterangan, uid: u.id, nama: u.nama },
+        c
+      );
     }
-  );
+  });
   const estates = [...new Set(save.map((r) => r.estate))];
   const dates = save.map((r) => r.tanggal_iso).sort();
   await logActivity(req, {
@@ -2858,30 +2923,35 @@ app.post("/api/pruning/import", async (req, res) => {
   res.json({ rows, ...count, saved: save.length });
 });
 
-// Target of a blok (Ha, SPH): set in the Rekap; a blok that only had its Master Blok one gets its own.
-app.put("/api/pruning/target", async (req, res) => {
-  const estate = String(req.body?.estate ?? "");
-  const blok = String(req.body?.blok ?? "").trim();
-  const ha = numOrNull(req.body?.ha);
-  const sph = numOrNull(req.body?.sph);
-  if (!estateAllowed(req.user!, estate) || !blokEstates(req).includes(estate)) return res.status(403).json({ error: "Akses estate ditolak" });
-  if (!blok) return res.status(400).json({ error: "Blok kosong" });
-  if ((ha !== null && !(ha >= 0)) || (sph !== null && !(sph >= 0))) return res.status(400).json({ error: "Ha / SPH harus angka ≥ 0" });
-  const old = (await pruningBlokList([estate])).find((b) => b.blok.toUpperCase() === blok.toUpperCase());
-  if (!old) return res.status(400).json({ error: `Blok ${blok} tidak ada di Master Blok ${estate}` });
+// A Rekap row's data (the sheet's ESTATE ... Field Number columns): Divisi, Planting Material, Tahun
+// Tanam, Ha, SPH, Kondisi Pokok, Field Number; PKK follows Ha x SPH (rounded) when either changes.
+app.put("/api/pruning/baris/:id", async (req, res) => {
+  const ex = await queryOne<PBaris>("SELECT * FROM pruning_baris WHERE id = @id", { id: Number(req.params.id) || 0 });
+  if (!ex) return res.status(404).json({ error: "Baris tidak ditemukan" });
+  if (!estateAllowed(req.user!, ex.estate)) return res.status(403).json({ error: "Akses estate ditolak" });
+  const b = req.body ?? {};
+  const v = {
+    divisi: b.divisi === undefined ? ex.divisi : String(b.divisi).trim(),
+    planting_material: b.planting_material === undefined ? ex.planting_material : String(b.planting_material).trim(),
+    tahun_tanam: b.tahun_tanam === undefined ? ex.tahun_tanam : numOrNull(b.tahun_tanam),
+    ha: b.ha === undefined ? ex.ha : numOrNull(b.ha),
+    sph: b.sph === undefined ? ex.sph : numOrNull(b.sph),
+    kondisi: b.kondisi === undefined ? ex.kondisi : String(b.kondisi).trim(),
+    field_number: b.field_number === undefined ? ex.field_number : String(b.field_number).trim(),
+  };
+  if ((v.ha !== null && !(v.ha >= 0)) || (v.sph !== null && !(v.sph >= 0))) return res.status(400).json({ error: "Ha / SPH harus angka ≥ 0" });
+  if (v.tahun_tanam !== null && !(Number.isInteger(v.tahun_tanam) && v.tahun_tanam > 1900 && v.tahun_tanam < 2100)) return res.status(400).json({ error: "Tahun tanam tidak valid" });
+  const pkk = v.ha === ex.ha && v.sph === ex.sph ? ex.pkk : v.ha !== null && v.sph !== null ? Math.round(v.ha * v.sph) : null;
   await execute(
-    `INSERT INTO pruning_target (estate, blok, divisi, ha, sph, urut)
-     VALUES (@estate, @blok, @divisi, @ha, @sph, (SELECT COALESCE(MAX(urut), 0) + 1 FROM pruning_target))
-     ON CONFLICT (estate, upper(blok)) DO UPDATE SET ha = EXCLUDED.ha, sph = EXCLUDED.sph`,
-    { estate, blok: old.blok, divisi: old.divisi ?? "", ha, sph }
+    `UPDATE pruning_baris SET divisi = @divisi, planting_material = @planting_material, tahun_tanam = @tahun_tanam, ha = @ha, sph = @sph, pkk = @pkk,
+       kondisi = @kondisi, field_number = @field_number WHERE id = @id`,
+    { ...v, pkk, id: ex.id }
   );
-  await logActivity(req, {
-    module: "PRUNING",
-    estate,
-    aksi: "Ubah Target Pruning",
-    objek: old.blok,
-    detail: `Ha: ${old.ha ?? "-"} → ${ha ?? "-"}; SPH: ${old.sph === null ? "-" : Math.round(old.sph * 100) / 100} → ${sph ?? "-"}`,
-  });
+  const label: Record<string, string> = { divisi: "Divisi", planting_material: "Planting Material", tahun_tanam: "Tahun Tanam", ha: "Ha", sph: "SPH", kondisi: "Kondisi Pokok", field_number: "Field Number" };
+  const diff = Object.keys(label)
+    .filter((k) => (ex as any)[k] !== (v as any)[k])
+    .map((k) => `${label[k]}: ${(ex as any)[k] ?? "-"} → ${(v as any)[k] ?? "-"}`);
+  if (diff.length) await logActivity(req, { module: "PRUNING", estate: ex.estate, aksi: "Ubah Baris Rekap Pruning", objek: `${ex.blok}${ex.tahun_tanam ? ` (TT ${ex.tahun_tanam})` : ""}`, detail: diff.join("; ") });
   res.json({ success: true });
 });
 
@@ -2898,10 +2968,16 @@ app.put("/api/pruning/:id", async (req, res) => {
   };
   const bad = await pruningInvalid(ex.estate, v.blok, v.tanggal, v.pkk, v.ha);
   if (bad) return res.status(400).json({ error: bad });
-  await execute(
-    "UPDATE pruning_log SET blok = @blok, tanggal_iso = @tanggal, pkk = @pkk, ha = @ha, keterangan = @keterangan, updated_at = now() WHERE id = @id",
-    { ...v, id: ex.id }
-  );
+  await withTransaction(async (c) => {
+    // Same blok: the row stays unless another is picked; another blok: its (first) row.
+    const keep = v.blok.toUpperCase() === String(ex.blok).toUpperCase() && req.body?.baris_id === undefined ? ex.baris_id : req.body?.baris_id;
+    const b = await pruningBarisFor(c, ex.estate, v.blok, keep);
+    await execute(
+      "UPDATE pruning_log SET blok = @blok, baris_id = @baris, tanggal_iso = @tanggal, pkk = @pkk, ha = @ha, keterangan = @keterangan, updated_at = now() WHERE id = @id",
+      { ...v, blok: b?.blok ?? v.blok, baris: b?.id ?? null, id: ex.id },
+      c
+    );
+  });
   const diff = [
     ex.blok !== v.blok && `Blok: ${ex.blok} → ${v.blok}`,
     ex.tanggal_iso !== v.tanggal && `Tanggal: ${ex.tanggal_iso} → ${v.tanggal}`,

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { ChevronLeft, ChevronRight, Download, Map as MapIcon, Pencil, Plus, Save, Search, Trash2, Upload, X } from "lucide-react";
-import { api, errorText, type PetaPruning, type PruningBlok, type PruningBlokOption, type PruningImportRow, type PruningLog } from "../lib/api";
+import { api, errorText, type PetaPruning, type PruningBlokOption, type PruningImportRow, type PruningLog } from "../lib/api";
+import { PruningRekapSheet } from "../components/PruningRekapSheet";
 import { downloadPruningTemplate, readPruningUpload, type PruningUploadRow } from "../lib/pruningExcel";
 import { useAuth } from "../context/AuthContext";
 import { can, pageAllowed } from "../lib/access";
@@ -73,15 +74,17 @@ export function PruningPage() {
       {tab === "input" ? (
         <InputRiwayat blokList={blokList} estates={estates} canInput={canInput} canEdit={canEdit} version={version} onChanged={changed} />
       ) : (
-        <Rekap estates={estates} canEdit={canEdit} version={version} onChanged={changed} />
+        <PruningRekapSheet estates={estates} canEdit={canEdit} version={version} onChanged={changed} />
       )}
     </div>
   );
 }
 
 // ---- Input & Riwayat ----
-type Baris = { blok: string; pkk: string; ha: string; keterangan: string };
-const barisKosong = (): Baris => ({ blok: "", pkk: "", ha: "", keterangan: "" });
+// barisId: which Rekap row, for a blok that has two (planted in two years / divisi); "" = its first.
+type Baris = { blok: string; barisId: string; pkk: string; ha: string; keterangan: string };
+const barisKosong = (): Baris => ({ blok: "", barisId: "", pkk: "", ha: "", keterangan: "" });
+const barisLabel = (x: { divisi: string; tahun_tanam: number | null }) => `TT ${x.tahun_tanam ?? "-"}${x.divisi ? ` · Div ${x.divisi}` : ""}`;
 
 function InputRiwayat({
   blokList,
@@ -108,7 +111,7 @@ function InputRiwayat({
   const [rekap, setRekap] = useState<PetaPruning | null>(null);
   useEffect(() => {
     if (!est || !canInput) return;
-    api.pruningRekap(Number(tanggal.slice(0, 4)) || null, est).then(setRekap).catch(() => {});
+    api.pruningPerBlok(Number(tanggal.slice(0, 4)) || null, est).then(setRekap).catch(() => {});
   }, [est, tanggal.slice(0, 4), version, canInput]);
   const blokEst = blokList.filter((b) => b.estate === est);
   const findBlok = (s: string) => blokEst.find((b) => b.blok.toUpperCase() === s.trim().toUpperCase());
@@ -116,8 +119,9 @@ function InputRiwayat({
   const setRow = (i: number, patch: Partial<Baris>) => setBaris((r) => r.map((x, j) => (j === i ? { ...x, ...patch } : x)));
   const haKira = (r: Baris) => {
     const b = findBlok(r.blok);
+    const sph = b?.baris.find((x) => String(x.id) === r.barisId)?.sph ?? b?.sph;
     const p = Number(r.pkk);
-    return b?.sph && p > 0 ? Math.round((p / b.sph) * 100) / 100 : null;
+    return sph && p > 0 ? Math.round((p / sph) * 100) / 100 : null;
   };
 
   // Upload Excel: read the file, let the server check every row (preview), then save the OK ones.
@@ -150,7 +154,7 @@ function InputRiwayat({
       await api.pruningCreate({
         estate: est,
         tanggal_iso: tanggal,
-        rows: isi.map((r) => ({ blok: r.blok.trim(), pkk: Number(r.pkk), ha: r.ha ? Number(r.ha) : haKira(r) ?? 0, keterangan: r.keterangan })),
+        rows: isi.map((r) => ({ blok: r.blok.trim(), baris_id: r.barisId ? Number(r.barisId) : undefined, pkk: Number(r.pkk), ha: r.ha ? Number(r.ha) : haKira(r) ?? 0, keterangan: r.keterangan })),
       });
       setMsg({ ok: true, text: `Tersimpan: ${isi.length} blok, ${fmt(isi.reduce((s, r) => s + Number(r.pkk), 0))} pokok` });
       setBaris([barisKosong()]);
@@ -211,10 +215,24 @@ function InputRiwayat({
                         <input
                           list="pruning-blok"
                           value={r.blok}
-                          onChange={(e) => setRow(i, { blok: e.target.value })}
+                          onChange={(e) => setRow(i, { blok: e.target.value, barisId: "" })}
                           placeholder="cth. L62"
                           className={`${inputCls} w-full ${r.blok && !b ? "border-[var(--accent-red)]" : ""}`}
                         />
+                        {b && b.baris.length > 1 && (
+                          <select
+                            value={r.barisId || String(b.baris[0].id)}
+                            onChange={(e) => setRow(i, { barisId: e.target.value })}
+                            title="Blok ini ada dua baris di rekap"
+                            className="mt-1 w-full text-xs rounded border border-[var(--accent-amber-border)] bg-[var(--accent-amber-bg)] px-1.5 py-1"
+                          >
+                            {b.baris.map((x) => (
+                              <option key={x.id} value={x.id}>
+                                {barisLabel(x)}
+                              </option>
+                            ))}
+                          </select>
+                        )}
                       </td>
                       <td className="py-1 pr-2">
                         <input type="number" min={0} value={r.pkk} onChange={(e) => setRow(i, { pkk: e.target.value })} className={`${inputCls} w-full`} />
@@ -422,7 +440,10 @@ function Riwayat({
                 <tr key={r.id} className="border-t border-[var(--border)]">
                   <td className="px-3 py-2 whitespace-nowrap">{tglLog(r)}</td>
                   <td className="px-3 py-2">{ESTATE_LABEL[r.estate] ?? r.estate}</td>
-                  <td className="px-3 py-2 font-medium">{r.blok}</td>
+                  <td className="px-3 py-2 font-medium">
+                    {r.blok}
+                    {r.dua_baris && <span className="ml-1 text-[11px] font-normal text-[var(--text-muted)]">TT {r.tahun_tanam ?? "-"}</span>}
+                  </td>
                   <td className="px-3 py-2 text-right">{fmt(r.pkk)}</td>
                   <td className="px-3 py-2 text-right">{fmt(r.ha, 2)}</td>
                   <td className="px-3 py-2 text-[var(--text-secondary)]">{r.keterangan || "-"}</td>
@@ -604,14 +625,16 @@ function UploadPreview({
 }
 
 function EditModal({ row, blokList, onClose, onSaved }: { row: PruningLog; blokList: PruningBlokOption[]; onClose: () => void; onSaved: () => void }) {
-  const [f, setF] = useState({ blok: row.blok, tanggal_iso: row.tanggal_iso, pkk: String(row.pkk), ha: String(row.ha), keterangan: row.keterangan });
+  const [f, setF] = useState({ blok: row.blok, barisId: row.baris_id ? String(row.baris_id) : "", tanggal_iso: row.tanggal_iso, pkk: String(row.pkk), ha: String(row.ha), keterangan: row.keterangan });
+  const blokNow = blokList.find((b) => b.blok.toUpperCase() === f.blok.trim().toUpperCase());
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const save = async () => {
     setSaving(true);
     setError("");
     try {
-      await api.pruningUpdate(row.id, { ...f, pkk: Number(f.pkk), ha: Number(f.ha) || 0 });
+      const { barisId, ...rest } = f;
+      await api.pruningUpdate(row.id, { ...rest, baris_id: barisId ? Number(barisId) : null, pkk: Number(f.pkk), ha: Number(f.ha) || 0 });
       onSaved();
     } catch (e) {
       setError(errorText(e, "Gagal menyimpan"));
@@ -641,7 +664,21 @@ function EditModal({ row, blokList, onClose, onSaved }: { row: PruningLog; blokL
         </datalist>
         <div className="grid grid-cols-2 gap-3">
           {field("Tanggal", <input type="date" value={f.tanggal_iso} max={localToday()} onChange={(e) => setF({ ...f, tanggal_iso: e.target.value })} className={`${inputCls} w-full`} />)}
-          {field("Blok", <input list="pruning-blok-edit" value={f.blok} onChange={(e) => setF({ ...f, blok: e.target.value })} className={`${inputCls} w-full`} />)}
+          {field(
+            "Blok",
+            <>
+              <input list="pruning-blok-edit" value={f.blok} onChange={(e) => setF({ ...f, blok: e.target.value, barisId: "" })} className={`${inputCls} w-full`} />
+              {blokNow && blokNow.baris.length > 1 && (
+                <select value={f.barisId || String(blokNow.baris[0].id)} onChange={(e) => setF({ ...f, barisId: e.target.value })} className="mt-1 w-full text-xs rounded border border-[var(--border)] px-1.5 py-1">
+                  {blokNow.baris.map((x) => (
+                    <option key={x.id} value={x.id}>
+                      {barisLabel(x)}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </>
+          )}
           {field("Pokok", <input type="number" min={0} value={f.pkk} onChange={(e) => setF({ ...f, pkk: e.target.value })} className={`${inputCls} w-full`} />)}
           {field("Ha", <input type="number" min={0} step="0.01" value={f.ha} onChange={(e) => setF({ ...f, ha: e.target.value })} className={`${inputCls} w-full`} />)}
         </div>
@@ -657,257 +694,6 @@ function EditModal({ row, blokList, onClose, onSaved }: { row: PruningLog; blokL
           </button>
         </div>
       </div>
-    </div>
-  );
-}
-
-// ---- Rekap per Blok: like the old sheet, pokok per month for one year vs Ha x SPH ----
-function Rekap({ estates, canEdit, version, onChanged }: { estates: string[]; canEdit: boolean; version: number; onChanged: () => void }) {
-  const [tahun, setTahun] = useState<number | null>(null);
-  const [estate, setEstate] = useState("");
-  const [search, setSearch] = useState("");
-  const [status, setStatus] = useState<"" | "belum" | "kurang" | "selesai">("");
-  const [data, setData] = useState<PetaPruning | null>(null);
-  const [error, setError] = useState("");
-  const [edit, setEdit] = useState<{ key: string; ha: string; sph: string } | null>(null);
-  useEffect(() => {
-    api
-      .pruningRekap(tahun, estate)
-      .then(setData)
-      .catch((e) => setError(errorText(e, "Gagal memuat rekap")));
-  }, [tahun, estate, version]);
-
-  const q = search.trim().toUpperCase();
-  const rows = (data?.blok ?? []).filter((b) => {
-    if (q && !b.blok.toUpperCase().includes(q) && !(b.divisi ?? "").toUpperCase().includes(q)) return false;
-    const p = pctOf(b);
-    if (status === "belum") return !b.pkk;
-    if (status === "kurang") return !!b.pkk && (p === null || p < 100);
-    if (status === "selesai") return p !== null && p >= 100;
-    return true;
-  });
-  const tot = rows.reduce(
-    (s, b) => ({ target: s.target + (b.target ?? 0), pkk: s.pkk + b.pkk, ha: s.ha + (b.ha ?? 0), haP: s.haP + b.ha_pruning, bulan: s.bulan.map((v, i) => v + b.bulan[i]) }),
-    { target: 0, pkk: 0, ha: 0, haP: 0, bulan: Array(12).fill(0) as number[] }
-  );
-  const key = (b: PruningBlok) => `${b.estate}|${b.blok}`;
-
-  const saveTarget = async (b: PruningBlok) => {
-    if (!edit) return;
-    try {
-      await api.pruningTarget({ estate: b.estate, blok: b.blok, ha: edit.ha === "" ? null : Number(edit.ha), sph: edit.sph === "" ? null : Number(edit.sph) });
-      setEdit(null);
-      onChanged();
-    } catch (e) {
-      setError(errorText(e, "Gagal menyimpan target"));
-    }
-  };
-
-  const report = async (): Promise<TableReport> => ({
-    title: `Rekap Pruning PT.AKSS ${data?.tahun ?? ""}`,
-    subtitle: [`Estate: ${estate ? ESTATE_LABEL[estate] : "Semua"}`, "Pokok per bulan; target = Ha × SPH"],
-    landscape: true,
-    columns: [
-      { label: "Estate" },
-      { label: "Divisi" },
-      { label: "Blok" },
-      { label: "Ha", align: "right" },
-      { label: "SPH", align: "right" },
-      { label: "Target", align: "right" },
-      ...BULAN.map((m) => ({ label: m, align: "right" as const })),
-      { label: "Total", align: "right" },
-      { label: "Ha pruning", align: "right" },
-      { label: "%", align: "right" },
-      { label: "Terakhir" },
-    ],
-    rows: [
-      ...rows.map((b) => [
-        ESTATE_LABEL[b.estate] ?? b.estate,
-        b.divisi ?? "",
-        b.blok,
-        b.ha,
-        b.sph === null ? null : Math.round(b.sph * 100) / 100,
-        b.target === null ? null : Math.round(b.target),
-        ...b.bulan.map((v) => v || null),
-        b.pkk,
-        Math.round(b.ha_pruning * 100) / 100,
-        pctOf(b) === null ? null : `${fmt(pctOf(b), 1)}%`,
-        bulanTahun(b.terakhir),
-      ]),
-      ["TOTAL", "", `${rows.length} blok`, Math.round(tot.ha * 100) / 100, null, Math.round(tot.target), ...tot.bulan, tot.pkk, Math.round(tot.haP * 100) / 100, tot.target ? `${fmt((tot.pkk / tot.target) * 100, 1)}%` : null, ""],
-    ],
-  });
-
-  return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2 bg-[var(--bg-card)] border border-[var(--border)] rounded-lg p-3">
-        <select value={data?.tahun ?? ""} onChange={(e) => setTahun(Number(e.target.value))} className={inputCls} aria-label="Tahun">
-          {(data?.tahunList ?? []).map((t) => (
-            <option key={t} value={t}>
-              Tahun {t}
-            </option>
-          ))}
-        </select>
-        <select value={estate} onChange={(e) => setEstate(e.target.value)} className={inputCls} aria-label="Estate">
-          <option value="">Semua estate</option>
-          {estates.map((e) => (
-            <option key={e} value={e}>
-              {ESTATE_LABEL[e] ?? e}
-            </option>
-          ))}
-        </select>
-        <select value={status} onChange={(e) => setStatus(e.target.value as typeof status)} className={inputCls} aria-label="Status">
-          <option value="">Semua blok</option>
-          <option value="belum">Belum pruning</option>
-          <option value="kurang">Sudah, belum 100%</option>
-          <option value="selesai">Selesai (≥ 100%)</option>
-        </select>
-        <div className="relative">
-          <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
-          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Cari blok / divisi" className={`${inputCls} pl-8 w-44`} />
-        </div>
-        <div className="ml-auto flex gap-2">
-          <ExportButtons total={rows.length} buildReport={report} fileName={`rekap-pruning-${data?.tahun ?? ""}`} />
-        </div>
-      </div>
-
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        {[
-          ["Target pokok", fmt(tot.target)],
-          [`Sudah pruning ${data?.tahun ?? ""}`, fmt(tot.pkk)],
-          ["Progress", tot.target ? `${fmt((tot.pkk / tot.target) * 100, 2)}%` : "-"],
-          ["Blok belum pruning", `${rows.filter((b) => !b.pkk).length} dari ${rows.length}`],
-        ].map(([l, v]) => (
-          <div key={l} className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg p-3">
-            <div className="text-[11px] text-[var(--text-muted)]">{l}</div>
-            <div className="text-lg font-semibold">{v}</div>
-          </div>
-        ))}
-      </div>
-
-      {error && <p className="text-xs text-[var(--accent-red)]">{error}</p>}
-      <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg overflow-auto max-h-[70vh]">
-        <table className="w-full text-xs whitespace-nowrap">
-          <thead className="bg-[#f8fafc] text-[var(--text-secondary)] sticky top-0 z-10">
-            <tr className="text-left">
-              <th className="px-2 py-2">Estate</th>
-              <th className="px-2 py-2">Div</th>
-              <th className="px-2 py-2">Blok</th>
-              <th className="px-2 py-2 text-right">Ha</th>
-              <th className="px-2 py-2 text-right">SPH</th>
-              <th className="px-2 py-2 text-right">Target</th>
-              {BULAN.map((m) => (
-                <th key={m} className="px-2 py-2 text-right">
-                  {m}
-                </th>
-              ))}
-              <th className="px-2 py-2 text-right">Total</th>
-              <th className="px-2 py-2 text-right">Ha prun.</th>
-              <th className="px-2 py-2 text-right">%</th>
-              <th className="px-2 py-2">Terakhir</th>
-            </tr>
-          </thead>
-          <tbody>
-            {!data ? (
-              <tr>
-                <td colSpan={22} className="px-3 py-6 text-center text-[var(--text-muted)]">
-                  Memuat...
-                </td>
-              </tr>
-            ) : (
-              rows.map((b) => {
-                const p = pctOf(b);
-                const editing = edit?.key === key(b);
-                return (
-                  <tr key={key(b)} className="border-t border-[var(--border)] hover:bg-[#f8fafc]">
-                    <td className="px-2 py-1.5">{ESTATE_LABEL[b.estate] ?? b.estate}</td>
-                    <td className="px-2 py-1.5">{b.divisi ?? "-"}</td>
-                    <td className="px-2 py-1.5 font-semibold">{b.blok}</td>
-                    {editing ? (
-                      <>
-                        <td className="px-1 py-1" colSpan={3}>
-                          <div className="flex items-center gap-1">
-                            <input type="number" step="0.01" value={edit.ha} onChange={(e) => setEdit({ ...edit, ha: e.target.value })} className="w-16 rounded border border-[var(--border)] px-1 py-0.5 text-right" title="Ha" />
-                            <input type="number" step="0.01" value={edit.sph} onChange={(e) => setEdit({ ...edit, sph: e.target.value })} className="w-14 rounded border border-[var(--border)] px-1 py-0.5 text-right" title="SPH" />
-                            <button onClick={() => saveTarget(b)} title="Simpan" className="p-1 text-[var(--accent-blue)]">
-                              <Save size={13} />
-                            </button>
-                            <button onClick={() => setEdit(null)} title="Batal" className="p-1 text-[var(--text-muted)]">
-                              <X size={13} />
-                            </button>
-                          </div>
-                        </td>
-                      </>
-                    ) : (
-                      <>
-                        <td className="px-2 py-1.5 text-right">{fmt(b.ha, 2)}</td>
-                        <td className="px-2 py-1.5 text-right" title={b.target_sumber === "master" ? "Dari Master Blok" : undefined}>
-                          {fmt(b.sph, 0)}
-                          {b.target_sumber === "master" && <span className="text-[var(--text-muted)]">*</span>}
-                        </td>
-                        <td className="px-2 py-1.5 text-right">
-                          <span className="inline-flex items-center gap-1">
-                            {fmt(b.target)}
-                            {canEdit && (
-                              <button
-                                onClick={() => setEdit({ key: key(b), ha: b.ha === null ? "" : String(b.ha), sph: b.sph === null ? "" : String(Math.round(b.sph * 100) / 100) })}
-                                title="Ubah Ha / SPH target"
-                                className="text-[var(--text-muted)] hover:text-[var(--accent-blue)]"
-                              >
-                                <Pencil size={11} />
-                              </button>
-                            )}
-                          </span>
-                        </td>
-                      </>
-                    )}
-                    {b.bulan.map((v, i) => (
-                      <td key={i} className={`px-2 py-1.5 text-right ${v ? "" : "text-[var(--text-muted)]"}`}>
-                        {v ? fmt(v) : "-"}
-                      </td>
-                    ))}
-                    <td className="px-2 py-1.5 text-right font-semibold">{b.pkk ? fmt(b.pkk) : "-"}</td>
-                    <td className="px-2 py-1.5 text-right">{b.ha_pruning ? fmt(b.ha_pruning, 2) : "-"}</td>
-                    <td
-                      className={`px-2 py-1.5 text-right font-semibold ${
-                        p === null ? "" : p >= 100 ? "text-[var(--accent-green)]" : p > 0 ? "text-[var(--accent-amber)]" : "text-[var(--accent-red)]"
-                      }`}
-                    >
-                      {p === null ? "-" : `${fmt(p, 1)}%`}
-                    </td>
-                    <td className="px-2 py-1.5 text-[var(--text-secondary)]">{bulanTahun(b.terakhir)}</td>
-                  </tr>
-                );
-              })
-            )}
-          </tbody>
-          {data && rows.length > 0 && (
-            <tfoot className="bg-[#f8fafc] font-semibold sticky bottom-0">
-              <tr className="border-t border-[var(--border)]">
-                <td className="px-2 py-2" colSpan={3}>
-                  Total {rows.length} blok
-                </td>
-                <td className="px-2 py-2 text-right">{fmt(tot.ha, 2)}</td>
-                <td />
-                <td className="px-2 py-2 text-right">{fmt(tot.target)}</td>
-                {tot.bulan.map((v, i) => (
-                  <td key={i} className="px-2 py-2 text-right">
-                    {v ? fmt(v) : "-"}
-                  </td>
-                ))}
-                <td className="px-2 py-2 text-right">{fmt(tot.pkk)}</td>
-                <td className="px-2 py-2 text-right">{fmt(tot.haP, 2)}</td>
-                <td className="px-2 py-2 text-right">{tot.target ? `${fmt((tot.pkk / tot.target) * 100, 1)}%` : "-"}</td>
-                <td />
-              </tr>
-            </tfoot>
-          )}
-        </table>
-      </div>
-      <p className="text-[11px] text-[var(--text-muted)]">
-        % = pokok pruning di tahun terpilih ÷ (Ha × SPH). * = SPH dari Master Blok (blok belum punya target pruning sendiri).
-        {canEdit && " Klik ikon pensil di kolom Target untuk mengubah Ha / SPH."}
-      </p>
     </div>
   );
 }

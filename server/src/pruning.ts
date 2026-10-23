@@ -14,7 +14,9 @@ export type PruningBlok = {
   tahun_tanam: number | null;
   ha: number | null;
   sph: number | null;
+  pkk: number | null;
   kondisi: string;
+  field_number: string;
   urut: number;
   bulan: PruningBulan[];
 };
@@ -47,7 +49,9 @@ export function parsePruning(csv: string): { rows: PruningBlok[]; tahun: number[
     tt: col(/^TAHUN TANAM$/),
     ha: col(/^HA$/),
     sph: col(/^SPH$/),
+    pkk: col(/^PKK$/),
     kondisi: col(/^KONDISI/),
+    field: col(/^FIELD/),
   };
   if (c.blok < 0 || c.ha < 0) throw new Error("Kolom Blok / Ha tidak ditemukan di sheet pruning");
   const years = head.map((v, i) => [Number(v), i] as const).filter(([y]) => Number.isInteger(y) && y >= 2000 && y <= 2100);
@@ -73,7 +77,9 @@ export function parsePruning(csv: string): { rows: PruningBlok[]; tahun: number[
       tahun_tanam: c.tt >= 0 ? num(r[c.tt]) : null,
       ha: num(r[c.ha]),
       sph: c.sph >= 0 ? num(r[c.sph]) : null,
+      pkk: c.pkk >= 0 ? num(r[c.pkk]) : null,
       kondisi: c.kondisi >= 0 ? clean(r[c.kondisi]) : "",
+      field_number: c.field >= 0 ? clean(r[c.field]) : "",
       urut: rows.length + 1,
       bulan,
     });

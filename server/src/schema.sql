@@ -714,6 +714,30 @@ CREATE TABLE IF NOT EXISTS pruning_log (
 );
 CREATE INDEX IF NOT EXISTS idx_pruning_log_blok ON pruning_log(estate, upper(blok), tanggal_iso);
 CREATE INDEX IF NOT EXISTS idx_pruning_log_tanggal ON pruning_log(tanggal_iso);
+-- The Rekap Pruning rows exactly as the sheet's BLOCK DETAIL, row for row (a blok can have two rows -
+-- another tahun tanam / divisi - each with its own Ha, SPH and pruning); pkk = the sheet's PKK column
+-- (Ha x SPH, rounded). Every pruning_log entry belongs to one row (baris_id); the map adds a blok's rows
+-- up, as the mapping sheet does. Replaces pruning_target (no longer read).
+CREATE TABLE IF NOT EXISTS pruning_baris (
+  id SERIAL PRIMARY KEY,
+  estate TEXT NOT NULL,
+  divisi TEXT NOT NULL DEFAULT '',
+  blok TEXT NOT NULL,
+  planting_material TEXT NOT NULL DEFAULT '',
+  tahun_tanam INTEGER,
+  ha DOUBLE PRECISION,
+  sph DOUBLE PRECISION,
+  pkk INTEGER,
+  kondisi TEXT NOT NULL DEFAULT '',
+  field_number TEXT NOT NULL DEFAULT '',
+  urut INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_pruning_baris_blok ON pruning_baris(estate, upper(blok));
+ALTER TABLE pruning_log ADD COLUMN IF NOT EXISTS baris_id INTEGER;
+CREATE INDEX IF NOT EXISTS idx_pruning_log_baris ON pruning_log(baris_id, tanggal_iso);
+-- An entry saved without its row (e.g. by an older version of the app) goes to its blok's first row.
+UPDATE pruning_log l SET baris_id = (SELECT b.id FROM pruning_baris b WHERE b.estate = l.estate AND upper(b.blok) = upper(l.blok) ORDER BY b.urut, b.id LIMIT 1)
+WHERE l.baris_id IS NULL AND EXISTS (SELECT 1 FROM pruning_baris b WHERE b.estate = l.estate AND upper(b.blok) = upper(l.blok));
 ALTER TABLE master_oli ADD COLUMN IF NOT EXISTS estates TEXT NOT NULL DEFAULT '';
 
 -- ---- Koperasi karyawan (for now Nilam only; `koperasi` = the estate running it) ----
