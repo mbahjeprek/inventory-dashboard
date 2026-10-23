@@ -565,6 +565,25 @@ export type KopTx = {
   diperiksa_at: string | null;
   diperiksa_catatan: string;
 };
+// Chat: a room of the account (DM, estate room, group) and a message.
+export type ChatRoom = {
+  id: number;
+  jenis: "DM" | "ESTATE" | "GRUP";
+  estate: string | null;
+  nama: string;
+  lawan_id: number | null;
+  lawan_online: boolean | null;
+  last_id: number | null;
+  last_isi: string | null;
+  last_foto: boolean | null;
+  last_at: string | null;
+  last_nama: string | null;
+  last_saya: boolean | null;
+  unread: number;
+  n_member: number;
+};
+export type ChatMessage = { id: number; user_id: number; nama: string; isi: string; evidence_id: string | null; link_url: string | null; link_label: string | null; created_at: string };
+
 // Berita Acara Pemusnahan (Klinik / Koperasi): the stored document and its approval (capture WA) and closing.
 export type BeritaAcara = {
   id: number;
@@ -908,6 +927,16 @@ export const api = {
   logout: () => req<{ success: boolean }>("/api/auth/logout", { method: "POST" }),
 
   me: () => req<{ user: AuthUser }>("/api/auth/me"),
+  chatRooms: () => req<ChatRoom[]>("/api/chat/rooms"),
+  chatUnread: (after: number) => req<{ total: number; max: number; baru: { id: number; room_id: number; isi: string; foto: boolean; dari: string; room_nama: string | null }[] }>(`/api/chat/unread?after=${after}`),
+  chatUsers: () => req<{ id: number; username: string; nama: string; role: string; estates: string | null; online: boolean }[]>("/api/chat/users"),
+  chatDm: (user_id: number) => req<{ id: number }>("/api/chat/dm", { method: "POST", body: JSON.stringify({ user_id }) }),
+  chatGrup: (nama: string, user_ids: number[]) => req<{ id: number }>("/api/chat/grup", { method: "POST", body: JSON.stringify({ nama, user_ids }) }),
+  chatMessages: (room: number, after = 0, before = 0) =>
+    req<{ messages: ChatMessage[]; reads: { user_id: number; last_read_id: number; nama: string }[] }>(`/api/chat/rooms/${room}/messages?after=${after}&before=${before}`),
+  chatSend: (room: number, body: { isi: string; evidence_id?: string | null; link_url?: string | null; link_label?: string | null }) =>
+    req<{ id: number }>(`/api/chat/rooms/${room}/messages`, { method: "POST", body: JSON.stringify(body) }),
+  chatRead: (room: number, last_id: number) => req<{ success: boolean }>(`/api/chat/rooms/${room}/read`, { method: "POST", body: JSON.stringify({ last_id }) }),
   userOnline: () =>
     req<{ id: number; username: string; nama: string; role: string; estates: string | null; last_seen_at: string; last_page: string | null; online: boolean }[]>("/api/user-online"),
 

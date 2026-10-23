@@ -108,7 +108,7 @@ export function PinjamanNotif() {
   return (
     <div
       role="alert"
-      className={`fixed z-40 bottom-4 right-4 left-4 sm:left-auto sm:w-[380px] rounded-lg border shadow-lg bg-[var(--bg-card)] ${late.length ? "border-[var(--accent-red-border)]" : "border-[var(--accent-amber-border)]"}`}
+      className={`fixed z-40 bottom-20 right-4 left-4 sm:left-auto sm:right-20 sm:bottom-4 sm:w-[380px] rounded-lg border shadow-lg bg-[var(--bg-card)] ${late.length ? "border-[var(--accent-red-border)]" : "border-[var(--accent-amber-border)]"}`}
     >
       <div className={`flex items-start gap-2.5 px-4 py-3 rounded-t-lg ${late.length ? "bg-[var(--accent-red-bg)] text-[var(--accent-red)]" : "bg-[var(--accent-amber-bg)] text-[var(--accent-amber)]"}`}>
         <BellRing size={18} className="shrink-0 mt-0.5" />

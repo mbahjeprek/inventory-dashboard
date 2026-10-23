@@ -946,3 +946,40 @@ CREATE INDEX IF NOT EXISTS idx_ba_item_ref ON berita_acara_item(modul, ref_id);
 -- the app page it was on (sent by the browser). Online = seen in the last 5 minutes.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS last_page TEXT;
+
+-- Chat between accounts: DM (two people, dm_key "<smaller id>-<larger id>"), ESTATE (one room per estate,
+-- everyone who has that estate) and GRUP (made by a Super User, its chat_member rows). chat_read keeps
+-- how far each account has read a room (receipts and unread counts). A message may carry a photo
+-- (evidence_id) and a link to a page of the app (link_url / link_label).
+CREATE TABLE IF NOT EXISTS chat_room (
+  id SERIAL PRIMARY KEY,
+  jenis TEXT NOT NULL,
+  nama TEXT NOT NULL DEFAULT '',
+  estate TEXT UNIQUE,
+  dm_key TEXT UNIQUE,
+  created_by INTEGER,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS chat_member (
+  room_id INTEGER NOT NULL REFERENCES chat_room(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL,
+  PRIMARY KEY (room_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_chat_member_user ON chat_member(user_id);
+CREATE TABLE IF NOT EXISTS chat_message (
+  id SERIAL PRIMARY KEY,
+  room_id INTEGER NOT NULL REFERENCES chat_room(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL,
+  isi TEXT NOT NULL DEFAULT '',
+  evidence_id UUID,
+  link_url TEXT,
+  link_label TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_chat_message_room ON chat_message(room_id, id);
+CREATE TABLE IF NOT EXISTS chat_read (
+  room_id INTEGER NOT NULL REFERENCES chat_room(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL,
+  last_read_id INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (room_id, user_id)
+);

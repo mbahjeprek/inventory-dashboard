@@ -10,7 +10,7 @@ const MAX_SIDE = 1280;
 const QUALITY = 0.7;
 const MAX_ZOOM = 6;
 
-async function shrink(file: File): Promise<string> {
+export async function shrink(file: File): Promise<string> {
   const url = URL.createObjectURL(file);
   try {
     const img = await new Promise<HTMLImageElement>((resolve, reject) => {

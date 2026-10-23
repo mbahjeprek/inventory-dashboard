@@ -175,6 +175,8 @@ function requiredPerms(req: express.Request): Need {
   if (is(/^\/stock-opname(\/|$)/)) return null;
   // Log Stok Opname: the route lists the modules / estates whose opnames the account may see.
   if (is(/^\/stock-opname-log$/)) return null;
+  // Chat: any logged-in account; each route checks that the room is one of the account's.
+  if (is(/^\/chat(\/|$)/)) return null;
   // Berita Acara Pemusnahan: each route checks the modul's permission (Klinik / Koperasi) and the unit itself.
   if (is(/^\/berita-acara(\/|$)/)) return null;
   // Pinjaman antar estate: each route checks the loan's module (view / input) and estates itself.
@@ -7923,6 +7925,173 @@ app.get("/api/pemakaian/detail", async (req, res) => {
   res.json({ data });
 });
 
+// ---- Chat (see schema.sql chat_*): DM, a room per estate, groups made by a Super User ----
+// The rooms an account is in: its DMs and groups, and the estate rooms of its estates (made when first needed).
+const CHAT_ROOMS_SQL = `
+  SELECT r.id FROM chat_room r
+   WHERE (r.jenis IN ('DM', 'GRUP') AND EXISTS (SELECT 1 FROM chat_member m WHERE m.room_id = r.id AND m.user_id = @uid))
+      OR (r.jenis = 'ESTATE' AND r.estate = ANY(@estates::text[]))`;
+async function chatEstateRooms(user: SessionUser) {
+  const own = ESTATES.filter((e) => estateAllowed(user, e)) as string[];
+  if (own.length)
+    await execute(
+      `INSERT INTO chat_room (jenis, nama, estate) SELECT 'ESTATE', 'Estate ' || e, e FROM unnest(@own::text[]) e ON CONFLICT (estate) DO NOTHING`,
+      { own }
+    );
+  return own;
+}
+async function chatRoomOf(req: express.Request, res: express.Response) {
+  const own = ESTATES.filter((e) => estateAllowed(req.user!, e)) as string[];
+  const room = await queryOne<any>(`SELECT r.* FROM chat_room r WHERE r.id = @id AND r.id IN (${CHAT_ROOMS_SQL})`, { id: Number(req.params.id) || 0, uid: req.user!.id, estates: own });
+  if (!room) res.status(404).json({ error: "Percakapan tidak ditemukan" });
+  return room;
+}
+
+// The account's rooms, newest activity first: name (a DM is named after the other person), last message, unread.
+app.get("/api/chat/rooms", async (req, res) => {
+  const u = req.user!;
+  const own = await chatEstateRooms(u);
+  const rows = await queryMany(
+    `SELECT r.id, r.jenis, r.estate,
+            CASE WHEN r.jenis = 'DM' THEN COALESCE(NULLIF(o.nama, ''), o.username) ELSE r.nama END AS nama,
+            o.id AS lawan_id, o.last_seen_at > now() - interval '5 minutes' AS lawan_online,
+            lm.id AS last_id, lm.isi AS last_isi, lm.evidence_id IS NOT NULL AS last_foto, lm.created_at AS last_at,
+            COALESCE(NULLIF(lu.nama, ''), lu.username) AS last_nama, lm.user_id = @uid AS last_saya,
+            (SELECT COUNT(*)::int FROM chat_message x WHERE x.room_id = r.id AND x.user_id <> @uid AND x.id > COALESCE(cr.last_read_id, 0)) AS unread,
+            (SELECT COUNT(*)::int FROM chat_member m WHERE m.room_id = r.id) AS n_member
+       FROM chat_room r
+       LEFT JOIN chat_read cr ON cr.room_id = r.id AND cr.user_id = @uid
+       LEFT JOIN LATERAL (SELECT u2.* FROM chat_member m JOIN users u2 ON u2.id = m.user_id WHERE r.jenis = 'DM' AND m.room_id = r.id AND m.user_id <> @uid LIMIT 1) o ON true
+       LEFT JOIN LATERAL (SELECT * FROM chat_message x WHERE x.room_id = r.id ORDER BY x.id DESC LIMIT 1) lm ON true
+       LEFT JOIN users lu ON lu.id = lm.user_id
+      WHERE r.id IN (${CHAT_ROOMS_SQL})
+      ORDER BY COALESCE(lm.created_at, r.created_at) DESC`,
+    { uid: u.id, estates: own }
+  );
+  res.json(rows);
+});
+
+// Unread total and the newest unread messages (for the pop-up), polled by every open tab.
+app.get("/api/chat/unread", async (req, res) => {
+  const u = req.user!;
+  const own = ESTATES.filter((e) => estateAllowed(u, e)) as string[];
+  const after = Number(req.query.after) || 0;
+  const total = await queryOne<{ n: number }>(
+    `SELECT COUNT(*)::int n FROM chat_message x LEFT JOIN chat_read cr ON cr.room_id = x.room_id AND cr.user_id = @uid
+      WHERE x.room_id IN (${CHAT_ROOMS_SQL}) AND x.user_id <> @uid AND x.id > COALESCE(cr.last_read_id, 0)`,
+    { uid: u.id, estates: own }
+  );
+  const baru = after
+    ? await queryMany(
+        `SELECT x.id, x.room_id, x.isi, x.evidence_id IS NOT NULL AS foto, COALESCE(NULLIF(su.nama, ''), su.username) AS dari,
+                CASE WHEN r.jenis = 'DM' THEN NULL ELSE r.nama END AS room_nama
+           FROM chat_message x JOIN chat_room r ON r.id = x.room_id JOIN users su ON su.id = x.user_id
+           LEFT JOIN chat_read cr ON cr.room_id = x.room_id AND cr.user_id = @uid
+          WHERE x.room_id IN (${CHAT_ROOMS_SQL}) AND x.user_id <> @uid AND x.id > @after AND x.id > COALESCE(cr.last_read_id, 0)
+          ORDER BY x.id DESC LIMIT 5`,
+        { uid: u.id, estates: own, after }
+      )
+    : [];
+  const max = await queryOne<{ m: number }>(`SELECT COALESCE(MAX(x.id), 0)::int m FROM chat_message x WHERE x.room_id IN (${CHAT_ROOMS_SQL})`, { uid: u.id, estates: own });
+  res.json({ total: total!.n, baru, max: max!.m });
+});
+
+// People to chat with (and whether they are online).
+app.get("/api/chat/users", async (req, res) => {
+  res.json(
+    await queryMany(
+      `SELECT id, username, nama, role, estates, last_seen_at > now() - interval '5 minutes' AS online FROM users WHERE id <> @uid ORDER BY (last_seen_at > now() - interval '5 minutes') DESC NULLS LAST, COALESCE(NULLIF(nama, ''), username)`,
+      { uid: req.user!.id }
+    )
+  );
+});
+
+// The DM room with one account (made the first time).
+app.post("/api/chat/dm", async (req, res) => {
+  const other = await queryOne<{ id: number }>("SELECT id FROM users WHERE id = @id", { id: Number(req.body?.user_id) || 0 });
+  if (!other || other.id === req.user!.id) return res.status(400).json({ error: "Pengguna tidak valid" });
+  const key = [req.user!.id, other.id].sort((a, b) => a - b).join("-");
+  const room = await withTransaction(async (c) => {
+    const r = await queryOne<{ id: number }>(
+      "INSERT INTO chat_room (jenis, dm_key, created_by) VALUES ('DM', @key, @uid) ON CONFLICT (dm_key) DO UPDATE SET dm_key = EXCLUDED.dm_key RETURNING id",
+      { key, uid: req.user!.id },
+      c
+    );
+    await execute("INSERT INTO chat_member (room_id, user_id) VALUES (@r, @a), (@r, @b) ON CONFLICT DO NOTHING", { r: r!.id, a: req.user!.id, b: other.id }, c);
+    return r!;
+  });
+  res.json(room);
+});
+
+// A group of chosen accounts (Super User).
+app.post("/api/chat/grup", requireSuperuser, async (req, res) => {
+  const nama = String(req.body?.nama ?? "").trim();
+  const ids = [...new Set([req.user!.id, ...(Array.isArray(req.body?.user_ids) ? req.body.user_ids : []).map(Number).filter((n: number) => n > 0)])];
+  if (!nama) return res.status(400).json({ error: "Isi nama grup" });
+  if (ids.length < 2) return res.status(400).json({ error: "Pilih minimal satu anggota" });
+  const room = await withTransaction(async (c) => {
+    const r = await queryOne<{ id: number }>("INSERT INTO chat_room (jenis, nama, created_by) VALUES ('GRUP', @nama, @uid) RETURNING id", { nama, uid: req.user!.id }, c);
+    await execute("INSERT INTO chat_member (room_id, user_id) SELECT @r, u.id FROM users u WHERE u.id = ANY(@ids::int[])", { r: r!.id, ids }, c);
+    return r!;
+  });
+  res.json(room);
+});
+
+// Messages of a room: the last 60 (or those after `after` / before `before`), with who read how far.
+app.get("/api/chat/rooms/:id/messages", async (req, res) => {
+  const room = await chatRoomOf(req, res);
+  if (!room) return;
+  const after = Number(req.query.after) || 0;
+  const before = Number(req.query.before) || 0;
+  const rows = await queryMany(
+    `SELECT * FROM (
+       SELECT x.id, x.user_id, COALESCE(NULLIF(u.nama, ''), u.username) AS nama, x.isi, x.evidence_id, x.link_url, x.link_label, x.created_at
+         FROM chat_message x JOIN users u ON u.id = x.user_id
+        WHERE x.room_id = @room ${after ? "AND x.id > @after" : ""} ${before ? "AND x.id < @before" : ""}
+        ORDER BY x.id DESC LIMIT 60) t ORDER BY id`,
+    { room: room.id, after, before }
+  );
+  const reads = await queryMany(
+    `SELECT cr.user_id, cr.last_read_id, COALESCE(NULLIF(u.nama, ''), u.username) AS nama FROM chat_read cr JOIN users u ON u.id = cr.user_id WHERE cr.room_id = @room AND cr.user_id <> @uid`,
+    { room: room.id, uid: req.user!.id }
+  );
+  res.json({ messages: rows, reads });
+});
+
+app.post("/api/chat/rooms/:id/messages", async (req, res) => {
+  const room = await chatRoomOf(req, res);
+  if (!room) return;
+  const isi = String(req.body?.isi ?? "").trim().slice(0, 4000);
+  const linkUrl = typeof req.body?.link_url === "string" && req.body.link_url.startsWith("/") ? req.body.link_url.slice(0, 300) : null;
+  const linkLabel = linkUrl ? String(req.body?.link_label ?? "").slice(0, 120) : null;
+  if (!isi && !req.body?.evidence_id && !linkUrl) return res.status(400).json({ error: "Pesan kosong" });
+  const evidence = req.body?.evidence_id ? await claimEvidence(req, res) : null;
+  if (evidence === undefined) return;
+  const row = await queryOne<{ id: number }>(
+    "INSERT INTO chat_message (room_id, user_id, isi, evidence_id, link_url, link_label) VALUES (@room, @uid, @isi, @ev::uuid, @url, @label) RETURNING id",
+    { room: room.id, uid: req.user!.id, isi, ev: evidence, url: linkUrl, label: linkLabel }
+  );
+  // Sending means having read everything before it.
+  await execute(
+    `INSERT INTO chat_read (room_id, user_id, last_read_id) VALUES (@room, @uid, @id)
+     ON CONFLICT (room_id, user_id) DO UPDATE SET last_read_id = GREATEST(chat_read.last_read_id, EXCLUDED.last_read_id)`,
+    { room: room.id, uid: req.user!.id, id: row!.id }
+  );
+  res.json({ id: row!.id });
+});
+
+app.post("/api/chat/rooms/:id/read", async (req, res) => {
+  const room = await chatRoomOf(req, res);
+  if (!room) return;
+  const id = Number(req.body?.last_id) || 0;
+  await execute(
+    `INSERT INTO chat_read (room_id, user_id, last_read_id) VALUES (@room, @uid, @id)
+     ON CONFLICT (room_id, user_id) DO UPDATE SET last_read_id = GREATEST(chat_read.last_read_id, EXCLUDED.last_read_id)`,
+    { room: room.id, uid: req.user!.id, id }
+  );
+  res.json({ success: true });
+});
+
 // ---- Berita Acara Pemusnahan (see schema.sql berita_acara): Klinik obat / BHP and Koperasi barang rusak ----
 type BaModul = "KLINIK" | "KOPERASI";
 const BA_ALASAN: Record<string, string> = { EXPIRED: "Kedaluwarsa", RUSAK: "Rusak", RETUR: "Retur ke supplier" };
@@ -10023,7 +10192,7 @@ app.get("/api/evidence/:id", async (req, res) => {
 // photo storage isn't set up on this server (SUPABASE_URL / SUPABASE_SERVICE_KEY), so no photo is
 // asked and transactions keep working until it is.
 // Every table whose rows keep a foto bukti (schema.sql evidence_id columns).
-const EVIDENCE_HOLDERS = ["transactions", "stock_in_log", "stock_out_log", "gudang_stock_tx", "klinik_stock_tx", "bbm_log", "pupuk_log", "oli_log", "pinjaman", "pinjaman_kembali", "klinik_kunjungan", "koperasi_tx", "berita_acara"];
+const EVIDENCE_HOLDERS = ["transactions", "stock_in_log", "stock_out_log", "gudang_stock_tx", "klinik_stock_tx", "bbm_log", "pupuk_log", "oli_log", "pinjaman", "pinjaman_kembali", "klinik_kunjungan", "koperasi_tx", "berita_acara", "chat_message"];
 
 async function claimEvidence(req: express.Request, res: express.Response): Promise<string | null | undefined> {
   if (!evidenceEnabled()) return null;

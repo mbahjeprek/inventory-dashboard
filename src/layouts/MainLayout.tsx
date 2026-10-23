@@ -8,7 +8,7 @@ import { useOpenPinjaman } from "../hooks/useOpenPinjaman";
 import { useTableDragScroll } from "../hooks/useDragScroll";
 import { StatusUpdateBanner, useStatusUpdate } from "../components/StatusUpdate";
 import { useAuth } from "../context/AuthContext";
-import { api } from "../lib/api";
+import { ChatWidget } from "../components/ChatWidget";
 
 export function MainLayout() {
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -19,13 +19,7 @@ export function MainLayout() {
   const { refresh: refreshUser } = useAuth();
   // Every list table can be dragged with the mouse, up / down and sideways.
   useTableDragScroll();
-  // Heartbeat while the tab is visible: someone reading a page without clicking still shows as online.
-  useEffect(() => {
-    const t = setInterval(() => {
-      if (document.visibilityState === "visible") api.me().catch(() => {});
-    }, 120_000);
-    return () => clearInterval(t);
-  }, []);
+
 
   // Close the phone drawer once a menu item has navigated somewhere; open loans are re-read so the
   // warnings follow a loan made or returned a moment ago.
@@ -55,6 +49,8 @@ export function MainLayout() {
           <Outlet />
         </main>
         <PinjamanNotif />
+        {/* Chat (its unread check every 20 s also keeps the account "online" while a tab is open). */}
+        <ChatWidget />
         <SessionExpiredModal />
       </div>
     </div>
