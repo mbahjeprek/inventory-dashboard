@@ -5,6 +5,7 @@ import cookieParser from "cookie-parser";
 import type { PoolClient } from "pg";
 import { queryMany, queryOne, execute, withTransaction, txTime } from "./db.js";
 import { canonProvider, labelKey, splitDiagnosis } from "./klinikLaporan.js";
+import { parsePruning, PRUNING_SHEET } from "./pruning.js";
 import { namaKey, namaMirip, sameTahun } from "./pasien.js";
 import { COOKIE_NAME, hashPassword, verifyPassword, signSession, verifySession, ESTATES, ALL_PERMS, MODULE_PERMS, parseList, type SessionUser } from "./auth.js";
 
@@ -2585,8 +2586,100 @@ app.get("/api/peta-blok", async (req, res) => {
      ORDER BY c.gy, c.gx`,
     { estates, from, to }
   );
-  const legend = await queryMany("SELECT id, dari, label, warna FROM peta_legend ORDER BY dari");
-  res.json({ estates, cells, legend });
+  const legend = await queryMany("SELECT id, dari, label, warna FROM peta_legend WHERE jenis = 'pupuk' ORDER BY dari");
+  const pruningLegend = await queryMany("SELECT id, dari, label, warna FROM peta_legend WHERE jenis = 'pruning' ORDER BY dari");
+  res.json({ estates, cells, legend, pruningLegend });
+});
+
+// ---- Rekap Pruning (see schema.sql pruning_blok / pruning_bulan and pruning.ts) ----
+// The sheet stays the place where pruning is filled in; the app re-reads it when its copy is older
+// than PRUNING_TTL (on the first look at the map after that), or on Sinkron sekarang. One sync at a
+// time (advisory lock); a failed read keeps the last good copy and shows the error.
+const PRUNING_TTL = 10 * 60_000;
+async function syncPruning(force: boolean): Promise<void> {
+  const fresh = (at: Date | null, ms: number) => !!at && Date.now() - new Date(at).getTime() < ms;
+  const st = await queryOne<{ checked_at: Date | null }>("SELECT checked_at FROM pruning_sync WHERE id = 1");
+  if (fresh(st?.checked_at ?? null, force ? 20_000 : PRUNING_TTL)) return;
+  let parsed: ReturnType<typeof parsePruning>;
+  try {
+    const r = await fetch(PRUNING_SHEET, { redirect: "follow", signal: AbortSignal.timeout(20_000) });
+    if (!r.ok) throw new Error(`Sheet tidak bisa dibaca (HTTP ${r.status}); pastikan aksesnya "siapa saja yang memiliki link"`);
+    parsed = parsePruning(await r.text());
+  } catch (e: any) {
+    const msg = e?.name === "TimeoutError" ? "Sheet terlalu lama merespons" : String(e?.message ?? e);
+    await execute(
+      `INSERT INTO pruning_sync (id, checked_at, error) VALUES (1, now(), @msg)
+       ON CONFLICT (id) DO UPDATE SET checked_at = now(), error = @msg`,
+      { msg }
+    );
+    return;
+  }
+  const { rows } = parsed;
+  await withTransaction(async (c) => {
+    await c.query("SELECT pg_advisory_xact_lock(hashtext('pruning_sync'))");
+    // Another request synced while this one was reading the sheet.
+    const again = await queryOne<{ checked_at: Date | null }>("SELECT checked_at FROM pruning_sync WHERE id = 1", {}, c);
+    if (fresh(again?.checked_at ?? null, 20_000)) return;
+    await execute("DELETE FROM pruning_blok", {}, c);
+    const ids = await queryMany<{ id: number; urut: number }>(
+      `INSERT INTO pruning_blok (estate, divisi, blok, planting_material, tahun_tanam, ha, sph, kondisi, urut)
+       SELECT * FROM unnest(@estate::text[], @divisi::text[], @blok::text[], @pm::text[], @tt::int[], @ha::float8[], @sph::float8[], @kondisi::text[], @urut::int[])
+       RETURNING id, urut`,
+      {
+        estate: rows.map((r) => r.estate),
+        divisi: rows.map((r) => r.divisi),
+        blok: rows.map((r) => r.blok),
+        pm: rows.map((r) => r.planting_material),
+        tt: rows.map((r) => (r.tahun_tanam === null ? null : Math.round(r.tahun_tanam))),
+        ha: rows.map((r) => r.ha),
+        sph: rows.map((r) => r.sph),
+        kondisi: rows.map((r) => r.kondisi),
+        urut: rows.map((r) => r.urut),
+      },
+      c
+    );
+    const idOf = new Map(ids.map((x) => [x.urut, x.id]));
+    const b = rows.flatMap((r) => r.bulan.map((m) => ({ ...m, blok_id: idOf.get(r.urut)! })));
+    await execute(
+      `INSERT INTO pruning_bulan (blok_id, tahun, bulan, pkk, ha)
+       SELECT * FROM unnest(@blok_id::int[], @tahun::int[], @bulan::int[], @pkk::float8[], @ha::float8[])`,
+      { blok_id: b.map((x) => x.blok_id), tahun: b.map((x) => x.tahun), bulan: b.map((x) => x.bulan), pkk: b.map((x) => x.pkk), ha: b.map((x) => x.ha) },
+      c
+    );
+    await execute(
+      `INSERT INTO pruning_sync (id, checked_at, synced_at, baris, error) VALUES (1, now(), now(), @n, NULL)
+       ON CONFLICT (id) DO UPDATE SET checked_at = now(), synced_at = now(), baris = @n, error = NULL`,
+      { n: rows.length },
+      c
+    );
+  });
+}
+
+// Pruning per blok of the account's estates for one year (as the mapping sheet: realisasi pokok vs
+// Ha x SPH), with the months of that year and the last month pruned in any year. ?sync=1 re-reads
+// the sheet now.
+app.get("/api/peta-blok/pruning", async (req, res) => {
+  await syncPruning(req.query.sync === "1");
+  const estates = blokEstates(req);
+  const tahunList = (await queryMany<{ t: number }>("SELECT DISTINCT tahun t FROM pruning_bulan ORDER BY 1")).map((r) => r.t);
+  const now = new Date().getFullYear();
+  const tahun = Number(req.query.tahun) || now;
+  const blok = await queryMany(
+    `SELECT b.estate, upper(b.blok) blok, string_agg(DISTINCT NULLIF(b.divisi, ''), ' / ') divisi,
+       SUM(b.ha)::float8 ha, SUM(b.ha * b.sph)::float8 target, string_agg(DISTINCT NULLIF(b.kondisi, ''), ' / ') kondisi,
+       COALESCE(SUM(y.pkk), 0)::float8 pkk, COALESCE(SUM(y.ha), 0)::float8 ha_pruning,
+       (SELECT array_agg(COALESCE(x.s, 0) ORDER BY g.m) FROM generate_series(1, 12) g(m)
+          LEFT JOIN (SELECT pb.bulan, SUM(pb.pkk)::float8 s FROM pruning_bulan pb
+                     WHERE pb.blok_id = ANY(array_agg(b.id)) AND pb.tahun = @tahun GROUP BY 1) x ON x.bulan = g.m) bulan,
+       (SELECT max(pb.tahun * 100 + pb.bulan) FROM pruning_bulan pb WHERE pb.blok_id = ANY(array_agg(b.id)) AND pb.pkk > 0) terakhir
+     FROM pruning_blok b
+     LEFT JOIN (SELECT blok_id, SUM(pkk) pkk, SUM(ha) ha FROM pruning_bulan WHERE tahun = @tahun GROUP BY 1) y ON y.blok_id = b.id
+     WHERE b.estate = ANY(@estates)
+     GROUP BY 1, 2`,
+    { estates, tahun }
+  );
+  const sync = await queryOne("SELECT synced_at, checked_at, baris, error FROM pruning_sync WHERE id = 1");
+  res.json({ tahun, tahunList, blok, sync, sheet: PRUNING_SHEET.replace(/\/export\?format=csv&gid=(\d+)$/, "/edit#gid=$1") });
 });
 
 // Warna Bebas: paint (or clear, warna null) a set of boxes.
@@ -2615,6 +2708,7 @@ app.put("/api/peta-blok/warna", async (req, res) => {
 
 // The progress legend: from which % each colour starts, its text and colour.
 app.put("/api/peta-blok/legend", async (req, res) => {
+  const jenis = req.body?.jenis === "pruning" ? "pruning" : "pupuk";
   const items = (Array.isArray(req.body?.items) ? req.body.items : []).map((i: any) => ({
     dari: Number(i?.dari),
     label: String(i?.label ?? "").trim(),
@@ -2625,10 +2719,11 @@ app.put("/api/peta-blok/legend", async (req, res) => {
   if (bad) return res.status(400).json({ error: "Batas % harus angka ≥ 0 dan warna harus dipilih" });
   if (!items.some((i: any) => i.dari === 0)) return res.status(400).json({ error: "Harus ada warna yang mulai dari 0%" });
   await withTransaction(async (c) => {
-    await execute("DELETE FROM peta_legend", {}, c);
-    for (const i of items) await execute("INSERT INTO peta_legend (dari, label, warna) VALUES (@dari, @label, @warna)", { ...i, warna: i.warna.toLowerCase() }, c);
+    await execute("DELETE FROM peta_legend WHERE jenis = @jenis", { jenis }, c);
+    for (const i of items)
+      await execute("INSERT INTO peta_legend (dari, label, warna, jenis) VALUES (@dari, @label, @warna, @jenis)", { ...i, warna: i.warna.toLowerCase(), jenis }, c);
   });
-  await logActivity(req, { module: "PUPUK", estate: null, aksi: "Ubah Legenda Peta Blok", objek: items.map((i: any) => `${i.dari}%: ${i.warna}`).join(", ") });
+  await logActivity(req, { module: "PUPUK", estate: null, aksi: `Ubah Legenda Peta Blok (${jenis === "pruning" ? "Pruning" : "Pemupukan"})`, objek: items.map((i: any) => `${i.dari}%: ${i.warna}`).join(", ") });
   res.json({ success: true });
 });
 

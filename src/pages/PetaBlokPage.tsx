@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Download, Eraser, Hand, Lock, LockOpen, Maximize2, Minimize2, Minus, Paintbrush, Plus, Save, Search, Trash2 } from "lucide-react";
-import { api, errorText, type PetaBlok, type PetaCell, type PetaLegend } from "../lib/api";
+import { Download, Eraser, ExternalLink, Hand, Lock, LockOpen, Maximize2, Minimize2, Minus, Paintbrush, Plus, RefreshCw, Save, Search, Trash2 } from "lucide-react";
+import { api, errorText, type PetaBlok, type PetaCell, type PetaLegend, type PetaPruning, type PruningBlok } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { can } from "../lib/access";
 
@@ -17,13 +17,20 @@ const textOn = (hex: string) => {
   return l > 0.55 ? "#1a2634" : "#ffffff";
 };
 const pctOf = (c: PetaCell) => (c.pkk ? ((c.kg ?? 0) / c.pkk) * 100 : null);
+const BULAN = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
+const yyyymm = (n: number | null) => (n ? `${BULAN[(n % 100) - 1]} ${Math.floor(n / 100)}` : "-");
+const keyOf = (estate: string | null, blok: string) => `${estate}|${blok.toUpperCase()}`;
+const pruningPct = (p: PruningBlok | undefined) => (p?.target ? (p.pkk / p.target) * 100 : null);
+const jamTgl = (iso: string) =>
+  new Date(iso).toLocaleString("id-ID", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Jakarta" });
 
-type Mode = "progress" | "bebas";
+type Mode = "progress" | "pruning" | "bebas";
 type Preset = "semua" | "tahun" | "6" | "custom";
 
 // Master Data > Peta Blok: the AKSS block map as in the "mapping pemupukan npk akss" sheet. Progress
-// pemupukan colours every blok by kg NPK out to it / its PKK, with an editable legend; Warna Bebas
-// lets the user paint blok any colour (saved for everyone).
+// pemupukan colours every blok by kg NPK out to it / its PKK, with an editable legend; Progress
+// pruning by pokok pruned in a year (Rekap Pruning sheet, synced) / Ha x SPH, with its own legend;
+// Warna Bebas lets the user paint blok any colour (saved for everyone).
 export function PetaBlokPage() {
   const [data, setData] = useState<PetaBlok | null>(null);
   const [error, setError] = useState("");
@@ -58,7 +65,11 @@ export function PetaBlokPage() {
   }, []);
   const [hover, setHover] = useState<PetaCell | null>(null);
   const [paint, setPaint] = useState<string | null>("#6aa84f");
+  // The legend being shown / edited: the pemupukan one, or the pruning one on the pruning tab.
   const [legend, setLegend] = useState<PetaLegend[]>([]);
+  const [pruning, setPruning] = useState<PetaPruning | null>(null);
+  const [tahun, setTahun] = useState<number | null>(null);
+  const [syncing, setSyncing] = useState(false);
   const [legendDirty, setLegendDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -126,14 +137,36 @@ export function PetaBlokPage() {
           ? { dateFrom: custom.from, dateTo: custom.to }
           : { dateFrom: "", dateTo: "" };
 
+  const legendOf = (d: PetaBlok, m: Mode) => (m === "pruning" ? d.pruningLegend : d.legend);
   const load = () =>
     api
       .petaBlok(range)
-      .then((d) => {
-        setData(d);
-        if (!legendDirty) setLegend(d.legend);
-      })
+      .then(setData)
       .catch((e) => setError(errorText(e, "Gagal memuat peta")));
+  // The legend follows the tab and the saved one, unless it is being edited.
+  useEffect(() => {
+    if (data && !legendDirty) setLegend(legendOf(data, mode));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, mode]);
+  // Pruning: loaded with the tab (the server re-reads the sheet when its copy is old), or now.
+  const loadPruning = (sync = false) => {
+    setSyncing(sync);
+    return api
+      .petaPruning(tahun, sync)
+      .then(setPruning)
+      .catch((e) => setError(errorText(e, "Gagal memuat data pruning")))
+      .finally(() => setSyncing(false));
+  };
+  useEffect(() => {
+    if (mode === "pruning") loadPruning();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, tahun]);
+  const pickMode = (m: Mode) => {
+    setMode(m);
+    setLegendDirty(false);
+  };
+  const pruneOf = useMemo(() => new Map((pruning?.blok ?? []).map((p) => [keyOf(p.estate, p.blok), p])), [pruning]);
+  const pr = (c: PetaCell) => pruneOf.get(keyOf(c.estate, c.label));
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -146,8 +179,9 @@ export function PetaBlokPage() {
   const CW = 70 * zoom;
   const CH = 26 * zoom;
   const sorted = [...legend].sort((a, b) => b.dari - a.dari);
+  const pctFor = (c: PetaCell) => (mode === "pruning" ? pruningPct(pr(c)) : pctOf(c));
   const autoColor = (c: PetaCell) => {
-    const p = pctOf(c);
+    const p = pctFor(c);
     if (p === null) return NO_DATA;
     return sorted.find((l) => p >= l.dari)?.warna ?? "#ffffff";
   };
@@ -165,11 +199,19 @@ export function PetaBlokPage() {
   }, [q, data]);
 
   // Totals like the sheet's (POKOK, HA, TON, %) over the blok of the chosen estate.
-  const scope = blok.filter((c) => c.pkk !== null && (!estate || c.estate === estate));
+  const scope = blok.filter((c) => (mode === "pruning" ? !!pr(c) : c.pkk !== null) && (!estate || c.estate === estate));
   const tot = scope.reduce((s, c) => ({ pkk: s.pkk + (c.pkk ?? 0), ha: s.ha + (c.ha ?? 0), kg: s.kg + (c.kg ?? 0) }), { pkk: 0, ha: 0, kg: 0 });
+  // Pruning totals over the blok on the map, like the sheet's (target pokok, realisasi, %).
+  const totP = scope.reduce(
+    (s, c) => {
+      const p = pr(c);
+      return { target: s.target + (p?.target ?? 0), pkk: s.pkk + (p?.pkk ?? 0), ha: s.ha + (p?.ha ?? 0), haP: s.haP + (p?.ha_pruning ?? 0), belum: s.belum + (p && !p.pkk ? 1 : 0) };
+    },
+    { target: 0, pkk: 0, ha: 0, haP: 0, belum: 0 }
+  );
   const countOf = (l: PetaLegend) =>
     scope.filter((c) => {
-      const p = pctOf(c);
+      const p = pctFor(c);
       return p !== null && sorted.find((x) => p >= x.dari) === l;
     }).length;
 
@@ -205,7 +247,10 @@ export function PetaBlokPage() {
     setSaving(true);
     setError("");
     try {
-      await api.petaBlokLegend(legend.map(({ dari, label, warna }) => ({ dari, label, warna })));
+      await api.petaBlokLegend(
+        legend.map(({ dari, label, warna }) => ({ dari, label, warna })),
+        mode === "pruning" ? "pruning" : "pupuk"
+      );
       setLegendDirty(false);
       load();
     } catch (e) {
@@ -237,7 +282,7 @@ export function PetaBlokPage() {
       ctx.fillRect(0, 0, w, h);
       ctx.drawImage(img, 0, 0, w, h);
       const a = document.createElement("a");
-      a.download = `peta-blok-${mode === "bebas" ? "warna-bebas" : "progress-pemupukan"}-${localIso(new Date())}.png`;
+      a.download = `peta-blok-${mode === "bebas" ? "warna-bebas" : mode === "pruning" ? `progress-pruning-${pruning?.tahun ?? ""}` : "progress-pemupukan"}-${localIso(new Date())}.png`;
       a.href = canvas.toDataURL("image/png");
       a.click();
     };
@@ -247,13 +292,14 @@ export function PetaBlokPage() {
   const inputCls = "text-sm rounded-md border border-[var(--border)] px-3 py-2 bg-white";
   const tab = (m: Mode, label: string) => (
     <button
-      onClick={() => setMode(m)}
+      onClick={() => pickMode(m)}
       className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px ${mode === m ? "border-[var(--accent-blue)] text-[var(--accent-blue)]" : "border-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)]"}`}
     >
       {label}
     </button>
   );
   const hp = hover ? pctOf(hover) : null;
+  const hpr = hover ? pr(hover) : undefined;
   // Warna Bebas, read-only: the colours painted (in the chosen estate) and on how many blok.
   const usedColors = [
     ...blok
@@ -266,7 +312,7 @@ export function PetaBlokPage() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold text-[var(--text-primary)]">Peta Blok AKSS</h1>
-          <p className="text-sm text-[var(--text-secondary)]">Mapping pemupukan NPK per blok, atau warnai blok sesuai kebutuhan</p>
+          <p className="text-sm text-[var(--text-secondary)]">Mapping pemupukan NPK dan pruning per blok, atau warnai blok sesuai kebutuhan</p>
         </div>
         <div className="flex flex-wrap gap-2">
           {canEdit && (
@@ -303,6 +349,7 @@ export function PetaBlokPage() {
 
       <div className="flex gap-1 border-b border-[var(--border)]">
         {tab("progress", "Progress Pemupukan")}
+        {tab("pruning", "Progress Pruning")}
         {tab("bebas", "Warna Bebas")}
       </div>
 
@@ -336,6 +383,25 @@ export function PetaBlokPage() {
             )}
           </>
         )}
+        {mode === "pruning" && (
+          <>
+            <select value={pruning?.tahun ?? ""} onChange={(e) => setTahun(Number(e.target.value))} className={inputCls} aria-label="Tahun pruning">
+              {(pruning?.tahunList.length ? pruning.tahunList : [new Date().getFullYear()]).map((t) => (
+                <option key={t} value={t}>
+                  Pruning tahun {t}
+                </option>
+              ))}
+            </select>
+            <button
+              onClick={() => loadPruning(true)}
+              disabled={syncing}
+              title="Ambil data terbaru dari sheet Rekap Pruning sekarang"
+              className="inline-flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border border-[var(--border)] hover:bg-[#f1f5f9] disabled:opacity-50"
+            >
+              <RefreshCw size={14} className={syncing ? "animate-spin" : ""} /> {syncing ? "Menyinkronkan..." : "Sinkron sekarang"}
+            </button>
+          </>
+        )}
         <div className="ml-auto flex items-center gap-1">
           <button onClick={() => setZoom((z) => Math.max(0.5, +(z - 0.1).toFixed(1)))} title="Perkecil" className="p-2 rounded-md border border-[var(--border)] hover:bg-[#f1f5f9]">
             <Minus size={14} />
@@ -348,6 +414,19 @@ export function PetaBlokPage() {
       </div>
 
       {error && <p className="text-xs text-[var(--accent-red)]">{error}</p>}
+      {mode === "pruning" && pruning && (
+        <p className="text-xs text-[var(--text-secondary)] flex flex-wrap items-center gap-x-2 gap-y-1">
+          <span>
+            Data dari sheet Rekap Pruning
+            {pruning.sync?.synced_at ? ` · diperbarui ${jamTgl(pruning.sync.synced_at)} (${pruning.sync.baris} baris)` : " · belum pernah tersinkron"}
+            {" · mengikuti isian baru di sheet otomatis (dicek tiap 10 menit)"}
+          </span>
+          <a href={pruning.sheet} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[var(--accent-blue)] hover:underline">
+            Buka sheet <ExternalLink size={12} />
+          </a>
+          {pruning.sync?.error && <span className="text-[var(--accent-red)]">Gagal membaca sheet terakhir: {pruning.sync.error}</span>}
+        </p>
+      )}
 
       <div className="grid gap-3 xl:grid-cols-[1fr_20rem] items-start">
         <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg overflow-hidden">
@@ -358,8 +437,10 @@ export function PetaBlokPage() {
                 {hover.estate ? ` · ${ESTATE_LABEL[hover.estate] ?? hover.estate}` : " · tidak ada di Master Blok"}
                 {hover.divisi && ` · Div ${hover.divisi}`}
                 {hover.tahun_tanam && ` · TT ${hover.tahun_tanam}`}
-                {hover.pkk !== null && ` · ${fmt(hover.ha, 2)} Ha · ${fmt(hover.pkk)} pokok · pupuk ${fmt(hover.kg ?? 0)} kg (${fmt(hp, 1)}%)`}
-                {hover.terakhir && ` · terakhir dipupuk ${hover.terakhir.split("-").reverse().join("/")}`}
+                {mode === "pruning"
+                  ? hpr && ` · pruning ${pruning?.tahun}: ${fmt(hpr.pkk)} / ${fmt(hpr.target)} pokok (${fmt(pruningPct(hpr), 1)}%) · terakhir ${yyyymm(hpr.terakhir)}`
+                  : hover.pkk !== null && ` · ${fmt(hover.ha, 2)} Ha · ${fmt(hover.pkk)} pokok · pupuk ${fmt(hover.kg ?? 0)} kg (${fmt(hp, 1)}%)`}
+                {mode !== "pruning" && hover.terakhir && ` · terakhir dipupuk ${hover.terakhir.split("-").reverse().join("/")}`}
               </span>
             ) : (
               <span className="text-[var(--text-muted)]">
@@ -428,7 +509,7 @@ export function PetaBlokPage() {
                         />
                         <text
                           x={c.gx * CW + CW / 2}
-                          y={c.gy * CH + (CH * c.h) / 2}
+                          y={c.gy * CH + (CH * c.h) / 2 - (mode === "pruning" && pruningPct(pr(c)) !== null ? 5 * zoom : 0)}
                           dominantBaseline="central"
                           textAnchor="middle"
                           fontSize={10 * zoom}
@@ -437,6 +518,19 @@ export function PetaBlokPage() {
                         >
                           {c.label}
                         </text>
+                        {/* Pruning: the % under the blok name, as the mapping sheet shows it. */}
+                        {mode === "pruning" && pruningPct(pr(c)) !== null && (
+                          <text
+                            x={c.gx * CW + CW / 2}
+                            y={c.gy * CH + (CH * c.h) / 2 + 6 * zoom}
+                            dominantBaseline="central"
+                            textAnchor="middle"
+                            fontSize={8 * zoom}
+                            fill={textOn(fill)}
+                          >
+                            {fmt(pruningPct(pr(c)), 0)}%
+                          </text>
+                        )}
                       </g>
                     );
                   })}
@@ -464,7 +558,42 @@ export function PetaBlokPage() {
                   <b className="text-sm text-[var(--text-primary)]">Blok {hover.label}</b>
                   <span className="text-[var(--text-secondary)]">{hover.estate ? ESTATE_LABEL[hover.estate] ?? hover.estate : ""}</span>
                 </div>
-                {hover.pkk === null ? (
+                {mode === "pruning" ? (
+                  !hpr ? (
+                    <div className="text-[var(--text-muted)]">Tidak ada di Rekap Pruning</div>
+                  ) : (
+                    <>
+                      <div className="text-[var(--text-secondary)]">
+                        Divisi {hpr.divisi || "-"}
+                        {hpr.kondisi && /[a-z]/i.test(hpr.kondisi) && ` · kondisi ${hpr.kondisi}`}
+                      </div>
+                      <div className="grid grid-cols-2 gap-x-2 mt-1">
+                        <span className="text-[var(--text-muted)]">Luas</span>
+                        <span className="text-right">{fmt(hpr.ha, 2)} Ha</span>
+                        <span className="text-[var(--text-muted)]">Target (Ha × SPH)</span>
+                        <span className="text-right">{fmt(hpr.target)} pokok</span>
+                        <span className="text-[var(--text-muted)]">Pruning {pruning?.tahun}</span>
+                        <span className="text-right">{fmt(hpr.pkk)} pokok</span>
+                        <span className="text-[var(--text-muted)]">Ha pruning</span>
+                        <span className="text-right">{fmt(hpr.ha_pruning, 2)} Ha</span>
+                        <span className="text-[var(--text-muted)]">Progress</span>
+                        <span className="text-right font-semibold">
+                          <span className="inline-block w-2.5 h-2.5 rounded-sm border border-[var(--border)] mr-1 align-middle" style={{ background: autoColor(hover) }} />
+                          {fmt(pruningPct(hpr), 1)}%
+                        </span>
+                      </div>
+                      {hpr.bulan.some((v) => v > 0) && (
+                        <div className="mt-1 text-[var(--text-secondary)]">
+                          {hpr.bulan
+                            .map((v, i) => (v > 0 ? `${BULAN[i]} ${fmt(v)}` : ""))
+                            .filter(Boolean)
+                            .join(" · ")}
+                        </div>
+                      )}
+                      <div className="text-[var(--text-muted)] mt-1">{hpr.terakhir ? `Terakhir pruning ${yyyymm(hpr.terakhir)}` : "Belum pernah pruning"}</div>
+                    </>
+                  )
+                ) : hover.pkk === null ? (
                   <div className="text-[var(--text-muted)]">{hover.estate ? "Belum ada data di Master Blok" : "Tidak ada di Master Blok"}</div>
                 ) : (
                   <>
@@ -502,7 +631,35 @@ export function PetaBlokPage() {
 
         <div className="space-y-3">
           <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg p-3 text-sm">
-            <div className="text-xs font-semibold uppercase text-[var(--text-secondary)] mb-2">Total {estate ? ESTATE_LABEL[estate] : "AKSS"}</div>
+            <div className="text-xs font-semibold uppercase text-[var(--text-secondary)] mb-2">
+              Total {estate ? ESTATE_LABEL[estate] : "AKSS"}
+              {mode === "pruning" && pruning ? ` · pruning ${pruning.tahun}` : ""}
+            </div>
+            {mode === "pruning" ? (
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <div className="text-[11px] text-[var(--text-muted)]">Target pokok</div>
+                  <div className="font-semibold">{fmt(totP.target)}</div>
+                </div>
+                <div>
+                  <div className="text-[11px] text-[var(--text-muted)]">Sudah pruning</div>
+                  <div className="font-semibold">{fmt(totP.pkk)}</div>
+                </div>
+                <div>
+                  <div className="text-[11px] text-[var(--text-muted)]">Ha pruning / luas</div>
+                  <div className="font-semibold">
+                    {fmt(totP.haP, 2)} / {fmt(totP.ha, 2)}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[11px] text-[var(--text-muted)]">Progress</div>
+                  <div className="font-semibold">{totP.target ? `${fmt((totP.pkk / totP.target) * 100, 2)}%` : "-"}</div>
+                </div>
+                <div className="col-span-2 text-[11px] text-[var(--text-muted)]">
+                  {totP.belum} dari {scope.length} blok belum pruning di tahun ini
+                </div>
+              </div>
+            ) : (
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <div className="text-[11px] text-[var(--text-muted)]">Pokok</div>
@@ -521,9 +678,10 @@ export function PetaBlokPage() {
                 <div className="font-semibold">{tot.pkk ? `${fmt((tot.kg / tot.pkk) * 100, 2)}%` : "-"}</div>
               </div>
             </div>
+            )}
           </div>
 
-          {mode === "progress" ? (
+          {mode !== "bebas" ? (
             <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg p-3 space-y-2">
               <div className="text-xs font-semibold uppercase text-[var(--text-secondary)]">Legenda{editing ? " (bisa diubah)" : ""}</div>
               {legend.map((l, i) => (
@@ -552,7 +710,8 @@ export function PetaBlokPage() {
                 </div>
               ))}
               <div className="flex items-center gap-2 text-[11px] text-[var(--text-muted)]">
-                <span className="inline-block w-9 h-4 rounded border border-[var(--border)]" style={{ background: NO_DATA }} /> tidak ada di Master Blok / estate lain
+                <span className="inline-block w-9 h-4 rounded border border-[var(--border)]" style={{ background: NO_DATA }} />{" "}
+                {mode === "pruning" ? "tidak ada di Rekap Pruning / estate lain" : "tidak ada di Master Blok / estate lain"}
               </div>
               {editing && (
               <div className="flex gap-2 pt-1">
@@ -572,7 +731,11 @@ export function PetaBlokPage() {
               </div>
               )}
               {!editing && <LockNote canEdit={canEdit} />}
-              <p className="text-[11px] text-[var(--text-muted)]">Progress = pupuk NPK keluar ke blok (kg, Inventory Pupuk) ÷ jumlah pokok (PKK, Master Blok) × 100%, seperti di sheet.</p>
+              <p className="text-[11px] text-[var(--text-muted)]">
+                {mode === "pruning"
+                  ? "Progress = pokok yang sudah pruning di tahun terpilih (Rekap Pruning) ÷ (Ha × SPH) × 100%, seperti di sheet mapping pruning."
+                  : "Progress = pupuk NPK keluar ke blok (kg, Inventory Pupuk) ÷ jumlah pokok (PKK, Master Blok) × 100%, seperti di sheet."}
+              </p>
             </div>
           ) : !editing ? (
             <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg p-3 space-y-2">

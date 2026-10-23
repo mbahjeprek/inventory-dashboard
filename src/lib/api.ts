@@ -311,7 +311,28 @@ export type PetaCell = {
   terakhir: string | null;
 };
 export type PetaLegend = { id: number; dari: number; label: string; warna: string };
-export type PetaBlok = { estates: string[]; cells: PetaCell[]; legend: PetaLegend[] };
+export type PetaBlok = { estates: string[]; cells: PetaCell[]; legend: PetaLegend[]; pruningLegend: PetaLegend[] };
+// Rekap Pruning per blok for one year (synced from the pruning Google Sheet). target = Ha x SPH,
+// pkk = pokok pruned that year, bulan = the 12 months' pokok, terakhir = yyyymm of the last pruning.
+export type PruningBlok = {
+  estate: string;
+  blok: string;
+  divisi: string | null;
+  ha: number | null;
+  target: number | null;
+  kondisi: string | null;
+  pkk: number;
+  ha_pruning: number;
+  bulan: number[];
+  terakhir: number | null;
+};
+export type PetaPruning = {
+  tahun: number;
+  tahunList: number[];
+  blok: PruningBlok[];
+  sync: { synced_at: string | null; checked_at: string | null; baris: number | null; error: string | null } | null;
+  sheet: string;
+};
 
 export type AlatBerat = {
   id: number;
@@ -1380,8 +1401,10 @@ export const api = {
   petaBlok: (range: { dateFrom: string; dateTo: string }) => req<PetaBlok>(`/api/peta-blok?${new URLSearchParams(range)}`),
   petaBlokWarna: (ids: number[], warna: string | null) =>
     req<{ success: boolean }>("/api/peta-blok/warna", { method: "PUT", body: JSON.stringify({ ids, warna }) }),
-  petaBlokLegend: (items: { dari: number; label: string; warna: string }[]) =>
-    req<{ success: boolean }>("/api/peta-blok/legend", { method: "PUT", body: JSON.stringify({ items }) }),
+  petaBlokLegend: (items: { dari: number; label: string; warna: string }[], jenis: "pupuk" | "pruning" = "pupuk") =>
+    req<{ success: boolean }>("/api/peta-blok/legend", { method: "PUT", body: JSON.stringify({ items, jenis }) }),
+  petaPruning: (tahun: number | null, sync = false) =>
+    req<PetaPruning>(`/api/peta-blok/pruning?${new URLSearchParams({ ...(tahun ? { tahun: String(tahun) } : {}), ...(sync ? { sync: "1" } : {}) })}`),
 
   bbmSummary: (lokasi?: string, range?: { dateFrom?: string; dateTo?: string; asOf?: string }) => {
     const qs = new URLSearchParams(

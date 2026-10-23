@@ -676,6 +676,44 @@ CREATE TABLE IF NOT EXISTS peta_legend (
   label TEXT NOT NULL,
   warna TEXT NOT NULL
 );
+-- Each map has its own legend: 'pupuk' (progress pemupukan) or 'pruning'.
+ALTER TABLE peta_legend ADD COLUMN IF NOT EXISTS jenis TEXT NOT NULL DEFAULT 'pupuk';
+INSERT INTO peta_legend (dari, label, warna, jenis)
+SELECT * FROM (VALUES (0::float8, 'Belum pruning', '#ff0000', 'pruning'), (1, 'Sebagian (< 50%)', '#ff9900', 'pruning'),
+  (50, '50 - 99%', '#ffff00', 'pruning'), (100, 'Selesai (≥ 100%)', '#6aa84f', 'pruning')) v
+WHERE NOT EXISTS (SELECT 1 FROM peta_legend WHERE jenis = 'pruning');
+
+-- Rekap Pruning PT.AKSS, copied from its Google Sheet (server/src/pruning.ts) and refreshed from it
+-- automatically: one pruning_blok per sheet row (a blok can have two rows), the pokok (PKK) and Ha
+-- pruned per month in pruning_bulan. pruning_sync = when the sheet was last read and how it went.
+CREATE TABLE IF NOT EXISTS pruning_blok (
+  id SERIAL PRIMARY KEY,
+  estate TEXT NOT NULL,
+  divisi TEXT NOT NULL DEFAULT '',
+  blok TEXT NOT NULL,
+  planting_material TEXT NOT NULL DEFAULT '',
+  tahun_tanam INTEGER,
+  ha DOUBLE PRECISION,
+  sph DOUBLE PRECISION,
+  kondisi TEXT NOT NULL DEFAULT '',
+  urut INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_pruning_blok_estate ON pruning_blok(estate, blok);
+CREATE TABLE IF NOT EXISTS pruning_bulan (
+  blok_id INTEGER NOT NULL REFERENCES pruning_blok(id) ON DELETE CASCADE,
+  tahun INTEGER NOT NULL,
+  bulan INTEGER NOT NULL,
+  pkk DOUBLE PRECISION NOT NULL DEFAULT 0,
+  ha DOUBLE PRECISION NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_pruning_bulan_blok ON pruning_bulan(blok_id, tahun);
+CREATE TABLE IF NOT EXISTS pruning_sync (
+  id INTEGER PRIMARY KEY DEFAULT 1,
+  checked_at TIMESTAMPTZ,
+  synced_at TIMESTAMPTZ,
+  baris INTEGER,
+  error TEXT
+);
 ALTER TABLE master_oli ADD COLUMN IF NOT EXISTS estates TEXT NOT NULL DEFAULT '';
 
 -- ---- Koperasi karyawan (for now Nilam only; `koperasi` = the estate running it) ----
