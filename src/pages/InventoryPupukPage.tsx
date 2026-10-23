@@ -4,6 +4,7 @@ import { Search, ChevronLeft, ChevronRight, Sprout, PackagePlus, ListPlus, Penci
 import { api, errorText, type PupukRecord, type PupukSummary } from "../lib/api";
 import { StatCard } from "../components/StatCard";
 import { ExportButtons } from "../components/ExportButtons";
+import { PeriodeFilter, bulanIni } from "../components/PeriodeFilter";
 import { ActivityLogButton } from "../components/ActivityLogButton";
 import { LengkapiDataButton } from "../components/LengkapiData";
 import { DokumenButton } from "../components/DokumenButton";
@@ -37,8 +38,9 @@ export function InventoryPupukPage({ estate }: { estate: string }) {
   const [search, setSearch] = useState("");
   const [jenis, setJenis] = useState("");
   const [divisi, setDivisi] = useState("");
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
+  // The running month by default, so the list, Cetak and Excel show 1st - today.
+  const [dateFrom, setDateFrom] = useState(() => bulanIni()[0]);
+  const [dateTo, setDateTo] = useState(() => bulanIni()[1]);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [showTransaksi, setShowTransaksi] = useState(false);
@@ -126,11 +128,11 @@ export function InventoryPupukPage({ estate }: { estate: string }) {
       search && `Cari: "${search}"`,
       jenis && `Nama Barang: ${jenis}`,
       divisi && `Divisi: ${divisi}`,
-      (dateFrom || dateTo) && `Tanggal: ${tgl(dateFrom) || "awal"} - ${tgl(dateTo) || "akhir"}`,
     ].filter(Boolean);
     return {
       title: `Inventory Pupuk - ${estate}`,
       subtitle: [
+        `Periode: ${dateFrom || dateTo ? `${tgl(dateFrom) || "awal"} s/d ${tgl(dateTo) || "sekarang"}` : "semua tanggal"}`,
         ...(active.length ? [`Filter: ${active.join(" · ")}`] : []),
         `${total.toLocaleString("id-ID")} transaksi · total stock in ${diterimaSum.toLocaleString("id-ID")} KG · total stock out ${keluarSum.toLocaleString("id-ID")} KG`,
       ],
@@ -182,7 +184,6 @@ export function InventoryPupukPage({ estate }: { estate: string }) {
           <LengkapiDataButton kind="pupuk" estate={estate} onDone={load} />
           <DokumenButton modul="PUPUK" estate={estate} />
           <PemakaianButton module="PUPUK" estate={estate} />
-          <ExportButtons total={total} buildReport={buildReport} fileName={`inventory-pupuk-${estate.toLowerCase()}`} />
           {canInput && (
             <button
               onClick={() => setShowBatch(true)}
@@ -278,28 +279,18 @@ export function InventoryPupukPage({ estate }: { estate: string }) {
             </option>
           ))}
         </select>
-        {/* Tanggal dari - sampai: side by side, half the width each on a phone */}
-        <div className="flex items-center gap-2 w-full sm:w-auto">
-          <input
-            type="date"
-            value={dateFrom}
-            onChange={(e) => {
-              setDateFrom(e.target.value);
-              setPage(1);
-            }}
-            className={`${selectCls} flex-1 min-w-0 sm:flex-none`}
-          />
-          <span className="text-[var(--text-muted)] text-sm">-</span>
-          <input
-            type="date"
-            value={dateTo}
-            onChange={(e) => {
-              setDateTo(e.target.value);
-              setPage(1);
-            }}
-            className={`${selectCls} flex-1 min-w-0 sm:flex-none`}
-          />
-        </div>
+        {/* Periode (Bulan ini by default) with Cetak / Excel of exactly that period next to it */}
+        <PeriodeFilter
+          from={dateFrom}
+          to={dateTo}
+          onChange={(f, t) => {
+            setDateFrom(f);
+            setDateTo(t);
+            setPage(1);
+          }}
+        >
+          <ExportButtons total={total} buildReport={buildReport} fileName={`inventory-pupuk-${estate.toLowerCase()}`} />
+        </PeriodeFilter>
       </div>
 
       <div className="text-sm text-[var(--text-secondary)]">

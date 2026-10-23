@@ -4,6 +4,7 @@ import { Search, ChevronLeft, ChevronRight, Fuel, Droplet, PackagePlus, Pencil, 
 import { api, errorText, type BbmRecord, type BbmSummary } from "../lib/api";
 import { StatCard } from "../components/StatCard";
 import { ExportButtons } from "../components/ExportButtons";
+import { PeriodeFilter, bulanIni } from "../components/PeriodeFilter";
 import { ActivityLogButton } from "../components/ActivityLogButton";
 import { LengkapiDataButton } from "../components/LengkapiData";
 import { DokumenButton } from "../components/DokumenButton";
@@ -33,8 +34,9 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
   const [lokasi, setLokasi] = useState(lokasiLock ?? "");
   const [alat, setAlat] = useState("");
   const [alatOptions, setAlatOptions] = useState<string[]>([]);
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
+  // The running month by default, so the list, Cetak and Excel show 1st - today.
+  const [dateFrom, setDateFrom] = useState(() => bulanIni()[0]);
+  const [dateTo, setDateTo] = useState(() => bulanIni()[1]);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [showTransaksi, setShowTransaksi] = useState(false);
@@ -118,11 +120,11 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
       jenisBbm && `Jenis BBM: ${jenisBbm}`,
       `Lokasi: ${lokasiLock || lokasi || "Semua"}`,
       alat && `Alat: ${alat}`,
-      (dateFrom || dateTo) && `Tanggal: ${tgl(dateFrom) || "awal"} - ${tgl(dateTo) || "akhir"}`,
     ].filter(Boolean);
     return {
       title: `Inventory BBM${lokasiLock ? ` - ${lokasiLock}` : ""}`,
       subtitle: [
+        `Periode: ${dateFrom || dateTo ? `${tgl(dateFrom) || "awal"} s/d ${tgl(dateTo) || "sekarang"}` : "semua tanggal"}`,
         `Filter: ${filters.join(" · ")}`,
         `${total.toLocaleString("id-ID")} transaksi · total stock out ${pemakaianSum.toLocaleString("id-ID")} LTR · total stock in ${diterimaSum.toLocaleString("id-ID")} LTR`,
       ],
@@ -197,11 +199,6 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
           {(lokasiLock || lokasi) && <LengkapiDataButton kind="bbm" estate={lokasiLock || lokasi} onDone={load} />}
           {(lokasiLock || lokasi) && <DokumenButton modul="BBM" estate={lokasiLock || lokasi} />}
           {(lokasiLock || lokasi) && <PemakaianButton key={`p-${lokasiLock || lokasi}`} module="BBM" estate={lokasiLock || lokasi} />}
-          <ExportButtons
-            total={total}
-            buildReport={buildReport}
-            fileName={`inventory-bbm${lokasiLock ? `-${lokasiLock.toLowerCase()}` : ""}`}
-          />
           {canInput && (
             <button
               onClick={() => setShowBatch(true)}
@@ -326,28 +323,18 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
           ))}
         </select>
 
-        {/* Tanggal dari - sampai: side by side, half the width each on a phone */}
-        <div className="flex items-center gap-2 w-full sm:w-auto">
-          <input
-            type="date"
-            value={dateFrom}
-            onChange={(e) => {
-              setDateFrom(e.target.value);
-              setPage(1);
-            }}
-            className="text-sm rounded-md border border-[var(--border)] px-3 py-2 flex-1 min-w-0 sm:flex-none"
-          />
-          <span className="text-[var(--text-muted)] text-sm">-</span>
-          <input
-            type="date"
-            value={dateTo}
-            onChange={(e) => {
-              setDateTo(e.target.value);
-              setPage(1);
-            }}
-            className="text-sm rounded-md border border-[var(--border)] px-3 py-2 flex-1 min-w-0 sm:flex-none"
-          />
-        </div>
+        {/* Periode (Bulan ini by default) with Cetak / Excel of exactly that period next to it */}
+        <PeriodeFilter
+          from={dateFrom}
+          to={dateTo}
+          onChange={(f, t) => {
+            setDateFrom(f);
+            setDateTo(t);
+            setPage(1);
+          }}
+        >
+          <ExportButtons total={total} buildReport={buildReport} fileName={`inventory-bbm${lokasiLock ? `-${lokasiLock.toLowerCase()}` : ""}`} />
+        </PeriodeFilter>
       </div>
 
       <div className="text-sm text-[var(--text-secondary)]">

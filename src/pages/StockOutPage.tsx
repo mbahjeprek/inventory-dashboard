@@ -6,6 +6,7 @@ import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useAuth } from "../context/AuthContext";
 import { can, canEditRow } from "../lib/access";
 import { ExportButtons } from "../components/ExportButtons";
+import { PeriodeFilter, bulanIni } from "../components/PeriodeFilter";
 import { fetchAllRows, type TableReport } from "../lib/printTable";
 import { EvidenceLink } from "../components/EvidenceInput";
 import { tanggalWaktu } from "../lib/datetime";
@@ -20,8 +21,9 @@ export function StockOutPage({ embedded = false }: { embedded?: boolean }) {
   const [qtySum, setQtySum] = useState(0);
   const [search, setSearch] = useState("");
   const [tujuan, setTujuan] = useState("");
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
+  // The running month by default, so the list, Cetak and Excel show 1st - today.
+  const [dateFrom, setDateFrom] = useState(() => bulanIni()[0]);
+  const [dateTo, setDateTo] = useState(() => bulanIni()[1]);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const { user } = useAuth();
@@ -66,11 +68,10 @@ export function StockOutPage({ embedded = false }: { embedded?: boolean }) {
     const active = [
       search && `Cari: "${search}"`,
       tujuan && `Tujuan: ${tujuan}`,
-      (dateFrom || dateTo) && `Tanggal: ${tgl(dateFrom) || "awal"} - ${tgl(dateTo) || "akhir"}`,
     ].filter(Boolean);
     return {
       title: "Stock Out Gudang - Nilam",
-      subtitle: active.length ? [`Filter: ${active.join(" · ")}`] : [],
+      subtitle: [`Periode: ${dateFrom || dateTo ? `${tgl(dateFrom) || "awal"} s/d ${tgl(dateTo) || "sekarang"}` : "semua tanggal"}`, ...(active.length ? [`Filter: ${active.join(" · ")}`] : [])],
       landscape: true,
       columns: [
         { label: "Tgl Keluar", nowrap: true },
@@ -109,7 +110,6 @@ export function StockOutPage({ embedded = false }: { embedded?: boolean }) {
             {total.toLocaleString("id-ID")} transaksi · total {qtySum.toLocaleString("id-ID")} unit keluar
           </p>
         </div>
-        <ExportButtons total={total} buildReport={buildReport} fileName="stock-out-gudang-nilam" />
       </div>
 
       <div className="flex flex-wrap items-center gap-3 bg-[var(--bg-card)] border border-[var(--border)] rounded-lg p-3">
@@ -139,28 +139,18 @@ export function StockOutPage({ embedded = false }: { embedded?: boolean }) {
           ))}
         </select>
 
-        {/* Tanggal dari - sampai: side by side, half the width each on a phone */}
-        <div className="flex items-center gap-2 w-full sm:w-auto">
-          <input
-            type="date"
-            value={dateFrom}
-            onChange={(e) => {
-              setDateFrom(e.target.value);
-              setPage(1);
-            }}
-            className="text-sm rounded-md border border-[var(--border)] px-3 py-2 flex-1 min-w-0 sm:flex-none"
-          />
-          <span className="text-[var(--text-muted)] text-sm">-</span>
-          <input
-            type="date"
-            value={dateTo}
-            onChange={(e) => {
-              setDateTo(e.target.value);
-              setPage(1);
-            }}
-            className="text-sm rounded-md border border-[var(--border)] px-3 py-2 flex-1 min-w-0 sm:flex-none"
-          />
-        </div>
+        {/* Periode (Bulan ini by default) with Cetak / Excel of exactly that period next to it */}
+        <PeriodeFilter
+          from={dateFrom}
+          to={dateTo}
+          onChange={(f, t) => {
+            setDateFrom(f);
+            setDateTo(t);
+            setPage(1);
+          }}
+        >
+          <ExportButtons total={total} buildReport={buildReport} fileName="stock-out-gudang-nilam" />
+        </PeriodeFilter>
       </div>
 
       <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg overflow-hidden">

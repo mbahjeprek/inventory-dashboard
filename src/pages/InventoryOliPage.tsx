@@ -4,6 +4,7 @@ import { Search, ChevronLeft, ChevronRight, Droplet, PackagePlus, ListPlus, Penc
 import { api, errorText, type OliRecord, type OliSummary } from "../lib/api";
 import { StatCard } from "../components/StatCard";
 import { ExportButtons } from "../components/ExportButtons";
+import { PeriodeFilter, bulanIni } from "../components/PeriodeFilter";
 import { ActivityLogButton } from "../components/ActivityLogButton";
 import { LengkapiDataButton } from "../components/LengkapiData";
 import { DokumenButton } from "../components/DokumenButton";
@@ -37,8 +38,9 @@ export function InventoryOliPage({ estate }: { estate: string }) {
   const [diterimaSum, setDiterimaSum] = useState(0);
   const [search, setSearch] = useState("");
   const [jenis, setJenis] = useState("");
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
+  // The running month by default, so the list, Cetak and Excel show 1st - today.
+  const [dateFrom, setDateFrom] = useState(() => bulanIni()[0]);
+  const [dateTo, setDateTo] = useState(() => bulanIni()[1]);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [showTransaksi, setShowTransaksi] = useState(false);
@@ -119,11 +121,11 @@ export function InventoryOliPage({ estate }: { estate: string }) {
     const active = [
       search && `Cari: "${search}"`,
       jenis && `Jenis Oli: ${jenis}`,
-      (dateFrom || dateTo) && `Tanggal: ${tgl(dateFrom) || "awal"} - ${tgl(dateTo) || "akhir"}`,
     ].filter(Boolean);
     return {
       title: `Inventory Oli - ${estate}`,
       subtitle: [
+        `Periode: ${dateFrom || dateTo ? `${tgl(dateFrom) || "awal"} s/d ${tgl(dateTo) || "sekarang"}` : "semua tanggal"}`,
         ...(active.length ? [`Filter: ${active.join(" · ")}`] : []),
         `${total.toLocaleString("id-ID")} transaksi · total stock in ${fmt(diterimaSum)} LTR · total stock out ${fmt(pemakaianSum)} LTR`,
       ],
@@ -156,7 +158,6 @@ export function InventoryOliPage({ estate }: { estate: string }) {
           <LengkapiDataButton kind="oli" estate={estate} onDone={load} />
           <DokumenButton modul="OLI" estate={estate} />
           <PemakaianButton module="OLI" estate={estate} />
-          <ExportButtons total={total} buildReport={buildReport} fileName={`inventory-oli-${estate.toLowerCase()}`} />
           {canInput && (
             <button
               onClick={() => setShowBatch(true)}
@@ -239,28 +240,18 @@ export function InventoryOliPage({ estate }: { estate: string }) {
             </option>
           ))}
         </select>
-        {/* Tanggal dari - sampai: side by side, half the width each on a phone */}
-        <div className="flex items-center gap-2 w-full sm:w-auto">
-          <input
-            type="date"
-            value={dateFrom}
-            onChange={(e) => {
-              setDateFrom(e.target.value);
-              setPage(1);
-            }}
-            className={`${selectCls} flex-1 min-w-0 sm:flex-none`}
-          />
-          <span className="text-[var(--text-muted)] text-sm">-</span>
-          <input
-            type="date"
-            value={dateTo}
-            onChange={(e) => {
-              setDateTo(e.target.value);
-              setPage(1);
-            }}
-            className={`${selectCls} flex-1 min-w-0 sm:flex-none`}
-          />
-        </div>
+        {/* Periode (Bulan ini by default) with Cetak / Excel of exactly that period next to it */}
+        <PeriodeFilter
+          from={dateFrom}
+          to={dateTo}
+          onChange={(f, t) => {
+            setDateFrom(f);
+            setDateTo(t);
+            setPage(1);
+          }}
+        >
+          <ExportButtons total={total} buildReport={buildReport} fileName={`inventory-oli-${estate.toLowerCase()}`} />
+        </PeriodeFilter>
       </div>
 
       <div className="text-sm text-[var(--text-secondary)]">

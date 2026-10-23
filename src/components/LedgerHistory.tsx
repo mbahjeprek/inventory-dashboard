@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Search, ChevronLeft, ChevronRight, Pencil, Trash2 } from "lucide-react";
 import { api, errorText, type LedgerTx, type StockScope } from "../lib/api";
 import { ExportButtons } from "./ExportButtons";
+import { PeriodeFilter, bulanIni } from "./PeriodeFilter";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { EditLedgerTxModal } from "./EditLedgerTxModal";
 import { fetchAllRows, type TableReport } from "../lib/printTable";
@@ -35,8 +36,9 @@ export function LedgerHistory({ scope, type, refreshKey }: { scope: StockScope; 
   const [total, setTotal] = useState(0);
   const [qtySum, setQtySum] = useState(0);
   const [search, setSearch] = useState("");
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
+  // The running month by default, so the list, Cetak and Excel show 1st - today.
+  const [dateFrom, setDateFrom] = useState(() => bulanIni()[0]);
+  const [dateTo, setDateTo] = useState(() => bulanIni()[1]);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<LedgerTx | null>(null);
@@ -76,10 +78,10 @@ export function LedgerHistory({ scope, type, refreshKey }: { scope: StockScope; 
   const buildReport = async (): Promise<TableReport> => {
     const all = await fetchAllRows((p, ps) => api.ledgerHistory(scope, { ...query(), page: p, pageSize: ps }));
     const tgl = (iso: string) => (iso ? iso.split("-").reverse().join("/") : "");
-    const active = [search && `Cari: "${search}"`, (dateFrom || dateTo) && `Tanggal: ${tgl(dateFrom) || "awal"} - ${tgl(dateTo) || "akhir"}`].filter(Boolean);
+    const active = [search && `Cari: "${search}"`].filter(Boolean);
     return {
       title,
-      subtitle: active.length ? [`Filter: ${active.join(" · ")}`] : [],
+      subtitle: [`Periode: ${dateFrom || dateTo ? `${tgl(dateFrom) || "awal"} s/d ${tgl(dateTo) || "sekarang"}` : "semua tanggal"}`, ...(active.length ? [`Filter: ${active.join(" · ")}`] : [])],
       landscape: true,
       columns: [
         { label: "Waktu", nowrap: true },
@@ -124,17 +126,12 @@ export function LedgerHistory({ scope, type, refreshKey }: { scope: StockScope; 
     else load();
   };
 
-  const inputCls = "text-sm rounded-md border border-[var(--border)] px-3 py-2";
-
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-[var(--text-secondary)]">
           {total.toLocaleString("id-ID")} transaksi · total {qtySum.toLocaleString("id-ID")} unit {isOut ? "keluar" : "masuk"}
         </p>
-        <div className="flex items-center gap-2">
-          <ExportButtons total={total} buildReport={buildReport} fileName={`${isOut ? "stock-out" : "stock-in"}-${scope.kind}-${scope.name.toLowerCase()}`} />
-        </div>
       </div>
 
       <div className="flex flex-wrap items-center gap-3 bg-[var(--bg-card)] border border-[var(--border)] rounded-lg p-3">
@@ -147,28 +144,18 @@ export function LedgerHistory({ scope, type, refreshKey }: { scope: StockScope; 
             className="w-full pl-9 pr-3 py-2 text-sm rounded-md border border-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-blue-border)]"
           />
         </div>
-        {/* Tanggal dari - sampai: side by side, half the width each on a phone */}
-        <div className="flex items-center gap-2 w-full sm:w-auto">
-          <input
-            type="date"
-            value={dateFrom}
-            onChange={(e) => {
-              setDateFrom(e.target.value);
-              setPage(1);
-            }}
-            className={`${inputCls} flex-1 min-w-0 sm:flex-none`}
-          />
-          <span className="text-[var(--text-muted)] text-sm">-</span>
-          <input
-            type="date"
-            value={dateTo}
-            onChange={(e) => {
-              setDateTo(e.target.value);
-              setPage(1);
-            }}
-            className={`${inputCls} flex-1 min-w-0 sm:flex-none`}
-          />
-        </div>
+        {/* Periode (Bulan ini by default) with Cetak / Excel of exactly that period next to it */}
+        <PeriodeFilter
+          from={dateFrom}
+          to={dateTo}
+          onChange={(f, t) => {
+            setDateFrom(f);
+            setDateTo(t);
+            setPage(1);
+          }}
+        >
+          <ExportButtons total={total} buildReport={buildReport} fileName={`${isOut ? "stock-out" : "stock-in"}-${scope.kind}-${scope.name.toLowerCase()}`} />
+        </PeriodeFilter>
       </div>
 
       <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg overflow-hidden">
