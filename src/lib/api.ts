@@ -858,6 +858,24 @@ export type Dokumen = {
   created_at: string;
   updated_at: string;
 };
+export type SopStatus = "BELUM" | "DRAFT" | "BERLAKU" | "REVISI";
+export type Sop = {
+  id: number;
+  bagian: string;
+  urut: number;
+  judul: string;
+  audit: boolean;
+  no_dokumen: string;
+  revisi: string;
+  tgl_berlaku: string;
+  pic: string;
+  status: SopStatus;
+  url: string;
+  keterangan: string;
+  oleh: string | null;
+  updated_at: string;
+};
+export type SopInput = Pick<Sop, "bagian" | "judul" | "audit" | "no_dokumen" | "revisi" | "tgl_berlaku" | "pic" | "status" | "url" | "keterangan">;
 export type DokumenInput = Pick<Dokumen, "judul" | "url" | "kategori" | "modul" | "estate" | "keterangan" | "pic" | "pinned">;
 export type KopSlipLine = { anggota_kode: string; tanggal_iso: string; bon: string | null; barang_kode: string; barang_nama: string; satuan: string; qty: number; harga: number; total: number; bayar: string };
 export type KopCara = "POTONG_GAJI" | "TUNAI" | "LAINNYA";
@@ -1786,6 +1804,10 @@ export const api = {
   dokumenEdit: (id: number, body: DokumenInput) => req<{ success: boolean }>(`/api/dokumen/${id}`, { method: "PUT", body: JSON.stringify(body) }),
   dokumenPin: (id: number, pinned: boolean) => req<{ success: boolean }>(`/api/dokumen/${id}`, { method: "PUT", body: JSON.stringify({ pinOnly: true, pinned }) }),
   dokumenKunci: (id: number, kunci: boolean) => req<{ success: boolean }>(`/api/dokumen/${id}`, { method: "PUT", body: JSON.stringify({ kunciOnly: kunci }) }),
+  sop: () => req<{ data: Sop[]; edit: boolean }>("/api/sop"),
+  sopTambah: (body: SopInput) => req<{ success: boolean; id: number; urut: number }>("/api/sop", { method: "POST", body: JSON.stringify(body) }),
+  sopEdit: (id: number, body: SopInput) => req<{ success: boolean; urut: number }>(`/api/sop/${id}`, { method: "PUT", body: JSON.stringify(body) }),
+  sopHapus: (id: number) => req<{ success: boolean }>(`/api/sop/${id}`, { method: "DELETE" }),
   dokumenHapus: (id: number) => req<{ success: boolean }>(`/api/dokumen/${id}`, { method: "DELETE" }),
   kopEditTx: (id: number, body: { barang_kode: string; qty: number; harga: number }) =>
     req<{ success: boolean }>(`/api/koperasi/tx/${id}`, { method: "PUT", body: JSON.stringify(body) }),

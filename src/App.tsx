@@ -25,6 +25,7 @@ import { MasterObatPage } from "./pages/MasterObatPage";
 import { MasterOliPage } from "./pages/MasterOliPage";
 import { MasterPupukPage } from "./pages/MasterPupukPage";
 import { DokumenPage } from "./pages/DokumenPage";
+import { SopPage } from "./pages/SopPage";
 import { SemuaEstatePage } from "./pages/SemuaEstatePage";
 import { UserActivityPage } from "./pages/UserActivityPage";
 import { StokOpnamePage } from "./pages/StokOpnamePage";
@@ -216,6 +217,14 @@ function App() {
                 element={
                   <RequirePageAccess>
                     <DokumenPage />
+                  </RequirePageAccess>
+                }
+              />
+              <Route
+                path="/sop"
+                element={
+                  <RequirePageAccess>
+                    <SopPage />
                   </RequirePageAccess>
                 }
               />

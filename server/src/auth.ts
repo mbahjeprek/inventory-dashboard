@@ -42,6 +42,8 @@ export const ALL_PERMS: string[] = [
   "dokumen.edit",
   // Kelola semua: change / delete / lock every link, not only one's own.
   "dokumen.kelola",
+  // Daftar SOP: add SOPs to a bagian, fill in / change their no. dokumen, PIC, status, link; delete them.
+  "sop.edit",
   // Koperasi karyawan: Lihat, Input (pengambilan / pembelian / rusak), Edit (hapus transaksi, master barang & anggota).
   "koperasi.view",
   "koperasi.input",

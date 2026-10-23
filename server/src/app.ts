@@ -192,6 +192,8 @@ function requiredPerms(req: express.Request): Need {
   // Dokumen & Link: add with Dokumen & Link; change / delete one's own (not locked) - checked in the route - or
   // every one with Kelola semua.
   if (is(/^\/dokumen(\/|$)/)) return m === "GET" ? null : ["dokumen.edit", "dokumen.kelola"];
+  // Daftar SOP: seen by every account; added / changed / deleted with Daftar SOP.
+  if (is(/^\/sop(\/|$)/)) return m === "GET" ? null : ["sop.edit"];
   // Status Update: the route lists only the estates and modules the account can see.
   if (is(/^\/status-update$/)) return null;
   // Foto bukti: any logged-in account uploads for its own transactions (the transaction route checks).
@@ -265,7 +267,7 @@ const PERM_AKSI: Record<string, string> = { view: "Lihat", input: "Input", edit:
 const permLabel = (p: string) => {
   const [m, a] = p.split(".");
   if (PERM_MODUL[m]) return `${PERM_AKSI[a] ?? a} ${PERM_MODUL[m]}`;
-  const other: Record<string, string> = { "dokumen.edit": "Dokumen & Link", "dokumen.kelola": "Kelola semua Dokumen & Link", "master.peta": "Lihat Peta Blok", "master.peta_edit": "Ubah Peta Blok", "master.alat": "Master Alat Berat", "master.users": "Pengguna", "monitor.log_user": "Log Aktivitas User" };
+  const other: Record<string, string> = { "dokumen.edit": "Dokumen & Link", "dokumen.kelola": "Kelola semua Dokumen & Link", "sop.edit": "Ubah Daftar SOP", "master.peta": "Lihat Peta Blok", "master.peta_edit": "Ubah Peta Blok", "master.alat": "Master Alat Berat", "master.users": "Pengguna", "monitor.log_user": "Log Aktivitas User" };
   return other[p] ?? (m === "master" ? `Master ${a.charAt(0).toUpperCase()}${a.slice(1)}` : p);
 };
 
@@ -10933,6 +10935,72 @@ app.delete("/api/dokumen/:id", async (req, res) => {
   if (!dokBolehUbah(req.user!, existing)) return res.status(403).json({ error: dokTolak(req.user!, existing) });
   await execute("DELETE FROM dokumen_link WHERE id = @id", { id: existing.id });
   await dokLog(req, existing, "Hapus Dokumen", existing.url);
+  res.json({ success: true });
+});
+
+// ---- Daftar SOP (see schema.sql sop) ----
+const SOP_BAGIAN = ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12", "13", "14", "UMUM"];
+const SOP_STATUS = ["BELUM", "DRAFT", "BERLAKU", "REVISI"];
+const sopPayload = (b: any) => ({
+  bagian: SOP_BAGIAN.includes(String(b?.bagian ?? "").toUpperCase()) ? String(b.bagian).toUpperCase() : "UMUM",
+  judul: String(b?.judul ?? "").trim(),
+  audit: b?.audit === true,
+  no_dokumen: String(b?.no_dokumen ?? "").trim(),
+  revisi: String(b?.revisi ?? "").trim(),
+  tgl_berlaku: /^\d{4}-\d{2}-\d{2}$/.test(String(b?.tgl_berlaku ?? "")) ? String(b.tgl_berlaku) : "",
+  pic: String(b?.pic ?? "").trim(),
+  status: SOP_STATUS.includes(String(b?.status ?? "").toUpperCase()) ? String(b.status).toUpperCase() : "BELUM",
+  url: String(b?.url ?? "").trim(),
+  keterangan: String(b?.keterangan ?? "").trim(),
+});
+const sopCek = (d: ReturnType<typeof sopPayload>) =>
+  !d.judul ? "Nama SOP wajib diisi" : d.url && !dokUrlOk(d.url) ? "Link harus diawali https:// (salin dari address bar / tombol Share)" : "";
+const sopEdit = (u: SessionUser) => u.role === "superuser" || u.perms.includes("sop.edit");
+
+app.get("/api/sop", async (req, res) => {
+  const data = await queryMany(
+    `SELECT s.*, u.nama AS oleh FROM sop s LEFT JOIN users u ON u.id = s.user_id ORDER BY s.bagian = 'UMUM', s.bagian, s.urut, s.id`
+  );
+  res.json({ data, edit: sopEdit(req.user!) });
+});
+
+app.post("/api/sop", async (req, res) => {
+  const d = sopPayload(req.body);
+  const err = sopCek(d);
+  if (err) return res.status(400).json({ error: err });
+  // A new SOP goes to the bottom of its bagian.
+  const row = await queryOne<{ id: number; urut: number }>(
+    `INSERT INTO sop (bagian, urut, judul, audit, no_dokumen, revisi, tgl_berlaku, pic, status, url, keterangan, user_id)
+     VALUES (@bagian, (SELECT COALESCE(MAX(urut), 0) + 1 FROM sop WHERE bagian = @bagian), @judul, @audit, @no_dokumen, @revisi,
+             @tgl_berlaku, @pic, @status, @url, @keterangan, @uid) RETURNING id, urut`,
+    { ...d, uid: req.user!.id }
+  );
+  res.json({ success: true, id: row!.id, urut: row!.urut });
+});
+
+app.put("/api/sop/:id", async (req, res) => {
+  const existing = await queryOne<any>("SELECT * FROM sop WHERE id = @id", { id: req.params.id });
+  if (!existing) return res.status(404).json({ error: "SOP tidak ditemukan" });
+  const d = sopPayload(req.body);
+  const err = sopCek(d);
+  if (err) return res.status(400).json({ error: err });
+  // Moved to another bagian: to the bottom of that one.
+  const urut =
+    d.bagian === existing.bagian
+      ? existing.urut
+      : (await queryOne<{ n: number }>("SELECT COALESCE(MAX(urut), 0) + 1 AS n FROM sop WHERE bagian = @bagian", { bagian: d.bagian }))!.n;
+  await execute(
+    `UPDATE sop SET bagian = @bagian, urut = @urut, judul = @judul, audit = @audit, no_dokumen = @no_dokumen, revisi = @revisi,
+       tgl_berlaku = @tgl_berlaku, pic = @pic, status = @status, url = @url, keterangan = @keterangan, updated_at = now() WHERE id = @id`,
+    { ...d, urut, id: existing.id }
+  );
+  res.json({ success: true, urut });
+});
+
+app.delete("/api/sop/:id", async (req, res) => {
+  const existing = await queryOne<any>("SELECT id FROM sop WHERE id = @id", { id: req.params.id });
+  if (!existing) return res.status(404).json({ error: "SOP tidak ditemukan" });
+  await execute("DELETE FROM sop WHERE id = @id", { id: existing.id });
   res.json({ success: true });
 });
 

@@ -32,7 +32,7 @@ import { useAuth } from "../context/AuthContext";
 import { useEstateFilter } from "../hooks/useEstateFilter";
 import { useOpenPinjaman } from "../hooks/useOpenPinjaman";
 import { ChangePasswordModal } from "./ChangePasswordModal";
-import { canModule, hasDashboard, pageAllowed, userEstates, OPNAME_PATH, PINJAMAN_PATH, PASIEN_PATH, KOPERASI_PATH, KENDARAAN_PATH, PRUNING_PATH, DOKUMEN_PATH, type Module } from "../lib/access";
+import { canModule, hasDashboard, pageAllowed, userEstates, OPNAME_PATH, PINJAMAN_PATH, PASIEN_PATH, KOPERASI_PATH, KENDARAAN_PATH, PRUNING_PATH, DOKUMEN_PATH, SOP_PATH, type Module } from "../lib/access";
 
 // subtitle: shown only on the active menu, which grows into a gold card (see NavRow).
 type NavItem = { to: string; label: string; icon: typeof Package; subtitle?: string };
@@ -101,6 +101,7 @@ const navSections: NavSection[] = [
       { to: "/master-blok", label: "Blok", icon: Grid3x3, subtitle: "Blok kebun" },
       { to: "/peta-blok", label: "Peta Blok", icon: MapIcon, subtitle: "Peta kebun" },
       { to: DOKUMEN_PATH, label: "Dokumen & Link", icon: FolderOpen, subtitle: "No, nama, PIC & link" },
+      { to: SOP_PATH, label: "Daftar SOP", icon: ClipboardCheck, subtitle: "SOP per bagian & status" },
       { to: "/users", label: "Pengguna", icon: KeyRound, subtitle: "Akun & hak akses" },
     ],
   },
