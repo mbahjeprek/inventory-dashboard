@@ -10697,11 +10697,12 @@ app.put("/api/evidence/attach", async (req, res) => {
 });
 
 // ---- Lengkapi Data: complete a month's transactions in one go ----
-// Lists the month's transactions of one estate that still miss something the input form asks for (No.
-// SPB / BPB, kendaraan & HM, blok, keterangan / catatan, foto bukti) and saves what the admin fills in,
-// all rows at once. Only EMPTY fields are filled and only a missing photo is added - amounts, dates and
-// saldo never change - so it is open (any month) to an account with Input or Edit of the module in that
-// estate. Loan / transfer / koreksi rows are left out (their data lives in Pinjaman / Stok Opname).
+// Lists ALL the month's transactions of one estate with the fields the input form asks for (No. SPB / BPB,
+// kendaraan & HM, blok, keterangan / catatan, foto bukti), marking what is still empty - a placeholder
+// such as "-" or "0" counts as empty - and saves what the admin fills in or corrects, all rows at once,
+// each change logged with its old value. Amounts, dates and saldo are never touched, so it is open (any
+// month) to an account with Input or Edit of the module in that estate. Loan / transfer / koreksi rows are
+// left out (their data lives in Pinjaman / Stok Opname).
 type LengkapiField = { key: string; label: string; type: "text" | "number"; applies: string };
 type LengkapiKind = {
   table: string;
@@ -10824,8 +10825,8 @@ const LENGKAPI: Record<string, LengkapiKind> = {
     ],
   },
 };
-// A field counts as empty when NULL, blank (a number column: NULL only).
-const lengkapiEmpty = (f: LengkapiField) => (f.type === "number" ? `${f.key} IS NULL` : `NULLIF(trim(COALESCE(${f.key}::text, '')), '') IS NULL`);
+// A field counts as empty when NULL, blank or only a placeholder ("-", "0", "--", "."); a number column: NULL.
+const lengkapiEmpty = (f: LengkapiField) => (f.type === "number" ? `${f.key} IS NULL` : `trim(COALESCE(${f.key}::text, '')) ~ '^[-0. ]*$'`);
 const lengkapiKind = (req: express.Request, res: express.Response) => {
   const k = LENGKAPI[String(req.params.kind)];
   if (!k) res.status(404).json({ error: "Modul tidak dikenal" });
@@ -10847,12 +10848,10 @@ app.get("/api/lengkapi/:kind", async (req, res) => {
        ARRAY_REMOVE(ARRAY[${k.fields.map((f) => `CASE WHEN ${f.applies} THEN '${f.key}' END`).join(", ")}], NULL) AS berlaku
      FROM ${k.table}
      WHERE ${k.estate} = @estate AND left(${k.date}, 7) = @bulan AND ${k.base}
-       AND (${need.join(" OR ")}${foto ? " OR evidence_id IS NULL" : ""})
      ORDER BY ${k.date}, id`,
     { estate, bulan }
   );
-  const total = await queryOne<{ n: number }>(`SELECT COUNT(*)::int n FROM ${k.table} WHERE ${k.estate} = @estate AND left(${k.date}, 7) = @bulan AND ${k.base}`, { estate, bulan });
-  res.json({ fields: k.fields.map(({ key, label, type }) => ({ key, label, type })), foto, rows, totalBulan: total?.n ?? 0 });
+  res.json({ fields: k.fields.map(({ key, label, type }) => ({ key, label, type })), foto, rows, totalBulan: rows.length });
 });
 
 app.put("/api/lengkapi/:kind", async (req, res) => {
@@ -10878,43 +10877,49 @@ app.put("/api/lengkapi/:kind", async (req, res) => {
         );
         if (!row) throw new Error(`Transaksi #${id} tidak ditemukan di ${estate}`);
         const set: Record<string, unknown> = {};
+        const old: Record<string, unknown> = {};
         for (const f of k.fields) {
           const v = r?.values?.[f.key];
-          if (v === undefined || v === null || String(v).trim() === "" || !row[`ok_${f.key}`]) continue;
+          if (v === undefined || v === null || !row[`ok_${f.key}`]) continue;
           const cur = row[f.key];
-          if (!(cur === null || (f.type === "text" && String(cur).trim() === ""))) continue; // filled already: left as it is
+          let nv: string | number | null;
           if (f.type === "number") {
-            const n = Number(String(v).replace(",", "."));
-            if (!Number.isFinite(n) || n < 0) throw new Error(`Tanggal ${row.tgl_}: ${f.label} harus angka`);
-            set[f.key] = n;
-          } else set[f.key] = String(v).trim().slice(0, 200);
+            if (String(v).trim() === "") nv = null;
+            else {
+              nv = Number(String(v).replace(",", "."));
+              if (!Number.isFinite(nv) || nv < 0) throw new Error(`Tanggal ${row.tgl_}: ${f.label} harus angka`);
+            }
+            if (nv === (cur === null ? null : Number(cur))) continue;
+          } else {
+            nv = String(v).trim().slice(0, 200);
+            if (nv === String(cur ?? "").trim()) continue;
+          }
+          set[f.key] = nv;
+          old[f.key] = cur;
         }
         const keys = Object.keys(set);
         if (keys.length) await execute(`UPDATE ${k.table} SET ${keys.map((x) => `${x} = @${x}`).join(", ")} WHERE id = @id`, { ...set, id }, c);
-        // The mirrored manual transaction gets the same text where it is still empty too.
+        // The mirrored manual transaction gets the same text.
         for (const x of keys.filter((x) => k.mirror?.[x])) {
           const col = k.mirror![x];
-          await execute(
-            `UPDATE transactions SET ${col} = @v WHERE mirror_source = @t AND mirror_id = @id AND NULLIF(trim(COALESCE(${col}, '')), '') IS NULL`,
-            { v: set[x], t: k.table, id },
-            c
-          );
+          await execute(`UPDATE transactions SET ${col} = @v WHERE mirror_source = @t AND mirror_id = @id`, { v: set[x] ?? "", t: k.table, id }, c);
         }
         let foto = false;
         const ev = r?.evidence_id;
-        if (ev && !row.evidence_id) {
+        if (ev && ev !== row.evidence_id) {
           const ok =
             /^[0-9a-f-]{36}$/.test(String(ev)) &&
             (await queryOne("UPDATE evidence SET used = true WHERE id = @ev::uuid AND used = false AND (user_id = @uid OR @su) RETURNING id", { ev, uid: u.id, su: u.role === "superuser" }, c));
           if (!ok) throw new Error(`Tanggal ${row.tgl_}: foto bukti tidak valid, upload ulang fotonya`);
           const targets = k.mirror ? nilamEvidenceRows(k.table as "stock_in_log" | "stock_out_log", id) : [{ table: k.table, where: "id = @id", params: { id } }];
-          for (const t of targets) await execute(`UPDATE ${t.table} SET evidence_id = @ev::uuid WHERE (${t.where}) AND evidence_id IS NULL`, { ...t.params, ev }, c);
+          // A photo already there is replaced (the old one stays in the log line).
+          for (const t of targets) await execute(`UPDATE ${t.table} SET evidence_id = @ev::uuid WHERE (${t.where}) AND evidence_id IS NOT DISTINCT FROM @old::uuid`, { ...t.params, ev, old: row.evidence_id }, c);
           foto = true;
           fotoCount++;
         }
         if (keys.length || foto)
           done.push(
-            `${String(row.tgl_).split("-").reverse().join("/")}${row.no_spb ? ` SPB ${row.no_spb}` : ""}: ${[...keys.map((x) => `${k.fields.find((f) => f.key === x)!.label} ${set[x]}`), foto && "foto bukti"].filter(Boolean).join(", ")}`
+            `${String(row.tgl_).split("-").reverse().join("/")} #${id}: ${[...keys.map((x) => `${k.fields.find((f) => f.key === x)!.label} ${old[x] === null || old[x] === "" ? "(kosong)" : old[x]} → ${set[x] ?? "(kosong)"}`), foto && (row.evidence_id ? "ganti foto bukti" : "foto bukti")].filter(Boolean).join(", ")}`
           );
       }
     });

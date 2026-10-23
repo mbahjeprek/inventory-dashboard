@@ -5,11 +5,11 @@ import { useAuth } from "../context/AuthContext";
 import { can } from "../lib/access";
 import { EvidenceLink, shrink } from "./EvidenceInput";
 
-// Lengkapi Data: one month of an estate's transactions that still miss something the input form asks
-// for (No. SPB / BPB, kendaraan & HM, blok, keterangan, foto bukti), every gap an input in one table,
-// saved together - instead of opening the transactions day by day. Only empty fields are filled and a
-// missing photo added (the server never changes what is already there), for an account with Input or
-// Edit of the module.
+// Lengkapi Data: every transaction of one month of an estate in one table, with the fields the input
+// form asks for (No. SPB / BPB, kendaraan & HM, blok, keterangan, foto bukti) as inputs - the empty ones
+// ("-" / "0" count as empty) marked - so they are filled in / corrected and saved together instead of
+// opening the transactions day by day. Amounts, dates and saldo are not touched; every change is logged
+// with its old value. For an account with Input or Edit of the module.
 
 const MODULE_OF: Record<LengkapiKind, string> = { bbm: "bbm", pupuk: "pupuk", oli: "oli", gudang: "gudang", klinik: "klinik", nilam_masuk: "gudang", nilam_keluar: "gudang" };
 const TITLE: Record<LengkapiKind, string> = { bbm: "BBM", pupuk: "Pupuk", oli: "Oli", gudang: "Gudang", klinik: "Klinik", nilam_masuk: "Stok Masuk", nilam_keluar: "Stok Keluar" };
@@ -82,22 +82,23 @@ function LengkapiModal({ kinds, estate, onClose, onDone }: { kinds: LengkapiKind
     for (const r of data?.rows ?? []) for (const k of r.kurang) c[k] = (c[k] ?? 0) + 1;
     return c;
   }, [data]);
-  const rows = (data?.rows ?? []).filter((r) => !only || r.kurang.includes(only));
+  // only: "" = every transaction, "kurang" = those with something empty, or one field's empties.
+  const rows = (data?.rows ?? []).filter((r) => !only || (only === "kurang" ? r.kurang.length > 0 : r.kurang.includes(only)));
+  const belum = (data?.rows ?? []).filter((r) => r.kurang.length).length;
+  const cur = (r: LengkapiRow, key: string) => (r[key] === null || r[key] === undefined ? "" : String(r[key]));
+  const valOf = (r: LengkapiRow, key: string) => edits[r.id]?.values?.[key] ?? cur(r, key);
+  const kosong = (v: string) => /^[-0. ]*$/.test(v.trim());
+  const changedKeys = (r: LengkapiRow) => Object.keys(edits[r.id]?.values ?? {}).filter((k) => edits[r.id].values[k].trim() !== cur(r, k).trim());
   const setVal = (id: number, key: string, v: string) => setEdits((e) => ({ ...e, [id]: { ...e[id], values: { ...(e[id]?.values ?? {}), [key]: v } } }));
-  const filled = (r: LengkapiRow, key: string) => (key === "foto" ? !!edits[r.id]?.evidence_id : !!edits[r.id]?.values?.[key]?.trim());
-  const changedIds = Object.keys(edits)
-    .map(Number)
-    .filter((id) => {
-      const e = edits[id];
-      return !!e.evidence_id || Object.values(e.values ?? {}).some((v) => v.trim());
-    });
-  // Isi semua: one value for every still-empty cell of a column (e.g. the same keterangan for the month).
+  const changedIds = (data?.rows ?? []).filter((r) => edits[r.id]?.evidence_id || changedKeys(r).length).map((r) => r.id);
+  // Isi semua: one value for every still-empty cell of a column among the rows shown.
   const isiSemua = (key: string, label: string) => {
     const v = window.prompt(`Isi ${label} untuk semua baris yang masih kosong${only ? " (yang tampil)" : ""}:`);
     if (!v?.trim()) return;
     setEdits((e) => {
       const n = { ...e };
-      for (const r of rows) if (r.kurang.includes(key) && !n[r.id]?.values?.[key]) n[r.id] = { ...n[r.id], values: { ...(n[r.id]?.values ?? {}), [key]: v.trim() } };
+      for (const r of rows)
+        if (r.berlaku.includes(key) && kosong(n[r.id]?.values?.[key] ?? cur(r, key))) n[r.id] = { ...n[r.id], values: { ...(n[r.id]?.values ?? {}), [key]: v.trim() } };
       return n;
     });
   };
@@ -126,7 +127,9 @@ function LengkapiModal({ kinds, estate, onClose, onDone }: { kinds: LengkapiKind
         kind,
         estate,
         bulan,
-        changedIds.map((id) => ({ id, values: edits[id].values ?? {}, evidence_id: edits[id].evidence_id }))
+        (data?.rows ?? [])
+          .filter((r) => changedIds.includes(r.id))
+          .map((r) => ({ id: r.id, values: Object.fromEntries(changedKeys(r).map((k) => [k, edits[r.id].values[k]])), evidence_id: edits[r.id]?.evidence_id }))
       );
       setMsg(`Tersimpan: ${r.saved} transaksi${r.foto ? ` · ${r.foto} foto bukti` : ""}`);
       setEdits({});
@@ -151,7 +154,7 @@ function LengkapiModal({ kinds, estate, onClose, onDone }: { kinds: LengkapiKind
           <div className="mr-auto">
             <h2 className="font-semibold text-[var(--text-primary)]">Lengkapi Data · {kinds.length > 1 ? "Gudang" : TITLE[kind]} {estate}</h2>
             <p className="text-xs text-[var(--text-secondary)]">
-              Transaksi yang masih ada kolom kosong / belum ada foto bukti. Isi lalu Simpan sekaligus; jumlah, tanggal dan saldo tidak berubah.
+              Semua transaksi bulan ini. Kotak kuning = masih kosong (termasuk "-" / "0"). Isi atau koreksi lalu Simpan sekaligus; jumlah, tanggal dan saldo tidak berubah.
             </p>
           </div>
           {kinds.length > 1 && (
@@ -183,17 +186,25 @@ function LengkapiModal({ kinds, estate, onClose, onDone }: { kinds: LengkapiKind
         {data && (
           <div className="flex flex-wrap items-center gap-2 px-4 py-2.5 text-xs border-b border-[var(--border)]">
             <span className="text-[var(--text-secondary)] mr-1">
-              {data.rows.length ? (
+              <b className="text-[var(--text-primary)]">{data.totalBulan}</b> transaksi {bulanLabel(bulan)}
+              {belum ? (
                 <>
-                  <b className="text-[var(--text-primary)]">{data.rows.length}</b> dari {data.totalBulan} transaksi {bulanLabel(bulan)} belum lengkap:
+                  {" "}· <b className="text-[var(--accent-amber)]">{belum}</b> belum lengkap:
                 </>
+              ) : data.totalBulan ? (
+                " · semua kolom sudah terisi"
               ) : (
-                `Semua ${data.totalBulan} transaksi ${bulanLabel(bulan)} sudah lengkap.`
+                ""
               )}
             </span>
             {data.rows.length > 0 && (
               <button onClick={() => setOnly("")} className={`px-2 py-1 rounded border ${!only ? "border-[var(--accent-blue)] text-[var(--accent-blue)] bg-[var(--accent-blue-bg)]" : "border-[var(--border)]"}`}>
-                Semua
+                Semua {data.rows.length}
+              </button>
+            )}
+            {belum > 0 && (
+              <button onClick={() => setOnly("kurang")} className={`px-2 py-1 rounded border ${only === "kurang" ? "border-[var(--accent-blue)] text-[var(--accent-blue)] bg-[var(--accent-blue-bg)]" : "border-[var(--border)]"}`}>
+                Belum lengkap {belum}
               </button>
             )}
             {cols
@@ -214,7 +225,7 @@ function LengkapiModal({ kinds, estate, onClose, onDone }: { kinds: LengkapiKind
           {!data ? (
             <p className="p-6 text-sm text-[var(--text-muted)]">{error || "Memuat..."}</p>
           ) : rows.length === 0 ? (
-            <p className="p-6 text-sm text-[var(--text-muted)]">Tidak ada yang perlu dilengkapi.</p>
+            <p className="p-6 text-sm text-[var(--text-muted)]">{data.rows.length ? "Tidak ada transaksi untuk filter ini." : "Tidak ada transaksi di bulan ini."}</p>
           ) : (
             <table className="w-full text-xs">
               <thead className="bg-[#f8fafc] text-[var(--text-secondary)] sticky top-0 z-10">
@@ -228,7 +239,7 @@ function LengkapiModal({ kinds, estate, onClose, onDone }: { kinds: LengkapiKind
                     <th key={c.key} className="px-2 py-2 min-w-[120px]">
                       <div className="flex items-center gap-1">
                         {c.label}
-                        {c.key !== "foto" && kurangCount[c.key] > 1 && (
+                        {c.key !== "foto" && kurangCount[c.key] > 0 && (
                           <button onClick={() => isiSemua(c.key, c.label)} className="font-normal text-[10px] text-[var(--accent-blue)] hover:underline" title="Isi semua yang kosong dengan satu nilai">
                             isi semua
                           </button>
@@ -250,39 +261,47 @@ function LengkapiModal({ kinds, estate, onClose, onDone }: { kinds: LengkapiKind
                       if (c.key === "foto")
                         return (
                           <td key="foto" className="px-2 py-1">
-                            {r.evidence_id ? (
-                              <EvidenceLink id={r.evidence_id} label="ada" />
-                            ) : edits[r.id]?.evidence_id ? (
+                            {edits[r.id]?.evidence_id ? (
                               <span className="inline-flex items-center gap-1.5">
-                                <EvidenceLink id={edits[r.id].evidence_id} label="baru" />
+                                <EvidenceLink id={edits[r.id].evidence_id} label={r.evidence_id ? "foto pengganti" : "baru"} />
                                 <button onClick={() => setEdits((e) => ({ ...e, [r.id]: { values: e[r.id]?.values ?? {} } }))} title="Batalkan foto" className="text-[var(--text-muted)] hover:text-[var(--accent-red)]">
                                   <X size={12} />
                                 </button>
                               </span>
                             ) : (
-                              <label className="inline-flex items-center gap-1 px-2 py-1 rounded border border-dashed border-[var(--accent-amber-border)] bg-[var(--accent-amber-bg)] text-[var(--accent-amber)] cursor-pointer whitespace-nowrap">
-                                {uploading === r.id ? <Loader2 size={12} className="animate-spin" /> : <ImagePlus size={12} />} Upload
-                                <input type="file" accept="image/*" className="hidden" onChange={(e) => (pickFoto(r.id, e.target.files?.[0]), (e.target.value = ""))} />
-                              </label>
+                              <span className="inline-flex items-center gap-2 whitespace-nowrap">
+                                {r.evidence_id && <EvidenceLink id={r.evidence_id} label="ada" />}
+                                <label
+                                  className={`inline-flex items-center gap-1 px-2 py-1 rounded border cursor-pointer ${
+                                    r.evidence_id ? "border-[var(--border)] text-[var(--text-secondary)]" : "border-dashed border-[var(--accent-amber-border)] bg-[var(--accent-amber-bg)] text-[var(--accent-amber)]"
+                                  }`}
+                                  title={r.evidence_id ? "Ganti foto bukti" : "Upload foto bukti"}
+                                >
+                                  {uploading === r.id ? <Loader2 size={12} className="animate-spin" /> : <ImagePlus size={12} />} {r.evidence_id ? "Ganti" : "Upload"}
+                                  <input type="file" accept="image/*" className="hidden" onChange={(e) => (pickFoto(r.id, e.target.files?.[0]), (e.target.value = ""))} />
+                                </label>
+                              </span>
                             )}
                           </td>
                         );
                       const applies = r.berlaku.includes(c.key);
-                      const missing = r.kurang.includes(c.key);
+                      const v = valOf(r, c.key);
+                      const ubah = edits[r.id]?.values?.[c.key] !== undefined && v.trim() !== cur(r, c.key).trim();
                       return (
                         <td key={c.key} className="px-2 py-1">
                           {!applies ? (
                             <span className="text-[var(--text-muted)]">-</span>
-                          ) : missing ? (
+                          ) : (
                             <input
                               type={c.type === "number" ? "number" : "text"}
                               step="any"
-                              value={edits[r.id]?.values?.[c.key] ?? ""}
+                              value={v}
                               onChange={(e) => setVal(r.id, c.key, e.target.value)}
-                              className={`w-full min-w-[100px] rounded border px-2 py-1 ${filled(r, c.key) ? "border-[var(--accent-green)] bg-white" : "border-[var(--accent-amber-border)] bg-[#fffbeb]"}`}
+                              title={ubah ? `Sebelumnya: ${cur(r, c.key) || "(kosong)"}` : undefined}
+                              className={`w-full min-w-[100px] rounded border px-2 py-1 ${
+                                ubah ? "border-[var(--accent-green)] bg-white" : kosong(v) ? "border-[var(--accent-amber-border)] bg-[#fffbeb]" : "border-[var(--border)] bg-white"
+                              }`}
                             />
-                          ) : (
-                            <span className="text-[var(--text-secondary)]">{String(r[c.key as keyof LengkapiRow] ?? "")}</span>
                           )}
                         </td>
                       );
