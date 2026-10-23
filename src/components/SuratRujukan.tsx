@@ -3,7 +3,8 @@ import { FileText, X } from "lucide-react";
 import type { Kunjungan } from "../lib/api";
 import { printDocument } from "../lib/printTable";
 import { isoDisplay } from "../lib/opname";
-import { KOP_CSS, PERUSAHAAN, escHtml as esc, kopHtml, tanggalPanjang } from "../lib/surat";
+import { KOP_CSS, PERUSAHAAN, escHtml as esc, kopHtml, penandatangan, punyaGelar, tanggalPanjang } from "../lib/surat";
+import { useAuth } from "../context/AuthContext";
 
 // Surat Rujukan from a kunjungan, in the clinics' own format: kop "PT. ANUGRAH KEMBANG SAWIT SEJAHTERA /
 // DEPARTEMEN KLINIK ESTATE <estate>", nomor <visit>/AKSS-<kode estate>/<bulan romawi>/<tahun>, Kepada Yth.
@@ -101,6 +102,7 @@ const inputCls = "w-full text-sm rounded-md border border-[var(--border)] px-3 p
 const labelCls = "text-xs text-[var(--text-secondary)] mb-1 block";
 
 export function SuratRujukanModal({ k, onClose }: { k: Kunjungan; onClose: () => void }) {
+  const { user } = useAuth();
   const key = `surat-rujukan-${k.klinik}`;
   let ingat: { perusahaan?: string; petugas?: string; gelar?: string; tujuanList?: string[] } = {};
   try {
@@ -130,8 +132,9 @@ export function SuratRujukanModal({ k, onClose }: { k: Kunjungan; onClose: () =>
     diagnosa: k.diagnosis || "",
     penunjang: "",
     terapi: terapiAwal,
-    petugas: ingat.petugas || k.created_by || "",
-    gelar: ingat.gelar || "",
+    // The signer by its current account name; a name that already carries its title gets no second gelar.
+    petugas: penandatangan(user, k.created_by),
+    gelar: punyaGelar(penandatangan(user, k.created_by)) ? "" : ingat.gelar || "",
     tanggal: k.tanggal_iso,
   });
   const [error, setError] = useState("");

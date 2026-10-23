@@ -2180,6 +2180,27 @@ app.put("/api/users/:id", requireSuperuser, async (req, res) => {
     throw e;
   }
   sessionCache.delete(Number(req.params.id));
+  // A new nama (e.g. a clinic account given its bidan's full name and title): the copies of the old one
+  // that letters and reports print follow it - the visits it entered, the obat it received, its stok
+  // opname, permintaan obat and pruning entries.
+  const namaBaru = String(nama).trim();
+  if (namaBaru !== existing.nama) {
+    const uid = existing.id;
+    const lama = existing.nama;
+    const ests = String(access.estates || existing.estates || existing.estate || "").split(",").filter(Boolean);
+    await withTransaction(async (c) => {
+      await execute("UPDATE klinik_kunjungan SET created_by = @baru WHERE created_by = @lama AND klinik = ANY(@ests)", { baru: namaBaru, lama, ests }, c);
+      await execute("UPDATE klinik_stock_tx SET penerima = @baru WHERE penerima = @lama AND user_id = @uid", { baru: namaBaru, lama, uid }, c);
+      await execute("UPDATE opname SET created_by_nama = @baru WHERE created_by = @uid AND created_by_nama = @lama", { baru: namaBaru, lama, uid }, c);
+      await execute("UPDATE opname SET submitted_by_nama = @baru WHERE submitted_by = @uid AND submitted_by_nama = @lama", { baru: namaBaru, lama, uid }, c);
+      await execute("UPDATE opname SET approved_by_nama = @baru WHERE approved_by = @uid AND approved_by_nama = @lama", { baru: namaBaru, lama, uid }, c);
+      await execute("UPDATE klinik_permintaan SET created_by = @baru WHERE user_id = @uid AND created_by = @lama", { baru: namaBaru, lama, uid }, c);
+      await execute("UPDATE pruning_log SET created_by = @baru WHERE user_id = @uid AND created_by = @lama", { baru: namaBaru, lama, uid }, c);
+    });
+    for (const estate of ests.filter((e) => KLINIK_OPTIONS.includes(e)).slice(0, 5))
+      if (String(existing.perms ?? "").includes("klinik.") || existing.role === "superuser")
+        await logActivity(req, { module: "KLINIK", estate, aksi: "Ubah Nama Akun", objek: existing.username, detail: `${lama} → ${namaBaru} (ikut diperbarui di kunjungan, penerima obat, stok opname dan permintaan obat)` });
+  }
   const sebelum = existing.edit_lampau_until ? jakartaDay(existing.edit_lampau_until) : "";
   // Logged in the Log of every module / estate the account works in, where its edits will show up.
   if (lampauGiven && String(lampauRaw ?? "") !== sebelum) {

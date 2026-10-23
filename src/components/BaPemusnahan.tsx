@@ -3,7 +3,7 @@ import { CheckCircle2, FileText, Printer, ShieldCheck, X } from "lucide-react";
 import { api, errorText, type BeritaAcara, type KlinikTarik, type KopTx } from "../lib/api";
 import { printDocument } from "../lib/printTable";
 import { isoDisplay, localToday } from "../lib/opname";
-import { BULAN, HARI, KOP_CSS, PERUSAHAAN, escHtml, kopHtml, terbilang } from "../lib/surat";
+import { BULAN, HARI, KOP_CSS, PERUSAHAAN, escHtml, jabatanDariGelar, kopHtml, namaLama, terbilang } from "../lib/surat";
 import { useAuth } from "../context/AuthContext";
 import { can } from "../lib/access";
 import { EvidenceInput, EvidenceLink, useEvidenceEnabled } from "./EvidenceInput";
@@ -132,6 +132,7 @@ function Shell({ title, subtitle, onClose, children, wide = false }: { title: st
 
 // The form of a new BA: saved with its automatic nomor, then printed.
 export function BaForm({ jenis: j, items, onClose, onSaved }: { jenis: BaJenis; items: BaItem[] | null; onClose: () => void; onSaved: () => void }) {
+  const { user } = useAuth();
   const awal = (): Isian => {
     const kosong = {
       perusahaan: PERUSAHAAN,
@@ -140,13 +141,18 @@ export function BaForm({ jenis: j, items, onClose, onSaved }: { jenis: BaJenis; 
       pihakKetiga: "",
       ...Object.fromEntries(PERAN.map((k) => [k, { nama: "", jabatan: j.peran[k].jabatan }])),
     } as Isian;
+    let isian = kosong;
     try {
       const s = JSON.parse(localStorage.getItem(j.storageKey) ?? "null");
-      if (s) return { ...kosong, ...s };
+      if (s) isian = { ...kosong, ...s };
     } catch {
       /* no storage */
     }
-    return kosong;
+    // Yang menyerahkan (the bidan / mantri jaga): the clinic account by its full name and title when
+    // nothing (or only an old-style name) was remembered.
+    if (user?.nama && user.role !== "superuser" && (!isian.pj?.nama || namaLama(isian.pj.nama)))
+      isian = { ...isian, pj: { nama: user.nama, jabatan: jabatanDariGelar(user.nama) || isian.pj?.jabatan || "" } };
+    return isian;
   };
   const [f, setF] = useState<Isian>(awal);
   const [tanggal, setTanggal] = useState(localToday());

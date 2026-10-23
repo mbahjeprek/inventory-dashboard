@@ -31,3 +31,15 @@ export const KOP_CSS = `
 export const kopHtml = (perusahaan: string, unit: string) =>
   `<div class="kop"><img class="kop-logo" src="${escHtml(location.origin)}/logo-akss.png" alt="AKSS"><div class="kop-teks"><div class="kop-pt">${escHtml(perusahaan)}</div><div class="kop-unit">${escHtml(unit)}</div></div><div class="kop-spasi"></div></div>`;
 export const PERUSAHAAN = "PT. Anugrah Kembang Sawit Sejahtera";
+
+// The clinic staff who sign: the accounts carry the full name with its title ("Sukaena Amd.keb").
+// A name that already has a title is printed as it is (no second gelar), the jabatan follows the title,
+// and an old-style account name ("Admin Klinik Nilam", "Bidan Sukaina") is never offered as the signer.
+export const punyaGelar = (nama: string) => /(^|\s)(dr|ns)\.|\ba\.?\s?md\b|\bamd\b|\bs\.\s?(kep|keb|tr|st|ked|farm)\b/i.test(nama);
+export const jabatanDariGelar = (nama: string): string | null =>
+  /keb\b/i.test(nama) ? "Bidan" : /kep\b|(^|\s)ns\./i.test(nama) ? "Perawat" : /(^|\s)dr\./i.test(nama) ? "Dokter" : null;
+export const namaLama = (nama: string) => /^(admin klinik|bidan |perawat |mantri )/i.test(nama.trim());
+// Who signs a letter of a visit: the clinic account printing it (its full name and title), else the
+// account that entered the visit.
+export const penandatangan = (user: { nama?: string; role?: string } | null | undefined, createdBy: string) =>
+  user?.nama && user.role !== "superuser" && !namaLama(user.nama) ? user.nama : createdBy && !namaLama(createdBy) ? createdBy : user?.nama ?? createdBy ?? "";
