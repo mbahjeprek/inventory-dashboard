@@ -567,6 +567,8 @@ export type KopTx = {
 };
 // Depo Air (Koperasi): the monthly report of one depot (or both).
 export type DepoLaporan = {
+  dari: string;
+  sampai: string;
   periode: string;
   depo: string;
   harga: number;
@@ -574,8 +576,13 @@ export type DepoLaporan = {
   perBayar: { bayar: string; galon: number; total: number }[];
   perDivisi: { divisi: string; galon: number; total: number; orang: number }[];
   perHari: { tanggal: string; galon: number; orang: number }[];
+  perMinggu: { minggu: number; dari: number; sampai: number; galon: number; hari: number }[];
   top: { kode: string; nama: string | null; divisi: string | null; galon: number; total: number }[];
-  perBulan: { periode: string; galon: number; pendapatan: number; biaya: number }[];
+  // The months of the range; tren12 = the 12 months up to its end (on-screen trend only).
+  perBulan: { periode: string; galon: number; pendapatan: number; pelanggan: number; biaya: number }[];
+  tren12: { periode: string; galon: number; pendapatan: number; pelanggan: number; biaya: number }[];
+  // The range of the same length just before, to compare.
+  sebelum: { dari: string; sampai: string; galon: number; pendapatan: number; pelanggan: number; biaya: number };
   biaya: { id: number; depo: string; tanggal_iso: string; kategori: string; keterangan: string; jumlah: number; evidence_id: string | null; oleh: string }[];
   kategori: Record<string, string>;
 };
@@ -1527,10 +1534,10 @@ export const api = {
   baSelesai: (id: number, body: { tanggal: string; catatan: string; evidence_id: string | null }) =>
     req<{ success: boolean }>(`/api/berita-acara/${id}/selesai`, { method: "PUT", body: JSON.stringify(body) }),
   baBatal: (id: number, alasan: string) => req<{ success: boolean }>(`/api/berita-acara/${id}/batal`, { method: "PUT", body: JSON.stringify({ alasan }) }),
-  depoLaporan: (depo: string, periode: string) => req<DepoLaporan>(`/api/koperasi/depo?${new URLSearchParams({ depo, periode })}`),
-  depoTx: (depo: string, periode: string) =>
+  depoLaporan: (depo: string, dari: string, sampai: string) => req<DepoLaporan>(`/api/koperasi/depo?${new URLSearchParams({ depo, dari, sampai })}`),
+  depoTx: (depo: string, dari: string, sampai: string) =>
     req<{ id: number; tanggal_iso: string; depo: string; anggota_kode: string; nama: string | null; divisi: string | null; estate: string | null; qty: number; total: number; bayar: string }[]>(
-      `/api/koperasi/depo/tx?${new URLSearchParams({ depo, periode })}`
+      `/api/koperasi/depo/tx?${new URLSearchParams({ depo, dari, sampai })}`
     ),
   depoPindah: (id: number, depo: string) => req<{ success: boolean }>(`/api/koperasi/depo/tx/${id}`, { method: "PUT", body: JSON.stringify({ depo }) }),
   depoBiaya: (body: { depo: string; tanggal: string; kategori: string; jumlah: number; keterangan: string; evidence_id: string | null }) =>

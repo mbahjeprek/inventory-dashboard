@@ -9448,75 +9448,138 @@ const DEPO_BIAYA: Record<string, string> = {
 // depo '' = both; the Stock Out of the depot barang in the periode.
 const depoWhere = (depo: string) => `t.koperasi = @k AND t.jenis = 'JUAL' AND b.depo_air AND (@depo = '' OR t.depo = @depo)`;
 
-// The report of one month (and the 12 months up to it): galon, pendapatan per cara bayar, pelanggan,
-// per divisi, per hari, top pelanggan, biaya and laba / rugi.
+// Months (YYYY-MM) arithmetic for the depot reports.
+const blnGeser = (per: string, n: number) => {
+  const [y, m] = per.split("-").map(Number);
+  const d = new Date(y, m - 1 + n, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+};
+const blnAntara = (dari: string, sampai: string) => {
+  const out: string[] = [];
+  for (let p = dari; p <= sampai && out.length < 60; p = blnGeser(p, 1)) out.push(p);
+  return out;
+};
+// dari..sampai (months) of a depot request; a lone `periode` is one month.
+function depoRange(q: Record<string, unknown>) {
+  const per = String(q.periode ?? "");
+  const dari = String(q.dari ?? per);
+  const sampai = String(q.sampai ?? per);
+  if (!isPeriode(dari) || !isPeriode(sampai) || dari > sampai) return null;
+  if (blnAntara(dari, sampai).length > 36) return null;
+  return { dari, sampai };
+}
+
+// The report of a range of months (one month = a monthly report): galon, pendapatan per cara bayar,
+// pelanggan, per divisi, per bulan (or per hari and per minggu for one month), top pelanggan, biaya,
+// laba / rugi, the same figures of the range just before (to compare), and the 12 months up to the
+// end for the on-screen trend.
 app.get("/api/koperasi/depo", async (req, res) => {
-  const periode = String(req.query.periode ?? "");
+  const r = depoRange(req.query as Record<string, unknown>);
   const depo = DEPO.includes(String(req.query.depo)) ? String(req.query.depo) : "";
-  if (!isPeriode(periode)) return res.status(400).json({ error: "Periode tidak valid" });
-  const p = { k: KOPERASI, depo, periode };
+  if (!r) return res.status(400).json({ error: "Periode tidak valid (paling panjang 36 bulan)" });
+  const { dari, sampai } = r;
+  const bulan = blnAntara(dari, sampai);
+  const satuBulan = bulan.length === 1;
+  const sebelumSampai = blnGeser(dari, -1);
+  const sebelumDari = blnGeser(dari, -bulan.length);
+  const awal12 = blnGeser(sampai, -11);
+  const p = { k: KOPERASI, depo, dari, sampai };
   const from = `FROM koperasi_tx t JOIN koperasi_barang b ON b.kode = t.barang_kode LEFT JOIN koperasi_anggota a ON a.kode = t.anggota_kode ${KOP_ANGGOTA_JOIN}`;
-  const awal = (() => {
-    const [y, m] = periode.split("-").map(Number);
-    const d = new Date(y, m - 12, 1);
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-  })();
-  const [ringkas, perBayar, perDivisi, perHari, top, perBulan, biaya, biayaBulan, harga] = await Promise.all([
+  const dalam = `${depoWhere(depo)} AND t.periode BETWEEN @dari AND @sampai`;
+  const [ringkas, perBayar, perDivisi, perHari, top, perBulanQ, biaya, biayaBulan, harga, sebelum, biayaSebelum] = await Promise.all([
     queryOne(
       `SELECT COALESCE(SUM(t.qty), 0)::float8 galon, COALESCE(SUM(t.total), 0)::float8 pendapatan, COUNT(DISTINCT t.anggota_kode)::int pelanggan, COUNT(*)::int transaksi
-         ${from} WHERE ${depoWhere(depo)} AND t.periode = @periode`,
+         ${from} WHERE ${dalam}`,
       p
     ),
-    queryMany(`SELECT t.bayar, COALESCE(SUM(t.qty), 0)::float8 galon, COALESCE(SUM(t.total), 0)::float8 total ${from} WHERE ${depoWhere(depo)} AND t.periode = @periode GROUP BY 1`, p),
+    queryMany(`SELECT t.bayar, COALESCE(SUM(t.qty), 0)::float8 galon, COALESCE(SUM(t.total), 0)::float8 total ${from} WHERE ${dalam} GROUP BY 1`, p),
     queryMany(
-      `SELECT COALESCE(NULLIF(${"COALESCE(NULLIF(k.lokasi_kerja, ''), a.divisi)"}, ''), CASE WHEN a.jenis = 'INSTANSI' THEN 'Instansi' ELSE 'Tanpa divisi' END) AS divisi,
+      `SELECT COALESCE(NULLIF(COALESCE(NULLIF(k.lokasi_kerja, ''), a.divisi), ''), CASE WHEN a.jenis = 'INSTANSI' THEN 'Instansi' ELSE 'Tanpa divisi' END) AS divisi,
               COALESCE(SUM(t.qty), 0)::float8 galon, COALESCE(SUM(t.total), 0)::float8 total, COUNT(DISTINCT t.anggota_kode)::int orang
-         ${from} WHERE ${depoWhere(depo)} AND t.periode = @periode GROUP BY 1 ORDER BY 2 DESC`,
+         ${from} WHERE ${dalam} GROUP BY 1 ORDER BY 2 DESC`,
       p
     ),
-    queryMany(`SELECT t.tanggal_iso AS tanggal, COALESCE(SUM(t.qty), 0)::float8 galon, COUNT(DISTINCT t.anggota_kode)::int orang ${from} WHERE ${depoWhere(depo)} AND t.periode = @periode GROUP BY 1 ORDER BY 1`, p),
+    satuBulan
+      ? queryMany(`SELECT t.tanggal_iso AS tanggal, COALESCE(SUM(t.qty), 0)::float8 galon, COUNT(DISTINCT t.anggota_kode)::int orang ${from} WHERE ${dalam} GROUP BY 1 ORDER BY 1`, p)
+      : Promise.resolve([]),
     queryMany(
       `SELECT t.anggota_kode AS kode, COALESCE(NULLIF(k.nama, ''), a.nama) AS nama, COALESCE(NULLIF(k.lokasi_kerja, ''), a.divisi) AS divisi, COALESCE(SUM(t.qty), 0)::float8 galon, COALESCE(SUM(t.total), 0)::float8 total
-         ${from} WHERE ${depoWhere(depo)} AND t.periode = @periode GROUP BY 1, 2, 3 ORDER BY 4 DESC LIMIT 10`,
+         ${from} WHERE ${dalam} GROUP BY 1, 2, 3 ORDER BY 4 DESC LIMIT 10`,
       p
     ),
     queryMany(
-      `SELECT t.periode, COALESCE(SUM(t.qty), 0)::float8 galon, COALESCE(SUM(t.total), 0)::float8 pendapatan
-         ${from} WHERE ${depoWhere(depo)} AND t.periode >= @awal AND t.periode <= @periode GROUP BY 1 ORDER BY 1`,
-      { ...p, awal }
+      `SELECT t.periode, COALESCE(SUM(t.qty), 0)::float8 galon, COALESCE(SUM(t.total), 0)::float8 pendapatan, COUNT(DISTINCT t.anggota_kode)::int pelanggan
+         ${from} WHERE ${depoWhere(depo)} AND t.periode BETWEEN @awal AND @sampai GROUP BY 1 ORDER BY 1`,
+      { ...p, awal: awal12 < dari ? awal12 : dari }
     ),
     queryMany(
       `SELECT b.id, b.depo, b.tanggal_iso, b.kategori, b.keterangan, b.jumlah, b.evidence_id, COALESCE(u.nama, u.username, '') AS oleh
-         FROM depo_air_biaya b LEFT JOIN users u ON u.id = b.user_id WHERE (@depo = '' OR b.depo = @depo) AND b.periode = @periode ORDER BY b.tanggal_iso, b.id`,
+         FROM depo_air_biaya b LEFT JOIN users u ON u.id = b.user_id WHERE (@depo = '' OR b.depo = @depo) AND b.periode BETWEEN @dari AND @sampai ORDER BY b.tanggal_iso, b.id`,
       p
     ),
-    queryMany(`SELECT periode, SUM(jumlah)::float8 biaya FROM depo_air_biaya WHERE (@depo = '' OR depo = @depo) AND periode >= @awal AND periode <= @periode GROUP BY 1`, { ...p, awal }),
+    queryMany(`SELECT periode, SUM(jumlah)::float8 biaya FROM depo_air_biaya WHERE (@depo = '' OR depo = @depo) AND periode BETWEEN @awal AND @sampai GROUP BY 1`, {
+      ...p,
+      awal: awal12 < dari ? awal12 : dari,
+    }),
     queryOne<{ h: number }>("SELECT MAX(harga_jual)::float8 h FROM koperasi_barang WHERE depo_air AND aktif"),
+    queryOne<{ galon: number; pendapatan: number; pelanggan: number }>(
+      `SELECT COALESCE(SUM(t.qty), 0)::float8 galon, COALESCE(SUM(t.total), 0)::float8 pendapatan, COUNT(DISTINCT t.anggota_kode)::int pelanggan
+         ${from} WHERE ${depoWhere(depo)} AND t.periode BETWEEN @sdari AND @ssampai`,
+      { ...p, sdari: sebelumDari, ssampai: sebelumSampai }
+    ),
+    queryOne<{ v: number }>("SELECT COALESCE(SUM(jumlah), 0)::float8 v FROM depo_air_biaya WHERE (@depo = '' OR depo = @depo) AND periode BETWEEN @sdari AND @ssampai", {
+      depo,
+      sdari: sebelumDari,
+      ssampai: sebelumSampai,
+    }),
   ]);
-  const biayaPer = new Map(biayaBulan.map((r: any) => [r.periode, r.biaya]));
-  const bulan: { periode: string; galon: number; pendapatan: number; biaya: number }[] = [];
-  for (let i = 11; i >= 0; i--) {
-    const [y, m] = periode.split("-").map(Number);
-    const d = new Date(y, m - 1 - i, 1);
-    const per = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-    const r: any = perBulan.find((x: any) => x.periode === per);
-    bulan.push({ periode: per, galon: r?.galon ?? 0, pendapatan: r?.pendapatan ?? 0, biaya: biayaPer.get(per) ?? 0 });
-  }
-  res.json({ periode, depo, harga: harga?.h ?? 0, ringkas, perBayar, perDivisi, perHari, top, perBulan: bulan, biaya, kategori: DEPO_BIAYA });
+  const biayaPer = new Map(biayaBulan.map((x: any) => [x.periode, x.biaya]));
+  const baris = (per: string) => {
+    const x: any = perBulanQ.find((y: any) => y.periode === per);
+    return { periode: per, galon: x?.galon ?? 0, pendapatan: x?.pendapatan ?? 0, pelanggan: x?.pelanggan ?? 0, biaya: biayaPer.get(per) ?? 0 };
+  };
+  // One month: per minggu (1-7, 8-14, 15-21, 22-28, 29-akhir) of the days.
+  const perMinggu = satuBulan
+    ? [1, 2, 3, 4, 5]
+        .map((w) => {
+          const hari = (perHari as any[]).filter((h) => Math.min(5, Math.ceil(Number(h.tanggal.slice(8)) / 7)) === w);
+          const akhir = new Date(Number(dari.slice(0, 4)), Number(dari.slice(5, 7)), 0).getDate();
+          return { minggu: w, dari: (w - 1) * 7 + 1, sampai: w === 5 ? akhir : w * 7, galon: hari.reduce((s, h) => s + h.galon, 0), hari: hari.length };
+        })
+        .filter((w) => w.dari <= new Date(Number(dari.slice(0, 4)), Number(dari.slice(5, 7)), 0).getDate())
+    : [];
+  res.json({
+    dari,
+    sampai,
+    periode: sampai,
+    depo,
+    harga: harga?.h ?? 0,
+    ringkas,
+    perBayar,
+    perDivisi,
+    perHari,
+    perMinggu,
+    top,
+    perBulan: bulan.map(baris),
+    tren12: blnAntara(awal12, sampai).map(baris),
+    biaya,
+    sebelum: { dari: sebelumDari, sampai: sebelumSampai, ...sebelum!, biaya: biayaSebelum!.v },
+    kategori: DEPO_BIAYA,
+  });
 });
 
-// The depot's Stock Out rows of the month (for the list / Excel and to move a row to the other depot).
+// The depot's Stock Out rows of the range (for the list / Excel and to move a row to the other depot).
 app.get("/api/koperasi/depo/tx", async (req, res) => {
-  const periode = String(req.query.periode ?? "");
+  const r = depoRange(req.query as Record<string, unknown>);
   const depo = DEPO.includes(String(req.query.depo)) ? String(req.query.depo) : "";
-  if (!isPeriode(periode)) return res.status(400).json({ error: "Periode tidak valid" });
+  if (!r) return res.status(400).json({ error: "Periode tidak valid" });
   res.json(
     await queryMany(
       `SELECT t.id, t.tanggal_iso, t.depo, t.anggota_kode, COALESCE(NULLIF(k.nama, ''), a.nama) AS nama, COALESCE(NULLIF(k.lokasi_kerja, ''), a.divisi) AS divisi, a.estate,
               t.qty::float8, t.total::float8, t.bayar
          FROM koperasi_tx t JOIN koperasi_barang b ON b.kode = t.barang_kode LEFT JOIN koperasi_anggota a ON a.kode = t.anggota_kode ${KOP_ANGGOTA_JOIN}
-        WHERE ${depoWhere(depo)} AND t.periode = @periode ORDER BY t.tanggal_iso DESC, t.id DESC`,
-      { k: KOPERASI, depo, periode }
+        WHERE ${depoWhere(depo)} AND t.periode BETWEEN @dari AND @sampai ORDER BY t.tanggal_iso DESC, t.id DESC LIMIT 3000`,
+      { k: KOPERASI, depo, ...r }
     )
   );
 });
