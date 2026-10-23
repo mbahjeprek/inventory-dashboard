@@ -941,3 +941,8 @@ CREATE TABLE IF NOT EXISTS berita_acara_item (
   PRIMARY KEY (ba_id, ref_id)
 );
 CREATE INDEX IF NOT EXISTS idx_ba_item_ref ON berita_acara_item(modul, ref_id);
+
+-- Who is online: the last request of an account (at most once a minute, or when its page changes) and
+-- the app page it was on (sent by the browser). Online = seen in the last 5 minutes.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS last_page TEXT;

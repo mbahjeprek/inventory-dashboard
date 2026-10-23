@@ -4,6 +4,7 @@ import { Activity, ChevronLeft, ChevronRight, LogIn, UserCheck, UserX, ArrowLeft
 import { api, type UserActivity } from "../lib/api";
 import { ExportButtons } from "../components/ExportButtons";
 import { accessSummary } from "../lib/access";
+import { OnlinePanel } from "../components/OnlinePanel";
 import type { TableReport } from "../lib/printTable";
 
 // Categorical slots in fixed order (dataviz reference palette, light mode); "Lainnya" is neutral.
@@ -233,6 +234,8 @@ export function UserActivityPage() {
           Siapa yang aktif mengisi data (tambah, edit, hapus, transaksi di semua modul) dan siapa yang login, per periode.
         </p>
       </div>
+
+      <OnlinePanel />
 
       <div className="flex flex-wrap items-center gap-2 bg-[var(--bg-card)] border border-[var(--border)] rounded-lg p-3">
         <span className="text-xs font-semibold uppercase tracking-wide text-[var(--text-secondary)] mr-1">Periode</span>

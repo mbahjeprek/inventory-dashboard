@@ -79,6 +79,16 @@ const SESSION_TTL_MS = 15_000;
 // A session in use is renewed (a fresh 7-day cookie) at most once an hour, so an account working in
 // the app is never logged out in the middle of a form - only one left unused for 7 days.
 const SESSION_RENEW_S = 60 * 60;
+// Last seen of an account (Log Aktivitas User > Sedang online): written at most once a minute per
+// instance, or at once when the page it is on changes. A failure never fails the request.
+const seen = new Map<number, { at: number; page: string }>();
+async function markSeen(id: number, req: express.Request) {
+  const page = String(req.get("x-page") ?? "").slice(0, 200);
+  const last = seen.get(id);
+  if (last && Date.now() - last.at < 60_000 && (!page || page === last.page)) return;
+  seen.set(id, { at: Date.now(), page: page || last?.page || "" });
+  await execute("UPDATE users SET last_seen_at = now(), last_page = COALESCE(NULLIF(@page, ''), last_page) WHERE id = @id", { id, page }).catch(() => {});
+}
 async function sessionFromCookie(req: express.Request, res?: express.Response): Promise<SessionUser | null> {
   const token = req.cookies?.[COOKIE_NAME];
   const claims = token ? verifySession(token) : null;
@@ -87,6 +97,7 @@ async function sessionFromCookie(req: express.Request, res?: express.Response): 
     if (res && claims.iat && Date.now() / 1000 - claims.iat > SESSION_RENEW_S) setSessionCookie(res, signSession(u));
     return u;
   };
+  await markSeen(claims.id, req);
   const hit = sessionCache.get(claims.id);
   if (hit && Date.now() - hit.at < SESSION_TTL_MS) return renew(hit.user);
   const row = await queryOne<UserRow>("SELECT id, username, nama, role, estate, estates, perms, temp_full_until, temp_full_modules, edit_lampau_until FROM users WHERE id = @id", { id: claims.id });
@@ -206,7 +217,7 @@ function requiredPerms(req: express.Request): Need {
   // Peta Blok: seen with Lihat Peta Blok, Ubah Peta Blok or Master Blok; colours / legend changed only with Ubah Peta Blok.
   if (is(/^\/peta-blok(\/|$)/)) return m === "GET" ? ["master.peta", "master.peta_edit", "master.blok"] : ["master.peta_edit"];
   if (is(/^\/users(\/|$)/)) return ["master.users"];
-  if (is(/^\/user-activity$/)) return ["monitor.log_user"];
+  if (is(/^\/user-activity$/) || is(/^\/user-online$/)) return ["monitor.log_user"];
   // Koperasi: Lihat; Input = pengambilan / pembelian / barang rusak; Edit = hapus transaksi and the master barang / anggota.
   // Stok opname: start / fill in the counts with Input; Selesai / Batal and Koreksi Stok with Edit.
   // Kendaraan & Alat Berat: Lihat; Input = kondisi harian and a unit's rusak / selesai; Edit = add / change units.
@@ -5073,6 +5084,15 @@ for (const lr of LEDGER_ROUTES) {
 // ---- Log Aktivitas User (superuser): who acted / logged in over a period ----
 // Built from activity_log (every add/edit/delete/transaction, all modules) and login_log. Every
 // account is listed, so the ones without a single action in the period stand out.
+// Accounts seen in the last 30 minutes (online = the last 5), newest first, with the page they were on.
+app.get("/api/user-online", async (_req, res) => {
+  const data = await queryMany(
+    `SELECT id, username, nama, role, estates, last_seen_at, last_page, last_seen_at > now() - interval '5 minutes' AS online
+       FROM users WHERE last_seen_at > now() - interval '30 minutes' ORDER BY last_seen_at DESC`
+  );
+  res.json(data);
+});
+
 app.get("/api/user-activity", requireSuperuser, async (req, res) => {
   const { dateFrom = "", dateTo = "", tz = "" } = req.query as Record<string, string>;
   const iso = /^\d{4}-\d{2}-\d{2}$/;

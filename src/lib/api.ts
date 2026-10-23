@@ -888,7 +888,8 @@ export function errorText(e: unknown, fallback: string, _useServer = false): str
 
 async function req<T>(url: string, opts?: RequestInit): Promise<T> {
   const res = await fetch(url, {
-    headers: { "Content-Type": "application/json" },
+    // X-Page: the app page this request came from (Log Aktivitas User > Sedang online).
+    headers: { "Content-Type": "application/json", "X-Page": window.location.pathname + window.location.search },
     ...opts,
   });
   if (!res.ok) {
@@ -907,6 +908,8 @@ export const api = {
   logout: () => req<{ success: boolean }>("/api/auth/logout", { method: "POST" }),
 
   me: () => req<{ user: AuthUser }>("/api/auth/me"),
+  userOnline: () =>
+    req<{ id: number; username: string; nama: string; role: string; estates: string | null; last_seen_at: string; last_page: string | null; online: boolean }[]>("/api/user-online"),
 
   changePassword: (currentPassword: string, newPassword: string) =>
     req<{ success: boolean }>("/api/auth/change-password", { method: "POST", body: JSON.stringify({ currentPassword, newPassword }) }),
