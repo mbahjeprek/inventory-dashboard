@@ -161,6 +161,9 @@ app.use("/api", async (req, res, next) => {
 // path (without the /api prefix), the action from the method. "super" = superusers
 // only; null = any logged-in account (the route still checks the estate itself).
 type Need = string[] | "super" | null;
+// Kebun (Pruning PT.AKSS, and its tab on the Peta Blok) is hidden for now: only a Super User sees it, whatever
+// pruning ticks an account has (they are kept for when it opens). Same switch in src/lib/access.ts.
+const KEBUN_HANYA_SUPER = true;
 const ACTIVITY_PERM: Record<string, string> = { BARANG: "gudang", BBM: "bbm", PUPUK: "pupuk", KLINIK: "klinik", OLI: "oli", KOPERASI: "koperasi", KENDARAAN: "kendaraan", PRUNING: "pruning" };
 function requiredPerms(req: express.Request): Need {
   // Inside app.use("/api") req.path is relative to the mount, inside a route it is the full path.
@@ -221,6 +224,8 @@ function requiredPerms(req: express.Request): Need {
   if (is(/^\/alat-berat(\/|$)/)) return ["master.alat"];
   if (is(/^\/master-blok(\/|$)/)) return ["master.blok"];
   // Peta Blok: seen with Lihat Peta Blok, Ubah Peta Blok or Master Blok; colours / legend changed only with Ubah Peta Blok.
+  // Kebun (pruning) is hidden for now: Super User only (KEBUN_HANYA_SUPER), also on the Peta Blok.
+  if (KEBUN_HANYA_SUPER && (is(/^\/pruning(\/|$)/) || is(/^\/peta-blok\/pruning$/))) return "super";
   if (is(/^\/peta-blok(\/|$)/)) return m === "GET" ? ["master.peta", "master.peta_edit", "master.blok"] : ["master.peta_edit"];
   if (is(/^\/users(\/|$)/)) return ["master.users"];
   if (is(/^\/user-activity$/) || is(/^\/user-online$/)) return ["monitor.log_user"];

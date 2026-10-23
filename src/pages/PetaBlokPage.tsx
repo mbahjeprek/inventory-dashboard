@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { Download, Eraser, Hand, Lock, LockOpen, Maximize2, Minimize2, Minus, Paintbrush, Plus, Save, Scissors, Search, Trash2 } from "lucide-react";
 import { api, errorText, type PetaBlok, type PetaCell, type PetaLegend, type PetaPruning, type PruningBlok } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
-import { can, pageAllowed, PRUNING_PATH } from "../lib/access";
+import { can, kebunTerlihat, pageAllowed, PRUNING_PATH } from "../lib/access";
 
 const ESTATE_LABEL: Record<string, string> = { NILAM: "Nilam", KNS: "KNS", WJA: "WJA", ZAMRUD: "Zamrud", FIRUS: "Firus" };
 const fmt = (n: number | null | undefined, d = 0) => (n === null || n === undefined ? "-" : n.toLocaleString("id-ID", { minimumFractionDigits: d, maximumFractionDigits: d }));
@@ -345,7 +345,7 @@ export function PetaBlokPage() {
 
       <div className="flex gap-1 border-b border-[var(--border)]">
         {tab("progress", "Progress Pemupukan")}
-        {tab("pruning", "Progress Pruning")}
+        {kebunTerlihat(user) && tab("pruning", "Progress Pruning")}
         {tab("bebas", "Warna Bebas")}
       </div>
 

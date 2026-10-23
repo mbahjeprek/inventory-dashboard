@@ -194,8 +194,11 @@ export const KOPERASI_PATH = "/koperasi";
 // Kendaraan & Alat Berat (PT.AKSS): seen with Lihat Kendaraan.
 export const KENDARAAN_PATH = "/kendaraan";
 
-// Pruning PT.AKSS: seen with Lihat, Input or Edit Pruning.
+// Pruning PT.AKSS: seen with Lihat, Input or Edit Pruning - but the Kebun menu is hidden for now, Super User
+// only (KEBUN_HANYA_SUPER, the same switch on the server).
 export const PRUNING_PATH = "/pruning";
+export const KEBUN_HANYA_SUPER = true;
+export const kebunTerlihat = (user: AuthUser | null) => !!user && (user.role === "superuser" || !KEBUN_HANYA_SUPER);
 
 // Dokumen & Link: every account sees the links of its estates; Kelola Dokumen adds / edits them.
 export const DOKUMEN_PATH = "/dokumen";
@@ -239,7 +242,7 @@ export function pageAllowed(user: AuthUser | null, path: string): boolean {
   if (path === DOKUMEN_PATH) return true;
   if (path === KOPERASI_PATH) return can(user, "koperasi.view") && userEstates(user).includes(KOPERASI_ESTATE);
   if (path === KENDARAAN_PATH) return can(user, "kendaraan.view");
-  if (path === PRUNING_PATH) return ["pruning.view", "pruning.input", "pruning.edit"].some((p) => can(user, p));
+  if (path === PRUNING_PATH) return !KEBUN_HANYA_SUPER && ["pruning.view", "pruning.input", "pruning.edit"].some((p) => can(user, p));
   // Peta Blok: seen with Lihat Peta Blok, Ubah Peta Blok or Master Blok.
   if (path === "/peta-blok") return ["master.peta", "master.peta_edit", "master.blok"].some((p) => can(user, p));
   return !!PAGE_PERMS[path] && can(user, PAGE_PERMS[path]);
