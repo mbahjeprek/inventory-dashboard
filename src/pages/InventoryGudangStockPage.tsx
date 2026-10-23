@@ -21,6 +21,7 @@ import { PinjamanCard } from "../components/PinjamanBanner";
 import { StatCard } from "../components/StatCard";
 import { ExportButtons } from "../components/ExportButtons";
 import { ActivityLogButton } from "../components/ActivityLogButton";
+import { LengkapiDataButton } from "../components/LengkapiData";
 import { DokumenButton } from "../components/DokumenButton";
 import { PemakaianButton } from "../components/PemakaianPanel";
 import { fetchAllRows, type TableReport } from "../lib/printTable";
@@ -244,6 +245,7 @@ export function InventoryGudangStockPage({ gudang }: { gudang: string }) {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <ActivityLogButton module="BARANG" estate={gudang} />
+          <LengkapiDataButton kind="gudang" estate={gudang} />
           <DokumenButton modul="GUDANG" estate={gudang} />
           <PemakaianButton module="GUDANG" estate={gudang} />
           {tab === "stok" && <ExportButtons total={total} buildReport={buildReport} fileName={`inventory-gudang-${gudang.toLowerCase()}`} />}

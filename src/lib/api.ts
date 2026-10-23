@@ -345,6 +345,21 @@ export type PruningLog = {
   created_at: string;
   updated_at: string | null;
 };
+// Lengkapi Data: a month's transactions still missing a field the form asks for / a foto bukti.
+export type LengkapiKind = "bbm" | "pupuk" | "oli" | "gudang" | "klinik" | "nilam_masuk" | "nilam_keluar";
+export type LengkapiRow = {
+  id: number;
+  tanggal_iso: string;
+  jenis: string | null;
+  sub: string | null;
+  masuk: number | null;
+  keluar: number | null;
+  evidence_id: string | null;
+  kurang: string[];
+  berlaku: string[];
+  [field: string]: unknown;
+};
+export type LengkapiList = { fields: { key: string; label: string; type: "text" | "number" }[]; foto: boolean; rows: LengkapiRow[]; totalBulan: number };
 export type PruningImportRow = {
   row: number;
   estate: string;
@@ -1437,6 +1452,9 @@ export const api = {
     ),
   pruningCreate: (payload: { estate: string; tanggal_iso: string; rows: { blok: string; pkk: number; ha: number; keterangan: string }[] }) =>
     req<{ success: boolean }>("/api/pruning", { method: "POST", body: JSON.stringify(payload) }),
+  lengkapiList: (kind: LengkapiKind, estate: string, bulan: string) => req<LengkapiList>(`/api/lengkapi/${kind}?${new URLSearchParams({ estate, bulan })}`),
+  lengkapiSave: (kind: LengkapiKind, estate: string, bulan: string, rows: { id: number; values: Record<string, string>; evidence_id?: string }[]) =>
+    req<{ success: boolean; saved: number; foto: number }>(`/api/lengkapi/${kind}`, { method: "PUT", body: JSON.stringify({ estate, bulan, rows }) }),
   pruningImport: (rows: { row: number; tanggal_iso: string; estate: string; blok: string; pkk: number | null; ha: number | null; keterangan: string }[], dryRun: boolean) =>
     req<{ rows: PruningImportRow[]; ok: number; duplikat: number; error: number; saved: number }>("/api/pruning/import", {
       method: "POST",

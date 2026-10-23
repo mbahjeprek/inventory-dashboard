@@ -223,6 +223,12 @@ function requiredPerms(req: express.Request): Need {
   // Koperasi: Lihat; Input = pengambilan / pembelian / barang rusak; Edit = hapus transaksi and the master barang / anggota.
   // Stok opname: start / fill in the counts with Input; Selesai / Batal and Koreksi Stok with Edit.
   // Kendaraan & Alat Berat: Lihat; Input = kondisi harian and a unit's rusak / selesai; Edit = add / change units.
+  // Lengkapi Data (a month's missing SPB / bukti ...): seen with the module's Lihat, saved with its Input or Edit.
+  {
+    const lk = p.match(/^\/lengkapi\/(bbm|pupuk|oli|gudang|klinik|nilam_masuk|nilam_keluar)$/);
+    const mod = lk && (lk[1].startsWith("nilam_") ? "gudang" : lk[1]);
+    if (mod) return m === "GET" ? [`${mod}.view`] : [`${mod}.input`, `${mod}.edit`];
+  }
   // Pruning PT.AKSS: Lihat (riwayat, rekap); Input = new entries (form or Excel upload); Edit = change / delete entries and a blok's target.
   if (is(/^\/pruning(\/|$)/)) return m === "GET" ? ["pruning.view", "pruning.input", "pruning.edit"] : m === "POST" && is(/^\/pruning(\/import)?$/) ? ["pruning.input"] : ["pruning.edit"];
   if (is(/^\/kendaraan(\/|$)/)) {
@@ -10688,6 +10694,244 @@ app.put("/api/evidence/attach", async (req, res) => {
     detail: [row.keterangan, row.note, row.jenis_bbm, row.jenis_oli, row.jenis_pupuk, row.item_kode, row.obat_kode].filter(Boolean).join(" · "),
   });
   res.json({ success: true });
+});
+
+// ---- Lengkapi Data: complete a month's transactions in one go ----
+// Lists the month's transactions of one estate that still miss something the input form asks for (No.
+// SPB / BPB, kendaraan & HM, blok, keterangan / catatan, foto bukti) and saves what the admin fills in,
+// all rows at once. Only EMPTY fields are filled and only a missing photo is added - amounts, dates and
+// saldo never change - so it is open (any month) to an account with Input or Edit of the module in that
+// estate. Loan / transfer / koreksi rows are left out (their data lives in Pinjaman / Stok Opname).
+type LengkapiField = { key: string; label: string; type: "text" | "number"; applies: string };
+type LengkapiKind = {
+  table: string;
+  estate: string;
+  module: "bbm" | "pupuk" | "oli" | "gudang" | "klinik";
+  log: LogModule;
+  date: string;
+  base: string;
+  info: string;
+  fields: LengkapiField[];
+  // Gudang Nilam: its Stock In / Out rows mirror a manual transaction (transactions.mirror_*) that
+  // keeps the same text fields (field -> transactions column) and shares the photo (nilamEvidenceRows).
+  mirror?: Record<string, string>;
+};
+const JKT_DATE = "to_char(created_at AT TIME ZONE 'Asia/Jakarta', 'YYYY-MM-DD')";
+const LENGKAPI: Record<string, LengkapiKind> = {
+  bbm: {
+    table: "bbm_log",
+    estate: "lokasi",
+    module: "bbm",
+    log: "BBM",
+    date: "tanggal_iso",
+    base: "pinjaman_id IS NULL AND koreksi IS NULL",
+    info: "jenis_bbm AS jenis, estate AS sub, diterima AS masuk, pemakaian AS keluar",
+    fields: [
+      { key: "no_spb", label: "No. SPB", type: "text", applies: "true" },
+      { key: "kode_kendaraan", label: "Kode Kendaraan", type: "text", applies: "COALESCE(pemakaian, 0) > 0" },
+      // As the form: no HM/KM for a genset (by its code or its Master Alat Berat jenis).
+      {
+        key: "hm_terakhir",
+        label: "HM/KM",
+        type: "text",
+        applies:
+          "COALESCE(pemakaian, 0) > 0 AND COALESCE(kode_kendaraan, '') NOT ILIKE '%GENSET%' AND NOT EXISTS (SELECT 1 FROM alat_berat a WHERE upper(a.kode) = upper(kode_kendaraan) AND a.jenis_unit = 'GENSET')",
+      },
+      { key: "keterangan", label: "Keterangan", type: "text", applies: "true" },
+    ],
+  },
+  pupuk: {
+    table: "pupuk_log",
+    estate: "estate",
+    module: "pupuk",
+    log: "PUPUK",
+    date: "tanggal_iso",
+    base: "pinjaman_id IS NULL AND koreksi IS NULL",
+    info: "jenis_pupuk AS jenis, '' AS sub, diterima AS masuk, keluar AS keluar",
+    fields: [
+      { key: "divisi", label: "Divisi", type: "text", applies: "COALESCE(keluar, 0) > 0" },
+      { key: "blok", label: "Blok", type: "text", applies: "COALESCE(keluar, 0) > 0" },
+      { key: "ha", label: "HA", type: "number", applies: "COALESCE(keluar, 0) > 0" },
+      { key: "pokok", label: "Pokok", type: "number", applies: "COALESCE(keluar, 0) > 0" },
+      { key: "keterangan", label: "Keterangan", type: "text", applies: "true" },
+    ],
+  },
+  oli: {
+    table: "oli_log",
+    estate: "estate",
+    module: "oli",
+    log: "OLI",
+    date: "tanggal_iso",
+    base: "pinjaman_id IS NULL AND koreksi IS NULL",
+    info: "jenis_oli AS jenis, '' AS sub, diterima AS masuk, pemakaian AS keluar",
+    fields: [
+      { key: "no_embrace", label: "No. BPB", type: "text", applies: "true" },
+      { key: "keterangan", label: "Keterangan", type: "text", applies: "true" },
+    ],
+  },
+  gudang: {
+    table: "gudang_stock_tx",
+    estate: "gudang",
+    module: "gudang",
+    log: "BARANG",
+    date: JKT_DATE,
+    base: "COALESCE(is_correction, 0) = 0 AND pinjaman_id IS NULL AND transfer_from_id IS NULL",
+    info: "(SELECT i.nama FROM items i WHERE i.kode = item_kode) AS jenis, item_kode AS sub, CASE WHEN type = 'IN' THEN qty END AS masuk, CASE WHEN type = 'OUT' THEN qty END AS keluar",
+    fields: [
+      { key: "tujuan", label: "Tujuan / Konsumen", type: "text", applies: "type = 'OUT'" },
+      { key: "penerima", label: "Penerima / Diterima Oleh", type: "text", applies: "true" },
+      { key: "note", label: "Catatan", type: "text", applies: "true" },
+    ],
+  },
+  nilam_masuk: {
+    table: "stock_in_log",
+    estate: "'NILAM'",
+    module: "gudang",
+    log: "BARANG",
+    date: "tanggal_terima_iso",
+    base: "pinjaman_id IS NULL",
+    info: "nama AS jenis, kode AS sub, qty AS masuk, NULL::int AS keluar",
+    fields: [{ key: "keterangan", label: "Catatan", type: "text", applies: "true" }],
+    mirror: { keterangan: "note" },
+  },
+  nilam_keluar: {
+    table: "stock_out_log",
+    estate: "'NILAM'",
+    module: "gudang",
+    log: "BARANG",
+    date: "tanggal_keluar_iso",
+    base: "pinjaman_id IS NULL",
+    info: "nama AS jenis, kode AS sub, NULL::int AS masuk, qty AS keluar",
+    fields: [
+      { key: "tujuan", label: "Tujuan / Konsumen", type: "text", applies: "true" },
+      { key: "penerima", label: "Penerima / Pengambil", type: "text", applies: "true" },
+      { key: "keterangan", label: "Catatan", type: "text", applies: "true" },
+    ],
+    mirror: { tujuan: "tujuan", penerima: "penerima", keterangan: "note" },
+  },
+  klinik: {
+    table: "klinik_stock_tx",
+    estate: "klinik",
+    module: "klinik",
+    log: "KLINIK",
+    date: JKT_DATE,
+    base: "COALESCE(is_correction, 0) = 0 AND pinjaman_id IS NULL AND kunjungan_id IS NULL",
+    info: "(SELECT o.nama FROM obat o WHERE o.kode = obat_kode) AS jenis, obat_kode AS sub, CASE WHEN type = 'IN' THEN qty END AS masuk, CASE WHEN type = 'OUT' THEN qty END AS keluar",
+    fields: [
+      // Obat taken out for a patient: who got it (not for one thrown away / sent back, which has an alasan).
+      { key: "penerima", label: "Pasien / Penerima", type: "text", applies: "type = 'OUT' AND alasan IS NULL" },
+      { key: "note", label: "Catatan", type: "text", applies: "true" },
+    ],
+  },
+};
+// A field counts as empty when NULL, blank (a number column: NULL only).
+const lengkapiEmpty = (f: LengkapiField) => (f.type === "number" ? `${f.key} IS NULL` : `NULLIF(trim(COALESCE(${f.key}::text, '')), '') IS NULL`);
+const lengkapiKind = (req: express.Request, res: express.Response) => {
+  const k = LENGKAPI[String(req.params.kind)];
+  if (!k) res.status(404).json({ error: "Modul tidak dikenal" });
+  return k;
+};
+
+app.get("/api/lengkapi/:kind", async (req, res) => {
+  const k = lengkapiKind(req, res);
+  if (!k) return;
+  const estate = String(req.query.estate ?? "");
+  const bulan = String(req.query.bulan ?? "");
+  if (!estateAllowed(req.user!, estate)) return res.status(403).json({ error: "Akses ditolak" });
+  if (!/^\d{4}-\d{2}$/.test(bulan)) return res.status(400).json({ error: "Pilih bulan" });
+  const foto = evidenceEnabled();
+  const need = k.fields.map((f) => `(${f.applies}) AND ${lengkapiEmpty(f)}`);
+  const rows = await queryMany(
+    `SELECT id, ${k.date} AS tanggal_iso, ${k.info}, ${k.fields.map((f) => f.key).join(", ")}, evidence_id,
+       ARRAY_REMOVE(ARRAY[${k.fields.map((f, i) => `CASE WHEN ${need[i]} THEN '${f.key}' END`).join(", ")}${foto ? ", CASE WHEN evidence_id IS NULL THEN 'foto' END" : ""}], NULL) AS kurang,
+       ARRAY_REMOVE(ARRAY[${k.fields.map((f) => `CASE WHEN ${f.applies} THEN '${f.key}' END`).join(", ")}], NULL) AS berlaku
+     FROM ${k.table}
+     WHERE ${k.estate} = @estate AND left(${k.date}, 7) = @bulan AND ${k.base}
+       AND (${need.join(" OR ")}${foto ? " OR evidence_id IS NULL" : ""})
+     ORDER BY ${k.date}, id`,
+    { estate, bulan }
+  );
+  const total = await queryOne<{ n: number }>(`SELECT COUNT(*)::int n FROM ${k.table} WHERE ${k.estate} = @estate AND left(${k.date}, 7) = @bulan AND ${k.base}`, { estate, bulan });
+  res.json({ fields: k.fields.map(({ key, label, type }) => ({ key, label, type })), foto, rows, totalBulan: total?.n ?? 0 });
+});
+
+app.put("/api/lengkapi/:kind", async (req, res) => {
+  const k = lengkapiKind(req, res);
+  if (!k) return;
+  const estate = String(req.body?.estate ?? "");
+  if (!estateAllowed(req.user!, estate)) return res.status(403).json({ error: "Akses ditolak" });
+  const input = (Array.isArray(req.body?.rows) ? req.body.rows : []).slice(0, 1000);
+  if (!input.length) return res.status(400).json({ error: "Belum ada yang diisi" });
+  const u = req.user!;
+  const done: string[] = [];
+  let fotoCount = 0;
+  try {
+    await withTransaction(async (c) => {
+      for (const r of input) {
+        const id = Number(r?.id);
+        if (!Number.isInteger(id)) continue;
+        const row = await queryOne<any>(
+          `SELECT *, ${k.date} AS tgl_, ${k.fields.map((f) => `(${f.applies}) AS "ok_${f.key}"`).join(", ")}
+           FROM ${k.table} WHERE id = @id AND ${k.estate} = @estate AND ${k.base} FOR UPDATE`,
+          { id, estate },
+          c
+        );
+        if (!row) throw new Error(`Transaksi #${id} tidak ditemukan di ${estate}`);
+        const set: Record<string, unknown> = {};
+        for (const f of k.fields) {
+          const v = r?.values?.[f.key];
+          if (v === undefined || v === null || String(v).trim() === "" || !row[`ok_${f.key}`]) continue;
+          const cur = row[f.key];
+          if (!(cur === null || (f.type === "text" && String(cur).trim() === ""))) continue; // filled already: left as it is
+          if (f.type === "number") {
+            const n = Number(String(v).replace(",", "."));
+            if (!Number.isFinite(n) || n < 0) throw new Error(`Tanggal ${row.tgl_}: ${f.label} harus angka`);
+            set[f.key] = n;
+          } else set[f.key] = String(v).trim().slice(0, 200);
+        }
+        const keys = Object.keys(set);
+        if (keys.length) await execute(`UPDATE ${k.table} SET ${keys.map((x) => `${x} = @${x}`).join(", ")} WHERE id = @id`, { ...set, id }, c);
+        // The mirrored manual transaction gets the same text where it is still empty too.
+        for (const x of keys.filter((x) => k.mirror?.[x])) {
+          const col = k.mirror![x];
+          await execute(
+            `UPDATE transactions SET ${col} = @v WHERE mirror_source = @t AND mirror_id = @id AND NULLIF(trim(COALESCE(${col}, '')), '') IS NULL`,
+            { v: set[x], t: k.table, id },
+            c
+          );
+        }
+        let foto = false;
+        const ev = r?.evidence_id;
+        if (ev && !row.evidence_id) {
+          const ok =
+            /^[0-9a-f-]{36}$/.test(String(ev)) &&
+            (await queryOne("UPDATE evidence SET used = true WHERE id = @ev::uuid AND used = false AND (user_id = @uid OR @su) RETURNING id", { ev, uid: u.id, su: u.role === "superuser" }, c));
+          if (!ok) throw new Error(`Tanggal ${row.tgl_}: foto bukti tidak valid, upload ulang fotonya`);
+          const targets = k.mirror ? nilamEvidenceRows(k.table as "stock_in_log" | "stock_out_log", id) : [{ table: k.table, where: "id = @id", params: { id } }];
+          for (const t of targets) await execute(`UPDATE ${t.table} SET evidence_id = @ev::uuid WHERE (${t.where}) AND evidence_id IS NULL`, { ...t.params, ev }, c);
+          foto = true;
+          fotoCount++;
+        }
+        if (keys.length || foto)
+          done.push(
+            `${String(row.tgl_).split("-").reverse().join("/")}${row.no_spb ? ` SPB ${row.no_spb}` : ""}: ${[...keys.map((x) => `${k.fields.find((f) => f.key === x)!.label} ${set[x]}`), foto && "foto bukti"].filter(Boolean).join(", ")}`
+          );
+      }
+    });
+  } catch (e: any) {
+    return res.status(400).json({ error: e?.message ?? "Gagal menyimpan" });
+  }
+  if (done.length) {
+    const bulan = String(req.body?.bulan ?? "");
+    await logActivity(req, {
+      module: k.log,
+      estate,
+      aksi: "Lengkapi Data",
+      objek: `${done.length} transaksi${/^\d{4}-\d{2}$/.test(bulan) ? ` · ${bulan.split("-").reverse().join("/")}` : ""}${fotoCount ? ` · ${fotoCount} foto bukti` : ""}`,
+      detail: done.slice(0, 80).join("; ") + (done.length > 80 ? ` +${done.length - 80} lainnya` : ""),
+    });
+  }
+  res.json({ success: true, saved: done.length, foto: fotoCount });
 });
 
 app.get("/api/evidence/:id", async (req, res) => {

@@ -5,6 +5,7 @@ import { api, errorText, type PupukRecord, type PupukSummary } from "../lib/api"
 import { StatCard } from "../components/StatCard";
 import { ExportButtons } from "../components/ExportButtons";
 import { ActivityLogButton } from "../components/ActivityLogButton";
+import { LengkapiDataButton } from "../components/LengkapiData";
 import { DokumenButton } from "../components/DokumenButton";
 import { PemakaianButton } from "../components/PemakaianPanel";
 import { ConfirmDialog } from "../components/ConfirmDialog";
@@ -178,6 +179,7 @@ export function InventoryPupukPage({ estate }: { estate: string }) {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <ActivityLogButton module="PUPUK" estate={estate} />
+          <LengkapiDataButton kind="pupuk" estate={estate} onDone={load} />
           <DokumenButton modul="PUPUK" estate={estate} />
           <PemakaianButton module="PUPUK" estate={estate} />
           <ExportButtons total={total} buildReport={buildReport} fileName={`inventory-pupuk-${estate.toLowerCase()}`} />
