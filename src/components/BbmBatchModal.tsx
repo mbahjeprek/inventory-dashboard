@@ -121,6 +121,7 @@ export function BbmBatchModal({
 
   return (
     <BatchGrid
+      perRowEvidence
       title="Input Banyak BBM"
       subtitle="Stock In / Stock Out satu hari sekaligus"
       draftKey={`batch:bbm:${jenis}:${lokasi}`}
@@ -189,6 +190,7 @@ export function BbmBatchModal({
             kode_kendaraan: masuk(c) || kirim(c) ? "" : c.kendaraan.trim(),
             hm_terakhir: masuk(c) || kirim(c) || genset(c) ? "" : c.hm.trim(),
             ke: kirim(c) ? c.ke : "",
+            evidence_id: c.__ev || undefined,
           })),
         });
         return res.count;

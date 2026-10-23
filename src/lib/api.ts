@@ -501,6 +501,8 @@ export type BbmBatchRow = {
   hm_terakhir: string;
   // Nilam: another estate = sent into its stock, booked as a Transfer.
   ke?: string;
+  // The row's own foto bukti (Input Banyak: one per row, optional).
+  evidence_id?: string;
 };
 
 export type BbmRecord = {
@@ -1630,34 +1632,34 @@ export const api = {
   }) => req<{ success: boolean; id: number; saldo_stock: number }>("/api/bbm", { method: "POST", body: JSON.stringify(payload) }),
 
   // Input Banyak (all rows or none; a refused row comes back as ApiError.data.row, 0-based).
-  createNilamBatch: (payload: { tanggal_iso?: string; evidence_id: string; rows: { item_kode: string; type: "IN" | "OUT"; qty: number; tujuan: string; penerima: string; note: string }[] }) =>
+  createNilamBatch: (payload: { tanggal_iso?: string; evidence_id: string; rows: { item_kode: string; type: "IN" | "OUT"; qty: number; tujuan: string; penerima: string; note: string; evidence_id?: string }[] }) =>
     req<{ success: boolean; count: number }>("/api/transactions/batch", { method: "POST", body: JSON.stringify(payload) }),
   createGudangBatch: (payload: {
     // The day it happened when entered later (default today), see BACKDATE in app.ts.
     tanggal_iso?: string;
     evidence_id: string;
     gudang: string;
-    rows: { item_kode: string; type: "IN" | "OUT"; qty: number; tujuan: string; penerima: string; note: string }[];
+    rows: { item_kode: string; type: "IN" | "OUT"; qty: number; tujuan: string; penerima: string; note: string; evidence_id?: string }[];
   }) => req<{ success: boolean; count: number }>("/api/gudang-stock/transactions/batch", { method: "POST", body: JSON.stringify(payload) }),
   createKlinikBatch: (payload: {
     // The day it happened when entered later (default today), see BACKDATE in app.ts.
     tanggal_iso?: string;
     evidence_id: string;
     klinik: string;
-    rows: { obat_kode: string; type: "IN" | "OUT"; qty: number; expired_date: string; buang: boolean; penerima: string; ke?: string; note: string }[];
+    rows: { obat_kode: string; type: "IN" | "OUT"; qty: number; expired_date: string; buang: boolean; penerima: string; ke?: string; note: string; evidence_id?: string }[];
   }) => req<{ success: boolean; count: number }>("/api/klinik-stock/transactions/batch", { method: "POST", body: JSON.stringify(payload) }),
   createPupukBatch: (payload: {
     evidence_id: string;
     estate: string;
     tanggal_iso: string;
     // ke: Nilam's keluar sent into another estate's stock (a Transfer).
-    rows: { jenis_pupuk: string; tipe: "MASUK" | "KELUAR"; jumlah: number; divisi: string; blok: string; ha: number | ""; pokok: number | ""; keterangan: string; ke?: string }[];
+    rows: { jenis_pupuk: string; tipe: "MASUK" | "KELUAR"; jumlah: number; divisi: string; blok: string; ha: number | ""; pokok: number | ""; keterangan: string; ke?: string; evidence_id?: string }[];
   }) => req<{ success: boolean; count: number }>("/api/pupuk/batch", { method: "POST", body: JSON.stringify(payload) }),
   createOliBatch: (payload: {
     evidence_id: string;
     estate: string;
     tanggal_iso: string;
-    rows: { jenis_oli: string; tipe: "MASUK" | "PEMAKAIAN"; jumlah: number; no_embrace: string; keterangan: string; ke?: string }[];
+    rows: { jenis_oli: string; tipe: "MASUK" | "PEMAKAIAN"; jumlah: number; no_embrace: string; keterangan: string; ke?: string; evidence_id?: string }[];
   }) => req<{ success: boolean; count: number }>("/api/oli/batch", { method: "POST", body: JSON.stringify(payload) }),
   createBbmBatch: (payload: { evidence_id: string; jenis_bbm: "SOLAR" | "BENSIN"; lokasi: string; tanggal_iso: string; rows: BbmBatchRow[] }) =>
     req<{ success: boolean; count: number; saldo_stock: number }>("/api/bbm/batch", { method: "POST", body: JSON.stringify(payload) }),

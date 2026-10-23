@@ -96,6 +96,7 @@ export function PupukBatchModal({
 
   return (
     <BatchGrid
+      perRowEvidence
       title={`Input Banyak Pupuk - ${estate}`}
       subtitle="Stock In / Stock Out pupuk satu hari sekaligus"
       draftKey={`batch:pupuk:${estate}`}
@@ -129,6 +130,7 @@ export function PupukBatchModal({
               ha: keluar ? parseNum(c.ha) : "",
               pokok: keluar ? parseNum(c.pokok) : "",
               keterangan: c.ket.trim(),
+              evidence_id: c.__ev || undefined,
             };
           }),
         });
@@ -193,6 +195,7 @@ export function OliBatchModal({
 
   return (
     <BatchGrid
+      perRowEvidence
       title={`Input Banyak Oli - ${estate}`}
       subtitle="Stock In / Stock Out oli satu hari sekaligus"
       draftKey={`batch:oli:${estate}`}
@@ -221,6 +224,7 @@ export function OliBatchModal({
             no_embrace: c.bpb.trim(),
             keterangan: kirim(c) && c.bpb.trim() ? `BPB ${c.bpb.trim()}: ${c.ket.trim()}` : c.ket.trim(),
             ke: kirim(c) ? c.ke : "",
+            evidence_id: c.__ev || undefined,
           })),
         });
         return res.count;

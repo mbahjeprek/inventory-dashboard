@@ -150,7 +150,7 @@ export function StockBatchModal({ scope, onClose, onSuccess }: { scope?: StockSc
   };
 
   const submit = async (rows: Cells[], evidenceId: string) => {
-    const base = (c: Cells) => ({ qty: parseNum(c.jumlah), note: c.note.trim() });
+    const base = (c: Cells) => ({ qty: parseNum(c.jumlah), note: c.note.trim(), evidence_id: c.__ev || undefined });
     if (klinik) {
       const res = await api.createKlinikBatch({
         tanggal_iso: tanggal,
@@ -183,6 +183,7 @@ export function StockBatchModal({ scope, onClose, onSuccess }: { scope?: StockSc
 
   return (
     <BatchGrid
+      perRowEvidence
       title={klinik ? `Input Banyak Klinik - ${estate}` : `Input Banyak Gudang - ${estate}`}
       subtitle={klinik ? "Stock In / Stock Out obat & alat medis sekaligus" : "Stock In / Stock Out barang sekaligus"}
       draftKey={`batch:${scope?.kind ?? "nilam"}:${estate}`}

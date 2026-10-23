@@ -3339,8 +3339,8 @@ app.post("/api/bbm/batch", async (req, res) => {
       hm_terakhir: keluar ? String(r?.hm_terakhir ?? "").trim() : "",
     });
   }
-  const evidenceId = await claimEvidence(req, res);
-  if (evidenceId === undefined) return;
+  const ev = await claimBatchEvidence(req, res, rows.length);
+  if (!ev) return;
 
   const { tanggal, periode } = isoToIndoDate(tanggal_iso);
   let booked: { row: BatchRow; before: number; after: number }[];
@@ -3359,7 +3359,7 @@ app.post("/api/bbm/batch", async (req, res) => {
         stock = round3(row.tipe === "DITERIMA" ? stock + row.jumlah : stock - row.jumlah);
         if (row.ke) {
           const alasan = row.keterangan || `Kirim ke ${row.ke}`;
-          transfers.push(await bookLoan(client, req, { module: "BBM", dari: lokasi, ke: row.ke, item: row.item!, qty: row.jumlah, alasan, tanggal: tanggal_iso, evidenceId, transfer: true }));
+          transfers.push(await bookLoan(client, req, { module: "BBM", dari: lokasi, ke: row.ke, item: row.item!, qty: row.jumlah, alasan, tanggal: tanggal_iso, evidenceId: ev.of(i), transfer: true }));
           continue;
         }
         await execute(
@@ -3372,7 +3372,7 @@ app.post("/api/bbm/batch", async (req, res) => {
             periode,
             tanggal,
             tanggal_iso,
-            evidenceId,
+            evidenceId: ev.of(i),
             ...row,
             diterima: row.tipe === "DITERIMA" ? row.jumlah : null,
             pemakaian: row.tipe === "PEMAKAIAN" ? row.jumlah : null,
@@ -3386,7 +3386,7 @@ app.post("/api/bbm/batch", async (req, res) => {
       return out;
     });
   } catch (e) {
-    await releaseEvidence(evidenceId);
+    await ev.release();
     if (e instanceof BatchRowError) return res.status(400).json({ error: e.message, row: e.row });
     if (e instanceof StockError) return res.status(400).json({ error: e.message });
     throw e;
@@ -7441,13 +7441,13 @@ const refuseRow = (res: express.Response, i: number, error: string) => res.statu
 
 // Runs the booking; a BatchRowError (or a StockError thrown for row `at`) refuses it and gives the
 // foto bukti back. Returns false when the answer has been sent.
-async function bookBatch(res: express.Response, evidenceId: string | null, book: (client: PoolClient, at: (i: number) => void) => Promise<void>) {
+async function bookBatch(res: express.Response, evidenceIds: string[], book: (client: PoolClient, at: (i: number) => void) => Promise<void>) {
   let current = 0;
   try {
     await withTransaction((client) => book(client, (i) => (current = i)));
     return true;
   } catch (e) {
-    await releaseEvidence(evidenceId);
+    for (const id of evidenceIds) await releaseEvidence(id);
     if (e instanceof BatchRowError) {
       res.status(400).json({ error: e.message, row: e.row });
       return false;
@@ -7482,11 +7482,11 @@ app.post("/api/transactions/batch", requireEstate("NILAM"), async (req, res) => 
     if (r.type === "OUT" && !NILAM_TUJUAN.includes(tujuan)) return refuseRow(res, i, "tujuan wajib dipilih");
     clean.push({ item, type: r.type, qty, tujuan: r.type === "OUT" ? tujuan : "", penerima: String(r?.penerima ?? "").trim(), note: String(r?.note ?? "").trim() });
   }
-  const evidenceId = await claimEvidence(req, res);
-  if (evidenceId === undefined) return;
+  const ev = await claimBatchEvidence(req, res, rows.length);
+  if (!ev) return;
 
   const transfers: TransferChange[] = [];
-  const ok = await bookBatch(res, evidenceId, async (client, at) => {
+  const ok = await bookBatch(res, ev.ids, async (client, at) => {
     for (const [i, r] of clean.entries()) {
       at(i);
       if (r.type === "OUT") {
@@ -7496,14 +7496,14 @@ app.post("/api/transactions/batch", requireEstate("NILAM"), async (req, res) => 
       const tx = await queryOne<{ id: number }>(
         `INSERT INTO transactions (item_id, tujuan, type, qty, note, penerima, evidence_id)
          VALUES (@item_id, @tujuan, @type, @qty, @note, @penerima, @evidenceId::uuid) RETURNING id`,
-        { item_id: r.item.id, tujuan: r.tujuan, type: r.type, qty: r.qty, note: r.note || null, penerima: r.penerima, evidenceId },
+        { item_id: r.item.id, tujuan: r.tujuan, type: r.type, qty: r.qty, note: r.note || null, penerima: r.penerima, evidenceId: ev.of(i) },
         client
       );
       const mirror = await mirrorTransaction(client, r.item, r.type, r.tujuan, r.qty, r.note || null, r.penerima);
-      await execute(`UPDATE ${mirror.source} SET evidence_id = @evidenceId::uuid WHERE id = @id`, { evidenceId, id: mirror.id }, client);
+      await execute(`UPDATE ${mirror.source} SET evidence_id = @evidenceId::uuid WHERE id = @id`, { evidenceId: ev.of(i), id: mirror.id }, client);
       await execute("UPDATE transactions SET mirror_source = @s, mirror_id = @m WHERE id = @id", { s: mirror.source, m: mirror.id, id: tx!.id }, client);
       await applyStockEffect(client, r.item.id, r.type, r.qty, 1);
-      transfers.push(r.type === "OUT" ? await addTransfer(client, req, tx!.id, r.item.kode, r.tujuan, r.qty, r.penerima, r.note, evidenceId) : null);
+      transfers.push(r.type === "OUT" ? await addTransfer(client, req, tx!.id, r.item.kode, r.tujuan, r.qty, r.penerima, r.note, ev.of(i)) : null);
     }
   });
   if (!ok) return;
@@ -7542,10 +7542,10 @@ app.post("/api/gudang-stock/transactions/batch", async (req, res) => {
     if (r.type === "OUT" && !GUDANG_TUJUAN[gudang].includes(tujuan)) return refuseRow(res, i, `tujuan harus ${GUDANG_TUJUAN[gudang].join(" / ")}`);
     clean.push({ item, type: r.type, qty: round3(r.qty), tujuan: r.type === "OUT" ? tujuan : "", penerima: String(r?.penerima ?? "").trim(), note: String(r?.note ?? "").trim() });
   }
-  const evidenceId = await claimEvidence(req, res);
-  if (evidenceId === undefined) return;
+  const ev = await claimBatchEvidence(req, res, rows.length);
+  if (!ev) return;
 
-  const ok = await bookBatch(res, evidenceId, async (client, at) => {
+  const ok = await bookBatch(res, ev.ids, async (client, at) => {
     for (const [i, r] of clean.entries()) {
       at(i);
       const before = await applyMovement(client, req, GUDANG_LEDGER, {
@@ -7557,7 +7557,7 @@ app.post("/api/gudang-stock/transactions/batch", async (req, res) => {
         penerima: r.penerima,
         note: r.note || null,
         is_correction: 0,
-        evidenceId,
+        evidenceId: ev.of(i),
       });
       if (r.type === "OUT" && r.qty > before) throw new BatchRowError(i, `Baris ${i + 1}: stok ${r.item.kode} tinggal ${before}`);
     }
@@ -7607,16 +7607,16 @@ app.post("/api/klinik-stock/transactions/batch", async (req, res) => {
     }
     clean.push({ obat: o, type: r.type, qty: r.qty, exp: r.type === "IN" ? exp : undefined, buang, penerima: buang ? "" : String(r?.penerima ?? "").trim(), note: String(r?.note ?? "").trim(), ke, item });
   }
-  const evidenceId = await claimEvidence(req, res);
-  if (evidenceId === undefined) return;
+  const ev = await claimBatchEvidence(req, res, rows.length);
+  if (!ev) return;
 
   const transfers: LoanRow[] = [];
-  const ok = await bookBatch(res, evidenceId, async (client, at) => {
+  const ok = await bookBatch(res, ev.ids, async (client, at) => {
     for (const [i, r] of clean.entries()) {
       at(i);
       if (r.ke) {
         const alasan = r.note || `Kirim ke Klinik ${r.ke}`;
-        transfers.push(await bookLoan(client, req, { module: "KLINIK", dari: klinik, ke: r.ke, item: r.item!, qty: r.qty, alasan, tanggal: txTime.getStore()?.slice(0, 10) ?? jakartaToday(), evidenceId, transfer: true }));
+        transfers.push(await bookLoan(client, req, { module: "KLINIK", dari: klinik, ke: r.ke, item: r.item!, qty: r.qty, alasan, tanggal: txTime.getStore()?.slice(0, 10) ?? jakartaToday(), evidenceId: ev.of(i), transfer: true }));
         continue;
       }
       await klinikMoveTx(client, req, {
@@ -7629,7 +7629,7 @@ app.post("/api/klinik-stock/transactions/batch", async (req, res) => {
         penerima: r.penerima,
         note: r.note || null,
         is_correction: 0,
-        evidenceId,
+        evidenceId: ev.of(i),
       });
     }
   });
@@ -7691,15 +7691,15 @@ app.post("/api/pupuk/batch", async (req, res) => {
       keterangan: String(r?.keterangan ?? "").trim() || (r.tipe === "MASUK" ? "PUPUK MASUK" : ""),
     });
   }
-  const evidenceId = await claimEvidence(req, res);
-  if (evidenceId === undefined) return;
+  const ev = await claimBatchEvidence(req, res, rows.length);
+  if (!ev) return;
 
   const [y, m, d] = tanggal_iso.split("-");
   const tanggal = `${d}/${m}/${y}`;
   const periode = `${INDO_MONTHS[Number(m) - 1]} ${y}`;
   const saldo: { before: number; after: number }[] = [];
   const transfers: LoanRow[] = [];
-  const ok = await bookBatch(res, evidenceId, async (client, at) => {
+  const ok = await bookBatch(res, ev.ids, async (client, at) => {
     await execute("SELECT pg_advisory_xact_lock(hashtext(@key))", { key: `pupuk:${estate}` }, client);
     const run = new Map<string, number>();
     for (const [i, r] of clean.entries()) {
@@ -7711,13 +7711,13 @@ app.post("/api/pupuk/batch", async (req, res) => {
       saldo.push({ before, after });
       if (r.ke) {
         const alasan = r.keterangan || `Kirim ke ${r.ke}`;
-        transfers.push(await bookLoan(client, req, { module: "PUPUK", dari: estate, ke: r.ke, item: r.item!, qty: r.qty, alasan, tanggal: tanggal_iso, evidenceId, transfer: true }));
+        transfers.push(await bookLoan(client, req, { module: "PUPUK", dari: estate, ke: r.ke, item: r.item!, qty: r.qty, alasan, tanggal: tanggal_iso, evidenceId: ev.of(i), transfer: true }));
         continue;
       }
       await execute(
         `INSERT INTO pupuk_log (estate, jenis_pupuk, periode, tanggal, tanggal_iso, divisi, no_embrace, kode_barang, keluar, diterima, saldo_stock, keterangan, blok, ha, pokok, evidence_id)
          VALUES (@estate, @jenis, @periode, @tanggal, @tanggal_iso, @divisi, '', '', @keluar, @diterima, @after, @keterangan, @blok, @ha, @pokok, @evidenceId::uuid)`,
-        { estate, periode, tanggal, tanggal_iso, evidenceId, ...r, after, keluar: r.tipe === "KELUAR" ? r.qty : null, diterima: r.tipe === "MASUK" ? r.qty : null },
+        { estate, periode, tanggal, tanggal_iso, evidenceId: ev.of(i), ...r, after, keluar: r.tipe === "KELUAR" ? r.qty : null, diterima: r.tipe === "MASUK" ? r.qty : null },
         client
       );
     }
@@ -7764,13 +7764,13 @@ app.post("/api/oli/batch", async (req, res) => {
     }
     clean.push({ ke, item, jenis, tipe: r.tipe, qty: round3(qty), no_embrace: String(r?.no_embrace ?? "").trim(), keterangan: String(r?.keterangan ?? "").trim() || (r.tipe === "MASUK" ? "OLI MASUK" : "") });
   }
-  const evidenceId = await claimEvidence(req, res);
-  if (evidenceId === undefined) return;
+  const ev = await claimBatchEvidence(req, res, rows.length);
+  if (!ev) return;
 
   const { tanggal, periode } = oliDate(tanggal_iso);
   const saldo: { before: number; after: number }[] = [];
   const transfers: LoanRow[] = [];
-  const ok = await bookBatch(res, evidenceId, async (client, at) => {
+  const ok = await bookBatch(res, ev.ids, async (client, at) => {
     await execute("SELECT pg_advisory_xact_lock(hashtext(@key))", { key: `oli:${estate}` }, client);
     const run = new Map<string, number>();
     for (const [i, r] of clean.entries()) {
@@ -7782,13 +7782,13 @@ app.post("/api/oli/batch", async (req, res) => {
       saldo.push({ before, after });
       if (r.ke) {
         const alasan = r.keterangan || `Kirim ke ${r.ke}`;
-        transfers.push(await bookLoan(client, req, { module: "OLI", dari: estate, ke: r.ke, item: r.item!, qty: r.qty, alasan, tanggal: tanggal_iso, evidenceId, transfer: true }));
+        transfers.push(await bookLoan(client, req, { module: "OLI", dari: estate, ke: r.ke, item: r.item!, qty: r.qty, alasan, tanggal: tanggal_iso, evidenceId: ev.of(i), transfer: true }));
         continue;
       }
       await execute(
         `INSERT INTO oli_log (estate, jenis_oli, periode, tanggal, tanggal_iso, no_embrace, diterima, pemakaian, saldo_stock, keterangan, evidence_id)
          VALUES (@estate, @jenis, @periode, @tanggal, @tanggal_iso, @no_embrace, @diterima, @pemakaian, @after, @keterangan, @evidenceId::uuid)`,
-        { estate, periode, tanggal, tanggal_iso, evidenceId, ...r, after, diterima: r.tipe === "MASUK" ? r.qty : null, pemakaian: r.tipe === "PEMAKAIAN" ? r.qty : null },
+        { estate, periode, tanggal, tanggal_iso, evidenceId: ev.of(i), ...r, after, diterima: r.tipe === "MASUK" ? r.qty : null, pemakaian: r.tipe === "PEMAKAIAN" ? r.qty : null },
         client
       );
     }
@@ -8286,7 +8286,7 @@ app.post("/api/pinjaman/batch", async (req, res) => {
   const loans: LoanRow[] = [];
   const tanggal = ISO_DATE.test(String(req.body.tanggal_iso ?? "")) ? String(req.body.tanggal_iso) : jakartaToday();
 
-  const ok = await bookBatch(res, evidenceId, async (client, at) => {
+  const ok = await bookBatch(res, evidenceId ? [evidenceId] : [], async (client, at) => {
     for (const [i, r] of clean.entries()) {
       at(i);
       loans.push(await bookLoan(client, req, { module: m, dari, ke, item: r.item, qty: r.qty, alasan: r.alasan, tanggal, evidenceId, transfer: false }));
@@ -11447,6 +11447,34 @@ async function claimEvidence(req: express.Request, res: express.Response): Promi
 
 // Gives a claimed photo back when the transaction it was for is refused (e.g. not enough stock), so
 // the same upload can be used when the form is sent again.
+// Input Banyak: a foto bukti per row (rows[i].evidence_id) and / or one for the whole batch (evidence_id).
+// Every photo is optional - a row without one is completed later (Lengkapi Data). Each is taken (used) once;
+// a refused booking gives them back (ev.release / bookBatch). undefined = refused (the error is sent).
+type BatchEvidence = { of: (i: number) => string | null; ids: string[]; release: () => Promise<void> };
+async function claimBatchEvidence(req: express.Request, res: express.Response, n: number): Promise<BatchEvidence | undefined> {
+  if (!evidenceEnabled()) return { of: () => null, ids: [], release: async () => {} };
+  const list: any[] = Array.isArray(req.body?.rows) ? req.body.rows : [];
+  const want = (v: unknown) => (typeof v === "string" && /^[0-9a-f-]{36}$/.test(v) ? v : null);
+  const shared = want(req.body?.evidence_id);
+  const per = Array.from({ length: n }, (_, i) => want(list[i]?.evidence_id));
+  const taken: string[] = [];
+  for (const id of [...new Set([shared, ...per].filter((x): x is string => !!x))]) {
+    const ok = await queryOne("UPDATE evidence SET used = true WHERE id = @id::uuid AND used = false AND (user_id = @uid OR @su) RETURNING id", {
+      id,
+      uid: req.user!.id,
+      su: req.user!.role === "superuser",
+    });
+    if (!ok) {
+      for (const t of taken) await releaseEvidence(t);
+      const row = per.indexOf(id);
+      res.status(400).json(row >= 0 ? { error: `Baris ${row + 1}: foto bukti tidak valid, upload ulang fotonya`, row } : { error: "Foto bukti tidak valid, upload ulang fotonya" });
+      return undefined;
+    }
+    taken.push(id);
+  }
+  return { of: (i) => per[i] ?? shared, ids: taken, release: async () => { for (const t of taken) await releaseEvidence(t); } };
+}
+
 async function releaseEvidence(id: string | null | undefined) {
   if (id) await execute("UPDATE evidence SET used = false WHERE id = @id::uuid", { id });
 }

@@ -1,8 +1,8 @@
 import { Fragment, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { createPortal, flushSync } from "react-dom";
-import { Copy, Plus, Trash2, X } from "lucide-react";
-import { ApiError, errorText } from "../lib/api";
-import { EvidenceInput, useEvidenceEnabled } from "./EvidenceInput";
+import { ClipboardPaste, Copy, ImagePlus, Loader2, Plus, Trash2, X } from "lucide-react";
+import { api, ApiError, errorText } from "../lib/api";
+import { EvidenceInput, EvidenceLink, shrink, useEvidenceEnabled } from "./EvidenceInput";
 
 // Input Banyak: many Stok Masuk / Keluar typed as a table and saved in one go with one foto bukti.
 // Each inventory describes its columns and rules (BbmBatchModal, GudangBatchModal, ...); this table
@@ -70,6 +70,7 @@ export function BatchGrid({
   onSuccess,
   evidenceOptional = false,
   evidenceLabel = "Foto Bukti (satu untuk semua baris)",
+  perRowEvidence = false,
   carryDown = false,
 }: {
   title: string;
@@ -94,6 +95,9 @@ export function BatchGrid({
   // Koperasi: the photo may be left out.
   evidenceOptional?: boolean;
   evidenceLabel?: string;
+  // Inventories: a foto bukti per row (Upload, Tempel or Ctrl+V into the row clicked), each optional - a row
+  // saved without one is completed later in Lengkapi Data. The row's photo reaches submit as cells.__ev.
+  perRowEvidence?: boolean;
   // Typing in a row whose `carry` cells are empty fills them from the nearest row above (Koperasi: the
   // NIK of the person whose barang are listed under each other), wherever the row was clicked.
   carryDown?: boolean;
@@ -111,6 +115,49 @@ export function BatchGrid({
   const [owner, setOwner] = useState(draftKey);
   const [evidenceId, setEvidenceId] = useState<string | null>(null);
   const evidenceOn = useEvidenceEnabled();
+  const [fotoRow, setFotoRow] = useState<Record<number, string>>({});
+  const [fotoBusy, setFotoBusy] = useState<number | null>(null);
+  const [aktifRow, setAktifRow] = useState<number | null>(null);
+  const perRow = perRowEvidence && evidenceOn;
+  const uploadFoto = async (key: number, f: File | undefined) => {
+    if (!f) return;
+    setFotoBusy(key);
+    setError("");
+    try {
+      const { id } = await api.uploadEvidence(await shrink(f));
+      setFotoRow((m) => ({ ...m, [key]: id }));
+    } catch (e) {
+      setError(errorText(e, "Foto gagal diupload"));
+    } finally {
+      setFotoBusy(null);
+    }
+  };
+  const tempelFoto = async (key: number) => {
+    setAktifRow(key);
+    try {
+      for (const it of await navigator.clipboard.read()) {
+        const type = it.types.find((t) => t.startsWith("image/"));
+        if (type) return uploadFoto(key, new File([await it.getType(type)], "tempel.png", { type }));
+      }
+      setError("Tidak ada gambar di clipboard. Salin (copy) dulu fotonya, lalu klik Tempel.");
+    } catch {
+      setError("Browser tidak mengizinkan membaca clipboard. Klik barisnya lalu tekan Ctrl+V.");
+    }
+  };
+  // Ctrl+V of an image: into the row last clicked / typed in.
+  useEffect(() => {
+    if (!perRow) return;
+    const onPaste = (e: ClipboardEvent) => {
+      const file = [...(e.clipboardData?.files ?? [])].find((f) => f.type.startsWith("image/"));
+      if (!file) return;
+      e.preventDefault();
+      if (aktifRow === null) return setError("Klik dulu barisnya, lalu tempel (Ctrl+V) fotonya");
+      uploadFoto(aktifRow, file);
+    };
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [perRow, aktifRow]);
   const [rowErrors, setRowErrors] = useState<Record<number, string>>({});
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -224,12 +271,12 @@ export function BatchGrid({
     }
     setRowErrors(errs);
     if (Object.keys(errs).length) return setError(`${Object.keys(errs).length} baris belum lengkap / salah (ditandai merah)`);
-    if (evidenceOn && !evidenceId && !evidenceOptional) return setError("Foto bukti wajib diupload");
+    if (evidenceOn && !perRow && !evidenceId && !evidenceOptional) return setError("Foto bukti wajib diupload");
     setSubmitting(true);
     try {
       const count = await submit(
-        idx.map((i) => rows[i].c),
-        evidenceId ?? ""
+        idx.map((i) => (perRow && fotoRow[rows[i].key] ? { ...rows[i].c, __ev: fotoRow[rows[i].key] } : rows[i].c)),
+        perRow ? "" : (evidenceId ?? "")
       );
       try {
         localStorage.removeItem(draftKey);
@@ -249,11 +296,11 @@ export function BatchGrid({
   const optionsOf = (col: GridCol, c: Cells) => (typeof col.options === "function" ? col.options(c) : (col.options ?? []));
   const inputCls = (key: number, extraCls = "") =>
     `w-full text-sm rounded-md border px-2 py-1.5 bg-white ${rowErrors[key] ? "border-[var(--accent-red)]" : "border-[var(--border)]"} ${extraCls}`;
-  const minWidth = 60 + columns.reduce((t, c) => t + (c.width ?? 160), 0) + (saldo ? 100 : 0);
+  const minWidth = 60 + columns.reduce((t, c) => t + (c.width ?? 160), 0) + (saldo ? 100 : 0) + (perRow ? 160 : 0);
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-2 sm:p-4">
-      <div className="bg-white rounded-lg w-full max-w-6xl shadow-xl max-h-[calc(100vh-1rem)] flex flex-col">
+      <div className={`bg-white rounded-lg w-full ${perRow ? "max-w-[1400px]" : "max-w-6xl"} shadow-xl max-h-[calc(100vh-1rem)] flex flex-col`}>
         <div className="flex items-center justify-between px-5 py-3 border-b border-[var(--border)]">
           <div>
             <h3 className="font-semibold text-sm text-[var(--text-primary)]">{title}</h3>
@@ -309,6 +356,7 @@ export function BatchGrid({
                   </th>
                 ))}
                 {saldo && <th className="py-1.5 pr-2 w-[100px] text-right">{saldoLabel}</th>}
+                {perRow && <th className="py-1.5 pr-2 w-[150px]" title="Opsional: bisa dilengkapi nanti di Lengkapi Data">Foto Bukti</th>}
                 <th className="py-1.5 w-[60px]" />
               </tr>
             </thead>
@@ -317,7 +365,11 @@ export function BatchGrid({
                 const s = saldoCells[i];
                 return (
                   <Fragment key={r.key}>
-                    <tr className="align-top">
+                    <tr
+                      className={`align-top ${perRow && aktifRow === r.key ? "outline outline-2 -outline-offset-2 outline-[var(--accent-blue-border)]" : ""}`}
+                      onClick={() => setAktifRow(r.key)}
+                      onFocus={() => setAktifRow(r.key)}
+                    >
                       <td className="py-1 pr-2 pt-2.5 text-xs text-[var(--text-muted)]">{i + 1}</td>
                       {columns.map((col) => {
                         const off = col.off?.(r.c);
@@ -373,6 +425,37 @@ export function BatchGrid({
                           {s ? s.text : ""}
                         </td>
                       )}
+                      {perRow && (
+                        <td className="py-1 pr-2 whitespace-nowrap">
+                          {fotoRow[r.key] ? (
+                            <span className="inline-flex items-center gap-1.5 pt-1.5 text-xs">
+                              <EvidenceLink id={fotoRow[r.key]} label="foto" />
+                              <button
+                                onClick={() => setFotoRow((m) => Object.fromEntries(Object.entries(m).filter(([k]) => Number(k) !== r.key)))}
+                                title="Hapus foto baris ini"
+                                className="text-[var(--text-muted)] hover:text-[var(--accent-red)]"
+                              >
+                                <X size={12} />
+                              </button>
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-xs">
+                              <label className="inline-flex items-center gap-1 px-1.5 py-1 rounded border border-dashed border-[var(--border)] text-[var(--text-secondary)] cursor-pointer hover:bg-[#f1f5f9]" title="Upload foto bukti baris ini">
+                                {fotoBusy === r.key ? <Loader2 size={12} className="animate-spin" /> : <ImagePlus size={12} />} Upload
+                                <input type="file" accept="image/*" className="hidden" onChange={(e) => (uploadFoto(r.key, e.target.files?.[0]), (e.target.value = ""))} />
+                              </label>
+                              <button
+                                type="button"
+                                onClick={(e) => (e.stopPropagation(), tempelFoto(r.key))}
+                                title="Tempel foto dari clipboard (atau klik baris lalu Ctrl+V)"
+                                className="inline-flex items-center gap-1 px-1.5 py-1 rounded border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[#f1f5f9]"
+                              >
+                                <ClipboardPaste size={12} /> Tempel
+                              </button>
+                            </span>
+                          )}
+                        </td>
+                      )}
                       <td className="py-1 pt-1.5 whitespace-nowrap">
                         <button onClick={() => copyRow(i)} title="Salin baris (Ctrl+D)" className="p-1 rounded text-[var(--text-muted)] hover:bg-[#f1f5f9]">
                           <Copy size={14} />
@@ -385,7 +468,7 @@ export function BatchGrid({
                     {rowErrors[r.key] && (
                       <tr>
                         <td />
-                        <td colSpan={columns.length + (saldo ? 2 : 1)} className="pb-1 text-[11px] text-[var(--accent-red)]">
+                        <td colSpan={columns.length + (saldo ? 2 : 1) + (perRow ? 1 : 0)} className="pb-1 text-[11px] text-[var(--accent-red)]">
                           {rowErrors[r.key]}
                         </td>
                       </tr>
@@ -405,9 +488,16 @@ export function BatchGrid({
             <div className="text-sm text-[var(--text-secondary)]">
               <b className="text-[var(--text-primary)]">{filled.length}</b> baris{summary && <> · {summary(filled)}</>}
             </div>
-            <div className="w-full sm:w-80">
-              <EvidenceInput value={evidenceId} onChange={setEvidenceId} label={evidenceLabel} />
-            </div>
+            {perRow ? (
+              <div className="text-xs text-[var(--text-secondary)] sm:text-right">
+                Foto bukti per baris: <b className="text-[var(--text-primary)]">{rows.filter((x) => !isBlank(x.c) && fotoRow[x.key]).length}</b> dari {filled.length} ·
+                boleh dikosongkan, lengkapi nanti di Lengkapi Data
+              </div>
+            ) : (
+              <div className="w-full sm:w-80">
+                <EvidenceInput value={evidenceId} onChange={setEvidenceId} label={evidenceLabel} />
+              </div>
+            )}
           </div>
           {error && <p className="text-xs text-[var(--accent-red)]">{error}</p>}
           <button
