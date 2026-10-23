@@ -140,7 +140,8 @@ export function InventoryOliPage({ estate }: { estate: string }) {
         { label: "Stock (LTR)", align: "right" },
         { label: "Keterangan" },
       ],
-      rows: all.map((r) => [r.periode, tanggalWaktu(r.tanggal_iso, r.created_at, r.tanggal), r.jenis_oli, r.no_embrace, r.diterima || ((r.pinjam ?? 0) > 0 ? r.pinjam : null), r.pemakaian || ((r.pinjam ?? 0) < 0 ? -r.pinjam! : null), r.saldo_stock, r.keterangan]),
+      // The list shows the newest first; the printout / Excel read from the 1st of the period down.
+      rows: [...all].reverse().map((r) => [r.periode, tanggalWaktu(r.tanggal_iso, r.created_at, r.tanggal), r.jenis_oli, r.no_embrace, r.diterima || ((r.pinjam ?? 0) > 0 ? r.pinjam : null), r.pemakaian || ((r.pinjam ?? 0) < 0 ? -r.pinjam! : null), r.saldo_stock, r.keterangan]),
     };
   };
 

@@ -152,7 +152,8 @@ export function InventoryPupukPage({ estate }: { estate: string }) {
         { label: "HA", align: "right" },
         { label: "Pokok", align: "right" },
       ],
-      rows: all.map((r) => [
+      // The list shows the newest first; the printout / Excel read from the 1st of the period down.
+      rows: [...all].reverse().map((r) => [
         r.periode,
         tanggalWaktu(r.tanggal_iso, r.created_at, r.tanggal),
         r.jenis_pupuk,

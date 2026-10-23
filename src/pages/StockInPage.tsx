@@ -91,7 +91,8 @@ export function StockInPage({ embedded = false }: { embedded?: boolean }) {
         { label: "Tujuan" },
         { label: "Keterangan" },
       ],
-      rows: all.map((r) => [tanggalWaktu(r.tanggal_terima_iso, r.input_at ?? r.created_at, r.tanggal_terima), r.kode, r.nama, r.nama_vendor, r.po_in_akss || r.no_pr, r.qty, r.satuan, r.tujuan, r.keterangan]),
+      // The list shows the newest first; the printout / Excel read from the 1st of the period down.
+      rows: [...all].reverse().map((r) => [tanggalWaktu(r.tanggal_terima_iso, r.input_at ?? r.created_at, r.tanggal_terima), r.kode, r.nama, r.nama_vendor, r.po_in_akss || r.no_pr, r.qty, r.satuan, r.tujuan, r.keterangan]),
     };
   };
 

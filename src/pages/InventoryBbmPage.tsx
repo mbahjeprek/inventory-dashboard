@@ -143,7 +143,9 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
         { label: "Total HM Sebelum Pengisian", align: "right" },
       ],
       // Same rules as the table cells: 0/empty Stok Masuk & Keluar show "-", Saldo shows 0.
-      rows: all.map((r) => [
+      // The list shows the newest first; the printout / Excel read from the 1st of the period down.
+
+      rows: [...all].reverse().map((r) => [
         r.periode,
         tanggalWaktu(r.tanggal_iso, r.created_at, r.tanggal),
         r.no_spb,

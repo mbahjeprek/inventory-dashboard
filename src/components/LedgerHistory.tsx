@@ -94,7 +94,8 @@ export function LedgerHistory({ scope, type, refreshKey }: { scope: StockScope; 
         { label: "Catatan" },
         { label: "Diinput Oleh" },
       ],
-      rows: all.map((r) => [
+      // The list shows the newest first; the printout / Excel read from the 1st of the period down.
+      rows: [...all].reverse().map((r) => [
         [formatWaktu(r.created_at), inputNote(r) && `(${inputNote(r)})`].filter(Boolean).join(" "),
         r.kode,
         r.nama,
