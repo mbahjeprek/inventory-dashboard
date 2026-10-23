@@ -70,6 +70,76 @@ function Avatar({ nama, jenis, online }: { nama: string; jenis?: string; online?
 
 type Toast = { id: number; room_id: number; dari: string; isi: string; room_nama: string | null };
 
+// Where the chat button sits: dragged anywhere, then snapped to the nearer side (left / right) at the
+// height it was dropped; remembered per browser so it can be kept away from a page's pager or buttons.
+type Pos = { side: "left" | "right"; bottom: number };
+const POS_KEY = "chat.pos";
+const BTN = 52;
+const clampBottom = (b: number) => Math.max(8, Math.min(b, window.innerHeight - BTN - 8));
+function loadPos(): Pos {
+  try {
+    const p = JSON.parse(localStorage.getItem(POS_KEY) ?? "");
+    if ((p.side === "left" || p.side === "right") && typeof p.bottom === "number") return { side: p.side, bottom: clampBottom(p.bottom) };
+  } catch {
+    // ignore
+  }
+  return { side: "right", bottom: 16 };
+}
+function useDraggablePos() {
+  const [pos, setPos] = useState<Pos>(loadPos);
+  const [drag, setDrag] = useState<{ x: number; y: number } | null>(null);
+  const start = useRef<{ px: number; py: number; ox: number; oy: number; moved: boolean } | null>(null);
+  const justDragged = useRef(false);
+  useEffect(() => {
+    const onResize = () => setPos((p) => ({ ...p, bottom: clampBottom(p.bottom) }));
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+  const handlers = {
+    onPointerDown: (e: React.PointerEvent<HTMLElement>) => {
+      const r = e.currentTarget.getBoundingClientRect();
+      start.current = { px: e.clientX, py: e.clientY, ox: r.left, oy: r.top, moved: false };
+      e.currentTarget.setPointerCapture(e.pointerId);
+    },
+    onPointerMove: (e: React.PointerEvent<HTMLElement>) => {
+      const s = start.current;
+      if (!s) return;
+      const dx = e.clientX - s.px;
+      const dy = e.clientY - s.py;
+      if (!s.moved && Math.hypot(dx, dy) < 6) return;
+      s.moved = true;
+      setDrag({
+        x: Math.max(0, Math.min(s.ox + dx, window.innerWidth - BTN)),
+        y: Math.max(0, Math.min(s.oy + dy, window.innerHeight - BTN)),
+      });
+    },
+    onPointerUp: () => {
+      const s = start.current;
+      start.current = null;
+      if (!s?.moved || !drag) return;
+      justDragged.current = true;
+      const p: Pos = { side: drag.x + BTN / 2 < window.innerWidth / 2 ? "left" : "right", bottom: clampBottom(window.innerHeight - drag.y - BTN) };
+      setPos(p);
+      setDrag(null);
+      try {
+        localStorage.setItem(POS_KEY, JSON.stringify(p));
+      } catch {
+        // ignore
+      }
+    },
+  };
+  // A drag must not also count as a click on the button.
+  const takeDrag = () => {
+    const d = justDragged.current;
+    justDragged.current = false;
+    return d;
+  };
+  const style: React.CSSProperties = drag
+    ? { left: drag.x, top: drag.y, transition: "none" }
+    : { [pos.side]: 16, bottom: pos.bottom, transition: "left .15s, right .15s, bottom .15s" };
+  return { pos, style, handlers, takeDrag, dragging: drag !== null };
+}
+
 export function ChatWidget() {
   const { user } = useAuth();
   const [open, setOpen] = useState(false);
@@ -78,6 +148,12 @@ export function ChatWidget() {
   const [total, setTotal] = useState(0);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const maxRef = useRef(0);
+  const { pos, style: btnStyle, handlers: dragHandlers, takeDrag, dragging } = useDraggablePos();
+  // The panel and pop-ups open on the button's side, above it when it sits low, else below it.
+  const low = pos.bottom < window.innerHeight / 2;
+  const sideCls = pos.side === "right" ? "sm:right-4 sm:left-auto" : "sm:left-4 sm:right-auto";
+  const gap = low ? pos.bottom + BTN + 12 : window.innerHeight - pos.bottom + 12;
+  const panelStyle: React.CSSProperties = { [low ? "bottom" : "top"]: gap, maxHeight: window.innerHeight - gap - 8 };
   const viewRef = useRef({ open, view, roomId });
   viewRef.current = { open, view, roomId };
 
@@ -119,7 +195,7 @@ export function ChatWidget() {
   return (
     <>
       {/* Pop-ups of new messages, above the chat button. */}
-      <div className="fixed z-50 right-4 bottom-20 w-[300px] max-w-[calc(100vw-2rem)] space-y-2">
+      <div className={`fixed z-50 right-4 ${pos.side === "left" ? "sm:left-4 sm:right-auto" : ""} w-[300px] max-w-[calc(100vw-2rem)] space-y-2`} style={panelStyle}>
         {toasts.map((t) => (
           <button
             key={t.id}
@@ -136,9 +212,11 @@ export function ChatWidget() {
       </div>
 
       <button
-        onClick={() => (setOpen((o) => !o), setView(roomId ? view : "list"))}
-        title="Chat"
-        className="fixed z-40 right-4 bottom-4 w-13 h-13 p-3.5 rounded-full shadow-lg bg-[var(--accent-blue)] text-white hover:opacity-90"
+        {...dragHandlers}
+        onClick={() => !takeDrag() && (setOpen((o) => !o), setView(roomId ? view : "list"))}
+        title="Chat (tahan & geser untuk memindahkan)"
+        style={btnStyle}
+        className={`fixed z-40 w-13 h-13 p-3.5 rounded-full shadow-lg bg-[var(--accent-blue)] text-white hover:opacity-90 touch-none select-none ${dragging ? "cursor-grabbing opacity-80" : "cursor-pointer"}`}
       >
         {open ? <X size={22} /> : <MessageCircle size={22} />}
         {!open && total > 0 && (
@@ -149,7 +227,7 @@ export function ChatWidget() {
       </button>
 
       {open && (
-        <div className="fixed z-50 right-2 left-2 sm:left-auto sm:right-4 bottom-20 sm:w-[380px] h-[min(560px,calc(100vh-7rem))] rounded-xl border border-[var(--border)] bg-[var(--bg-card)] shadow-2xl flex flex-col overflow-hidden">
+        <div style={panelStyle} className={`fixed z-50 right-2 left-2 ${sideCls} sm:w-[380px] h-[min(560px,calc(100vh-7rem))] rounded-xl border border-[var(--border)] bg-[var(--bg-card)] shadow-2xl flex flex-col overflow-hidden`}>
           {view === "room" && roomId ? (
             <Percakapan roomId={roomId} onBack={() => (setView("list"), setRoomId(null), cek())} onRead={cek} />
           ) : view === "baru" ? (
