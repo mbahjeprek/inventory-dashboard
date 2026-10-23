@@ -11244,7 +11244,46 @@ app.get("/api/lengkapi/:kind", async (req, res) => {
      ORDER BY ${k.date}, id`,
     { estate, bulan }
   );
-  res.json({ fields: k.fields.map(({ key, label, type }) => ({ key, label, type })), foto, rows, totalBulan: rows.length });
+  // The choices the input form offers for a field (picked from a list, or still typed): kode kendaraan
+  // (Master Alat Berat + the codes used at the lokasi), divisi / blok (Master Blok), penerima (the
+  // estate's karyawan), tujuan (the fixed list of the gudang - `pilihan` = only these).
+  const want = new Set(k.fields.map((f) => f.key));
+  const options: Record<string, string[]> = {};
+  const pilihan: string[] = [];
+  if (k.module === "bbm" && want.has("kode_kendaraan"))
+    options.kode_kendaraan = (
+      await queryMany<{ v: string }>(
+        `SELECT kode v FROM alat_berat UNION SELECT DISTINCT trim(kode_kendaraan) FROM bbm_log WHERE lokasi = @estate AND trim(COALESCE(kode_kendaraan, '')) <> '' ORDER BY 1`,
+        { estate }
+      )
+    ).map((r) => r.v);
+  if (k.module === "pupuk") {
+    options.divisi = (
+      await queryMany<{ v: string }>(
+        `SELECT DISTINCT divisi v FROM master_blok WHERE estate = @estate AND divisi <> ''
+         UNION SELECT DISTINCT divisi FROM pupuk_log WHERE estate = @estate AND trim(COALESCE(divisi, '')) <> '' ORDER BY 1`,
+        { estate }
+      )
+    ).map((r) => r.v);
+    options.blok = (await queryMany<{ v: string }>("SELECT DISTINCT upper(blok) v FROM master_blok WHERE estate = @estate ORDER BY 1", { estate })).map((r) => r.v);
+  }
+  if (want.has("tujuan")) {
+    options.tujuan = k.table === "stock_out_log" ? NILAM_TUJUAN : GUDANG_TUJUAN[estate] ?? [];
+    // The other gudang only supply their own estates; Gudang Nilam's history also has free-typed tujuan.
+    if (k.table === "gudang_stock_tx") pilihan.push("tujuan");
+  }
+  // Penerima: the estate's karyawan, plus the names already received by at this gudang / klinik (KNS and WJA
+  // have no Master Karyawan yet).
+  if (want.has("penerima"))
+    options.penerima = (
+      await queryMany<{ v: string }>(
+        `SELECT DISTINCT nama v FROM karyawan WHERE UPPER(estate) = @estate AND trim(nama) <> ''
+         UNION SELECT DISTINCT trim(penerima) FROM ${k.table} WHERE ${k.estate} = @estate AND trim(COALESCE(penerima, '')) <> '' AND trim(penerima) !~ '^[-0. ]*$'
+         ORDER BY 1`,
+        { estate: k.estate === "'NILAM'" ? "NILAM" : estate }
+      )
+    ).map((r) => r.v);
+  res.json({ fields: k.fields.map(({ key, label, type }) => ({ key, label, type })), foto, rows, totalBulan: rows.length, options, pilihan });
 });
 
 app.put("/api/lengkapi/:kind", async (req, res) => {

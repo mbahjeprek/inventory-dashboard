@@ -50,6 +50,8 @@ function LengkapiModal({ kinds, estate, onClose, onDone }: { kinds: LengkapiKind
   const [only, setOnly] = useState("");
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState<number | null>(null);
+  // The row last clicked / typed in: a photo pasted (Ctrl+V) goes to it, as on the input form.
+  const [aktif, setAktif] = useState<number | null>(null);
 
   const load = () => {
     setData(null);
@@ -116,6 +118,20 @@ function LengkapiModal({ kinds, estate, onClose, onDone }: { kinds: LengkapiKind
       setUploading(null);
     }
   };
+
+  useEffect(() => {
+    if (!data?.foto) return;
+    const onPaste = (e: ClipboardEvent) => {
+      const file = [...(e.clipboardData?.files ?? [])].find((f) => f.type.startsWith("image/"));
+      if (!file) return;
+      e.preventDefault();
+      if (aktif === null) return setError("Klik dulu baris transaksinya, lalu tempel (Ctrl+V) fotonya");
+      pickFoto(aktif, file);
+    };
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aktif, data?.foto]);
 
   const save = async () => {
     if (!changedIds.length) return;
@@ -227,6 +243,17 @@ function LengkapiModal({ kinds, estate, onClose, onDone }: { kinds: LengkapiKind
           ) : rows.length === 0 ? (
             <p className="p-6 text-sm text-[var(--text-muted)]">{data.rows.length ? "Tidak ada transaksi untuk filter ini." : "Tidak ada transaksi di bulan ini."}</p>
           ) : (
+            <>
+              {/* One list per field with choices (kode kendaraan, divisi, blok, penerima ...), shared by its rows. */}
+              {Object.entries(data.options ?? {})
+                .filter(([k]) => !data.pilihan?.includes(k))
+                .map(([k, opts]) => (
+                  <datalist key={k} id={`lk-${k}`}>
+                    {opts.map((o) => (
+                      <option key={o} value={o} />
+                    ))}
+                  </datalist>
+                ))}
             <table className="w-full text-xs">
               <thead className="bg-[#f8fafc] text-[var(--text-secondary)] sticky top-0 z-10">
                 <tr className="text-left">
@@ -251,7 +278,12 @@ function LengkapiModal({ kinds, estate, onClose, onDone }: { kinds: LengkapiKind
               </thead>
               <tbody>
                 {rows.map((r) => (
-                  <tr key={r.id} className={`border-t border-[var(--border)] ${changedIds.includes(r.id) ? "bg-[#f0f9eb]" : ""}`}>
+                  <tr
+                    key={r.id}
+                    onClick={() => setAktif(r.id)}
+                    onFocus={() => setAktif(r.id)}
+                    className={`border-t border-[var(--border)] ${changedIds.includes(r.id) ? "bg-[#f0f9eb]" : ""} ${aktif === r.id ? "outline outline-2 -outline-offset-2 outline-[var(--accent-blue-border)]" : ""}`}
+                  >
                     <td className="px-2 py-1.5 whitespace-nowrap">{tgl(r.tanggal_iso)}</td>
                     <td className="px-2 py-1.5">{r.jenis}</td>
                     {kind === "bbm" && <td className="px-2 py-1.5">{r.sub}</td>}
@@ -280,6 +312,7 @@ function LengkapiModal({ kinds, estate, onClose, onDone }: { kinds: LengkapiKind
                                   {uploading === r.id ? <Loader2 size={12} className="animate-spin" /> : <ImagePlus size={12} />} {r.evidence_id ? "Ganti" : "Upload"}
                                   <input type="file" accept="image/*" className="hidden" onChange={(e) => (pickFoto(r.id, e.target.files?.[0]), (e.target.value = ""))} />
                                 </label>
+                                {aktif === r.id && uploading !== r.id && <span className="text-[10px] text-[var(--accent-blue)]">atau Ctrl+V</span>}
                               </span>
                             )}
                           </td>
@@ -291,10 +324,28 @@ function LengkapiModal({ kinds, estate, onClose, onDone }: { kinds: LengkapiKind
                         <td key={c.key} className="px-2 py-1">
                           {!applies ? (
                             <span className="text-[var(--text-muted)]">-</span>
+                          ) : data.pilihan?.includes(c.key) ? (
+                            <select
+                              value={v}
+                              onChange={(e) => setVal(r.id, c.key, e.target.value)}
+                              title={ubah ? `Sebelumnya: ${cur(r, c.key) || "(kosong)"}` : undefined}
+                              className={`w-full min-w-[100px] rounded border px-1.5 py-1 ${
+                                ubah ? "border-[var(--accent-green)] bg-white" : kosong(v) ? "border-[var(--accent-amber-border)] bg-[#fffbeb]" : "border-[var(--border)] bg-white"
+                              }`}
+                            >
+                              <option value="">- pilih -</option>
+                              {[...new Set([...(data.options?.[c.key] ?? []), ...(v && !kosong(v) ? [v] : [])])].map((o) => (
+                                <option key={o} value={o}>
+                                  {o}
+                                </option>
+                              ))}
+                            </select>
                           ) : (
                             <input
                               type={c.type === "number" ? "number" : "text"}
                               step="any"
+                              list={data.options?.[c.key]?.length ? `lk-${c.key}` : undefined}
+                              placeholder={data.options?.[c.key]?.length ? "pilih / ketik" : undefined}
                               value={v}
                               onChange={(e) => setVal(r.id, c.key, e.target.value)}
                               title={ubah ? `Sebelumnya: ${cur(r, c.key) || "(kosong)"}` : undefined}
@@ -310,6 +361,7 @@ function LengkapiModal({ kinds, estate, onClose, onDone }: { kinds: LengkapiKind
                 ))}
               </tbody>
             </table>
+            </>
           )}
         </div>
 

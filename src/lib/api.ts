@@ -453,7 +453,15 @@ export type LengkapiRow = {
   berlaku: string[];
   [field: string]: unknown;
 };
-export type LengkapiList = { fields: { key: string; label: string; type: "text" | "number" }[]; foto: boolean; rows: LengkapiRow[]; totalBulan: number };
+// options: the choices of a field (as the input form offers them); pilihan: the fields that take only those.
+export type LengkapiList = {
+  fields: { key: string; label: string; type: "text" | "number" }[];
+  foto: boolean;
+  rows: LengkapiRow[];
+  totalBulan: number;
+  options?: Record<string, string[]>;
+  pilihan?: string[];
+};
 export type PruningImportRow = {
   row: number;
   estate: string;
