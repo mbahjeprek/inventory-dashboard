@@ -841,6 +841,10 @@ export type Dokumen = {
   pic: string;
   pinned: boolean;
   oleh: string | null;
+  user_id: number | null;
+  // dikunci: only a Kelola semua account changes it; boleh_ubah: whether this account may change / delete it.
+  dikunci: boolean;
+  boleh_ubah: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -1767,10 +1771,11 @@ export const api = {
   kopSlip: (periode: string, kodes: string[]) =>
     req<{ periode: string; limit: number; jatuh_tempo: string; data: KopSlipLine[] }>(`/api/koperasi/slip?${new URLSearchParams({ periode, kode: kodes.join(",") })}`),
   dokumen: (p: { modul?: string; estate?: string; kategori?: string; search?: string } = {}) =>
-    req<{ data: Dokumen[] }>(`/api/dokumen?${new URLSearchParams(Object.entries(p).filter(([, v]) => v) as [string, string][])}`),
+    req<{ data: Dokumen[]; kelola: boolean }>(`/api/dokumen?${new URLSearchParams(Object.entries(p).filter(([, v]) => v) as [string, string][])}`),
   dokumenTambah: (body: DokumenInput) => req<{ success: boolean; id: number }>("/api/dokumen", { method: "POST", body: JSON.stringify(body) }),
   dokumenEdit: (id: number, body: DokumenInput) => req<{ success: boolean }>(`/api/dokumen/${id}`, { method: "PUT", body: JSON.stringify(body) }),
   dokumenPin: (id: number, pinned: boolean) => req<{ success: boolean }>(`/api/dokumen/${id}`, { method: "PUT", body: JSON.stringify({ pinOnly: true, pinned }) }),
+  dokumenKunci: (id: number, kunci: boolean) => req<{ success: boolean }>(`/api/dokumen/${id}`, { method: "PUT", body: JSON.stringify({ kunciOnly: kunci }) }),
   dokumenHapus: (id: number) => req<{ success: boolean }>(`/api/dokumen/${id}`, { method: "DELETE" }),
   kopEditTx: (id: number, body: { barang_kode: string; qty: number; harga: number }) =>
     req<{ success: boolean }>(`/api/koperasi/tx/${id}`, { method: "PUT", body: JSON.stringify(body) }),

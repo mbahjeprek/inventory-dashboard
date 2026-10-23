@@ -186,7 +186,9 @@ function requiredPerms(req: express.Request): Need {
   // Pemakaian per bulan: the route checks the module's Lihat and the estate itself.
   if (is(/^\/pemakaian(\/|$)/)) return null;
   // Dokumen & Link: every account sees the links of its estates (the route filters); changing them needs Kelola Dokumen.
-  if (is(/^\/dokumen(\/|$)/)) return m === "GET" ? null : ["dokumen.edit"];
+  // Dokumen & Link: add with Dokumen & Link; change / delete one's own (not locked) - checked in the route - or
+  // every one with Kelola semua.
+  if (is(/^\/dokumen(\/|$)/)) return m === "GET" ? null : ["dokumen.edit", "dokumen.kelola"];
   // Status Update: the route lists only the estates and modules the account can see.
   if (is(/^\/status-update$/)) return null;
   // Foto bukti: any logged-in account uploads for its own transactions (the transaction route checks).
@@ -258,7 +260,7 @@ const PERM_AKSI: Record<string, string> = { view: "Lihat", input: "Input", edit:
 const permLabel = (p: string) => {
   const [m, a] = p.split(".");
   if (PERM_MODUL[m]) return `${PERM_AKSI[a] ?? a} ${PERM_MODUL[m]}`;
-  const other: Record<string, string> = { "master.peta": "Lihat Peta Blok", "master.peta_edit": "Ubah Peta Blok", "master.alat": "Master Alat Berat", "master.users": "Pengguna", "monitor.log_user": "Log Aktivitas User" };
+  const other: Record<string, string> = { "dokumen.edit": "Dokumen & Link", "dokumen.kelola": "Kelola semua Dokumen & Link", "master.peta": "Lihat Peta Blok", "master.peta_edit": "Ubah Peta Blok", "master.alat": "Master Alat Berat", "master.users": "Pengguna", "monitor.log_user": "Log Aktivitas User" };
   return other[p] ?? (m === "master" ? `Master ${a.charAt(0).toUpperCase()}${a.slice(1)}` : p);
 };
 
@@ -10822,6 +10824,17 @@ const dokPayload = (b: any) => ({
 });
 // Only web links: a javascript: / data: url would run in the page when clicked.
 const dokUrlOk = (u: string) => /^https?:\/\/\S+$/i.test(u);
+// Who may change / delete a link: Kelola semua (and Super User) any; Dokumen & Link only the ones it added
+// itself, while they are not locked.
+const dokKelola = (u: SessionUser) => u.role === "superuser" || u.perms.includes("dokumen.kelola");
+const dokBolehUbah = (u: SessionUser, d: { user_id: number | null; dikunci: boolean }) =>
+  dokKelola(u) || (u.perms.includes("dokumen.edit") && d.user_id === u.id && !d.dikunci);
+const dokTolak = (u: SessionUser, d: { user_id: number | null; dikunci: boolean }) =>
+  d.dikunci
+    ? "Dokumen ini dikunci; hanya pengelola dokumen yang bisa mengubah / menghapusnya"
+    : d.user_id !== u.id
+      ? "Hanya pembuat dokumen ini atau pengelola dokumen yang bisa mengubah / menghapusnya"
+      : "Akses ditolak";
 async function dokLog(req: express.Request, d: { modul: string; estate: string; judul: string }, aksi: string, detail?: string) {
   const module = DOK_LOG[d.modul];
   if (module) await logActivity(req, { module, estate: d.estate || null, aksi, objek: d.judul, detail });
@@ -10853,10 +10866,11 @@ app.get("/api/dokumen", async (req, res) => {
       WHERE ${conditions.join(" AND ")} ORDER BY d.pinned DESC, d.id`,
     params
   );
-  res.json({ data });
+  res.json({ data: data.map((d: any) => ({ ...d, boleh_ubah: dokBolehUbah(u, d) })), kelola: dokKelola(u) });
 });
 
 app.post("/api/dokumen", async (req, res) => {
+  if (!dokKelola(req.user!) && !req.user!.perms.includes("dokumen.edit")) return res.status(403).json({ error: "Akses ditolak" });
   const d = dokPayload(req.body);
   if (!d.judul) return res.status(400).json({ error: "Judul wajib diisi" });
   if (!dokUrlOk(d.url)) return res.status(400).json({ error: "Link harus diawali https:// (salin dari address bar / tombol Share)" });
@@ -10874,6 +10888,15 @@ app.put("/api/dokumen/:id", async (req, res) => {
   const existing = await queryOne<any>("SELECT * FROM dokumen_link WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Dokumen tidak ditemukan" });
   if (existing.estate && !estateAllowed(req.user!, existing.estate)) return res.status(403).json({ error: "Akses ditolak" });
+  // Kunci / buka kunci: Kelola semua only.
+  if (req.body?.kunciOnly !== undefined) {
+    if (!dokKelola(req.user!)) return res.status(403).json({ error: "Hanya pengelola dokumen yang bisa mengunci dokumen" });
+    const kunci = req.body.kunciOnly === true;
+    await execute("UPDATE dokumen_link SET dikunci = @kunci, updated_at = now() WHERE id = @id", { kunci, id: existing.id });
+    await dokLog(req, existing, kunci ? "Kunci Dokumen" : "Buka Kunci Dokumen", existing.url);
+    return res.json({ success: true });
+  }
+  if (!dokBolehUbah(req.user!, existing)) return res.status(403).json({ error: dokTolak(req.user!, existing) });
   // Pin only (the star on a card) keeps the rest as it is.
   const d = req.body?.pinOnly ? { ...existing, pinned: req.body.pinned === true } : dokPayload(req.body);
   if (!d.judul) return res.status(400).json({ error: "Judul wajib diisi" });
@@ -10893,6 +10916,7 @@ app.delete("/api/dokumen/:id", async (req, res) => {
   const existing = await queryOne<any>("SELECT * FROM dokumen_link WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Dokumen tidak ditemukan" });
   if (existing.estate && !estateAllowed(req.user!, existing.estate)) return res.status(403).json({ error: "Akses ditolak" });
+  if (!dokBolehUbah(req.user!, existing)) return res.status(403).json({ error: dokTolak(req.user!, existing) });
   await execute("DELETE FROM dokumen_link WHERE id = @id", { id: existing.id });
   await dokLog(req, existing, "Hapus Dokumen", existing.url);
   res.json({ success: true });

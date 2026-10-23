@@ -40,6 +40,8 @@ export const ALL_PERMS: string[] = [
   "monitor.log_user",
   // Dokumen & Link: add / edit / delete the links (seeing them needs no tick).
   "dokumen.edit",
+  // Kelola semua: change / delete / lock every link, not only one's own.
+  "dokumen.kelola",
   // Koperasi karyawan: Lihat, Input (pengambilan / pembelian / rusak), Edit (hapus transaksi, master barang & anggota).
   "koperasi.view",
   "koperasi.input",

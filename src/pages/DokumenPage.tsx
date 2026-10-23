@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Check, Copy, ExternalLink, Plus, Search, Trash2 } from "lucide-react";
+import { Check, Copy, ExternalLink, Lock, LockOpen, Plus, Search, Trash2 } from "lucide-react";
 import { api, errorText, ESTATES, type Dokumen, type DokumenInput } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { can, userEstates } from "../lib/access";
@@ -9,14 +9,15 @@ import { DOK_MODUL, jenisOf } from "../lib/dokumen";
 
 // Master Data > Dokumen & Link: the list of documents (Google Sheets / Docs / Drive, PDF...) like a
 // spreadsheet - No, Nama Dokumen, PIC, Link, plus the menu / estate whose "Dokumen" button shows it.
-// With Kelola Dokumen every cell is typed in place and saved when you leave it; "Tambah baris" adds a row,
-// saved once it has a name and a link. Without it the list is read-only and the links open in a new tab.
+// With Dokumen & Link an account adds rows and types in place (saved when a cell is left) in the rows it
+// added itself; with Kelola semua (or as Super User) in every row, and it can lock a row (gembok) so nobody
+// else - not even who added it - changes or deletes it. Other rows are read-only; links open in a new tab.
 const selectCls = "text-sm rounded-md border border-[var(--border)] px-3 py-2 bg-white";
 const cellCls =
   "w-full bg-transparent px-2 py-1.5 text-sm rounded border border-transparent hover:border-[var(--border)] focus:border-[var(--accent-blue)] focus:bg-white focus:outline-none";
 const urlOk = (u: string) => /^https?:\/\/\S+$/i.test(u.trim());
 
-type Row = DokumenInput & { id: number | null; key: string };
+type Row = DokumenInput & { id: number | null; key: string; boleh_ubah: boolean; dikunci: boolean; oleh: string | null };
 const toRow = (d: Dokumen): Row => ({
   id: d.id,
   key: `d${d.id}`,
@@ -28,9 +29,15 @@ const toRow = (d: Dokumen): Row => ({
   keterangan: d.keterangan,
   pic: d.pic ?? "",
   pinned: d.pinned,
+  boleh_ubah: d.boleh_ubah,
+  dikunci: d.dikunci,
+  oleh: d.oleh,
 });
 const emptyRow = (modul: string, estate: string): Row => ({
   id: null,
+  boleh_ubah: true,
+  dikunci: false,
+  oleh: null,
   key: `n${Date.now()}${Math.random()}`,
   judul: "",
   url: "",
@@ -53,6 +60,7 @@ export function DokumenPage() {
   const [rows, setRows] = useState<Row[] | null>(null);
   const [error, setError] = useState("");
   const [hapus, setHapus] = useState<Row | null>(null);
+  const [kelola, setKelola] = useState(false);
   const req = useRef(0);
   const estates = user?.role === "superuser" ? [...ESTATES] : userEstates(user);
 
@@ -65,11 +73,35 @@ export function DokumenPage() {
     const n = ++req.current;
     api
       .dokumen({ search: q, modul, estate })
-      .then((r) => n === req.current && (setRows((cur) => [...r.data.map(toRow), ...(cur ?? []).filter((x) => x.id === null)]), setError("")))
+      .then((r) => n === req.current && (setRows((cur) => [...r.data.map(toRow), ...(cur ?? []).filter((x) => x.id === null)]), setKelola(r.kelola), setError("")))
       .catch((e) => n === req.current && (setRows([]), setError(errorText(e, "Gagal memuat dokumen"))));
   };
   useEffect(load, [q, modul, estate]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const kunci = async (r: Row) => {
+    if (r.id === null) return;
+    try {
+      await api.dokumenKunci(r.id, !r.dikunci);
+      setRows((x) => (x ?? []).map((y) => (y.key === r.key ? { ...y, dikunci: !r.dikunci } : y)));
+    } catch (e) {
+      setError(errorText(e, "Gagal mengunci dokumen"));
+    }
+  };
+  // The gembok: a button for Kelola semua, else just a sign that the row is locked / who owns it.
+  const gembok = (r: Row) =>
+    r.id === null ? null : kelola ? (
+      <button
+        onClick={() => kunci(r)}
+        title={r.dikunci ? "Dikunci: hanya pengelola dokumen yang bisa mengubah / menghapus. Klik untuk membuka kunci." : "Kunci supaya tidak bisa diubah / dihapus selain oleh pengelola dokumen"}
+        className={`p-1.5 rounded hover:bg-[#f1f5f9] ${r.dikunci ? "text-[var(--accent-amber)]" : "text-[var(--text-muted)]"}`}
+      >
+        {r.dikunci ? <Lock size={14} /> : <LockOpen size={14} />}
+      </button>
+    ) : !r.boleh_ubah && canEdit ? (
+      <span title={r.dikunci ? "Dikunci oleh pengelola dokumen" : `Hanya bisa diubah oleh pembuatnya${r.oleh ? ` (${r.oleh})` : ""} atau pengelola dokumen`} className="inline-flex p-1.5 text-[var(--text-muted)]">
+        <Lock size={14} />
+      </span>
+    ) : null;
   const tambah = () => setRows((r) => [...(r ?? []), emptyRow(modul, estate)]);
   const saved = (key: string, d: Row) => setRows((r) => (r ?? []).map((x) => (x.key === key ? d : x)));
   const doHapus = async () => {
@@ -169,10 +201,18 @@ export function DokumenPage() {
                 </tr>
               ) : (
                 rows.map((r, i) =>
-                  canEdit ? (
-                    <EditRow key={r.key} no={i + 1} row={r} estates={estates} onSaved={(d) => saved(r.key, d)} onHapus={() => (r.id === null && !r.judul && !r.url ? setRows((x) => (x ?? []).filter((y) => y.key !== r.key)) : setHapus(r))} />
+                  canEdit && r.boleh_ubah ? (
+                    <EditRow
+                      key={r.key}
+                      no={i + 1}
+                      row={r}
+                      estates={estates}
+                      extra={gembok(r)}
+                      onSaved={(d) => saved(r.key, { ...d, boleh_ubah: r.boleh_ubah, dikunci: r.dikunci, oleh: r.oleh })}
+                      onHapus={() => (r.id === null && !r.judul && !r.url ? setRows((x) => (x ?? []).filter((y) => y.key !== r.key)) : setHapus(r))}
+                    />
                   ) : (
-                    <ViewRow key={r.key} no={i + 1} row={r} />
+                    <ViewRow key={r.key} no={i + 1} row={r} extra={gembok(r)} />
                   )
                 )
               )}
@@ -233,7 +273,7 @@ function LinkCell({ url }: { url: string }) {
   );
 }
 
-function ViewRow({ no, row }: { no: number; row: Row }) {
+function ViewRow({ no, row, extra }: { no: number; row: Row; extra?: React.ReactNode }) {
   return (
     <tr className="border-t border-[var(--border)] hover:bg-[#f8fafc] align-top">
       <td className="px-3 py-2 text-right text-[var(--text-muted)] border-r border-[var(--border)]">{no}</td>
@@ -262,6 +302,7 @@ function ViewRow({ no, row }: { no: number; row: Row }) {
             <CopyBtn url={row.url} />
           </>
         )}
+        {extra}
       </td>
     </tr>
   );
@@ -269,7 +310,21 @@ function ViewRow({ no, row }: { no: number; row: Row }) {
 
 // One row typed in place: saved when a cell is left with something changed (a new row once it has a
 // name and a valid link). The row shows whether it is saved and why not.
-function EditRow({ no, row, estates, onSaved, onHapus }: { no: number; row: Row; estates: string[]; onSaved: (r: Row) => void; onHapus: () => void }) {
+function EditRow({
+  no,
+  row,
+  estates,
+  extra,
+  onSaved,
+  onHapus,
+}: {
+  no: number;
+  row: Row;
+  estates: string[];
+  extra?: React.ReactNode;
+  onSaved: (r: Row) => void;
+  onHapus: () => void;
+}) {
   const [v, setV] = useState<Row>(row);
   const [state, setState] = useState<"" | "saving" | "saved" | "error">("");
   const [msg, setMsg] = useState("");
@@ -376,6 +431,7 @@ function EditRow({ no, row, estates, onSaved, onHapus }: { no: number; row: Row;
                 </a>
               )}
               {urlOk(v.url) && <CopyBtn url={v.url} />}
+              {extra}
               <button onClick={onHapus} title="Hapus baris" className="p-1.5 rounded text-[var(--text-muted)] hover:bg-[var(--accent-red-bg)] hover:text-[var(--accent-red)]">
                 <Trash2 size={14} />
               </button>

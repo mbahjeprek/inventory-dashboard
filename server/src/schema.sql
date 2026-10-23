@@ -1130,3 +1130,7 @@ CREATE TABLE IF NOT EXISTS klinik_permintaan_line (
   tanggal_pemenuhan TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_klinik_permintaan_line ON klinik_permintaan_line(permintaan_id);
+
+-- Dokumen & Link: dikunci = only an account with Kelola semua Dokumen (or a Super User) changes / deletes it,
+-- not even the one who added it.
+ALTER TABLE dokumen_link ADD COLUMN IF NOT EXISTS dikunci BOOLEAN NOT NULL DEFAULT false;
