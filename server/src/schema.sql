@@ -983,3 +983,43 @@ CREATE TABLE IF NOT EXISTS chat_read (
   last_read_id INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (room_id, user_id)
 );
+
+-- Depo Air (Koperasi): a barang marked depo_air is the water of the koperasi's depots (K0188 AIR GALON
+-- isi ulang). Each of its Stock Out rows says which depot served it (depo NILAM / FIRUS): set by the
+-- trigger from the buyer's estate when not given (Firus -> FIRUS, anything else -> NILAM), changeable in
+-- the Depo Air tab. depo_air_biaya = the depot's running costs per month, for its laba / rugi.
+ALTER TABLE koperasi_barang ADD COLUMN IF NOT EXISTS depo_air BOOLEAN NOT NULL DEFAULT false;
+UPDATE koperasi_barang SET depo_air = true WHERE kode = 'K0188' AND NOT depo_air;
+ALTER TABLE koperasi_tx ADD COLUMN IF NOT EXISTS depo TEXT;
+CREATE OR REPLACE FUNCTION koperasi_tx_depo() RETURNS trigger AS $$
+BEGIN
+  IF NEW.depo IS NULL AND NEW.jenis = 'JUAL' AND EXISTS (SELECT 1 FROM koperasi_barang b WHERE b.kode = NEW.barang_kode AND b.depo_air) THEN
+    -- The buyer's estate; one without an estate (an instansi) by its kode / name (FRS..., "Kantor Firus").
+    NEW.depo := COALESCE((SELECT CASE WHEN upper(COALESCE(NULLIF(k.estate, ''), a.estate, '')) = 'FIRUS'
+                                        OR (COALESCE(NULLIF(k.estate, ''), a.estate, '') = '' AND (a.kode LIKE 'FRS%' OR upper(a.nama) LIKE '%FIRUS%'))
+                                      THEN 'FIRUS' ELSE 'NILAM' END
+                            FROM koperasi_anggota a LEFT JOIN karyawan k ON UPPER(REPLACE(k.nik, ' ', '')) = a.kode WHERE a.kode = NEW.anggota_kode LIMIT 1), 'NILAM');
+  END IF;
+  RETURN NEW;
+END $$ LANGUAGE plpgsql;
+DROP TRIGGER IF EXISTS trg_koperasi_tx_depo ON koperasi_tx;
+CREATE TRIGGER trg_koperasi_tx_depo BEFORE INSERT OR UPDATE OF barang_kode ON koperasi_tx FOR EACH ROW EXECUTE FUNCTION koperasi_tx_depo();
+UPDATE koperasi_tx t SET depo = CASE WHEN upper(COALESCE(NULLIF(k.estate, ''), a.estate, '')) = 'FIRUS'
+                                         OR (COALESCE(NULLIF(k.estate, ''), a.estate, '') = '' AND (a.kode LIKE 'FRS%' OR upper(a.nama) LIKE '%FIRUS%'))
+                                       THEN 'FIRUS' ELSE 'NILAM' END
+  FROM koperasi_barang b, koperasi_anggota a LEFT JOIN karyawan k ON UPPER(REPLACE(k.nik, ' ', '')) = a.kode
+ WHERE b.kode = t.barang_kode AND b.depo_air AND a.kode = t.anggota_kode AND t.jenis = 'JUAL' AND t.depo IS NULL;
+UPDATE koperasi_tx t SET depo = 'NILAM' FROM koperasi_barang b WHERE b.kode = t.barang_kode AND b.depo_air AND t.jenis = 'JUAL' AND t.depo IS NULL;
+CREATE TABLE IF NOT EXISTS depo_air_biaya (
+  id SERIAL PRIMARY KEY,
+  depo TEXT NOT NULL,
+  periode TEXT NOT NULL,
+  tanggal_iso TEXT NOT NULL,
+  kategori TEXT NOT NULL,
+  keterangan TEXT NOT NULL DEFAULT '',
+  jumlah DOUBLE PRECISION NOT NULL,
+  evidence_id UUID,
+  user_id INTEGER,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_depo_biaya ON depo_air_biaya(depo, periode);

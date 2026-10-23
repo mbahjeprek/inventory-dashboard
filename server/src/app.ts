@@ -236,7 +236,7 @@ function requiredPerms(req: express.Request): Need {
     // finishing a stok opname (it books the koreksi) too.
     if (is(/^\/koperasi\/(rusak|koreksi)\/\d+\/periksa$/) || is(/^\/koperasi\/opname\/\d+\/selesai$/)) return ["koperasi.approve"];
     const input =
-      (m === "POST" && is(/^\/koperasi\/((jual|beli|rusak)(\/batch)?|opname|koreksi)$/)) || (m === "PUT" && is(/^\/koperasi\/opname\/\d+\/lines$/));
+      (m === "POST" && is(/^\/koperasi\/((jual|beli|rusak)(\/batch)?|opname|koreksi|depo\/biaya)$/)) || (m === "PUT" && is(/^\/koperasi\/opname\/\d+\/lines$/));
     return input ? ["koperasi.input"] : ["koperasi.edit"];
   }
   return "super";
@@ -9434,6 +9434,133 @@ app.put("/api/koperasi/tx/:id", async (req, res) => {
   }
 });
 
+// ---- Depo Air (see schema.sql depo_air_biaya): the koperasi's water depots at Nilam and Firus ----
+const DEPO = ["NILAM", "FIRUS"];
+const DEPO_BIAYA: Record<string, string> = {
+  LISTRIK: "Listrik / BBM genset",
+  FILTER: "Filter, media & lampu UV",
+  GALON: "Galon, tutup & segel",
+  OPERATOR: "Upah operator",
+  PERAWATAN: "Perawatan & perbaikan mesin",
+  UJI: "Uji kualitas air",
+  LAINNYA: "Lain-lain",
+};
+// depo '' = both; the Stock Out of the depot barang in the periode.
+const depoWhere = (depo: string) => `t.koperasi = @k AND t.jenis = 'JUAL' AND b.depo_air AND (@depo = '' OR t.depo = @depo)`;
+
+// The report of one month (and the 12 months up to it): galon, pendapatan per cara bayar, pelanggan,
+// per divisi, per hari, top pelanggan, biaya and laba / rugi.
+app.get("/api/koperasi/depo", async (req, res) => {
+  const periode = String(req.query.periode ?? "");
+  const depo = DEPO.includes(String(req.query.depo)) ? String(req.query.depo) : "";
+  if (!isPeriode(periode)) return res.status(400).json({ error: "Periode tidak valid" });
+  const p = { k: KOPERASI, depo, periode };
+  const from = `FROM koperasi_tx t JOIN koperasi_barang b ON b.kode = t.barang_kode LEFT JOIN koperasi_anggota a ON a.kode = t.anggota_kode ${KOP_ANGGOTA_JOIN}`;
+  const awal = (() => {
+    const [y, m] = periode.split("-").map(Number);
+    const d = new Date(y, m - 12, 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  })();
+  const [ringkas, perBayar, perDivisi, perHari, top, perBulan, biaya, biayaBulan, harga] = await Promise.all([
+    queryOne(
+      `SELECT COALESCE(SUM(t.qty), 0)::float8 galon, COALESCE(SUM(t.total), 0)::float8 pendapatan, COUNT(DISTINCT t.anggota_kode)::int pelanggan, COUNT(*)::int transaksi
+         ${from} WHERE ${depoWhere(depo)} AND t.periode = @periode`,
+      p
+    ),
+    queryMany(`SELECT t.bayar, COALESCE(SUM(t.qty), 0)::float8 galon, COALESCE(SUM(t.total), 0)::float8 total ${from} WHERE ${depoWhere(depo)} AND t.periode = @periode GROUP BY 1`, p),
+    queryMany(
+      `SELECT COALESCE(NULLIF(${"COALESCE(NULLIF(k.lokasi_kerja, ''), a.divisi)"}, ''), CASE WHEN a.jenis = 'INSTANSI' THEN 'Instansi' ELSE 'Tanpa divisi' END) AS divisi,
+              COALESCE(SUM(t.qty), 0)::float8 galon, COALESCE(SUM(t.total), 0)::float8 total, COUNT(DISTINCT t.anggota_kode)::int orang
+         ${from} WHERE ${depoWhere(depo)} AND t.periode = @periode GROUP BY 1 ORDER BY 2 DESC`,
+      p
+    ),
+    queryMany(`SELECT t.tanggal_iso AS tanggal, COALESCE(SUM(t.qty), 0)::float8 galon, COUNT(DISTINCT t.anggota_kode)::int orang ${from} WHERE ${depoWhere(depo)} AND t.periode = @periode GROUP BY 1 ORDER BY 1`, p),
+    queryMany(
+      `SELECT t.anggota_kode AS kode, COALESCE(NULLIF(k.nama, ''), a.nama) AS nama, COALESCE(NULLIF(k.lokasi_kerja, ''), a.divisi) AS divisi, COALESCE(SUM(t.qty), 0)::float8 galon, COALESCE(SUM(t.total), 0)::float8 total
+         ${from} WHERE ${depoWhere(depo)} AND t.periode = @periode GROUP BY 1, 2, 3 ORDER BY 4 DESC LIMIT 10`,
+      p
+    ),
+    queryMany(
+      `SELECT t.periode, COALESCE(SUM(t.qty), 0)::float8 galon, COALESCE(SUM(t.total), 0)::float8 pendapatan
+         ${from} WHERE ${depoWhere(depo)} AND t.periode >= @awal AND t.periode <= @periode GROUP BY 1 ORDER BY 1`,
+      { ...p, awal }
+    ),
+    queryMany(
+      `SELECT b.id, b.depo, b.tanggal_iso, b.kategori, b.keterangan, b.jumlah, b.evidence_id, COALESCE(u.nama, u.username, '') AS oleh
+         FROM depo_air_biaya b LEFT JOIN users u ON u.id = b.user_id WHERE (@depo = '' OR b.depo = @depo) AND b.periode = @periode ORDER BY b.tanggal_iso, b.id`,
+      p
+    ),
+    queryMany(`SELECT periode, SUM(jumlah)::float8 biaya FROM depo_air_biaya WHERE (@depo = '' OR depo = @depo) AND periode >= @awal AND periode <= @periode GROUP BY 1`, { ...p, awal }),
+    queryOne<{ h: number }>("SELECT MAX(harga_jual)::float8 h FROM koperasi_barang WHERE depo_air AND aktif"),
+  ]);
+  const biayaPer = new Map(biayaBulan.map((r: any) => [r.periode, r.biaya]));
+  const bulan: { periode: string; galon: number; pendapatan: number; biaya: number }[] = [];
+  for (let i = 11; i >= 0; i--) {
+    const [y, m] = periode.split("-").map(Number);
+    const d = new Date(y, m - 1 - i, 1);
+    const per = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    const r: any = perBulan.find((x: any) => x.periode === per);
+    bulan.push({ periode: per, galon: r?.galon ?? 0, pendapatan: r?.pendapatan ?? 0, biaya: biayaPer.get(per) ?? 0 });
+  }
+  res.json({ periode, depo, harga: harga?.h ?? 0, ringkas, perBayar, perDivisi, perHari, top, perBulan: bulan, biaya, kategori: DEPO_BIAYA });
+});
+
+// The depot's Stock Out rows of the month (for the list / Excel and to move a row to the other depot).
+app.get("/api/koperasi/depo/tx", async (req, res) => {
+  const periode = String(req.query.periode ?? "");
+  const depo = DEPO.includes(String(req.query.depo)) ? String(req.query.depo) : "";
+  if (!isPeriode(periode)) return res.status(400).json({ error: "Periode tidak valid" });
+  res.json(
+    await queryMany(
+      `SELECT t.id, t.tanggal_iso, t.depo, t.anggota_kode, COALESCE(NULLIF(k.nama, ''), a.nama) AS nama, COALESCE(NULLIF(k.lokasi_kerja, ''), a.divisi) AS divisi, a.estate,
+              t.qty::float8, t.total::float8, t.bayar
+         FROM koperasi_tx t JOIN koperasi_barang b ON b.kode = t.barang_kode LEFT JOIN koperasi_anggota a ON a.kode = t.anggota_kode ${KOP_ANGGOTA_JOIN}
+        WHERE ${depoWhere(depo)} AND t.periode = @periode ORDER BY t.tanggal_iso DESC, t.id DESC`,
+      { k: KOPERASI, depo, periode }
+    )
+  );
+});
+
+app.put("/api/koperasi/depo/tx/:id", async (req, res) => {
+  const depo = String(req.body?.depo ?? "");
+  if (!DEPO.includes(depo)) return res.status(400).json({ error: "Depo tidak valid" });
+  const t = await queryOne<any>(
+    "SELECT t.id, t.depo, t.tanggal_iso, t.qty, t.anggota_kode FROM koperasi_tx t JOIN koperasi_barang b ON b.kode = t.barang_kode WHERE t.id = @id AND t.koperasi = @k AND t.jenis = 'JUAL' AND b.depo_air",
+    { id: req.params.id, k: KOPERASI }
+  );
+  if (!t) return res.status(404).json({ error: "Transaksi depo tidak ditemukan" });
+  if (t.depo === depo) return res.json({ success: true });
+  await execute("UPDATE koperasi_tx SET depo = @depo WHERE id = @id", { depo, id: t.id });
+  await logActivity(req, { module: "KOPERASI", estate: KOPERASI, aksi: "Pindah Depo Air", objek: `${t.anggota_kode} ${t.tanggal_iso}`, detail: `${kopQty(t.qty)} galon: Depo ${t.depo ?? "-"} → Depo ${depo}` });
+  res.json({ success: true });
+});
+
+app.post("/api/koperasi/depo/biaya", async (req, res) => {
+  const b = req.body ?? {};
+  const depo = String(b.depo ?? "");
+  const jumlah = Number(b.jumlah);
+  if (!DEPO.includes(depo)) return res.status(400).json({ error: "Pilih depo" });
+  if (!isIsoDate(b.tanggal) || b.tanggal > jakartaToday()) return res.status(400).json({ error: "Tanggal tidak valid (tidak boleh setelah hari ini)" });
+  if (!DEPO_BIAYA[b.kategori]) return res.status(400).json({ error: "Pilih jenis biaya" });
+  if (!(jumlah > 0)) return res.status(400).json({ error: "Jumlah harus lebih dari 0" });
+  const evidence = b.evidence_id ? await claimEvidence(req, res) : null;
+  if (evidence === undefined) return;
+  const ket = String(b.keterangan ?? "").trim();
+  await execute(
+    `INSERT INTO depo_air_biaya (depo, periode, tanggal_iso, kategori, keterangan, jumlah, evidence_id, user_id) VALUES (@depo, @periode, @tgl, @kat, @ket, @jumlah, @ev::uuid, @uid)`,
+    { depo, periode: b.tanggal.slice(0, 7), tgl: b.tanggal, kat: b.kategori, ket, jumlah, ev: evidence, uid: req.user!.id }
+  );
+  await logActivity(req, { module: "KOPERASI", estate: KOPERASI, aksi: "Biaya Depo Air", objek: `Depo ${depo}`, detail: `${b.tanggal} · ${DEPO_BIAYA[b.kategori]} · Rp ${Math.round(jumlah).toLocaleString("id-ID")}${ket ? ` · ${ket}` : ""}` });
+  res.json({ success: true });
+});
+
+app.delete("/api/koperasi/depo/biaya/:id", async (req, res) => {
+  const r = await queryOne<any>("DELETE FROM depo_air_biaya WHERE id = @id RETURNING *", { id: req.params.id });
+  if (!r) return res.status(404).json({ error: "Biaya tidak ditemukan" });
+  await logActivity(req, { module: "KOPERASI", estate: KOPERASI, aksi: "Hapus Biaya Depo Air", objek: `Depo ${r.depo}`, detail: `${r.tanggal_iso} · ${DEPO_BIAYA[r.kategori] ?? r.kategori} · Rp ${Math.round(r.jumlah).toLocaleString("id-ID")}` });
+  res.json({ success: true });
+});
+
 // ---- Stok opname koperasi (its own, separate from the inventory Stok Opname; see schema.sql koperasi_opname) ----
 // Start = every active stocked barang with its stock now; the counts are typed in (saved as a draft);
 // Selesai books fisik - stok_sistem of each counted line as a KOREKSI movement. One draft at a time.
@@ -10192,7 +10319,7 @@ app.get("/api/evidence/:id", async (req, res) => {
 // photo storage isn't set up on this server (SUPABASE_URL / SUPABASE_SERVICE_KEY), so no photo is
 // asked and transactions keep working until it is.
 // Every table whose rows keep a foto bukti (schema.sql evidence_id columns).
-const EVIDENCE_HOLDERS = ["transactions", "stock_in_log", "stock_out_log", "gudang_stock_tx", "klinik_stock_tx", "bbm_log", "pupuk_log", "oli_log", "pinjaman", "pinjaman_kembali", "klinik_kunjungan", "koperasi_tx", "berita_acara", "chat_message"];
+const EVIDENCE_HOLDERS = ["transactions", "stock_in_log", "stock_out_log", "gudang_stock_tx", "klinik_stock_tx", "bbm_log", "pupuk_log", "oli_log", "pinjaman", "pinjaman_kembali", "klinik_kunjungan", "koperasi_tx", "berita_acara", "chat_message", "depo_air_biaya"];
 
 async function claimEvidence(req: express.Request, res: express.Response): Promise<string | null | undefined> {
   if (!evidenceEnabled()) return null;

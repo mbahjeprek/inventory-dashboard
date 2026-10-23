@@ -35,7 +35,7 @@ const monthsBack = (p: string, n: number) => {
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
 };
 
-function Panel({ title, note, children, className = "" }: { title: string; note?: string; children: ReactNode; className?: string }) {
+export function Panel({ title, note, children, className = "" }: { title: string; note?: string; children: ReactNode; className?: string }) {
   return (
     <section className={`bg-[var(--bg-card)] border border-[var(--border)] rounded-lg ${className}`}>
       <div className="px-4 pt-3 pb-2">
@@ -47,7 +47,7 @@ function Panel({ title, note, children, className = "" }: { title: string; note?
   );
 }
 
-function Tip({ lines }: { lines: ReactNode[] }) {
+export function Tip({ lines }: { lines: ReactNode[] }) {
   return <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-md shadow px-3 py-2 text-xs space-y-0.5">{lines}</div>;
 }
 

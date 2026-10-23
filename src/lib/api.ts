@@ -565,6 +565,21 @@ export type KopTx = {
   diperiksa_at: string | null;
   diperiksa_catatan: string;
 };
+// Depo Air (Koperasi): the monthly report of one depot (or both).
+export type DepoLaporan = {
+  periode: string;
+  depo: string;
+  harga: number;
+  ringkas: { galon: number; pendapatan: number; pelanggan: number; transaksi: number };
+  perBayar: { bayar: string; galon: number; total: number }[];
+  perDivisi: { divisi: string; galon: number; total: number; orang: number }[];
+  perHari: { tanggal: string; galon: number; orang: number }[];
+  top: { kode: string; nama: string | null; divisi: string | null; galon: number; total: number }[];
+  perBulan: { periode: string; galon: number; pendapatan: number; biaya: number }[];
+  biaya: { id: number; depo: string; tanggal_iso: string; kategori: string; keterangan: string; jumlah: number; evidence_id: string | null; oleh: string }[];
+  kategori: Record<string, string>;
+};
+
 // Chat: a room of the account (DM, estate room, group) and a message.
 export type ChatRoom = {
   id: number;
@@ -1512,6 +1527,15 @@ export const api = {
   baSelesai: (id: number, body: { tanggal: string; catatan: string; evidence_id: string | null }) =>
     req<{ success: boolean }>(`/api/berita-acara/${id}/selesai`, { method: "PUT", body: JSON.stringify(body) }),
   baBatal: (id: number, alasan: string) => req<{ success: boolean }>(`/api/berita-acara/${id}/batal`, { method: "PUT", body: JSON.stringify({ alasan }) }),
+  depoLaporan: (depo: string, periode: string) => req<DepoLaporan>(`/api/koperasi/depo?${new URLSearchParams({ depo, periode })}`),
+  depoTx: (depo: string, periode: string) =>
+    req<{ id: number; tanggal_iso: string; depo: string; anggota_kode: string; nama: string | null; divisi: string | null; estate: string | null; qty: number; total: number; bayar: string }[]>(
+      `/api/koperasi/depo/tx?${new URLSearchParams({ depo, periode })}`
+    ),
+  depoPindah: (id: number, depo: string) => req<{ success: boolean }>(`/api/koperasi/depo/tx/${id}`, { method: "PUT", body: JSON.stringify({ depo }) }),
+  depoBiaya: (body: { depo: string; tanggal: string; kategori: string; jumlah: number; keterangan: string; evidence_id: string | null }) =>
+    req<{ success: boolean }>("/api/koperasi/depo/biaya", { method: "POST", body: JSON.stringify(body) }),
+  depoHapusBiaya: (id: number) => req<{ success: boolean }>(`/api/koperasi/depo/biaya/${id}`, { method: "DELETE" }),
   kdUnits: () => req<KdUnit[]>("/api/kendaraan/unit"),
   kdTambahUnit: (body: KdUnitInput) => req<{ success: boolean; id: number }>("/api/kendaraan/unit", { method: "POST", body: JSON.stringify(body) }),
   kdEditUnit: (id: number, body: KdUnitInput) => req<{ success: boolean }>(`/api/kendaraan/unit/${id}`, { method: "PUT", body: JSON.stringify(body) }),
