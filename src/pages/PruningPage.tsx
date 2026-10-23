@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { ChevronLeft, ChevronRight, Map as MapIcon, Pencil, Plus, Save, Search, Trash2, X } from "lucide-react";
-import { api, errorText, type PetaPruning, type PruningBlok, type PruningBlokOption, type PruningLog } from "../lib/api";
+import { ChevronLeft, ChevronRight, Download, Map as MapIcon, Pencil, Plus, Save, Search, Trash2, Upload, X } from "lucide-react";
+import { api, errorText, type PetaPruning, type PruningBlok, type PruningBlokOption, type PruningImportRow, type PruningLog } from "../lib/api";
+import { downloadPruningTemplate, readPruningUpload, type PruningUploadRow } from "../lib/pruningExcel";
 import { useAuth } from "../context/AuthContext";
 import { can, pageAllowed } from "../lib/access";
 import { localToday } from "../lib/opname";
@@ -117,6 +118,23 @@ function InputRiwayat({
     const b = findBlok(r.blok);
     const p = Number(r.pkk);
     return b?.sph && p > 0 ? Math.round((p / b.sph) * 100) / 100 : null;
+  };
+
+  // Upload Excel: read the file, let the server check every row (preview), then save the OK ones.
+  const [upload, setUpload] = useState<{ file: string; rows: PruningUploadRow[]; check: Awaited<ReturnType<typeof api.pruningImport>> } | null>(null);
+  const [reading, setReading] = useState(false);
+  const pilihFile = async (f: File | undefined) => {
+    if (!f) return;
+    setMsg(null);
+    setReading(true);
+    try {
+      const rows = await readPruningUpload(f, est);
+      setUpload({ file: f.name, rows, check: await api.pruningImport(rows, true) });
+    } catch (e) {
+      setMsg({ ok: false, text: e instanceof Error && !("status" in e) ? e.message : errorText(e, "Gagal membaca file") });
+    } finally {
+      setReading(false);
+    }
   };
 
   const simpan = async () => {
@@ -248,9 +266,36 @@ function InputRiwayat({
             >
               <Save size={15} /> {saving ? "Menyimpan..." : "Simpan"}
             </button>
+            <span className="mx-1 h-6 w-px bg-[var(--border)]" />
+            <button onClick={() => downloadPruningTemplate(blokList)} className={btnCls} title="Template Excel untuk input banyak blok / tanggal sekaligus">
+              <Download size={15} /> Unduh template
+            </button>
+            <label className={`${btnCls} cursor-pointer ${reading ? "opacity-50 pointer-events-none" : ""}`} title="Upload file Excel isian pruning">
+              <Upload size={15} /> {reading ? "Membaca..." : "Upload Excel"}
+              <input
+                type="file"
+                accept=".xlsx"
+                className="hidden"
+                onChange={(e) => {
+                  pilihFile(e.target.files?.[0]);
+                  e.target.value = "";
+                }}
+              />
+            </label>
             {msg && <span className={`text-sm ${msg.ok ? "text-[var(--accent-green)]" : "text-[var(--accent-red)]"}`}>{msg.text}</span>}
           </div>
         </div>
+      )}
+      {upload && (
+        <UploadPreview
+          {...upload}
+          onClose={() => setUpload(null)}
+          onSaved={(n, dup) => {
+            setUpload(null);
+            setMsg({ ok: true, text: `Upload tersimpan: ${n} baris${dup ? ` · ${dup} baris sudah ada, dilewati` : ""}` });
+            onChanged();
+          }}
+        />
       )}
 
       <Riwayat estates={estates} blokList={blokList} canEdit={canEdit} version={version} onChanged={onChanged} />
@@ -429,6 +474,131 @@ function Riwayat({
           onSaved={() => (setEdit(null), onChanged())}
         />
       )}
+    </div>
+  );
+}
+
+// The checked rows of an uploaded file: OK ones are saved with Simpan, rows already in are skipped,
+// rows with an error are shown so the file can be fixed and uploaded again.
+function UploadPreview({
+  file,
+  rows,
+  check,
+  onClose,
+  onSaved,
+}: {
+  file: string;
+  rows: PruningUploadRow[];
+  check: { rows: PruningImportRow[]; ok: number; duplikat: number; error: number };
+  onClose: () => void;
+  onSaved: (saved: number, duplikat: number) => void;
+}) {
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [only, setOnly] = useState<"" | "error" | "duplikat">(check.error ? "error" : "");
+  const shown = check.rows.filter((r) => !only || r.status === only);
+  const totalOk = check.rows.filter((r) => r.status === "ok").reduce((s, r) => s + r.pkk, 0);
+  const save = async () => {
+    setSaving(true);
+    setError("");
+    try {
+      const r = await api.pruningImport(rows, false);
+      onSaved(r.saved, r.duplikat);
+    } catch (e) {
+      setError(errorText(e, "Gagal menyimpan"));
+    } finally {
+      setSaving(false);
+    }
+  };
+  const badge = (r: PruningImportRow) =>
+    r.status === "ok" ? (
+      <span className="text-[var(--accent-green)]">OK</span>
+    ) : r.status === "duplikat" ? (
+      <span className="text-[var(--text-muted)]">{r.error}</span>
+    ) : (
+      <span className="text-[var(--accent-red)]">{r.error}</span>
+    );
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-start justify-center p-2 sm:p-6" onClick={onClose}>
+      <div className="w-full max-w-4xl max-h-full flex flex-col rounded-lg bg-[var(--bg-card)] shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-start justify-between gap-3 p-4 border-b border-[var(--border)]">
+          <div>
+            <h2 className="font-semibold">Upload Excel pruning</h2>
+            <p className="text-xs text-[var(--text-secondary)]">{file}</p>
+          </div>
+          <button onClick={onClose} className="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)]">
+            <X size={18} />
+          </button>
+        </div>
+        <div className="flex flex-wrap items-center gap-2 px-4 py-3 text-sm">
+          {(
+            [
+              ["", `Semua ${check.rows.length}`],
+              ["error", `Error ${check.error}`],
+              ["duplikat", `Sudah ada ${check.duplikat}`],
+            ] as const
+          ).map(([k, l]) => (
+            <button
+              key={k}
+              onClick={() => setOnly(k)}
+              className={`px-2.5 py-1 rounded-md border text-xs ${only === k ? "border-[var(--accent-blue)] text-[var(--accent-blue)] bg-[var(--accent-blue-bg)]" : "border-[var(--border)]"}`}
+            >
+              {l}
+            </button>
+          ))}
+          <span className="ml-auto text-[var(--text-secondary)]">
+            Siap disimpan: <b className="text-[var(--text-primary)]">{check.ok} baris</b> · {fmt(totalOk)} pokok
+          </span>
+        </div>
+        <div className="overflow-auto px-4 flex-1">
+          <table className="w-full text-xs">
+            <thead className="bg-[#f8fafc] text-[var(--text-secondary)] sticky top-0">
+              <tr className="text-left">
+                <th className="px-2 py-1.5">Baris</th>
+                <th className="px-2 py-1.5">Tanggal</th>
+                <th className="px-2 py-1.5">Estate</th>
+                <th className="px-2 py-1.5">Blok</th>
+                <th className="px-2 py-1.5 text-right">Pokok</th>
+                <th className="px-2 py-1.5 text-right">Ha</th>
+                <th className="px-2 py-1.5">Keterangan</th>
+                <th className="px-2 py-1.5">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {shown.map((r) => (
+                <tr key={r.row} className="border-t border-[var(--border)]">
+                  <td className="px-2 py-1 text-[var(--text-muted)]">{r.row}</td>
+                  <td className="px-2 py-1 whitespace-nowrap">{/^\d{4}-\d{2}-\d{2}$/.test(r.tanggal_iso) ? tgl(r.tanggal_iso) : r.tanggal_iso || "-"}</td>
+                  <td className="px-2 py-1">{ESTATE_LABEL[r.estate] ?? r.estate}</td>
+                  <td className="px-2 py-1 font-medium">{r.blok || "-"}</td>
+                  <td className="px-2 py-1 text-right">{Number.isFinite(r.pkk) && r.pkk >= 0 ? fmt(r.pkk) : "-"}</td>
+                  <td className="px-2 py-1 text-right">{Number.isFinite(r.ha) && r.ha >= 0 ? fmt(r.ha, 2) : "-"}</td>
+                  <td className="px-2 py-1 text-[var(--text-secondary)]">{r.keterangan}</td>
+                  <td className="px-2 py-1">{badge(r)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="flex flex-wrap items-center justify-end gap-2 p-4 border-t border-[var(--border)]">
+          {check.error > 0 && (
+            <span className="mr-auto text-xs text-[var(--accent-red)]">
+              {check.error} baris error tidak ikut disimpan. Perbaiki di file lalu upload lagi; baris yang sudah tersimpan tidak akan dobel.
+            </span>
+          )}
+          {error && <span className="text-xs text-[var(--accent-red)]">{error}</span>}
+          <button onClick={onClose} className={btnCls}>
+            Batal
+          </button>
+          <button
+            onClick={save}
+            disabled={saving || !check.ok}
+            className="inline-flex items-center gap-1.5 text-sm px-4 py-2 rounded-md bg-[var(--accent-blue)] text-white disabled:opacity-50"
+          >
+            <Save size={15} /> {saving ? "Menyimpan..." : `Simpan ${check.ok} baris`}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

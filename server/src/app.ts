@@ -223,8 +223,8 @@ function requiredPerms(req: express.Request): Need {
   // Koperasi: Lihat; Input = pengambilan / pembelian / barang rusak; Edit = hapus transaksi and the master barang / anggota.
   // Stok opname: start / fill in the counts with Input; Selesai / Batal and Koreksi Stok with Edit.
   // Kendaraan & Alat Berat: Lihat; Input = kondisi harian and a unit's rusak / selesai; Edit = add / change units.
-  // Pruning PT.AKSS: Lihat (riwayat, rekap); Input = new entries; Edit = change / delete entries and a blok's target.
-  if (is(/^\/pruning(\/|$)/)) return m === "GET" ? ["pruning.view", "pruning.input", "pruning.edit"] : m === "POST" && is(/^\/pruning$/) ? ["pruning.input"] : ["pruning.edit"];
+  // Pruning PT.AKSS: Lihat (riwayat, rekap); Input = new entries (form or Excel upload); Edit = change / delete entries and a blok's target.
+  if (is(/^\/pruning(\/|$)/)) return m === "GET" ? ["pruning.view", "pruning.input", "pruning.edit"] : m === "POST" && is(/^\/pruning(\/import)?$/) ? ["pruning.input"] : ["pruning.edit"];
   if (is(/^\/kendaraan(\/|$)/)) {
     if (m === "GET") return ["kendaraan.view"];
     if (is(/^\/kendaraan\/harian(\/isi)?$/) || is(/^\/kendaraan\/unit\/\d+\/kondisi$/)) return ["kendaraan.input"];
@@ -2756,6 +2756,100 @@ app.post("/api/pruning", async (req, res) => {
     detail: rows.map((r: any) => `${r.blok}: ${r.pkk} pokok${r.ha ? ` / ${r.ha} Ha` : ""}${r.keterangan ? ` (${r.keterangan})` : ""}`).join("; "),
   });
   res.json({ success: true });
+});
+
+// Upload Excel: rows of any date / estate / blok. Every row is checked (estate of the account, date not in
+// the future, blok known, pokok > 0); Ha left empty is estimated as pokok / SPH. A row that is already in
+// (same estate, blok, date, pokok and Ha - e.g. the same file uploaded twice) is skipped. dryRun = only
+// the check, for the preview; otherwise the OK rows are saved.
+const PRUNING_ESTATE: Record<string, string> = { NILAM: "NILAM", ZAMRUD: "ZAMRUD", FIRUS: "FIRUS", KNS: "KNS", WJA: "WJA" };
+app.post("/api/pruning/import", async (req, res) => {
+  const input = Array.isArray(req.body?.rows) ? req.body.rows : [];
+  if (!input.length) return res.status(400).json({ error: "File tidak berisi baris pruning" });
+  if (input.length > 3000) return res.status(400).json({ error: "Maksimal 3.000 baris sekali upload" });
+  const allowed = blokEstates(req);
+  const list = await pruningBlokList(allowed);
+  const blokOf = new Map(list.map((b) => [`${b.estate}|${b.blok.toUpperCase()}`, b]));
+  const today = jakartaToday();
+  type Row = { row: number; estate: string; blok: string; tanggal_iso: string; pkk: number; ha: number; keterangan: string; status: "ok" | "duplikat" | "error"; error?: string };
+  const rows: Row[] = input.map((r: any, i: number) => {
+    const estate = PRUNING_ESTATE[String(r?.estate ?? "").trim().toUpperCase()] ?? String(r?.estate ?? "").trim();
+    const blokRaw = String(r?.blok ?? "").trim();
+    const b = blokOf.get(`${estate}|${blokRaw.toUpperCase()}`);
+    const tanggal = String(r?.tanggal_iso ?? "").trim();
+    const pkk = Number(r?.pkk);
+    const haIn = r?.ha === null || r?.ha === undefined || r?.ha === "" ? null : Number(r.ha);
+    const ha = haIn ?? (b?.sph && pkk > 0 ? Math.round((pkk / b.sph) * 100) / 100 : 0);
+    const out: Row = { row: Number(r?.row) || i + 1, estate, blok: b?.blok ?? blokRaw, tanggal_iso: tanggal, pkk, ha, keterangan: String(r?.keterangan ?? "").trim().slice(0, 300), status: "ok" };
+    const err = !estate
+      ? "Estate kosong"
+      : !allowed.includes(estate)
+        ? `Estate ${estate} tidak ada di akses akun ini`
+        : !PRUNING_ISO.test(tanggal) || Number.isNaN(Date.parse(tanggal))
+          ? "Tanggal tidak valid"
+          : tanggal > today
+            ? "Tanggal lewat dari hari ini"
+            : !blokRaw
+              ? "Blok kosong"
+              : !b
+                ? `Blok ${blokRaw} tidak ada di Master Blok ${estate}`
+                : !Number.isFinite(pkk) || pkk <= 0
+                  ? "Pokok harus lebih dari 0"
+                  : !Number.isFinite(ha) || ha < 0
+                    ? "Ha tidak valid"
+                    : null;
+    if (err) Object.assign(out, { status: "error", error: err });
+    return out;
+  });
+  // Already saved, or twice in the file.
+  const ok = rows.filter((r) => r.status === "ok");
+  const key = (r: { estate: string; blok: string; tanggal_iso: string; pkk: number; ha: number }) =>
+    `${r.estate}|${r.blok.toUpperCase()}|${r.tanggal_iso}|${Number(r.pkk)}|${Math.round(Number(r.ha) * 100)}`;
+  const existing = ok.length
+    ? await queryMany<{ estate: string; blok: string; tanggal_iso: string; pkk: number; ha: number }>(
+        `SELECT estate, blok, tanggal_iso, pkk, ha FROM pruning_log WHERE estate = ANY(@estates) AND tanggal_iso = ANY(@tanggal)`,
+        { estates: [...new Set(ok.map((r) => r.estate))], tanggal: [...new Set(ok.map((r) => r.tanggal_iso))] }
+      )
+    : [];
+  const seen = new Set(existing.map(key));
+  for (const r of ok) {
+    const k = key(r);
+    if (seen.has(k)) Object.assign(r, { status: "duplikat", error: "Sudah ada (dilewati)" });
+    seen.add(k);
+  }
+  const save = rows.filter((r) => r.status === "ok");
+  const count = { ok: save.length, duplikat: rows.filter((r) => r.status === "duplikat").length, error: rows.filter((r) => r.status === "error").length };
+  if (req.body?.dryRun || !save.length) return res.json({ rows, ...count, saved: 0 });
+
+  const u = req.user!;
+  await execute(
+    `INSERT INTO pruning_log (estate, blok, tanggal_iso, pkk, ha, keterangan, sumber, user_id, created_by)
+     SELECT e, b, d, p, h, k, 'app', @uid, @nama FROM unnest(@estate::text[], @blok::text[], @tanggal::text[], @pkk::float8[], @ha::float8[], @ket::text[]) AS x(e, b, d, p, h, k)`,
+    {
+      estate: save.map((r) => r.estate),
+      blok: save.map((r) => r.blok),
+      tanggal: save.map((r) => r.tanggal_iso),
+      pkk: save.map((r) => r.pkk),
+      ha: save.map((r) => r.ha),
+      ket: save.map((r) => r.keterangan),
+      uid: u.id,
+      nama: u.nama,
+    }
+  );
+  const estates = [...new Set(save.map((r) => r.estate))];
+  const dates = save.map((r) => r.tanggal_iso).sort();
+  await logActivity(req, {
+    module: "PRUNING",
+    estate: estates.length === 1 ? estates[0] : null,
+    aksi: "Upload Excel Pruning",
+    objek: `${save.length} baris · ${save.reduce((s, r) => s + r.pkk, 0).toLocaleString("id-ID")} pokok · ${dates[0].split("-").reverse().join("/")}${dates.length > 1 && dates[0] !== dates[dates.length - 1] ? ` - ${dates[dates.length - 1].split("-").reverse().join("/")}` : ""}`,
+    detail:
+      save
+        .slice(0, 60)
+        .map((r) => `${r.tanggal_iso.split("-").reverse().join("/")} ${r.blok}: ${r.pkk} pokok`)
+        .join("; ") + (save.length > 60 ? ` +${save.length - 60} lainnya` : "") + (count.duplikat ? ` · ${count.duplikat} baris sudah ada dilewati` : ""),
+  });
+  res.json({ rows, ...count, saved: save.length });
 });
 
 // Target of a blok (Ha, SPH): set in the Rekap; a blok that only had its Master Blok one gets its own.

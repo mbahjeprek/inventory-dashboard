@@ -345,6 +345,17 @@ export type PruningLog = {
   created_at: string;
   updated_at: string | null;
 };
+export type PruningImportRow = {
+  row: number;
+  estate: string;
+  blok: string;
+  tanggal_iso: string;
+  pkk: number;
+  ha: number;
+  keterangan: string;
+  status: "ok" | "duplikat" | "error";
+  error?: string;
+};
 export type PruningBlokOption = { estate: string; blok: string; divisi: string | null; ha: number | null; sph: number | null; sumber: "pruning" | "master" };
 
 export type AlatBerat = {
@@ -1426,6 +1437,11 @@ export const api = {
     ),
   pruningCreate: (payload: { estate: string; tanggal_iso: string; rows: { blok: string; pkk: number; ha: number; keterangan: string }[] }) =>
     req<{ success: boolean }>("/api/pruning", { method: "POST", body: JSON.stringify(payload) }),
+  pruningImport: (rows: { row: number; tanggal_iso: string; estate: string; blok: string; pkk: number | null; ha: number | null; keterangan: string }[], dryRun: boolean) =>
+    req<{ rows: PruningImportRow[]; ok: number; duplikat: number; error: number; saved: number }>("/api/pruning/import", {
+      method: "POST",
+      body: JSON.stringify({ rows, dryRun }),
+    }),
   pruningUpdate: (id: number, payload: { blok: string; tanggal_iso: string; pkk: number; ha: number; keterangan: string }) =>
     req<{ success: boolean }>(`/api/pruning/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
   pruningDelete: (id: number) => req<{ success: boolean }>(`/api/pruning/${id}`, { method: "DELETE" }),
