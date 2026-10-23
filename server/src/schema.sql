@@ -1085,3 +1085,48 @@ CREATE TABLE IF NOT EXISTS depo_air_biaya (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_depo_biaya ON depo_air_biaya(depo, periode);
+
+-- Permintaan Obat, BMHP dan Alat Medis (Klinik > Permintaan Obat): a request letter of one klinik to the
+-- head office, drafted from the klinik's stock (saran = enough for N months of its average use, at least the
+-- buffer, in kemasan where the obat has one), printed with the kop and four signatures. nomor =
+-- 001/PMT-OBAT/KLINIK-<KLINIK>/MM/YYYY (urut per klinik and year). status DRAFT (still edited) -> DIAJUKAN
+-- (sent; then only the fulfilment is recorded). ttd = the four signatories {dibuat, diketahui, disetujui1,
+-- disetujui2: {nama, jabatan}}; a new request takes them from the klinik's last one.
+CREATE TABLE IF NOT EXISTS klinik_permintaan (
+  id SERIAL PRIMARY KEY,
+  klinik TEXT NOT NULL,
+  urut INTEGER NOT NULL,
+  nomor TEXT NOT NULL,
+  tanggal TEXT NOT NULL,
+  periode TEXT NOT NULL DEFAULT '',
+  departemen TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'DRAFT',
+  catatan TEXT NOT NULL DEFAULT '',
+  ttd JSONB NOT NULL DEFAULT '{}'::jsonb,
+  user_id INTEGER,
+  created_by TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  diajukan_at TIMESTAMPTZ,
+  updated_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_klinik_permintaan ON klinik_permintaan(klinik, tanggal);
+-- One requested item: an obat of the master (obat_kode) or a free item (obat_kode NULL); jumlah in `satuan`
+-- (BOX / BOTOL ... as on the form), stok_text = the stock written in Keterangan/Stok ("300 TAB", "KOSONG").
+-- Fulfilment per item: status MENUNGGU / APPROVED / SEBAGIAN / DITOLAK, dipenuhi (same unit), tanggal_pemenuhan.
+CREATE TABLE IF NOT EXISTS klinik_permintaan_line (
+  id SERIAL PRIMARY KEY,
+  permintaan_id INTEGER NOT NULL REFERENCES klinik_permintaan(id) ON DELETE CASCADE,
+  urut INTEGER NOT NULL DEFAULT 0,
+  obat_kode TEXT REFERENCES obat(kode) ON UPDATE CASCADE ON DELETE SET NULL,
+  nama TEXT NOT NULL,
+  satuan TEXT NOT NULL DEFAULT '',
+  jumlah DOUBLE PRECISION NOT NULL,
+  urgensi TEXT NOT NULL DEFAULT 'MEDIUM',
+  stok DOUBLE PRECISION,
+  stok_text TEXT NOT NULL DEFAULT '',
+  keterangan TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'MENUNGGU',
+  dipenuhi DOUBLE PRECISION,
+  tanggal_pemenuhan TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_klinik_permintaan_line ON klinik_permintaan_line(permintaan_id);

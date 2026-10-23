@@ -206,6 +206,8 @@ function requiredPerms(req: express.Request): Need {
   if (is(/^\/klinik-stock(\/|$)/)) return [`klinik.${act}`];
   // Klinik > Laporan Harian: Lihat / Input / Edit / Hapus kunjungan (estate checked in the route).
   if (is(/^\/klinik-laporan(\/|$)/)) return [`klinik.${act}`];
+  // Permintaan Obat: Lihat; buat / ubah / ajukan / catat pemenuhan with Input; hapus with Hapus.
+  if (is(/^\/klinik-permintaan(-rekap)?(\/|$)/)) return m === "GET" ? ["klinik.view"] : m === "DELETE" ? ["klinik.delete"] : ["klinik.input"];
   // Master Pasien: the patients of the account's clinics (estate checked in the route).
   if (is(/^\/pasien(\/|$)/)) return [`klinik.${act}`];
   if (is(/^\/top-keluar$/)) return [q.source === "klinik" ? "klinik.view" : "gudang.view"];
@@ -4863,6 +4865,271 @@ app.get("/api/klinik-laporan/options", async (req, res) => {
     satuan: uniq([...obat.map((o) => (o.satuan ?? "").toUpperCase()).filter(Boolean), ...satuanRaw.map((r) => r.v)]),
     obat,
   });
+});
+
+// ---- Permintaan Obat (see schema.sql klinik_permintaan) ----
+// Saran: every obat of the master (the klinik's stock row where it has one) with its stock, buffer and average use - Stock Out of the last 3 months
+// (terapi of the Laporan Harian included; koreksi, pinjaman and obat thrown away / sent back left out) -
+// and how much to ask: enough for `bulan` months of use, at least up to the buffer, minus the stock,
+// rounded up to whole kemasan (BOX / BOTOL ...) where the obat has one. Urgensi: HIGH = out of stock or
+// under half a month left, MEDIUM = at / under the buffer or under a month left, else LOW.
+const PERMINTAAN_STATUS_LINE = ["MENUNGGU", "APPROVED", "SEBAGIAN", "DITOLAK"];
+const PERMINTAAN_URGENSI = ["HIGH", "MEDIUM", "LOW"];
+const fmtQty = (n: number) => (Math.round(n * 100) / 100).toLocaleString("id-ID");
+
+app.get("/api/klinik-permintaan/saran", async (req, res) => {
+  const klinik = String(req.query.klinik ?? "");
+  if (!checkKlinik(req, res, klinik)) return;
+  const bulan = Math.min(Math.max(Number(req.query.bulan) || 2, 0.5), 12);
+  const rows = await queryMany<{
+    kode: string;
+    nama: string;
+    jenis: string;
+    satuan: string;
+    kemasan: string | null;
+    isi_kemasan: number | null;
+    bhp: boolean;
+    stok: number;
+    buffer: number;
+    expired_date: string | null;
+    pakai: number;
+    terdaftar: boolean;
+  }>(
+    `SELECT o.kode, o.nama, COALESCE(o.jenis, '') jenis, COALESCE(o.satuan, '') satuan, NULLIF(o.kemasan, '') kemasan, o.isi_kemasan, COALESCE(o.bhp, false) bhp,
+       COALESCE(s.stock_tersedia, 0)::float8 stok, COALESCE(s.buffer_stock, 0)::float8 buffer, NULLIF(s.expired_date, '') expired_date, s.id IS NOT NULL terdaftar,
+       COALESCE((SELECT SUM(t.qty) FROM klinik_stock_tx t
+                 WHERE t.klinik = @klinik AND t.obat_kode = o.kode AND t.type = 'OUT' AND COALESCE(t.is_correction, 0) = 0
+                   AND t.pinjaman_id IS NULL AND t.alasan IS NULL AND t.created_at >= now() - interval '90 days'), 0)::float8 pakai
+     FROM obat o LEFT JOIN klinik_stock s ON s.obat_kode = o.kode AND s.klinik = @klinik
+     ORDER BY o.nama`,
+    { klinik }
+  );
+  res.json({
+    bulan,
+    rows: rows.map((r) => {
+      const avg = r.pakai / 3;
+      const target = Math.max(r.buffer, avg * bulan);
+      const kurang = Math.max(0, target - r.stok);
+      const kemasan = r.kemasan && r.isi_kemasan && r.isi_kemasan > 1 ? r.kemasan : null;
+      const saran = kurang <= 0 ? 0 : kemasan ? Math.ceil(kurang / r.isi_kemasan!) : Math.ceil(kurang);
+      const cukup = avg > 0 ? r.stok / avg : null;
+      const urgensi = r.stok <= 0 || (cukup !== null && cukup < 0.5) ? "HIGH" : (r.buffer > 0 && r.stok <= r.buffer) || (cukup !== null && cukup < 1) ? "MEDIUM" : "LOW";
+      return {
+        ...r,
+        rata_bulan: Math.round(avg * 100) / 100,
+        cukup_bulan: cukup === null ? null : Math.round(cukup * 10) / 10,
+        satuan_minta: kemasan ?? r.satuan,
+        saran,
+        urgensi,
+        stok_text: r.stok <= 0 ? "KOSONG" : `${fmtQty(r.stok)} ${r.satuan}`.trim(),
+      };
+    }),
+  });
+});
+
+// The klinik's requests, newest first, with how many items and how far they are fulfilled.
+app.get("/api/klinik-permintaan", async (req, res) => {
+  const klinik = String(req.query.klinik ?? "");
+  if (!checkKlinik(req, res, klinik)) return;
+  const rows = await queryMany(
+    `SELECT p.id, p.klinik, p.nomor, p.tanggal, p.periode, p.departemen, p.status, p.catatan, p.created_by, p.created_at, p.diajukan_at,
+       COUNT(l.id)::int items,
+       COUNT(l.id) FILTER (WHERE l.status = 'APPROVED')::int approved,
+       COUNT(l.id) FILTER (WHERE l.status = 'SEBAGIAN')::int sebagian,
+       COUNT(l.id) FILTER (WHERE l.status = 'DITOLAK')::int ditolak,
+       COUNT(l.id) FILTER (WHERE l.tanggal_pemenuhan IS NOT NULL)::int terpenuhi,
+       COUNT(l.id) FILTER (WHERE l.urgensi = 'HIGH')::int high
+     FROM klinik_permintaan p LEFT JOIN klinik_permintaan_line l ON l.permintaan_id = p.id
+     WHERE p.klinik = @klinik GROUP BY p.id ORDER BY p.tanggal DESC, p.id DESC`,
+    { klinik }
+  );
+  // Signatories for a new request: the klinik's last ones.
+  const last = await queryOne<{ ttd: any }>("SELECT ttd FROM klinik_permintaan WHERE klinik = @klinik ORDER BY id DESC LIMIT 1", { klinik });
+  res.json({ rows, ttd: last?.ttd ?? null });
+});
+
+app.get("/api/klinik-permintaan/:id", async (req, res) => {
+  const p = await queryOne<any>("SELECT * FROM klinik_permintaan WHERE id = @id", { id: Number(req.params.id) || 0 });
+  if (!p) return res.status(404).json({ error: "Permintaan tidak ditemukan" });
+  if (!checkKlinik(req, res, p.klinik)) return;
+  const lines = await queryMany("SELECT * FROM klinik_permintaan_line WHERE permintaan_id = @id ORDER BY urut, id", { id: p.id });
+  res.json({ ...p, lines });
+});
+
+type PLine = { obat_kode: string | null; nama: string; satuan: string; jumlah: number; urgensi: string; stok: number | null; stok_text: string; keterangan: string };
+function permintaanBody(req: express.Request): { error?: string; head?: any; lines?: PLine[] } {
+  const b = req.body ?? {};
+  const tanggal = String(b.tanggal ?? "");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(tanggal)) return { error: "Tanggal tidak valid" };
+  const lines: PLine[] = (Array.isArray(b.lines) ? b.lines : []).slice(0, 500).map((l: any) => ({
+    obat_kode: l?.obat_kode ? String(l.obat_kode) : null,
+    nama: String(l?.nama ?? "").trim().slice(0, 200),
+    satuan: String(l?.satuan ?? "").trim().slice(0, 30),
+    jumlah: Number(l?.jumlah),
+    urgensi: PERMINTAAN_URGENSI.includes(l?.urgensi) ? l.urgensi : "MEDIUM",
+    stok: l?.stok === null || l?.stok === undefined || l?.stok === "" ? null : Number(l.stok),
+    stok_text: String(l?.stok_text ?? "").trim().slice(0, 60),
+    keterangan: String(l?.keterangan ?? "").trim().slice(0, 300),
+  }));
+  if (!lines.length) return { error: "Isi minimal satu obat" };
+  const bad = lines.find((l) => !l.nama || !Number.isFinite(l.jumlah) || l.jumlah <= 0);
+  if (bad) return { error: bad.nama ? `${bad.nama}: jumlah harus lebih dari 0` : "Ada baris tanpa nama obat" };
+  const orang = (o: any) => ({ nama: String(o?.nama ?? "").trim().slice(0, 100), jabatan: String(o?.jabatan ?? "").trim().slice(0, 100) });
+  const t = b.ttd ?? {};
+  return {
+    head: {
+      tanggal,
+      periode: String(b.periode ?? tanggal.slice(0, 4)).trim().slice(0, 40),
+      departemen: String(b.departemen ?? "").trim().slice(0, 80),
+      catatan: String(b.catatan ?? "").trim().slice(0, 500),
+      ttd: JSON.stringify({ dibuat: orang(t.dibuat), diketahui: orang(t.diketahui), disetujui1: orang(t.disetujui1), disetujui2: orang(t.disetujui2) }),
+    },
+    lines,
+  };
+}
+async function savePermintaanLines(c: PoolClient, id: number, lines: PLine[]) {
+  await execute("DELETE FROM klinik_permintaan_line WHERE permintaan_id = @id", { id }, c);
+  await execute(
+    `INSERT INTO klinik_permintaan_line (permintaan_id, urut, obat_kode, nama, satuan, jumlah, urgensi, stok, stok_text, keterangan)
+     SELECT @id, u, k, n, s, j, g, st, sx, ket
+     FROM unnest(@urut::int[], @kode::text[], @nama::text[], @satuan::text[], @jumlah::float8[], @urg::text[], @stok::float8[], @stx::text[], @ket::text[]) AS x(u, k, n, s, j, g, st, sx, ket)`,
+    {
+      id,
+      urut: lines.map((_, i) => i + 1),
+      kode: lines.map((l) => l.obat_kode),
+      nama: lines.map((l) => l.nama),
+      satuan: lines.map((l) => l.satuan),
+      jumlah: lines.map((l) => l.jumlah),
+      urg: lines.map((l) => l.urgensi),
+      stok: lines.map((l) => (l.stok !== null && Number.isFinite(l.stok) ? l.stok : null)),
+      stx: lines.map((l) => l.stok_text),
+      ket: lines.map((l) => l.keterangan),
+    },
+    c
+  );
+}
+
+app.post("/api/klinik-permintaan", async (req, res) => {
+  const klinik = String(req.body?.klinik ?? "");
+  if (!checkKlinik(req, res, klinik)) return;
+  const v = permintaanBody(req);
+  if (v.error) return res.status(400).json({ error: v.error });
+  const u = req.user!;
+  const ajukan = req.body?.ajukan === true;
+  const made = await withTransaction(async (c) => {
+    await c.query("SELECT pg_advisory_xact_lock(hashtext('klinik_permintaan_nomor'))");
+    const tahun = v.head.tanggal.slice(0, 4);
+    const urut = ((await queryOne<{ n: number }>("SELECT COALESCE(MAX(urut), 0)::int n FROM klinik_permintaan WHERE klinik = @klinik AND left(tanggal, 4) = @tahun", { klinik, tahun }, c))?.n ?? 0) + 1;
+    const nomor = `${String(urut).padStart(3, "0")}/PMT-OBAT/KLINIK-${klinik}/${v.head.tanggal.slice(5, 7)}/${tahun}`;
+    const p = await queryOne<{ id: number; nomor: string }>(
+      `INSERT INTO klinik_permintaan (klinik, urut, nomor, tanggal, periode, departemen, status, catatan, ttd, user_id, created_by, diajukan_at)
+       VALUES (@klinik, @urut, @nomor, @tanggal, @periode, @departemen, @status, @catatan, @ttd::jsonb, @uid, @nama, ${ajukan ? "now()" : "NULL"})
+       RETURNING id, nomor`,
+      { klinik, urut, nomor, ...v.head, status: ajukan ? "DIAJUKAN" : "DRAFT", uid: u.id, nama: u.nama },
+      c
+    );
+    await savePermintaanLines(c, p!.id, v.lines!);
+    return p!;
+  });
+  await logActivity(req, {
+    module: "KLINIK",
+    estate: klinik,
+    aksi: ajukan ? "Ajukan Permintaan Obat" : "Buat Permintaan Obat",
+    objek: `${made.nomor} · ${v.lines!.length} item`,
+    detail: v.lines!.slice(0, 60).map((l) => `${l.nama} ${fmtQty(l.jumlah)} ${l.satuan}`).join("; "),
+  });
+  res.json({ success: true, id: made.id, nomor: made.nomor });
+});
+
+// Edit a draft (or send it with ajukan); a request already sent only takes its fulfilment.
+app.put("/api/klinik-permintaan/:id", async (req, res) => {
+  const p = await queryOne<any>("SELECT * FROM klinik_permintaan WHERE id = @id", { id: Number(req.params.id) || 0 });
+  if (!p) return res.status(404).json({ error: "Permintaan tidak ditemukan" });
+  if (!checkKlinik(req, res, p.klinik)) return;
+  if (p.status !== "DRAFT") return res.status(400).json({ error: "Permintaan sudah diajukan; yang bisa diubah hanya pemenuhannya" });
+  const v = permintaanBody(req);
+  if (v.error) return res.status(400).json({ error: v.error });
+  const ajukan = req.body?.ajukan === true;
+  await withTransaction(async (c) => {
+    await execute(
+      `UPDATE klinik_permintaan SET tanggal = @tanggal, periode = @periode, departemen = @departemen, catatan = @catatan, ttd = @ttd::jsonb,
+         status = @status, diajukan_at = ${ajukan ? "now()" : "NULL"}, updated_at = now() WHERE id = @id`,
+      { ...v.head, status: ajukan ? "DIAJUKAN" : "DRAFT", id: p.id },
+      c
+    );
+    await savePermintaanLines(c, p.id, v.lines!);
+  });
+  await logActivity(req, {
+    module: "KLINIK",
+    estate: p.klinik,
+    aksi: ajukan ? "Ajukan Permintaan Obat" : "Ubah Permintaan Obat",
+    objek: `${p.nomor} · ${v.lines!.length} item`,
+    detail: v.lines!.slice(0, 60).map((l) => `${l.nama} ${fmtQty(l.jumlah)} ${l.satuan}`).join("; "),
+  });
+  res.json({ success: true });
+});
+
+// Fulfilment of a sent request, per item: status approval, how much came and when.
+app.put("/api/klinik-permintaan/:id/pemenuhan", async (req, res) => {
+  const p = await queryOne<any>("SELECT * FROM klinik_permintaan WHERE id = @id", { id: Number(req.params.id) || 0 });
+  if (!p) return res.status(404).json({ error: "Permintaan tidak ditemukan" });
+  if (!checkKlinik(req, res, p.klinik)) return;
+  if (p.status === "DRAFT") return res.status(400).json({ error: "Ajukan permintaan dulu sebelum mencatat pemenuhan" });
+  const items = (Array.isArray(req.body?.lines) ? req.body.lines : []).slice(0, 500);
+  const done: string[] = [];
+  try {
+    await withTransaction(async (c) => {
+      for (const it of items) {
+        const l = await queryOne<any>("SELECT * FROM klinik_permintaan_line WHERE id = @id AND permintaan_id = @pid", { id: Number(it?.id) || 0, pid: p.id }, c);
+        if (!l) continue;
+        const status = PERMINTAAN_STATUS_LINE.includes(it?.status) ? it.status : l.status;
+        const dipenuhi = it?.dipenuhi === "" || it?.dipenuhi === null || it?.dipenuhi === undefined ? null : Number(it.dipenuhi);
+        if (dipenuhi !== null && (!Number.isFinite(dipenuhi) || dipenuhi < 0)) throw new Error(`${l.nama}: jumlah dipenuhi tidak valid`);
+        const tgl = it?.tanggal_pemenuhan ? String(it.tanggal_pemenuhan) : null;
+        if (tgl && !/^\d{4}-\d{2}-\d{2}$/.test(tgl)) throw new Error(`${l.nama}: tanggal pemenuhan tidak valid`);
+        if (status === l.status && dipenuhi === l.dipenuhi && tgl === l.tanggal_pemenuhan) continue;
+        await execute("UPDATE klinik_permintaan_line SET status = @status, dipenuhi = @dipenuhi, tanggal_pemenuhan = @tgl WHERE id = @id", { status, dipenuhi, tgl, id: l.id }, c);
+        done.push(`${l.nama}: ${status}${dipenuhi !== null ? ` ${fmtQty(dipenuhi)} ${l.satuan}` : ""}${tgl ? ` (${tgl.split("-").reverse().join("/")})` : ""}`);
+      }
+    });
+  } catch (e: any) {
+    return res.status(400).json({ error: e?.message ?? "Gagal menyimpan" });
+  }
+  if (done.length) await logActivity(req, { module: "KLINIK", estate: p.klinik, aksi: "Pemenuhan Permintaan Obat", objek: `${p.nomor} · ${done.length} item`, detail: done.slice(0, 60).join("; ") });
+  res.json({ success: true, saved: done.length });
+});
+
+app.delete("/api/klinik-permintaan/:id", async (req, res) => {
+  const p = await queryOne<any>("SELECT * FROM klinik_permintaan WHERE id = @id", { id: Number(req.params.id) || 0 });
+  if (!p) return res.status(404).json({ error: "Permintaan tidak ditemukan" });
+  if (!checkKlinik(req, res, p.klinik)) return;
+  if (p.status !== "DRAFT" && req.user!.role !== "superuser") return res.status(400).json({ error: "Permintaan yang sudah diajukan hanya bisa dihapus Super User" });
+  await execute("DELETE FROM klinik_permintaan WHERE id = @id", { id: p.id });
+  await logActivity(req, { module: "KLINIK", estate: p.klinik, aksi: "Hapus Permintaan Obat", objek: p.nomor, detail: `Status ${p.status}` });
+  res.json({ success: true });
+});
+
+// Rekap Permintaan: every requested item of the account's kliniks (or one), as the request spreadsheet.
+app.get("/api/klinik-permintaan-rekap", async (req, res) => {
+  const klinik = String(req.query.klinik ?? "");
+  const kliniks = KLINIK_OPTIONS.filter((k) => (!klinik || k === klinik) && estateAllowed(req.user!, k));
+  const where = ["p.klinik = ANY(@kliniks)", "p.status <> 'DRAFT'"];
+  const params: Record<string, any> = { kliniks };
+  if (/^\d{4}(-\d{2})?$/.test(String(req.query.periode ?? ""))) {
+    where.push("p.tanggal LIKE @periode");
+    params.periode = `${req.query.periode}%`;
+  }
+  if (PERMINTAAN_STATUS_LINE.includes(String(req.query.status))) {
+    where.push("l.status = @status");
+    params.status = req.query.status;
+  }
+  const rows = await queryMany(
+    `SELECT l.id, p.id permintaan_id, p.nomor, p.tanggal, p.klinik, l.nama, l.satuan, l.jumlah, l.urgensi, l.status, l.dipenuhi, l.tanggal_pemenuhan, l.keterangan, l.stok_text
+     FROM klinik_permintaan_line l JOIN klinik_permintaan p ON p.id = l.permintaan_id
+     WHERE ${where.join(" AND ")} ORDER BY p.tanggal DESC, p.id DESC, l.urut`,
+    params
+  );
+  res.json({ rows });
 });
 
 app.get("/api/klinik-stock/summary", async (req, res) => {

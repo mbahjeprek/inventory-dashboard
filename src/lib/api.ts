@@ -367,6 +367,78 @@ export type PruningRekapBaris = {
   terakhir: string | null;
 };
 export type PruningRekapData = { tahunAwal: number; tahunAkhir: number; sekarang: number; baris: PruningRekapBaris[] };
+// Permintaan Obat (Klinik): saran from the stock, the requests and their items.
+export type PermintaanSaran = {
+  kode: string;
+  nama: string;
+  jenis: string;
+  satuan: string;
+  kemasan: string | null;
+  isi_kemasan: number | null;
+  bhp: boolean;
+  stok: number;
+  buffer: number;
+  expired_date: string | null;
+  pakai: number;
+  terdaftar: boolean;
+  rata_bulan: number;
+  cukup_bulan: number | null;
+  satuan_minta: string;
+  saran: number;
+  urgensi: PermintaanUrgensi;
+  stok_text: string;
+};
+export type PermintaanUrgensi = "HIGH" | "MEDIUM" | "LOW";
+export type PermintaanLineStatus = "MENUNGGU" | "APPROVED" | "SEBAGIAN" | "DITOLAK";
+export type PermintaanOrang = { nama: string; jabatan: string };
+export type PermintaanTtd = { dibuat: PermintaanOrang; diketahui: PermintaanOrang; disetujui1: PermintaanOrang; disetujui2: PermintaanOrang };
+export type PermintaanLine = {
+  id?: number;
+  obat_kode: string | null;
+  nama: string;
+  satuan: string;
+  jumlah: number;
+  urgensi: PermintaanUrgensi;
+  stok: number | null;
+  stok_text: string;
+  keterangan: string;
+  status?: PermintaanLineStatus;
+  dipenuhi?: number | null;
+  tanggal_pemenuhan?: string | null;
+};
+export type Permintaan = {
+  id: number;
+  klinik: string;
+  nomor: string;
+  tanggal: string;
+  periode: string;
+  departemen: string;
+  status: "DRAFT" | "DIAJUKAN";
+  catatan: string;
+  ttd: PermintaanTtd;
+  created_by: string;
+  created_at: string;
+  diajukan_at: string | null;
+  lines: PermintaanLine[];
+};
+export type PermintaanRingkas = Omit<Permintaan, "ttd" | "lines"> & { items: number; approved: number; sebagian: number; ditolak: number; terpenuhi: number; high: number };
+export type PermintaanRekapRow = {
+  id: number;
+  permintaan_id: number;
+  nomor: string;
+  tanggal: string;
+  klinik: string;
+  nama: string;
+  satuan: string;
+  jumlah: number;
+  urgensi: PermintaanUrgensi;
+  status: PermintaanLineStatus;
+  dipenuhi: number | null;
+  tanggal_pemenuhan: string | null;
+  keterangan: string;
+  stok_text: string;
+};
+export type PermintaanInput = { klinik?: string; tanggal: string; periode: string; departemen: string; catatan: string; ttd: PermintaanTtd; lines: PermintaanLine[]; ajukan: boolean };
 // Lengkapi Data: a month's transactions still missing a field the form asks for / a foto bukti.
 export type LengkapiKind = "bbm" | "pupuk" | "oli" | "gudang" | "klinik" | "nilam_masuk" | "nilam_keluar";
 export type LengkapiRow = {
@@ -1484,6 +1556,15 @@ export const api = {
     ),
   pruningCreate: (payload: { estate: string; tanggal_iso: string; rows: { blok: string; baris_id?: number; pkk: number; ha: number; keterangan: string }[] }) =>
     req<{ success: boolean }>("/api/pruning", { method: "POST", body: JSON.stringify(payload) }),
+  permintaanSaran: (klinik: string, bulan: number) => req<{ bulan: number; rows: PermintaanSaran[] }>(`/api/klinik-permintaan/saran?${new URLSearchParams({ klinik, bulan: String(bulan) })}`),
+  permintaanList: (klinik: string) => req<{ rows: PermintaanRingkas[]; ttd: PermintaanTtd | null }>(`/api/klinik-permintaan?${new URLSearchParams({ klinik })}`),
+  permintaanGet: (id: number) => req<Permintaan>(`/api/klinik-permintaan/${id}`),
+  permintaanCreate: (payload: PermintaanInput) => req<{ success: boolean; id: number; nomor: string }>("/api/klinik-permintaan", { method: "POST", body: JSON.stringify(payload) }),
+  permintaanUpdate: (id: number, payload: PermintaanInput) => req<{ success: boolean }>(`/api/klinik-permintaan/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
+  permintaanPemenuhan: (id: number, lines: { id: number; status: PermintaanLineStatus; dipenuhi: number | null; tanggal_pemenuhan: string | null }[]) =>
+    req<{ success: boolean; saved: number }>(`/api/klinik-permintaan/${id}/pemenuhan`, { method: "PUT", body: JSON.stringify({ lines }) }),
+  permintaanDelete: (id: number) => req<{ success: boolean }>(`/api/klinik-permintaan/${id}`, { method: "DELETE" }),
+  permintaanRekap: (params: Record<string, string>) => req<{ rows: PermintaanRekapRow[] }>(`/api/klinik-permintaan-rekap?${new URLSearchParams(params)}`),
   lengkapiList: (kind: LengkapiKind, estate: string, bulan: string) => req<LengkapiList>(`/api/lengkapi/${kind}?${new URLSearchParams({ estate, bulan })}`),
   lengkapiSave: (kind: LengkapiKind, estate: string, bulan: string, rows: { id: number; values: Record<string, string>; evidence_id?: string }[]) =>
     req<{ success: boolean; saved: number; foto: number }>(`/api/lengkapi/${kind}`, { method: "PUT", body: JSON.stringify({ estate, bulan, rows }) }),

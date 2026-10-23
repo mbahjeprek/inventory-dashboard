@@ -37,6 +37,7 @@ import { can } from "../lib/access";
 import { InventoryTabs, useInventoryTab } from "../components/InventoryTabs";
 import { KlinikLaporanTab } from "../components/KlinikLaporanTab";
 import { KlinikRusakTab, TarikModal } from "../components/KlinikRusakTab";
+import { KlinikPermintaanTab } from "../components/KlinikPermintaanTab";
 import { LedgerHistory } from "../components/LedgerHistory";
 import { ItemRiwayatButton } from "../components/ItemRiwayat";
 import { StockBatchModal } from "../components/StockBatchModal";
@@ -296,7 +297,7 @@ export function InventoryKlinikPage({ klinik }: { klinik: string }) {
           <LengkapiDataButton kind="klinik" estate={klinik} />
           <DokumenButton modul="KLINIK" estate={klinik} />
           {tab === "stok" && <ExportButtons total={total} buildReport={buildReport} fileName={`inventory-klinik-${klinik.toLowerCase()}`} />}
-          {canInput && tab !== "laporan" && (
+          {canInput && tab !== "laporan" && tab !== "permintaan" && (
             <button
               onClick={() => setShowBatch(true)}
               title="Banyak transaksi sekaligus"
@@ -305,7 +306,7 @@ export function InventoryKlinikPage({ klinik }: { klinik: string }) {
               <ListPlus size={16} /> Input Banyak
             </button>
           )}
-          {canTx && tab !== "laporan" && (<button
+          {canTx && tab !== "laporan" && tab !== "permintaan" && (<button
             onClick={() => setShowPicker(true)}
             className="inline-flex items-center gap-1.5 text-sm px-3.5 py-2 rounded-md border border-[var(--accent-blue-border)] text-[var(--accent-blue)] hover:bg-[var(--accent-blue-bg)]"
           >
@@ -318,6 +319,8 @@ export function InventoryKlinikPage({ klinik }: { klinik: string }) {
 
       {tab === "laporan" ? (
         <KlinikLaporanTab key={klinik} klinik={klinik} />
+      ) : tab === "permintaan" ? (
+        <KlinikPermintaanTab key={klinik} klinik={klinik} />
       ) : tab === "rusak" ? (
         <KlinikRusakTab key={klinik} klinik={klinik} refreshKey={historyKey} onChanged={() => (load(), loadSummary())} />
       ) : tab !== "stok" ? (
