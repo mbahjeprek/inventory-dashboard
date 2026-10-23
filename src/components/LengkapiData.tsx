@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ClipboardList, ImagePlus, Loader2, Save, X } from "lucide-react";
+import { ClipboardList, ClipboardPaste, ImagePlus, Loader2, Save, X } from "lucide-react";
 import { api, errorText, type LengkapiKind, type LengkapiList, type LengkapiRow } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { can } from "../lib/access";
@@ -133,6 +133,26 @@ function LengkapiModal({ kinds, estate, onClose, onDone }: { kinds: LengkapiKind
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [aktif, data?.foto]);
 
+  // Tempel: the image on the clipboard (a screenshot / copied photo) read by the button itself, for a
+  // browser or keyboard where Ctrl+V into the row is not handy.
+  const tempel = async (id: number) => {
+    setAktif(id);
+    setError("");
+    try {
+      const items = await navigator.clipboard.read();
+      for (const it of items) {
+        const type = it.types.find((t) => t.startsWith("image/"));
+        if (type) {
+          const blob = await it.getType(type);
+          return pickFoto(id, new File([blob], "tempel.png", { type }));
+        }
+      }
+      setError("Tidak ada gambar di clipboard. Salin (copy) dulu fotonya, lalu klik Tempel.");
+    } catch {
+      setError("Browser tidak mengizinkan membaca clipboard. Klik baris ini lalu tekan Ctrl+V.");
+    }
+  };
+
   const save = async () => {
     if (!changedIds.length) return;
     setSaving(true);
@@ -171,6 +191,7 @@ function LengkapiModal({ kinds, estate, onClose, onDone }: { kinds: LengkapiKind
             <h2 className="font-semibold text-[var(--text-primary)]">Lengkapi Data · {kinds.length > 1 ? "Gudang" : TITLE[kind]} {estate}</h2>
             <p className="text-xs text-[var(--text-secondary)]">
               Semua transaksi bulan ini. Kotak kuning = masih kosong (termasuk "-" / "0"). Isi atau koreksi lalu Simpan sekaligus; jumlah, tanggal dan saldo tidak berubah.
+              {data?.foto && " Foto bukti: Upload, Tempel, atau klik barisnya lalu Ctrl+V."}
             </p>
           </div>
           {kinds.length > 1 && (
@@ -312,7 +333,14 @@ function LengkapiModal({ kinds, estate, onClose, onDone }: { kinds: LengkapiKind
                                   {uploading === r.id ? <Loader2 size={12} className="animate-spin" /> : <ImagePlus size={12} />} {r.evidence_id ? "Ganti" : "Upload"}
                                   <input type="file" accept="image/*" className="hidden" onChange={(e) => (pickFoto(r.id, e.target.files?.[0]), (e.target.value = ""))} />
                                 </label>
-                                {aktif === r.id && uploading !== r.id && <span className="text-[10px] text-[var(--accent-blue)]">atau Ctrl+V</span>}
+                                <button
+                                  type="button"
+                                  onClick={(e) => (e.stopPropagation(), tempel(r.id))}
+                                  title="Tempel foto dari clipboard (atau klik baris lalu Ctrl+V)"
+                                  className="inline-flex items-center gap-1 px-2 py-1 rounded border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[#f1f5f9]"
+                                >
+                                  <ClipboardPaste size={12} /> Tempel
+                                </button>
                               </span>
                             )}
                           </td>
