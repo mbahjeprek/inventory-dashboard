@@ -108,7 +108,9 @@ export function SopPage() {
   const [status, setStatus] = useState("");
   const [bagian, setBagian] = useState("");
   const [auditSaja, setAuditSaja] = useState(false);
-  const [tutup, setTutup] = useState<Record<string, boolean>>({});
+  // Every bagian starts closed (only its header and progress); opened one by one, all at once, from the Daftar Isi,
+  // when adding to it, and by itself while a search / filter finds something in it.
+  const [buka, setBuka] = useState<Record<string, boolean>>({});
   const [hapus, setHapus] = useState<Row | null>(null);
 
   useEffect(() => {
@@ -143,7 +145,7 @@ export function SopPage() {
   const pct = (a: number, b: number) => (b ? Math.round((a / b) * 100) : 0);
 
   const tambah = (bg: string) => {
-    setTutup((t) => ({ ...t, [bg]: false }));
+    setBuka((t) => ({ ...t, [bg]: true }));
     setRows((r) => [...(r ?? []), emptyRow(bg)]);
   };
   const onSaved = (key: string, d: Row) => setRows((r) => (r ?? []).map((x) => (x.key === key ? d : x)));
@@ -302,7 +304,7 @@ export function SopPage() {
           rows={saved}
           onBagian={(bg) => {
             // Open the bagian and bring it into view (clearing filters that would hide it).
-            setTutup((t) => ({ ...t, [bg]: false }));
+            setBuka((t) => ({ ...t, [bg]: true }));
             if (bagian && bagian !== bg) setBagian("");
             setTimeout(() => document.getElementById(`sop-bagian-${bg}`)?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
           }}
@@ -310,6 +312,18 @@ export function SopPage() {
       )}
 
       {error && <p className="text-sm text-[var(--accent-red)]">{error}</p>}
+
+      {rows && (
+        <div className="flex items-center justify-end gap-3 text-xs">
+          <button onClick={() => setBuka(Object.fromEntries(SOP_BAGIAN.map((b) => [b.value, true])))} className="text-[var(--accent-blue)] hover:underline">
+            Buka semua bagian
+          </button>
+          <span className="text-[var(--border)]">|</span>
+          <button onClick={() => setBuka({})} className="text-[var(--accent-blue)] hover:underline">
+            Tutup semua
+          </button>
+        </div>
+      )}
 
       {rows === null ? (
         <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg px-4 py-8 text-center text-sm text-[var(--text-muted)]">Memuat...</div>
@@ -321,7 +335,7 @@ export function SopPage() {
               const ada = semua.filter((r) => r.id !== null);
               const ok = ada.filter((r) => r.status === "BERLAKU").length;
               const bAudit = ada.filter((r) => r.audit).length;
-              const open = !tutup[b.value];
+              const open = !!buka[b.value] || (filtering && tampil.length > 0);
               const nKunci = ada.filter((r) => r.dikunci).length;
               const semuaKunci = ada.length > 0 && nKunci === ada.length;
               return (
@@ -329,8 +343,8 @@ export function SopPage() {
                   <div
                     role="button"
                     tabIndex={0}
-                    onClick={() => setTutup((t) => ({ ...t, [b.value]: open }))}
-                    onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), setTutup((t) => ({ ...t, [b.value]: open })))}
+                    onClick={() => setBuka((t) => ({ ...t, [b.value]: !open }))}
+                    onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), setBuka((t) => ({ ...t, [b.value]: !open })))}
                     className="w-full flex flex-wrap items-center gap-x-3 gap-y-1.5 px-4 py-3 text-left bg-[#f3f9ef] hover:bg-[#eaf5e3] border-b border-[var(--border)] cursor-pointer select-none"
                   >
                     <span className="w-7 h-7 shrink-0 rounded-md bg-[#1f6f43] text-white text-xs font-semibold flex items-center justify-center">{b.no}</span>
@@ -737,9 +751,9 @@ function EditRow({
 function DaftarIsi({ rows, onBagian }: { rows: Row[]; onBagian: (bagian: string) => void }) {
   const [buka, setBuka] = useState(() => {
     try {
-      return localStorage.getItem("sop-daftar-isi") !== "0";
+      return localStorage.getItem("sop-daftar-isi") === "1";
     } catch {
-      return true;
+      return false;
     }
   });
   const toggle = () => {
