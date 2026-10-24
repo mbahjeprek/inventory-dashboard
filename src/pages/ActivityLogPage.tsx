@@ -17,9 +17,10 @@ const ESTATES_BY_MODULE = {
   KOPERASI: ["NILAM"],
   KENDARAAN: ["NILAM", "FIRUS", "ZAMRUD"],
   PRUNING: ["NILAM", "FIRUS", "ZAMRUD"],
+  SOP: [],
 };
 // Module names in titles / text.
-const MODULE_NAME: Record<ActivityLog["module"], string> = { BARANG: "Gudang", BBM: "BBM", PUPUK: "Pupuk", KLINIK: "Klinik", OLI: "Oli", KOPERASI: "Koperasi", KENDARAAN: "Kendaraan & Alat Berat", PRUNING: "Pruning PT.AKSS" };
+const MODULE_NAME: Record<ActivityLog["module"], string> = { BARANG: "Gudang", BBM: "BBM", PUPUK: "Pupuk", KLINIK: "Klinik", OLI: "Oli", KOPERASI: "Koperasi", KENDARAAN: "Kendaraan & Alat Berat", PRUNING: "Pruning PT.AKSS", SOP: "Daftar SOP" };
 
 const formatWaktu = (iso: string) =>
   new Date(iso).toLocaleString("id-ID", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
@@ -65,8 +66,10 @@ export function ActivityLogPage({
   const [editing, setEditing] = useState<ActivityLog | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<ActivityLog | null>(null);
   const pageSize = 25;
-  const objekLabel = module === "BARANG" ? "Barang" : module === "KLINIK" ? "Obat" : "Transaksi";
-  const colCount = isSuperuser ? 7 : 6;
+  const objekLabel = module === "BARANG" ? "Barang" : module === "KLINIK" ? "Obat" : module === "SOP" ? "SOP" : "Transaksi";
+  // The Daftar SOP belongs to no estate: no estate filter or column.
+  const noEstate = module === "SOP";
+  const colCount = (isSuperuser ? 7 : 6) - (noEstate ? 1 : 0);
 
   const filters = () => ({ module, estate, estates: estateLock ? "" : pickedEstates, aksi, search, dateFrom, dateTo });
 
@@ -113,7 +116,7 @@ export function ActivityLogPage({
     const tgl = (iso: string) => (iso ? iso.split("-").reverse().join("/") : "");
     const active = [
       search && `Cari: "${search}"`,
-      !estateLock && `${estateLabel}: ${estate || (ownEstates.length === 1 ? ownEstates[0] : "Semua")}`,
+      !estateLock && !noEstate && `${estateLabel}: ${estate || (ownEstates.length === 1 ? ownEstates[0] : "Semua")}`,
       aksi && `Aksi: ${aksi}`,
       (dateFrom || dateTo) && `Tanggal: ${tgl(dateFrom) || "awal"} - ${tgl(dateTo) || "akhir"}`,
     ].filter(Boolean);
@@ -124,12 +127,12 @@ export function ActivityLogPage({
       columns: [
         { label: "Waktu", nowrap: true },
         { label: "User" },
-        { label: estateLabel },
+        ...(noEstate ? [] : [{ label: estateLabel }]),
         { label: "Aksi", nowrap: true },
         { label: objekLabel },
         { label: "Detail" },
       ],
-      rows: all.map((r) => [formatWaktu(r.created_at), r.nama || r.username, r.estate, r.aksi, r.objek, r.detail]),
+      rows: all.map((r) => [formatWaktu(r.created_at), r.nama || r.username, ...(noEstate ? [] : [r.estate]), r.aksi, r.objek, r.detail]),
     };
   };
 
@@ -141,7 +144,7 @@ export function ActivityLogPage({
         <div>
           <h1 className="text-xl font-semibold text-[var(--text-primary)]">{title}</h1>
           <p className="text-sm text-[var(--text-secondary)]">
-            Riwayat perubahan data {module === "KOPERASI" || module === "KENDARAAN" || module === "PRUNING" ? MODULE_NAME[module] : `Inventory ${MODULE_NAME[module]}`} (tambah, edit, hapus, transaksi) beserta
+            Riwayat perubahan data {module === "KOPERASI" || module === "KENDARAAN" || module === "PRUNING" || module === "SOP" ? MODULE_NAME[module] : `Inventory ${MODULE_NAME[module]}`} (tambah, edit, hapus, transaksi) beserta
             siapa yang melakukannya
           </p>
         </div>
@@ -165,12 +168,12 @@ export function ActivityLogPage({
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder={`Cari ${module === "BARANG" ? "barang" : module === "KLINIK" ? "obat" : "transaksi"}, detail, atau user...`}
+            placeholder={`Cari ${module === "BARANG" ? "barang" : module === "KLINIK" ? "obat" : module === "SOP" ? "SOP" : "transaksi"}, detail, atau user...`}
             className="w-full pl-9 pr-3 py-2 text-sm rounded-md border border-[var(--border)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-blue-border)]"
           />
         </div>
 
-        {estateLock ? null : ESTATES_BY_MODULE[module].filter((e) => ownEstates.includes(e)).length > 1 ? (
+        {estateLock || noEstate ? null : ESTATES_BY_MODULE[module].filter((e) => ownEstates.includes(e)).length > 1 ? (
           <select
             value={estate}
             onChange={(e) => {
@@ -241,7 +244,7 @@ export function ActivityLogPage({
               <tr className="text-left text-xs uppercase">
                 <th className="px-4 py-2.5 whitespace-nowrap">Waktu</th>
                 <th className="px-4 py-2.5">User</th>
-                <th className="px-4 py-2.5">{estateLabel}</th>
+                {!noEstate && <th className="px-4 py-2.5">{estateLabel}</th>}
                 <th className="px-4 py-2.5">Aksi</th>
                 <th className="px-4 py-2.5">{objekLabel}</th>
                 <th className="px-4 py-2.5">Detail</th>
@@ -266,7 +269,7 @@ export function ActivityLogPage({
                   <tr key={r.id}>
                     <td className="px-4 py-2.5 whitespace-nowrap text-[var(--text-secondary)]">{formatWaktu(r.created_at)}</td>
                     <td className="px-4 py-2.5 whitespace-nowrap">{r.nama || r.username || "-"}</td>
-                    <td className="px-4 py-2.5">{r.estate || "-"}</td>
+                    {!noEstate && <td className="px-4 py-2.5">{r.estate || "-"}</td>}
                     <td className="px-4 py-2.5 whitespace-nowrap">
                       <span className={`text-xs px-2 py-0.5 rounded-full border ${aksiTone(r.aksi)}`}>{r.aksi}</span>
                     </td>

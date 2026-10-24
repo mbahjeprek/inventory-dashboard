@@ -1138,7 +1138,8 @@ ALTER TABLE dokumen_link ADD COLUMN IF NOT EXISTS dikunci BOOLEAN NOT NULL DEFAU
 -- Daftar SOP: the SOPs a plantation needs, grouped per bagian ('01'..'14' as in the ISPO / RSPO checklist,
 -- 'UMUM' for the rest). audit = almost always checked at an ISPO / RSPO audit (the star). status BELUM (not
 -- written yet) / DRAFT / BERLAKU (signed, in force) / REVISI (being revised); url = the file once it exists.
--- Seen by every account; added / changed with Daftar SOP (sop.edit). Seeded once, while the table is empty.
+-- Seen with Lihat Daftar SOP; added / changed with Ubah (sop.edit) while not dikunci; locked / unlocked with
+-- Kunci (sop.kunci). Seeded once, while the table is empty.
 CREATE TABLE IF NOT EXISTS sop (
   id SERIAL PRIMARY KEY,
   bagian TEXT NOT NULL DEFAULT 'UMUM',
@@ -1233,3 +1234,6 @@ BEGIN
       ('14', 5, 'Pengendalian dokumen & rekaman', true, '');
   END IF;
 END $$;
+
+-- Daftar SOP: dikunci = only an account with Kunci Daftar SOP (or a Super User) changes / deletes it.
+ALTER TABLE sop ADD COLUMN IF NOT EXISTS dikunci BOOLEAN NOT NULL DEFAULT false;

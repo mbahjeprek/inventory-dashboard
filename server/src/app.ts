@@ -192,8 +192,9 @@ function requiredPerms(req: express.Request): Need {
   // Dokumen & Link: add with Dokumen & Link; change / delete one's own (not locked) - checked in the route - or
   // every one with Kelola semua.
   if (is(/^\/dokumen(\/|$)/)) return m === "GET" ? null : ["dokumen.edit", "dokumen.kelola"];
-  // Daftar SOP: seen by every account; added / changed / deleted with Daftar SOP.
-  if (is(/^\/sop(\/|$)/)) return m === "GET" ? null : ["sop.edit"];
+  // Daftar SOP: Lihat; added / changed / deleted with Ubah (the route refuses a locked one); locked with Kunci.
+  if (is(/^\/sop\/kunci$/)) return ["sop.kunci"];
+  if (is(/^\/sop(\/|$)/)) return m === "GET" ? ["sop.view", "sop.edit", "sop.kunci"] : ["sop.edit", "sop.kunci"];
   // Status Update: the route lists only the estates and modules the account can see.
   if (is(/^\/status-update$/)) return null;
   // Foto bukti: any logged-in account uploads for its own transactions (the transaction route checks).
@@ -218,6 +219,7 @@ function requiredPerms(req: express.Request): Need {
   // Master Pasien: the patients of the account's clinics (estate checked in the route).
   if (is(/^\/pasien(\/|$)/)) return [`klinik.${act}`];
   if (is(/^\/top-keluar$/)) return [q.source === "klinik" ? "klinik.view" : "gudang.view"];
+  if (is(/^\/activity-log$/) && q.module === "SOP") return ["sop.view", "sop.edit", "sop.kunci"];
   if (is(/^\/activity-log$/)) return ACTIVITY_PERM[q.module] ? [`${ACTIVITY_PERM[q.module]}.view`] : "super";
   if (is(/^\/obat(\/|$)/)) return ["master.obat"];
   if (is(/^\/master-oli(\/|$)/)) return ["master.oli"];
@@ -267,7 +269,7 @@ const PERM_AKSI: Record<string, string> = { view: "Lihat", input: "Input", edit:
 const permLabel = (p: string) => {
   const [m, a] = p.split(".");
   if (PERM_MODUL[m]) return `${PERM_AKSI[a] ?? a} ${PERM_MODUL[m]}`;
-  const other: Record<string, string> = { "dokumen.edit": "Dokumen & Link", "dokumen.kelola": "Kelola semua Dokumen & Link", "sop.edit": "Ubah Daftar SOP", "master.peta": "Lihat Peta Blok", "master.peta_edit": "Ubah Peta Blok", "master.alat": "Master Alat Berat", "master.users": "Pengguna", "monitor.log_user": "Log Aktivitas User" };
+  const other: Record<string, string> = { "dokumen.edit": "Dokumen & Link", "dokumen.kelola": "Kelola semua Dokumen & Link", "sop.view": "Lihat Daftar SOP", "sop.edit": "Ubah Daftar SOP", "sop.kunci": "Kunci Daftar SOP", "master.peta": "Lihat Peta Blok", "master.peta_edit": "Ubah Peta Blok", "master.alat": "Master Alat Berat", "master.users": "Pengguna", "monitor.log_user": "Log Aktivitas User" };
   return other[p] ?? (m === "master" ? `Master ${a.charAt(0).toUpperCase()}${a.slice(1)}` : p);
 };
 
@@ -464,7 +466,7 @@ function requireEstate(estate: string) {
 }
 
 // ---- Activity log (audit trail), see schema.sql's activity_log ----
-type LogModule = "BARANG" | "BBM" | "PUPUK" | "KLINIK" | "OLI" | "KOPERASI" | "KENDARAAN" | "PRUNING";
+type LogModule = "BARANG" | "BBM" | "PUPUK" | "KLINIK" | "OLI" | "KOPERASI" | "KENDARAAN" | "PRUNING" | "SOP";
 
 // Records who changed what. Called after the change succeeded; a logging failure is reported but
 // never fails the user's action itself.
@@ -5861,13 +5863,16 @@ app.get("/api/user-activity", requireSuperuser, async (req, res) => {
 app.get("/api/activity-log", async (req, res) => {
   const { module = "", estate = "", estates = "", aksi = "", search = "", dateFrom = "", dateTo = "", tz = "", page = "1", pageSize = "50" } =
     req.query as Record<string, string>;
-  if (!["BARANG", "BBM", "PUPUK", "KLINIK", "OLI", "KOPERASI", "KENDARAAN"].includes(module)) return res.status(400).json({ error: "Modul tidak valid" });
+  if (!["BARANG", "BBM", "PUPUK", "KLINIK", "OLI", "KOPERASI", "KENDARAAN", "PRUNING", "SOP"].includes(module)) return res.status(400).json({ error: "Modul tidak valid" });
 
   const conditions = ["module = @module"];
   const params: any = { module };
 
-  // Estate accounts only ever see their own estates' log; anyone may narrow to one estate.
-  if (estate && estateAllowed(req.user!, estate)) {
+  // Estate accounts only ever see their own estates' log; anyone may narrow to one estate. The Daftar SOP
+  // belongs to no estate: its whole log is seen by whoever may see the list.
+  if (module === "SOP") {
+    // (no estate condition)
+  } else if (estate && estateAllowed(req.user!, estate)) {
     conditions.push("estate = @estate");
     params.estate = estate;
   } else if (req.user!.role !== "superuser" || estates) {
@@ -10939,32 +10944,53 @@ app.delete("/api/dokumen/:id", async (req, res) => {
 });
 
 // ---- Daftar SOP (see schema.sql sop) ----
-const SOP_BAGIAN = ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12", "13", "14", "UMUM"];
-const SOP_STATUS = ["BELUM", "DRAFT", "BERLAKU", "REVISI"];
+const SOP_BAGIAN: Record<string, string> = {
+  "01": "1. Persiapan Lahan & Pembukaan", "02": "2. Pembibitan", "03": "3. Penanaman & TBM", "04": "4. Pemeliharaan TM", "05": "5. Proteksi Tanaman",
+  "06": "6. Panen & Transport", "07": "7. Agronomi & Riset", "08": "8. Pabrik Kelapa Sawit", "09": "9. Teknik, Gudang & Logistik", "10": "10. K3",
+  "11": "11. Lingkungan & Keberlanjutan", "12": "12. SDM & Hubungan Industrial", "13": "13. Sosial & Kemitraan", "14": "14. Administrasi, Keuangan & Keamanan", UMUM: "15. Umum",
+};
+const SOP_STATUS: Record<string, string> = { BELUM: "Belum ada", DRAFT: "Draft", BERLAKU: "Berlaku", REVISI: "Perlu revisi" };
 const sopPayload = (b: any) => ({
-  bagian: SOP_BAGIAN.includes(String(b?.bagian ?? "").toUpperCase()) ? String(b.bagian).toUpperCase() : "UMUM",
+  bagian: SOP_BAGIAN[String(b?.bagian ?? "").toUpperCase()] ? String(b.bagian).toUpperCase() : "UMUM",
   judul: String(b?.judul ?? "").trim(),
   audit: b?.audit === true,
   no_dokumen: String(b?.no_dokumen ?? "").trim(),
   revisi: String(b?.revisi ?? "").trim(),
   tgl_berlaku: /^\d{4}-\d{2}-\d{2}$/.test(String(b?.tgl_berlaku ?? "")) ? String(b.tgl_berlaku) : "",
   pic: String(b?.pic ?? "").trim(),
-  status: SOP_STATUS.includes(String(b?.status ?? "").toUpperCase()) ? String(b.status).toUpperCase() : "BELUM",
+  status: SOP_STATUS[String(b?.status ?? "").toUpperCase()] ? String(b.status).toUpperCase() : "BELUM",
   url: String(b?.url ?? "").trim(),
   keterangan: String(b?.keterangan ?? "").trim(),
 });
 const sopCek = (d: ReturnType<typeof sopPayload>) =>
   !d.judul ? "Nama SOP wajib diisi" : d.url && !dokUrlOk(d.url) ? "Link harus diawali https:// (salin dari address bar / tombol Share)" : "";
-const sopEdit = (u: SessionUser) => u.role === "superuser" || u.perms.includes("sop.edit");
+// Kunci: locks / unlocks and changes the locked SOPs; Ubah: adds and changes / deletes the unlocked ones.
+const sopKunci = (u: SessionUser) => u.role === "superuser" || u.perms.includes("sop.kunci");
+const sopUbah = (u: SessionUser, s?: { dikunci: boolean }) => sopKunci(u) || (u.perms.includes("sop.edit") && !s?.dikunci);
+const SOP_TERKUNCI = "SOP ini dikunci; hanya akun dengan hak Kunci Daftar SOP yang bisa mengubah / menghapus atau membuka kuncinya";
+// The log shows the values as on screen: Ya / Tidak, the status and bagian names.
+const sopLogView = (s: any) => ({ ...s, bagian: SOP_BAGIAN[s.bagian] ?? s.bagian, status: SOP_STATUS[s.status] ?? s.status, audit: s.audit ? "Ya" : "Tidak" });
+const SOP_LABELS = {
+  bagian: "Bagian", judul: "Nama SOP", audit: "Audit ISPO/RSPO", no_dokumen: "No. Dokumen", revisi: "Revisi", tgl_berlaku: "Tgl Berlaku",
+  pic: "PIC", status: "Status", url: "Link", keterangan: "Keterangan",
+};
+const sopLog = (req: express.Request, aksi: string, objek: string, detail?: string) => logActivity(req, { module: "SOP", estate: null, aksi, objek, detail });
+const sopObjek = (s: { bagian: string; judul: string }) => `${s.judul} (${SOP_BAGIAN[s.bagian] ?? s.bagian})`;
+const sopRingkas = (s: any) =>
+  [`Status: ${SOP_STATUS[s.status] ?? s.status}`, s.no_dokumen && `No. Dokumen: ${s.no_dokumen}`, s.pic && `PIC: ${s.pic}`, s.audit && "Audit ISPO/RSPO", s.url && `Link: ${s.url}`]
+    .filter(Boolean)
+    .join("; ");
 
 app.get("/api/sop", async (req, res) => {
+  const u = req.user!;
   const data = await queryMany(
     `SELECT s.*, u.nama AS oleh FROM sop s LEFT JOIN users u ON u.id = s.user_id ORDER BY s.bagian = 'UMUM', s.bagian, s.urut, s.id`
   );
-  res.json({ data, edit: sopEdit(req.user!) });
+  res.json({ data: data.map((s: any) => ({ ...s, boleh_ubah: sopUbah(u, s) })), edit: sopUbah(u), kunci: sopKunci(u) });
 });
 
 app.post("/api/sop", async (req, res) => {
+  if (!sopUbah(req.user!)) return res.status(403).json({ error: "Akses ditolak" });
   const d = sopPayload(req.body);
   const err = sopCek(d);
   if (err) return res.status(400).json({ error: err });
@@ -10975,12 +11001,37 @@ app.post("/api/sop", async (req, res) => {
              @tgl_berlaku, @pic, @status, @url, @keterangan, @uid) RETURNING id, urut`,
     { ...d, uid: req.user!.id }
   );
+  await sopLog(req, "Tambah SOP", sopObjek(d), sopRingkas(d));
   res.json({ success: true, id: row!.id, urut: row!.urut });
+});
+
+// Kunci / buka kunci one SOP ({ id }) or every SOP of a bagian ({ bagian }).
+app.put("/api/sop/kunci", async (req, res) => {
+  const kunci = req.body?.kunci === true;
+  const id = Number(req.body?.id);
+  const bagian = String(req.body?.bagian ?? "").toUpperCase();
+  if (id) {
+    const s = await queryOne<any>("SELECT * FROM sop WHERE id = @id", { id });
+    if (!s) return res.status(404).json({ error: "SOP tidak ditemukan" });
+    if (s.dikunci === kunci) return res.json({ success: true, n: 0 });
+    await execute("UPDATE sop SET dikunci = @kunci, updated_at = now() WHERE id = @id", { kunci, id });
+    await sopLog(req, kunci ? "Kunci SOP" : "Buka Kunci SOP", sopObjek(s));
+    return res.json({ success: true, n: 1 });
+  }
+  if (!SOP_BAGIAN[bagian]) return res.status(400).json({ error: "Bagian tidak valid" });
+  const rows = await queryMany<{ judul: string }>(
+    "UPDATE sop SET dikunci = @kunci, updated_at = now() WHERE bagian = @bagian AND dikunci <> @kunci RETURNING judul",
+    { kunci, bagian }
+  );
+  if (rows.length)
+    await sopLog(req, kunci ? "Kunci SOP" : "Buka Kunci SOP", `Bagian ${SOP_BAGIAN[bagian]}`, `${rows.length} SOP: ${rows.map((r) => r.judul).join("; ")}`);
+  res.json({ success: true, n: rows.length });
 });
 
 app.put("/api/sop/:id", async (req, res) => {
   const existing = await queryOne<any>("SELECT * FROM sop WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "SOP tidak ditemukan" });
+  if (!sopUbah(req.user!, existing)) return res.status(403).json({ error: existing.dikunci ? SOP_TERKUNCI : "Akses ditolak" });
   const d = sopPayload(req.body);
   const err = sopCek(d);
   if (err) return res.status(400).json({ error: err });
@@ -10994,13 +11045,17 @@ app.put("/api/sop/:id", async (req, res) => {
        tgl_berlaku = @tgl_berlaku, pic = @pic, status = @status, url = @url, keterangan = @keterangan, updated_at = now() WHERE id = @id`,
     { ...d, urut, id: existing.id }
   );
+  const detail = describeChanges(sopLogView(existing), sopLogView(d), SOP_LABELS);
+  if (detail !== "Tidak ada perubahan") await sopLog(req, "Edit SOP", sopObjek(d), detail);
   res.json({ success: true, urut });
 });
 
 app.delete("/api/sop/:id", async (req, res) => {
-  const existing = await queryOne<any>("SELECT id FROM sop WHERE id = @id", { id: req.params.id });
+  const existing = await queryOne<any>("SELECT * FROM sop WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "SOP tidak ditemukan" });
+  if (!sopUbah(req.user!, existing)) return res.status(403).json({ error: existing.dikunci ? SOP_TERKUNCI : "Akses ditolak" });
   await execute("DELETE FROM sop WHERE id = @id", { id: existing.id });
+  await sopLog(req, "Hapus SOP", sopObjek(existing), sopRingkas(existing));
   res.json({ success: true });
 });
 

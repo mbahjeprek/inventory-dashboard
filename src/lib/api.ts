@@ -596,7 +596,7 @@ export type PupukSummary = {
 export type ActivityLog = {
   id: number;
   created_at: string;
-  module: "BARANG" | "BBM" | "PUPUK" | "KLINIK" | "OLI" | "KOPERASI" | "KENDARAAN" | "PRUNING";
+  module: "BARANG" | "BBM" | "PUPUK" | "KLINIK" | "OLI" | "KOPERASI" | "KENDARAAN" | "PRUNING" | "SOP";
   estate: string | null;
   aksi: string;
   objek: string | null;
@@ -873,6 +873,9 @@ export type Sop = {
   url: string;
   keterangan: string;
   oleh: string | null;
+  // dikunci: only an account with Kunci Daftar SOP changes it; boleh_ubah: whether this account may change / delete it.
+  dikunci: boolean;
+  boleh_ubah: boolean;
   updated_at: string;
 };
 export type SopInput = Pick<Sop, "bagian" | "judul" | "audit" | "no_dokumen" | "revisi" | "tgl_berlaku" | "pic" | "status" | "url" | "keterangan">;
@@ -1804,7 +1807,9 @@ export const api = {
   dokumenEdit: (id: number, body: DokumenInput) => req<{ success: boolean }>(`/api/dokumen/${id}`, { method: "PUT", body: JSON.stringify(body) }),
   dokumenPin: (id: number, pinned: boolean) => req<{ success: boolean }>(`/api/dokumen/${id}`, { method: "PUT", body: JSON.stringify({ pinOnly: true, pinned }) }),
   dokumenKunci: (id: number, kunci: boolean) => req<{ success: boolean }>(`/api/dokumen/${id}`, { method: "PUT", body: JSON.stringify({ kunciOnly: kunci }) }),
-  sop: () => req<{ data: Sop[]; edit: boolean }>("/api/sop"),
+  sop: () => req<{ data: Sop[]; edit: boolean; kunci: boolean }>("/api/sop"),
+  sopKunci: (body: { id: number } | { bagian: string }, kunci: boolean) =>
+    req<{ success: boolean; n: number }>("/api/sop/kunci", { method: "PUT", body: JSON.stringify({ ...body, kunci }) }),
   sopTambah: (body: SopInput) => req<{ success: boolean; id: number; urut: number }>("/api/sop", { method: "POST", body: JSON.stringify(body) }),
   sopEdit: (id: number, body: SopInput) => req<{ success: boolean; urut: number }>(`/api/sop/${id}`, { method: "PUT", body: JSON.stringify(body) }),
   sopHapus: (id: number) => req<{ success: boolean }>(`/api/sop/${id}`, { method: "DELETE" }),

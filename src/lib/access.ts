@@ -43,7 +43,9 @@ export const OTHER_PERMS: { group: string; items: { key: string; label: string }
       { key: "master.peta_edit", label: "Ubah Peta Blok" },
       { key: "dokumen.edit", label: "Dokumen & Link (tambah; ubah / hapus dokumen buatan sendiri)" },
       { key: "dokumen.kelola", label: "Kelola semua Dokumen & Link (ubah / hapus / kunci dokumen siapa pun)" },
-      { key: "sop.edit", label: "Ubah Daftar SOP (tambah SOP di tiap bagian, isi no. dokumen, PIC, status & link, hapus)" },
+      { key: "sop.view", label: "Lihat Daftar SOP" },
+      { key: "sop.edit", label: "Ubah Daftar SOP (tambah SOP di tiap bagian, ubah / hapus SOP yang tidak dikunci)" },
+      { key: "sop.kunci", label: "Kunci Daftar SOP (kunci / buka kunci SOP atau satu bagian, ubah SOP yang dikunci)" },
       { key: "master.users", label: "Pengguna" },
     ],
   },
@@ -203,7 +205,7 @@ export const kebunTerlihat = (user: AuthUser | null) => !!user && (user.role ===
 
 // Dokumen & Link: every account sees the links of its estates; Kelola Dokumen adds / edits them.
 export const DOKUMEN_PATH = "/dokumen";
-// Daftar SOP: seen by every account; changed with Ubah Daftar SOP.
+// Daftar SOP: seen with Lihat, Ubah or Kunci Daftar SOP.
 export const SOP_PATH = "/sop";
 export const KOPERASI_ESTATE = "NILAM";
 
@@ -242,7 +244,8 @@ export function pageAllowed(user: AuthUser | null, path: string): boolean {
   if (path === OPNAME_PATH || path.startsWith(`${OPNAME_PATH}/`)) return hasOpnameAccess(user);
   if (path === PINJAMAN_PATH) return MODULES.some((m) => canModule(user, m));
   if (path === PASIEN_PATH) return canModule(user, "KLINIK");
-  if (path === DOKUMEN_PATH || path === SOP_PATH) return true;
+  if (path === DOKUMEN_PATH) return true;
+  if (path === SOP_PATH) return ["sop.view", "sop.edit", "sop.kunci"].some((p) => can(user, p));
   if (path === KOPERASI_PATH) return can(user, "koperasi.view") && userEstates(user).includes(KOPERASI_ESTATE);
   if (path === KENDARAAN_PATH) return can(user, "kendaraan.view");
   if (path === PRUNING_PATH) return !KEBUN_HANYA_SUPER && ["pruning.view", "pruning.input", "pruning.edit"].some((p) => can(user, p));
