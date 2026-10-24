@@ -1270,3 +1270,9 @@ ALTER TABLE berita_acara ADD COLUMN IF NOT EXISTS ttd JSONB NOT NULL DEFAULT '{}
 -- Permintaan Obat only, 1 = Diketahui / Finance, 2 = Disetujui 1 / GM, 3 = Disetujui 2 / Head, 4 = Super User).
 -- An account may change an item decided at its own rank or below, never one decided higher up.
 ALTER TABLE klinik_permintaan_line ADD COLUMN IF NOT EXISTS approval_level INTEGER NOT NULL DEFAULT 0;
+
+-- Permintaan Obat: disetujui = how much of the item was approved (APPROVED = jumlah, DITOLAK = 0, SEBAGIAN = typed,
+-- more than 0 and less than jumlah; NULL while MENUNGGU), set with the status; dipenuhi = what actually arrived.
+ALTER TABLE klinik_permintaan_line ADD COLUMN IF NOT EXISTS disetujui DOUBLE PRECISION;
+UPDATE klinik_permintaan_line SET disetujui = CASE status WHEN 'APPROVED' THEN jumlah WHEN 'DITOLAK' THEN 0 END
+ WHERE disetujui IS NULL AND status IN ('APPROVED', 'DITOLAK');

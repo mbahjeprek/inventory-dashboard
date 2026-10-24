@@ -5167,11 +5167,14 @@ app.put("/api/klinik-permintaan/:id/pemenuhan", async (req, res) => {
         const status = PERMINTAAN_STATUS_LINE.includes(it?.status) ? it.status : l.status;
         // The alasan belongs to Sebagian / Ditolak only.
         const alasan = status === "SEBAGIAN" || status === "DITOLAK" ? String(it?.alasan ?? l.alasan ?? "").trim().slice(0, 300) : "";
+        // The approved amount follows the status: all of it, none, or (Sebagian) what was typed.
+        const disetujuiIn = it?.disetujui === "" || it?.disetujui === null || it?.disetujui === undefined ? l.disetujui : Number(it.disetujui);
+        const disetujui = status === "APPROVED" ? l.jumlah : status === "DITOLAK" ? 0 : status === "SEBAGIAN" ? disetujuiIn : null;
         const dipenuhi = it?.dipenuhi === "" || it?.dipenuhi === null || it?.dipenuhi === undefined ? null : Number(it.dipenuhi);
         if (dipenuhi !== null && (!Number.isFinite(dipenuhi) || dipenuhi < 0)) throw new Error(`${l.nama}: jumlah dipenuhi tidak valid`);
         const tgl = it?.tanggal_pemenuhan ? String(it.tanggal_pemenuhan) : null;
         if (tgl && !/^\d{4}-\d{2}-\d{2}$/.test(tgl)) throw new Error(`${l.nama}: tanggal pemenuhan tidak valid`);
-        const approvalBerubah = status !== l.status || alasan !== (l.alasan ?? "");
+        const approvalBerubah = status !== l.status || alasan !== (l.alasan ?? "") || disetujui !== l.disetujui;
         const pemenuhanBerubah = dipenuhi !== l.dipenuhi || tgl !== l.tanggal_pemenuhan;
         if (!approvalBerubah && !pemenuhanBerubah) continue;
         if (approvalBerubah && !bolehApprove)
@@ -5183,16 +5186,18 @@ app.put("/api/klinik-permintaan/:id/pemenuhan", async (req, res) => {
         if (pemenuhanBerubah && p.status !== "DISETUJUI")
           throw new Error(`${l.nama}: jumlah / tanggal pemenuhan diisi setelah keempat kotak ditandatangani (belum: ${TTD_LEVELS.filter((k) => !p.approval?.[k]).map((k) => TTD_LEVEL_LABEL[k]).join(", ")})`);
         if (pemenuhanBerubah && !bolehInput) throw new AksesError(`${l.nama}: jumlah / tanggal pemenuhan hanya bisa diisi akun dengan hak Input Klinik`);
+        if (approvalBerubah && status === "SEBAGIAN" && (disetujui === null || !Number.isFinite(disetujui) || disetujui <= 0 || disetujui >= l.jumlah))
+          throw new Error(`${l.nama}: isi jumlah yang disetujui (lebih dari 0 dan kurang dari ${fmtQty(l.jumlah)} ${l.satuan})`);
         if (approvalBerubah && (status === "SEBAGIAN" || status === "DITOLAK") && alasan.length < 3)
           throw new Error(`${l.nama}: isi alasan ${status === "DITOLAK" ? "penolakan" : "kenapa hanya disetujui sebagian"}`);
         await execute(
-          `UPDATE klinik_permintaan_line SET status = @status, alasan = @alasan, dipenuhi = @dipenuhi, tanggal_pemenuhan = @tgl
+          `UPDATE klinik_permintaan_line SET status = @status, alasan = @alasan, disetujui = @disetujui, dipenuhi = @dipenuhi, tanggal_pemenuhan = @tgl
              ${approvalBerubah ? ", approval_oleh = @oleh, approval_at = now(), approval_level = @rank" : ""} WHERE id = @id`,
-          { status, alasan, dipenuhi, tgl, oleh: u.nama, rank: itemRank(u), id: l.id },
+          { status, alasan, disetujui, dipenuhi, tgl, oleh: u.nama, rank: itemRank(u), id: l.id },
           c
         );
         done.push(
-          `${l.nama}: ${status}${approvalBerubah ? ` [${ITEM_RANK_LABEL[itemRank(u)]}]` : ""}${alasan ? ` (alasan: ${alasan})` : ""}${dipenuhi !== null ? ` ${fmtQty(dipenuhi)} ${l.satuan}` : ""}${tgl ? ` (${tgl.split("-").reverse().join("/")})` : ""}`
+          `${l.nama}: ${status}${approvalBerubah && disetujui !== null ? ` disetujui ${fmtQty(disetujui)} dari ${fmtQty(l.jumlah)} ${l.satuan}` : ""}${approvalBerubah ? ` [${ITEM_RANK_LABEL[itemRank(u)]}]` : ""}${alasan ? ` (alasan: ${alasan})` : ""}${dipenuhi !== null ? ` ${fmtQty(dipenuhi)} ${l.satuan}` : ""}${tgl ? ` (${tgl.split("-").reverse().join("/")})` : ""}`
         );
       }
     });
@@ -5278,7 +5283,7 @@ app.get("/api/klinik-permintaan-rekap", async (req, res) => {
     params.status = req.query.status;
   }
   const rows = await queryMany(
-    `SELECT l.id, p.id permintaan_id, p.nomor, p.tanggal, p.klinik, l.nama, l.satuan, l.jumlah, l.urgensi, l.status, l.alasan, l.dipenuhi, l.tanggal_pemenuhan, l.keterangan, l.stok_text
+    `SELECT l.id, p.id permintaan_id, p.nomor, p.tanggal, p.klinik, l.nama, l.satuan, l.jumlah, l.urgensi, l.status, l.alasan, l.disetujui, l.dipenuhi, l.tanggal_pemenuhan, l.keterangan, l.stok_text
      FROM klinik_permintaan_line l JOIN klinik_permintaan p ON p.id = l.permintaan_id
      WHERE ${where.join(" AND ")} ORDER BY p.tanggal DESC, p.id DESC, l.urut`,
     params

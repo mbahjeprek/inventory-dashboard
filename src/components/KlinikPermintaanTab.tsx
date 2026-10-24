@@ -552,8 +552,9 @@ export function Detail({ id, onBack }: { id: number; onBack: () => void; onEdit?
   // Item approval: Approve Permintaan Obat, or a Diketahui / Disetujui signer (Finance, GM, Head).
   const canApprove = ["klinik.permintaan_approve", "klinik.ttd_diketahui", "klinik.ttd_disetujui1", "klinik.ttd_disetujui2"].some((x) => can(user, x));
   const [p, setP] = useState<Permintaan | null>(null);
-  const [edit, setEdit] = useState<Record<number, { status: PermintaanLineStatus; alasan: string; dipenuhi: string; tanggal_pemenuhan: string }>>({});
+  const [edit, setEdit] = useState<Record<number, { status: PermintaanLineStatus; alasan: string; disetujui: string; dipenuhi: string; tanggal_pemenuhan: string }>>({});
   const [cekAlasan, setCekAlasan] = useState(false);
+  const [tolakSemua, setTolakSemua] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [msg, setMsg] = useState("");
   const [saving, setSaving] = useState(false);
@@ -563,7 +564,7 @@ export function Detail({ id, onBack }: { id: number; onBack: () => void; onEdit?
       .then((x) => {
         setP(x);
         setCekAlasan(false);
-        setEdit(Object.fromEntries(x.lines.map((l) => [l.id!, { status: l.status ?? "MENUNGGU", alasan: l.alasan ?? "", dipenuhi: l.dipenuhi === null || l.dipenuhi === undefined ? "" : String(l.dipenuhi), tanggal_pemenuhan: l.tanggal_pemenuhan ?? "" }])));
+        setEdit(Object.fromEntries(x.lines.map((l) => [l.id!, { status: l.status ?? "MENUNGGU", alasan: l.alasan ?? "", disetujui: l.disetujui === null || l.disetujui === undefined ? "" : String(l.disetujui), dipenuhi: l.dipenuhi === null || l.dipenuhi === undefined ? "" : String(l.dipenuhi), tanggal_pemenuhan: l.tanggal_pemenuhan ?? "" }])));
       })
       .catch((e) => setError(errorText(e, "Gagal memuat permintaan")));
   useEffect(() => {
@@ -586,17 +587,38 @@ export function Detail({ id, onBack }: { id: number; onBack: () => void; onEdit?
         p.lines.map((l) => [
           l.id!,
           terkunci(l)
-            ? { ...e[l.id!], dipenuhi: e[l.id!]?.dipenuhi || (l.status === "DITOLAK" ? "" : String(l.jumlah)), tanggal_pemenuhan: e[l.id!]?.tanggal_pemenuhan || today }
-            : { status: "APPROVED" as const, alasan: "", dipenuhi: e[l.id!]?.dipenuhi || String(l.jumlah), tanggal_pemenuhan: e[l.id!]?.tanggal_pemenuhan || today },
+            ? { ...e[l.id!], dipenuhi: e[l.id!]?.dipenuhi || String(l.disetujui ?? l.jumlah), tanggal_pemenuhan: e[l.id!]?.tanggal_pemenuhan || today }
+            : { status: "APPROVED" as const, alasan: "", disetujui: String(l.jumlah), dipenuhi: e[l.id!]?.dipenuhi || String(l.jumlah), tanggal_pemenuhan: e[l.id!]?.tanggal_pemenuhan || today },
         ])
       )
     );
   };
+  // Approve semua / Tolak semua (one alasan for every item): the items this account may still decide; saved with Simpan.
+  const semuaStatus = (status: "APPROVED" | "DITOLAK", alasan = "") =>
+    setEdit((e) =>
+      Object.fromEntries(
+        p.lines.map((l) => [
+          l.id!,
+          terkunci(l)
+            ? e[l.id!]
+            : { ...e[l.id!], status, alasan: status === "DITOLAK" ? alasan : "", disetujui: status === "APPROVED" ? String(l.jumlah) : "0", ...(status === "DITOLAK" && siap ? { dipenuhi: "0" } : {}) },
+        ])
+      )
+    );
   const simpan = async () => {
     setError("");
     setMsg("");
     // Only an approval being set now needs its alasan (an older one saved without it isn't blocked).
-    const berubah = (l: (typeof p.lines)[number]) => edit[l.id!].status !== (l.status ?? "MENUNGGU") || edit[l.id!].alasan.trim() !== (l.alasan ?? "");
+    const berubah = (l: (typeof p.lines)[number]) =>
+      edit[l.id!].status !== (l.status ?? "MENUNGGU") || edit[l.id!].alasan.trim() !== (l.alasan ?? "") || edit[l.id!].disetujui !== (l.disetujui === null || l.disetujui === undefined ? "" : String(l.disetujui));
+    const salahJumlah = p.lines.filter((l) => {
+      const n = Number(edit[l.id!].disetujui);
+      return berubah(l) && edit[l.id!].status === "SEBAGIAN" && (edit[l.id!].disetujui === "" || !(n > 0) || n >= l.jumlah);
+    });
+    if (salahJumlah.length) {
+      setCekAlasan(true);
+      return setError(`Isi jumlah yang disetujui (lebih dari 0 dan kurang dari jumlah permintaan): ${salahJumlah.map((l) => l.nama).join(", ")}`);
+    }
     const kurang = p.lines.filter((l) => berubah(l) && perluAlasan(edit[l.id!].status) && edit[l.id!].alasan.trim().length < 3);
     if (kurang.length) {
       setCekAlasan(true);
@@ -606,7 +628,13 @@ export function Detail({ id, onBack }: { id: number; onBack: () => void; onEdit?
     try {
       const r = await api.permintaanPemenuhan(
         p.id,
-        p.lines.map((l) => ({ id: l.id!, status: edit[l.id!].status, alasan: edit[l.id!].alasan.trim(), dipenuhi: edit[l.id!].dipenuhi === "" ? null : Number(edit[l.id!].dipenuhi), tanggal_pemenuhan: edit[l.id!].tanggal_pemenuhan || null }))
+        p.lines.map((l) => ({
+          id: l.id!,
+          status: edit[l.id!].status,
+          alasan: edit[l.id!].alasan.trim(),
+          disetujui: edit[l.id!].disetujui === "" ? null : Number(edit[l.id!].disetujui),
+          dipenuhi: edit[l.id!].dipenuhi === "" ? null : Number(edit[l.id!].dipenuhi), tanggal_pemenuhan: edit[l.id!].tanggal_pemenuhan || null,
+        }))
       );
       setMsg(`Tersimpan (${r.saved} item berubah)`);
       load();
@@ -634,6 +662,40 @@ export function Detail({ id, onBack }: { id: number; onBack: () => void; onEdit?
         </button>
       </div>
       <TtdPanel p={p} onDone={load} />
+      {bukaApproval && (
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <span className="text-[var(--text-secondary)]">Approval semua item:</span>
+          <button onClick={() => (setTolakSemua(null), semuaStatus("APPROVED"))} className={btn}>
+            <Check size={15} /> Approve semua
+          </button>
+          {tolakSemua === null ? (
+            <button onClick={() => setTolakSemua("")} className={`${btn} text-[var(--accent-red)]`}>
+              <X size={15} /> Tolak semua
+            </button>
+          ) : (
+            <>
+              <input
+                autoFocus
+                value={tolakSemua}
+                onChange={(ev) => setTolakSemua(ev.target.value)}
+                maxLength={300}
+                placeholder="Alasan ditolak, berlaku untuk semua item (wajib)"
+                className={`${inputCls} flex-1 min-w-[240px]`}
+              />
+              <button
+                onClick={() => (tolakSemua.trim().length < 3 ? setError("Isi alasan penolakan untuk semua item") : (semuaStatus("DITOLAK", tolakSemua.trim()), setTolakSemua(null), setError("")))}
+                className="inline-flex items-center gap-1.5 text-sm px-3.5 py-2 rounded-md bg-[var(--accent-red)] text-white hover:opacity-90"
+              >
+                Terapkan ke semua
+              </button>
+              <button onClick={() => setTolakSemua(null)} className={btn}>
+                Batal
+              </button>
+            </>
+          )}
+          <span className="text-xs text-[var(--text-muted)]">lalu klik Simpan di bawah. Item yang sudah diputuskan level di atas Anda tidak berubah.</span>
+        </div>
+      )}
       <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-[#f8fafc] text-xs text-[var(--text-secondary)]">
@@ -645,6 +707,7 @@ export function Detail({ id, onBack }: { id: number; onBack: () => void; onEdit?
               <th className="px-2 py-2">Urgensi</th>
               <th className="px-2 py-2">Keterangan/Stok</th>
               <th className="px-2 py-2 w-56">Status Approval</th>
+              <th className="px-2 py-2 w-24">Disetujui</th>
               <th className="px-2 py-2 w-24">Dipenuhi</th>
               <th className="px-2 py-2 w-36">Tgl Pemenuhan</th>
             </tr>
@@ -673,12 +736,16 @@ export function Detail({ id, onBack }: { id: number; onBack: () => void; onEdit?
                       value={e?.status}
                       onChange={(ev) => {
                         const status = ev.target.value as PermintaanLineStatus;
-                        // Approved: dipenuhi = the requested amount and today, where they are still empty.
+                        // Disetujui follows the status: all of it, 0, or typed for Sebagian. Once signed in full,
+                        // Approved also fills dipenuhi (the requested amount) and today, where they are still empty.
+                        const disetujui = status === "APPROVED" ? String(l.jumlah) : status === "DITOLAK" ? "0" : status === "SEBAGIAN" ? (e?.status === "SEBAGIAN" ? e.disetujui : "") : "";
                         set(
                           l.id!,
                           status === "APPROVED" && canInput && siap
-                            ? { status, dipenuhi: e?.dipenuhi || String(l.jumlah), tanggal_pemenuhan: e?.tanggal_pemenuhan || localToday() }
-                            : { status }
+                            ? { status, disetujui, dipenuhi: e?.dipenuhi || String(l.jumlah), tanggal_pemenuhan: e?.tanggal_pemenuhan || localToday() }
+                            : status === "DITOLAK" && canInput && siap
+                              ? { status, disetujui, dipenuhi: "0" }
+                              : { status, disetujui }
                         );
                       }}
                       className={cellIn}
@@ -708,6 +775,21 @@ export function Detail({ id, onBack }: { id: number; onBack: () => void; onEdit?
                         {l.approval_at && ` · ${new Date(l.approval_at).toLocaleDateString("id-ID")}`}
                       </p>
                     )}
+                  </td>
+                  <td className="px-2 py-1">
+                    <input
+                      disabled={!bukaApproval || terkunci(l) || e?.status !== "SEBAGIAN"}
+                      type="number"
+                      min={0}
+                      max={l.jumlah}
+                      value={e?.disetujui ?? ""}
+                      onChange={(ev) => set(l.id!, { disetujui: ev.target.value })}
+                      placeholder={e?.status === "SEBAGIAN" ? "berapa?" : ""}
+                      title={e?.status === "SEBAGIAN" ? `Jumlah yang disetujui (kurang dari ${fmt(l.jumlah, 2)})` : "Otomatis: Approved = jumlah permintaan, Ditolak = 0"}
+                      className={`${cellIn} ${
+                        cekAlasan && e?.status === "SEBAGIAN" && !(Number(e.disetujui) > 0 && Number(e.disetujui) < l.jumlah) ? "!border-[var(--accent-red)] bg-[var(--accent-red-bg)]" : ""
+                      }`}
+                    />
                   </td>
                   <td className="px-2 py-1">
                     <input disabled={!canInput || !siap} type="number" min={0} value={e?.dipenuhi} onChange={(ev) => set(l.id!, { dipenuhi: ev.target.value })} className={cellIn} />
@@ -781,7 +863,7 @@ function Rekap({ klinik }: { klinik: string }) {
       URGENSI_LABEL[r.urgensi],
       STATUS_LABEL[r.status],
       tgl(r.tanggal_pemenuhan),
-      [r.nomor, r.dipenuhi !== null ? `dipenuhi ${fmt(r.dipenuhi, 2)} ${r.satuan}` : "", r.alasan && `alasan: ${r.alasan}`, r.keterangan].filter(Boolean).join(" · "),
+      [r.nomor, r.disetujui !== null && r.disetujui !== r.jumlah ? `disetujui ${fmt(r.disetujui, 2)} ${r.satuan}` : "", r.dipenuhi !== null ? `dipenuhi ${fmt(r.dipenuhi, 2)} ${r.satuan}` : "", r.alasan && `alasan: ${r.alasan}`, r.keterangan].filter(Boolean).join(" · "),
     ]),
   });
   return (
@@ -843,6 +925,7 @@ function Rekap({ klinik }: { klinik: string }) {
                   <td className="px-3 py-1.5 text-center">{tgl(r.tanggal_pemenuhan)}</td>
                   <td className="px-3 py-1.5 text-xs text-[var(--text-secondary)]">
                     {r.nomor}
+                    {r.disetujui !== null && r.disetujui !== r.jumlah && ` · disetujui ${fmt(r.disetujui, 2)} ${r.satuan}`}
                     {r.dipenuhi !== null && ` · dipenuhi ${fmt(r.dipenuhi, 2)} ${r.satuan}`}
                     {r.alasan && ` · alasan: ${r.alasan}`}
                     {r.keterangan && ` · ${r.keterangan}`}
