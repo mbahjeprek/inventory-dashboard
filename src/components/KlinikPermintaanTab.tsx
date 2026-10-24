@@ -17,13 +17,14 @@ import { can } from "../lib/access";
 import { localToday } from "../lib/opname";
 import { printDocument, type TableReport } from "../lib/printTable";
 import { ExportButtons } from "./ExportButtons";
-import { TTD_DEFAULT, TTD_LABEL, TTD_LEVEL_LABEL, TTD_URUT, URGENSI_LABEL, estateLabel, permintaanHtml, ttdBerikut, waktuTtd } from "../lib/permintaanSurat";
+import { TTD_DEFAULT, TTD_LABEL, TTD_LEVEL_LABEL, TTD_URUT, URGENSI_LABEL, estateLabel, permintaanHtml, waktuTtd } from "../lib/permintaanSurat";
 
 // Klinik > Permintaan Obat: the "Form Permintaan Obat, BMHP dan Alat Medis" of the klinik, drafted from its
 // stock (saran = enough for N months of use, at least the buffer, in kemasan), edited, printed with the
-// kop and signatures, sent (DIAJUKAN), signed box by box in the app (Dibuat oleh -> Diketahui -> Disetujui 1 ->
-// Disetujui 2, each by an account with that box's tick; DISETUJUI once all four), then its items approved and
-// fulfilled; and the Rekap of every requested item like the request spreadsheet.
+// kop and signatures, sent (DIAJUKAN), signed in the app box by box in any order (Dibuat oleh, Diketahui,
+// Disetujui 1, Disetujui 2, each by an account with that box's tick; DISETUJUI once all four) - the Diketahui /
+// Disetujui signers may approve / refuse single items meanwhile - then fulfilled; and the Rekap of every
+// requested item like the request spreadsheet.
 
 const fmt = (n: number | null | undefined, d = 0) => (n === null || n === undefined ? "-" : n.toLocaleString("id-ID", { maximumFractionDigits: d }));
 const tgl = (iso: string | null | undefined) => (iso ? iso.split("-").reverse().join("/") : "-");
@@ -290,7 +291,7 @@ function Editor({ klinik, id, onDone, onBack }: { klinik: string; id: number | n
     if (!ls.length) return setError("Pilih minimal satu obat");
     const bad = ls.find((l) => !(l.jumlah > 0));
     if (bad) return setError(`${bad.nama}: isi jumlah permintaan`);
-    if (ajukan && !window.confirm(`Ajukan permintaan ${ls.length} item? Setelah diajukan isinya tidak bisa diubah lagi; permintaan lalu ditandatangani berurutan (Dibuat oleh, Diketahui, Disetujui 1, Disetujui 2).`)) return;
+    if (ajukan && !window.confirm(`Ajukan permintaan ${ls.length} item? Setelah diajukan isinya tidak bisa diubah lagi; permintaan lalu ditandatangani Dibuat oleh, Diketahui, Disetujui 1 dan Disetujui 2.`)) return;
     setSaving(true);
     try {
       const payload = { klinik, ...head, ttd, lines: ls, ajukan };
@@ -546,7 +547,8 @@ const perluAlasan = (s: PermintaanLineStatus) => s === "SEBAGIAN" || s === "DITO
 export function Detail({ id, onBack }: { id: number; onBack: () => void; onEdit?: (id: number) => void }) {
   const { user } = useAuth();
   const canInput = can(user, "klinik.input");
-  const canApprove = can(user, "klinik.permintaan_approve");
+  // Item approval: Approve Permintaan Obat, or a Diketahui / Disetujui signer (Finance, GM, Head).
+  const canApprove = ["klinik.permintaan_approve", "klinik.ttd_diketahui", "klinik.ttd_disetujui1", "klinik.ttd_disetujui2"].some((x) => can(user, x));
   const [p, setP] = useState<Permintaan | null>(null);
   const [edit, setEdit] = useState<Record<number, { status: PermintaanLineStatus; alasan: string; dipenuhi: string; tanggal_pemenuhan: string }>>({});
   const [cekAlasan, setCekAlasan] = useState(false);
@@ -569,6 +571,8 @@ export function Detail({ id, onBack }: { id: number; onBack: () => void; onEdit?
   if (!p) return <p className="p-4 text-sm text-[var(--text-muted)]">{error || "Memuat..."}</p>;
   // Items are approved / fulfilled only once the four boxes are signed.
   const siap = p.status === "DISETUJUI";
+  // Items can be approved / refused while it is being signed too.
+  const bukaApproval = canApprove && p.status !== "DRAFT";
   const set = (lid: number, patch: Partial<(typeof edit)[number]>) => setEdit((e) => ({ ...e, [lid]: { ...e[lid], ...patch } }));
   const semuaApproved = () => {
     const today = localToday();
@@ -646,15 +650,15 @@ export function Detail({ id, onBack }: { id: number; onBack: () => void; onEdit?
                   <td className="px-2 py-1.5 text-xs text-[var(--text-secondary)]">{[l.stok_text, l.keterangan].filter(Boolean).join(" · ")}</td>
                   <td className="px-2 py-1">
                     <select
-                      disabled={!canApprove || !siap}
-                      title={!siap ? "Terbuka setelah permintaan ditandatangani lengkap" : canApprove ? undefined : "Status approval hanya bisa diubah akun dengan hak Approve Permintaan Obat"}
+                      disabled={!bukaApproval}
+                      title={bukaApproval ? undefined : "Status approval diubah oleh penanda tangan Diketahui / Disetujui atau akun dengan hak Approve Permintaan Obat"}
                       value={e?.status}
                       onChange={(ev) => {
                         const status = ev.target.value as PermintaanLineStatus;
                         // Approved: dipenuhi = the requested amount and today, where they are still empty.
                         set(
                           l.id!,
-                          status === "APPROVED" && canInput
+                          status === "APPROVED" && canInput && siap
                             ? { status, dipenuhi: e?.dipenuhi || String(l.jumlah), tanggal_pemenuhan: e?.tanggal_pemenuhan || localToday() }
                             : { status }
                         );
@@ -669,7 +673,7 @@ export function Detail({ id, onBack }: { id: number; onBack: () => void; onEdit?
                     </select>
                     {e && perluAlasan(e.status) && (
                       <input
-                        disabled={!canApprove || !siap}
+                        disabled={!bukaApproval}
                         value={e.alasan}
                         onChange={(ev) => set(l.id!, { alasan: ev.target.value })}
                         placeholder={e.status === "DITOLAK" ? "Alasan ditolak (wajib)" : "Alasan disetujui sebagian (wajib)"}
@@ -698,18 +702,18 @@ export function Detail({ id, onBack }: { id: number; onBack: () => void; onEdit?
           </tbody>
         </table>
       </div>
-      {(canInput || canApprove) && siap && (
+      {(bukaApproval || (canInput && siap)) && (
         <div className="flex flex-wrap items-center gap-2">
           {error && <span className="text-sm text-[var(--accent-red)]">{error}</span>}
           {msg && <span className="text-sm text-[var(--accent-green)]">{msg}</span>}
           <span className="ml-auto" />
-          {canApprove && canInput && (
+          {canApprove && canInput && siap && (
             <button onClick={semuaApproved} className={btn}>
               Semua approved & dipenuhi hari ini
             </button>
           )}
           <button onClick={simpan} disabled={saving} className={btnBlue}>
-            <Save size={15} /> {saving ? "Menyimpan..." : "Simpan pemenuhan"}
+            <Save size={15} /> {saving ? "Menyimpan..." : siap ? "Simpan pemenuhan" : "Simpan approval item"}
           </button>
         </div>
       )}
@@ -846,15 +850,16 @@ function StatusSurat({ p }: { p: Pick<Permintaan, "status" | "approval" | "tolak
       <span className={`${cls} border-[var(--border)] text-[var(--text-secondary)]`}>Draft</span>
     );
   if (p.status === "DISETUJUI") return <span className={`${cls} border-[var(--accent-green-border)] text-[var(--accent-green)] bg-[var(--accent-green-bg)]`}>Disetujui</span>;
-  const next = ttdBerikut(p);
+  const belum = TTD_URUT.filter((k) => !p.approval?.[k]);
   return (
-    <span className={`${cls} border-[var(--accent-amber-border)] text-[var(--accent-amber)] bg-[var(--accent-amber-bg)]`}>
-      Menunggu {next ? TTD_LEVEL_LABEL[next] : "tanda tangan"} ({TTD_URUT.filter((k) => p.approval?.[k]).length}/4)
+    <span className={`${cls} border-[var(--accent-amber-border)] text-[var(--accent-amber)] bg-[var(--accent-amber-bg)]`} title={`Belum: ${belum.map((k) => TTD_LEVEL_LABEL[k]).join(", ")}`}>
+      Menunggu tanda tangan ({4 - belum.length}/4)
     </span>
   );
 }
 
-// ---- Tanda tangan: the four boxes in order; the account whose turn it is signs (Setujui) or refuses with an alasan ----
+// ---- Tanda tangan: the four boxes, signed in any order; an account signs (Setujui) an unsigned box it has the tick for,
+// or refuses with an alasan ----
 function TtdPanel({ p, onDone }: { p: Permintaan; onDone: () => void }) {
   const { user } = useAuth();
   const [tolakMode, setTolakMode] = useState(false);
@@ -862,17 +867,17 @@ function TtdPanel({ p, onDone }: { p: Permintaan; onDone: () => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   if (p.status === "DRAFT") return null;
-  const next = p.status === "DIAJUKAN" ? ttdBerikut(p) : null;
   const sudahTtd = user?.role !== "superuser" && TTD_URUT.some((k) => p.approval?.[k]?.user_id === user?.id);
-  const giliranSaya = !!next && can(user, `klinik.ttd_${next}`) && !sudahTtd;
-  const kirim = async (aksi: "SETUJU" | "TOLAK") => {
-    if (!next) return;
+  // The unsigned boxes this account may sign now.
+  const bisa = p.status === "DIAJUKAN" && !sudahTtd ? TTD_URUT.filter((k) => !p.approval?.[k] && can(user, `klinik.ttd_${k}`)) : [];
+  const kirim = async (aksi: "SETUJU" | "TOLAK", level = bisa[0]) => {
+    if (!level) return;
     if (aksi === "TOLAK" && alasan.trim().length < 3) return setError("Isi alasan penolakan");
-    if (aksi === "SETUJU" && !window.confirm(`Tandatangani permintaan ${p.nomor} sebagai ${TTD_LEVEL_LABEL[next]}?`)) return;
+    if (aksi === "SETUJU" && !window.confirm(`Tandatangani permintaan ${p.nomor} sebagai ${TTD_LEVEL_LABEL[level]}?`)) return;
     setBusy(true);
     setError("");
     try {
-      await api.permintaanTtd(p.id, { level: next, aksi, alasan: alasan.trim() });
+      await api.permintaanTtd(p.id, { level, aksi, alasan: alasan.trim() });
       setTolakMode(false);
       setAlasan("");
       onDone();
@@ -891,7 +896,7 @@ function TtdPanel({ p, onDone }: { p: Permintaan; onDone: () => void }) {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
         {TTD_URUT.map((k) => {
           const a = p.approval?.[k];
-          const now = k === next;
+          const now = bisa.includes(k);
           return (
             <div
               key={k}
@@ -906,13 +911,18 @@ function TtdPanel({ p, onDone }: { p: Permintaan; onDone: () => void }) {
               <p className="text-sm font-medium text-[var(--text-primary)] leading-tight mt-0.5">{a?.nama || p.ttd?.[k]?.nama || "-"}</p>
               <p className="text-[11px] text-[var(--text-muted)]">{a?.jabatan || p.ttd?.[k]?.jabatan}</p>
               <p className={`text-[11px] mt-0.5 ${a ? "text-[var(--accent-green)]" : now ? "text-[var(--accent-amber)]" : "text-[var(--text-muted)]"}`}>
-                {a ? `Ditandatangani ${waktuTtd(a.at)}` : now ? "Giliran tanda tangan" : "Belum"}
+                {a ? `Ditandatangani ${waktuTtd(a.at)}` : now ? "Bisa Anda tandatangani" : "Belum"}
               </p>
+              {now && bisa.length > 1 && (
+                <button onClick={() => kirim("SETUJU", k)} disabled={busy} className="mt-1.5 inline-flex items-center gap-1 text-xs px-2 py-1 rounded bg-[var(--accent-blue)] text-white hover:opacity-90 disabled:opacity-50">
+                  <Check size={12} /> Tandatangani
+                </button>
+              )}
             </div>
           );
         })}
       </div>
-      {giliranSaya && (
+      {bisa.length > 0 && (
         <div className="flex flex-wrap items-center gap-2 border-t border-[var(--border)] pt-3">
           {tolakMode ? (
             <>
@@ -934,25 +944,34 @@ function TtdPanel({ p, onDone }: { p: Permintaan; onDone: () => void }) {
           ) : (
             <>
               <span className="text-sm text-[var(--text-secondary)]">
-                Giliran Anda menandatangani sebagai <b>{TTD_LEVEL_LABEL[next!]}</b>.
+                {bisa.length === 1 ? (
+                  <>
+                    Anda menandatangani sebagai <b>{TTD_LEVEL_LABEL[bisa[0]]}</b>.
+                  </>
+                ) : (
+                  "Pilih kotak yang ditandatangani (tombol di kotaknya)."
+                )}
               </span>
               <span className="ml-auto" />
               <button onClick={() => setTolakMode(true)} disabled={busy} className={btn}>
                 Tolak
               </button>
-              <button onClick={() => kirim("SETUJU")} disabled={busy} className={btnBlue}>
-                <Check size={15} /> {busy ? "Menyimpan..." : "Setujui & tandatangani"}
-              </button>
+              {bisa.length === 1 && (
+                <button onClick={() => kirim("SETUJU")} disabled={busy} className={btnBlue}>
+                  <Check size={15} /> {busy ? "Menyimpan..." : "Setujui & tandatangani"}
+                </button>
+              )}
             </>
           )}
           {error && <span className="w-full text-xs text-[var(--accent-red)]">{error}</span>}
         </div>
       )}
-      {next && !giliranSaya && can(user, `klinik.ttd_${next}`) && sudahTtd && (
-        <p className="text-xs text-[var(--text-muted)]">Anda sudah menandatangani kotak lain; kotak {TTD_LEVEL_LABEL[next]} ditandatangani orang lain.</p>
-      )}
+      {p.status === "DIAJUKAN" && sudahTtd && <p className="text-xs text-[var(--text-muted)]">Anda sudah menandatangani permintaan ini; kotak lain ditandatangani orang lain.</p>}
       {p.status === "DIAJUKAN" && (
-        <p className="text-[11px] text-[var(--text-muted)]">Approval per item dan pemenuhan terbuka setelah keempat kotak ditandatangani.</p>
+        <p className="text-[11px] text-[var(--text-muted)]">
+          Tanda tangan boleh dalam urutan apa saja. Approval per item (Sebagian / Ditolak dengan alasan) bisa diisi Diketahui / Disetujui sekarang; jumlah & tanggal
+          pemenuhan terbuka setelah keempat kotak ditandatangani.
+        </p>
       )}
     </div>
   );

@@ -395,7 +395,8 @@ export type PermintaanTtdOleh = { nama: string; jabatan: string; user_id?: numbe
 export type PermintaanMenunggu = Pick<Permintaan, "id" | "klinik" | "nomor" | "tanggal" | "periode" | "departemen" | "created_by" | "diajukan_at" | "approval" | "ttd"> & {
   items: number;
   high: number;
-  berikut: keyof PermintaanTtd;
+  // The unsigned boxes this account may sign (any order).
+  bisa: (keyof PermintaanTtd)[];
 };
 export type PermintaanTtd = { dibuat: PermintaanOrang; diketahui: PermintaanOrang; disetujui1: PermintaanOrang; disetujui2: PermintaanOrang };
 export type PermintaanLine = {

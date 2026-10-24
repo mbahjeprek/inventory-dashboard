@@ -117,7 +117,7 @@ export function PersetujuanPage() {
       {bolehPermintaan && (
         <section className="space-y-2">
           <h2 className="text-sm font-semibold text-[var(--text-primary)]">
-            Permintaan Obat <span className="ml-1 text-xs font-normal text-[var(--text-muted)]">urut: Dibuat oleh → Diketahui → Disetujui 1 → Disetujui 2</span>
+            Permintaan Obat <span className="ml-1 text-xs font-normal text-[var(--text-muted)]">4 tanda tangan, urutan bebas</span>
           </h2>
           <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg overflow-x-auto">
             <table className="w-full text-sm">
@@ -170,8 +170,8 @@ export function PersetujuanPage() {
                       </td>
                       <td className="px-3 py-2">
                         <span className="text-xs px-2 py-0.5 rounded-full border border-[var(--accent-amber-border)] text-[var(--accent-amber)] bg-[var(--accent-amber-bg)] whitespace-nowrap">
-                          {TTD_LEVEL_LABEL[r.berikut]}
-                          {r.ttd?.[r.berikut]?.jabatan && ` · ${r.ttd[r.berikut].jabatan}`}
+                          {r.bisa.map((k) => TTD_LEVEL_LABEL[k]).join(" / ")}
+                          {r.bisa.length === 1 && r.ttd?.[r.bisa[0]]?.jabatan && ` · ${r.ttd[r.bisa[0]].jabatan}`}
                         </span>
                       </td>
                       <td className="px-3 py-2 text-right">

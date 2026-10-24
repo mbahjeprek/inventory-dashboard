@@ -1250,7 +1250,7 @@ ALTER TABLE klinik_permintaan_line ADD COLUMN IF NOT EXISTS alasan TEXT NOT NULL
 ALTER TABLE klinik_permintaan_line ADD COLUMN IF NOT EXISTS approval_oleh TEXT;
 ALTER TABLE klinik_permintaan_line ADD COLUMN IF NOT EXISTS approval_at TIMESTAMPTZ;
 
--- Permintaan Obat: digital sign-off in order - dibuat (Manager Estate), diketahui (GM Finance & Audit),
+-- Permintaan Obat: digital sign-off, the boxes in any order - dibuat (Manager Estate), diketahui (GM Finance & Audit),
 -- disetujui1 (Corporate GM Plantation), disetujui2 (Head of Business Unit) - each by an account with that
 -- level's tick (klinik.ttd_<level>). approval = { level: { nama, jabatan, user_id, at } }; once all four
 -- signed the status goes DIAJUKAN -> DISETUJUI and the items can be approved / fulfilled. A refusal (with
