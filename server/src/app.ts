@@ -167,6 +167,10 @@ const KEBUN_HANYA_SUPER = true;
 const TTD_PERMS = ["klinik.ttd_dibuat", "klinik.ttd_diketahui", "klinik.ttd_disetujui1", "klinik.ttd_disetujui2"];
 // The signers who may also approve / refuse single items (Sebagian / Ditolak with an alasan): Finance, GM, Head.
 const TTD_ITEM_PERMS = ["klinik.ttd_diketahui", "klinik.ttd_disetujui1", "klinik.ttd_disetujui2"];
+// Their rank for an item's decision: a higher one may change a lower one's, not the other way round.
+const ITEM_RANK_LABEL = ["Approve Permintaan Obat", "Diketahui (Finance)", "Disetujui 1 (GM)", "Disetujui 2 (Head)", "Super User"];
+const itemRank = (u: SessionUser) =>
+  u.role === "superuser" ? 4 : Math.max(0, ...TTD_ITEM_PERMS.map((x, i) => (u.perms.includes(x) ? i + 1 : 0)));
 const ACTIVITY_PERM: Record<string, string> = { BARANG: "gudang", BBM: "bbm", PUPUK: "pupuk", KLINIK: "klinik", OLI: "oli", KOPERASI: "koperasi", KENDARAAN: "kendaraan", PRUNING: "pruning" };
 function requiredPerms(req: express.Request): Need {
   // Inside app.use("/api") req.path is relative to the mount, inside a route it is the full path.
@@ -5172,6 +5176,10 @@ app.put("/api/klinik-permintaan/:id/pemenuhan", async (req, res) => {
         if (!approvalBerubah && !pemenuhanBerubah) continue;
         if (approvalBerubah && !bolehApprove)
           throw new AksesError(`${l.nama}: status approval hanya bisa diubah akun dengan hak Approve Permintaan Obat atau penanda tangan Diketahui / Disetujui`);
+        if (approvalBerubah && (l.approval_level ?? 0) > itemRank(u))
+          throw new AksesError(
+            `${l.nama}: sudah diputuskan ${l.approval_oleh ?? ""} (${ITEM_RANK_LABEL[l.approval_level]}); hanya level yang sama atau lebih tinggi yang bisa mengubahnya`
+          );
         if (pemenuhanBerubah && p.status !== "DISETUJUI")
           throw new Error(`${l.nama}: jumlah / tanggal pemenuhan diisi setelah keempat kotak ditandatangani (belum: ${TTD_LEVELS.filter((k) => !p.approval?.[k]).map((k) => TTD_LEVEL_LABEL[k]).join(", ")})`);
         if (pemenuhanBerubah && !bolehInput) throw new AksesError(`${l.nama}: jumlah / tanggal pemenuhan hanya bisa diisi akun dengan hak Input Klinik`);
@@ -5179,12 +5187,12 @@ app.put("/api/klinik-permintaan/:id/pemenuhan", async (req, res) => {
           throw new Error(`${l.nama}: isi alasan ${status === "DITOLAK" ? "penolakan" : "kenapa hanya disetujui sebagian"}`);
         await execute(
           `UPDATE klinik_permintaan_line SET status = @status, alasan = @alasan, dipenuhi = @dipenuhi, tanggal_pemenuhan = @tgl
-             ${approvalBerubah ? ", approval_oleh = @oleh, approval_at = now()" : ""} WHERE id = @id`,
-          { status, alasan, dipenuhi, tgl, oleh: u.nama, id: l.id },
+             ${approvalBerubah ? ", approval_oleh = @oleh, approval_at = now(), approval_level = @rank" : ""} WHERE id = @id`,
+          { status, alasan, dipenuhi, tgl, oleh: u.nama, rank: itemRank(u), id: l.id },
           c
         );
         done.push(
-          `${l.nama}: ${status}${alasan ? ` (alasan: ${alasan})` : ""}${dipenuhi !== null ? ` ${fmtQty(dipenuhi)} ${l.satuan}` : ""}${tgl ? ` (${tgl.split("-").reverse().join("/")})` : ""}`
+          `${l.nama}: ${status}${approvalBerubah ? ` [${ITEM_RANK_LABEL[itemRank(u)]}]` : ""}${alasan ? ` (alasan: ${alasan})` : ""}${dipenuhi !== null ? ` ${fmtQty(dipenuhi)} ${l.satuan}` : ""}${tgl ? ` (${tgl.split("-").reverse().join("/")})` : ""}`
         );
       }
     });

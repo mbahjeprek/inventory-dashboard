@@ -1265,3 +1265,8 @@ ALTER TABLE klinik_permintaan ADD COLUMN IF NOT EXISTS tolak JSONB;
 -- PNG data URL, input_oleh = the account holding the device). Tutup needs those three. A BA made before this has
 -- ttd '{}' and keeps its WhatsApp-capture approval.
 ALTER TABLE berita_acara ADD COLUMN IF NOT EXISTS ttd JSONB NOT NULL DEFAULT '{}'::jsonb;
+
+-- Permintaan Obat item approval in tiers: approval_level = the rank of who decided it last (0 = Approve
+-- Permintaan Obat only, 1 = Diketahui / Finance, 2 = Disetujui 1 / GM, 3 = Disetujui 2 / Head, 4 = Super User).
+-- An account may change an item decided at its own rank or below, never one decided higher up.
+ALTER TABLE klinik_permintaan_line ADD COLUMN IF NOT EXISTS approval_level INTEGER NOT NULL DEFAULT 0;

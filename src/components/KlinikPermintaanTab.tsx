@@ -37,6 +37,8 @@ const URG_CLS: Record<PermintaanUrgensi, string> = {
   MEDIUM: "text-[var(--accent-amber)] font-medium",
   LOW: "text-[var(--text-secondary)]",
 };
+// Who decided an item, by rank (a higher rank may change a lower one's decision).
+const RANK_LABEL = ["Approve", "Finance", "GM", "Head", "Super User"];
 const STATUS_LABEL: Record<PermintaanLineStatus, string> = { MENUNGGU: "Menunggu", APPROVED: "Approved", SEBAGIAN: "Sebagian", DITOLAK: "Ditolak" };
 
 const cetak = async (id: number) => printDocument(permintaanHtml(await api.permintaanGet(id)));
@@ -571,13 +573,23 @@ export function Detail({ id, onBack }: { id: number; onBack: () => void; onEdit?
   if (!p) return <p className="p-4 text-sm text-[var(--text-muted)]">{error || "Memuat..."}</p>;
   // Items are approved / fulfilled only once the four boxes are signed.
   const siap = p.status === "DISETUJUI";
-  // Items can be approved / refused while it is being signed too.
+  // Items can be approved / refused while it is being signed too; an item decided by a higher rank stays as it is.
   const bukaApproval = canApprove && p.status !== "DRAFT";
+  const rank = user?.role === "superuser" ? 4 : Math.max(0, ...["klinik.ttd_diketahui", "klinik.ttd_disetujui1", "klinik.ttd_disetujui2"].map((x, i) => (can(user, x) ? i + 1 : 0)));
+  const terkunci = (l: (typeof p.lines)[number]) => (l.approval_level ?? 0) > rank;
   const set = (lid: number, patch: Partial<(typeof edit)[number]>) => setEdit((e) => ({ ...e, [lid]: { ...e[lid], ...patch } }));
   const semuaApproved = () => {
     const today = localToday();
     setEdit((e) =>
-      Object.fromEntries(p.lines.map((l) => [l.id!, { status: "APPROVED" as const, alasan: "", dipenuhi: e[l.id!]?.dipenuhi || String(l.jumlah), tanggal_pemenuhan: e[l.id!]?.tanggal_pemenuhan || today }]))
+      // An item decided higher up keeps its decision; only its pemenuhan is filled.
+      Object.fromEntries(
+        p.lines.map((l) => [
+          l.id!,
+          terkunci(l)
+            ? { ...e[l.id!], dipenuhi: e[l.id!]?.dipenuhi || (l.status === "DITOLAK" ? "" : String(l.jumlah)), tanggal_pemenuhan: e[l.id!]?.tanggal_pemenuhan || today }
+            : { status: "APPROVED" as const, alasan: "", dipenuhi: e[l.id!]?.dipenuhi || String(l.jumlah), tanggal_pemenuhan: e[l.id!]?.tanggal_pemenuhan || today },
+        ])
+      )
     );
   };
   const simpan = async () => {
@@ -650,8 +662,14 @@ export function Detail({ id, onBack }: { id: number; onBack: () => void; onEdit?
                   <td className="px-2 py-1.5 text-xs text-[var(--text-secondary)]">{[l.stok_text, l.keterangan].filter(Boolean).join(" · ")}</td>
                   <td className="px-2 py-1">
                     <select
-                      disabled={!bukaApproval}
-                      title={bukaApproval ? undefined : "Status approval diubah oleh penanda tangan Diketahui / Disetujui atau akun dengan hak Approve Permintaan Obat"}
+                      disabled={!bukaApproval || terkunci(l)}
+                      title={
+                        terkunci(l)
+                          ? `Sudah diputuskan ${l.approval_oleh ?? ""} (${RANK_LABEL[l.approval_level ?? 0]}); hanya level yang sama atau lebih tinggi yang bisa mengubahnya`
+                          : bukaApproval
+                            ? undefined
+                            : "Status approval diubah oleh penanda tangan Diketahui / Disetujui atau akun dengan hak Approve Permintaan Obat"
+                      }
                       value={e?.status}
                       onChange={(ev) => {
                         const status = ev.target.value as PermintaanLineStatus;
@@ -673,7 +691,7 @@ export function Detail({ id, onBack }: { id: number; onBack: () => void; onEdit?
                     </select>
                     {e && perluAlasan(e.status) && (
                       <input
-                        disabled={!bukaApproval}
+                        disabled={!bukaApproval || terkunci(l)}
                         value={e.alasan}
                         onChange={(ev) => set(l.id!, { alasan: ev.target.value })}
                         placeholder={e.status === "DITOLAK" ? "Alasan ditolak (wajib)" : "Alasan disetujui sebagian (wajib)"}
@@ -686,6 +704,7 @@ export function Detail({ id, onBack }: { id: number; onBack: () => void; onEdit?
                     {l.approval_oleh && (
                       <p className="mt-0.5 text-[10px] text-[var(--text-muted)]">
                         oleh {l.approval_oleh}
+                        {(l.approval_level ?? 0) > 0 && ` (${RANK_LABEL[l.approval_level!]})`}
                         {l.approval_at && ` · ${new Date(l.approval_at).toLocaleDateString("id-ID")}`}
                       </p>
                     )}

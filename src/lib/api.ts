@@ -414,6 +414,8 @@ export type PermintaanLine = {
   alasan?: string;
   approval_oleh?: string | null;
   approval_at?: string | null;
+  // The rank of who decided it (0 Approve, 1 Finance, 2 GM, 3 Head, 4 Super User); only that rank or higher changes it.
+  approval_level?: number;
   dipenuhi?: number | null;
   tanggal_pemenuhan?: string | null;
 };
