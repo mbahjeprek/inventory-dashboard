@@ -531,11 +531,16 @@ function Editor({ klinik, id, onDone, onBack }: { klinik: string; id: number | n
 }
 
 // ---- A sent request: print it and record the fulfilment per item ----
+// The status approval (and its alasan, needed for Sebagian / Ditolak) is set with Approve Permintaan Obat;
+// dipenuhi / tanggal pemenuhan with Input Klinik.
+const perluAlasan = (s: PermintaanLineStatus) => s === "SEBAGIAN" || s === "DITOLAK";
 function Detail({ id, onBack }: { id: number; onBack: () => void; onEdit: (id: number) => void }) {
   const { user } = useAuth();
   const canInput = can(user, "klinik.input");
+  const canApprove = can(user, "klinik.permintaan_approve");
   const [p, setP] = useState<Permintaan | null>(null);
-  const [edit, setEdit] = useState<Record<number, { status: PermintaanLineStatus; dipenuhi: string; tanggal_pemenuhan: string }>>({});
+  const [edit, setEdit] = useState<Record<number, { status: PermintaanLineStatus; alasan: string; dipenuhi: string; tanggal_pemenuhan: string }>>({});
+  const [cekAlasan, setCekAlasan] = useState(false);
   const [error, setError] = useState("");
   const [msg, setMsg] = useState("");
   const [saving, setSaving] = useState(false);
@@ -544,7 +549,8 @@ function Detail({ id, onBack }: { id: number; onBack: () => void; onEdit: (id: n
       .permintaanGet(id)
       .then((x) => {
         setP(x);
-        setEdit(Object.fromEntries(x.lines.map((l) => [l.id!, { status: l.status ?? "MENUNGGU", dipenuhi: l.dipenuhi === null || l.dipenuhi === undefined ? "" : String(l.dipenuhi), tanggal_pemenuhan: l.tanggal_pemenuhan ?? "" }])));
+        setCekAlasan(false);
+        setEdit(Object.fromEntries(x.lines.map((l) => [l.id!, { status: l.status ?? "MENUNGGU", alasan: l.alasan ?? "", dipenuhi: l.dipenuhi === null || l.dipenuhi === undefined ? "" : String(l.dipenuhi), tanggal_pemenuhan: l.tanggal_pemenuhan ?? "" }])));
       })
       .catch((e) => setError(errorText(e, "Gagal memuat permintaan")));
   useEffect(() => {
@@ -556,17 +562,24 @@ function Detail({ id, onBack }: { id: number; onBack: () => void; onEdit: (id: n
   const semuaApproved = () => {
     const today = localToday();
     setEdit((e) =>
-      Object.fromEntries(p.lines.map((l) => [l.id!, { status: "APPROVED" as const, dipenuhi: e[l.id!]?.dipenuhi || String(l.jumlah), tanggal_pemenuhan: e[l.id!]?.tanggal_pemenuhan || today }]))
+      Object.fromEntries(p.lines.map((l) => [l.id!, { status: "APPROVED" as const, alasan: "", dipenuhi: e[l.id!]?.dipenuhi || String(l.jumlah), tanggal_pemenuhan: e[l.id!]?.tanggal_pemenuhan || today }]))
     );
   };
   const simpan = async () => {
-    setSaving(true);
     setError("");
     setMsg("");
+    // Only an approval being set now needs its alasan (an older one saved without it isn't blocked).
+    const berubah = (l: (typeof p.lines)[number]) => edit[l.id!].status !== (l.status ?? "MENUNGGU") || edit[l.id!].alasan.trim() !== (l.alasan ?? "");
+    const kurang = p.lines.filter((l) => berubah(l) && perluAlasan(edit[l.id!].status) && edit[l.id!].alasan.trim().length < 3);
+    if (kurang.length) {
+      setCekAlasan(true);
+      return setError(`Isi alasan untuk item Sebagian / Ditolak: ${kurang.map((l) => l.nama).join(", ")}`);
+    }
+    setSaving(true);
     try {
       const r = await api.permintaanPemenuhan(
         p.id,
-        p.lines.map((l) => ({ id: l.id!, status: edit[l.id!].status, dipenuhi: edit[l.id!].dipenuhi === "" ? null : Number(edit[l.id!].dipenuhi), tanggal_pemenuhan: edit[l.id!].tanggal_pemenuhan || null }))
+        p.lines.map((l) => ({ id: l.id!, status: edit[l.id!].status, alasan: edit[l.id!].alasan.trim(), dipenuhi: edit[l.id!].dipenuhi === "" ? null : Number(edit[l.id!].dipenuhi), tanggal_pemenuhan: edit[l.id!].tanggal_pemenuhan || null }))
       );
       setMsg(`Tersimpan (${r.saved} item berubah)`);
       load();
@@ -603,7 +616,7 @@ function Detail({ id, onBack }: { id: number; onBack: () => void; onEdit: (id: n
               <th className="px-2 py-2 text-right">Jumlah</th>
               <th className="px-2 py-2">Urgensi</th>
               <th className="px-2 py-2">Keterangan/Stok</th>
-              <th className="px-2 py-2 w-32">Status Approval</th>
+              <th className="px-2 py-2 w-56">Status Approval</th>
               <th className="px-2 py-2 w-24">Dipenuhi</th>
               <th className="px-2 py-2 w-36">Tgl Pemenuhan</th>
             </tr>
@@ -620,13 +633,37 @@ function Detail({ id, onBack }: { id: number; onBack: () => void; onEdit: (id: n
                   <td className={`px-2 py-1.5 ${URG_CLS[l.urgensi]}`}>{URGENSI_LABEL[l.urgensi]}</td>
                   <td className="px-2 py-1.5 text-xs text-[var(--text-secondary)]">{[l.stok_text, l.keterangan].filter(Boolean).join(" · ")}</td>
                   <td className="px-2 py-1">
-                    <select disabled={!canInput} value={e?.status} onChange={(ev) => set(l.id!, { status: ev.target.value as PermintaanLineStatus })} className={cellIn}>
+                    <select
+                      disabled={!canApprove}
+                      title={canApprove ? undefined : "Status approval hanya bisa diubah akun dengan hak Approve Permintaan Obat"}
+                      value={e?.status}
+                      onChange={(ev) => set(l.id!, { status: ev.target.value as PermintaanLineStatus })}
+                      className={cellIn}
+                    >
                       {(Object.keys(STATUS_LABEL) as PermintaanLineStatus[]).map((s) => (
                         <option key={s} value={s}>
                           {STATUS_LABEL[s]}
                         </option>
                       ))}
                     </select>
+                    {e && perluAlasan(e.status) && (
+                      <input
+                        disabled={!canApprove}
+                        value={e.alasan}
+                        onChange={(ev) => set(l.id!, { alasan: ev.target.value })}
+                        placeholder={e.status === "DITOLAK" ? "Alasan ditolak (wajib)" : "Alasan disetujui sebagian (wajib)"}
+                        maxLength={300}
+                        className={`${cellIn} mt-1 text-xs ${
+                          cekAlasan && e.alasan.trim().length < 3 ? "!border-[var(--accent-red)] bg-[var(--accent-red-bg)]" : ""
+                        }`}
+                      />
+                    )}
+                    {l.approval_oleh && (
+                      <p className="mt-0.5 text-[10px] text-[var(--text-muted)]">
+                        oleh {l.approval_oleh}
+                        {l.approval_at && ` · ${new Date(l.approval_at).toLocaleDateString("id-ID")}`}
+                      </p>
+                    )}
                   </td>
                   <td className="px-2 py-1">
                     <input disabled={!canInput} type="number" min={0} value={e?.dipenuhi} onChange={(ev) => set(l.id!, { dipenuhi: ev.target.value })} className={cellIn} />
@@ -640,20 +677,24 @@ function Detail({ id, onBack }: { id: number; onBack: () => void; onEdit: (id: n
           </tbody>
         </table>
       </div>
-      {canInput && (
+      {(canInput || canApprove) && (
         <div className="flex flex-wrap items-center gap-2">
           {error && <span className="text-sm text-[var(--accent-red)]">{error}</span>}
           {msg && <span className="text-sm text-[var(--accent-green)]">{msg}</span>}
-          <button onClick={semuaApproved} className={`${btn} ml-auto`}>
-            Semua approved & dipenuhi hari ini
-          </button>
+          <span className="ml-auto" />
+          {canApprove && canInput && (
+            <button onClick={semuaApproved} className={btn}>
+              Semua approved & dipenuhi hari ini
+            </button>
+          )}
           <button onClick={simpan} disabled={saving} className={btnBlue}>
             <Save size={15} /> {saving ? "Menyimpan..." : "Simpan pemenuhan"}
           </button>
         </div>
       )}
       <p className="text-[11px] text-[var(--text-muted)]">
-        Pemenuhan hanya mencatat status permintaan. Obat yang datang tetap dicatat lewat Stock In supaya stok bertambah.
+        Pemenuhan hanya mencatat status permintaan. Obat yang datang tetap dicatat lewat Stock In supaya stok bertambah. Status approval diubah oleh pemegang
+        hak Approve Permintaan Obat; Sebagian dan Ditolak wajib disertai alasan.
       </p>
     </div>
   );
@@ -696,7 +737,7 @@ function Rekap({ klinik }: { klinik: string }) {
       URGENSI_LABEL[r.urgensi],
       STATUS_LABEL[r.status],
       tgl(r.tanggal_pemenuhan),
-      [r.nomor, r.dipenuhi !== null ? `dipenuhi ${fmt(r.dipenuhi, 2)} ${r.satuan}` : "", r.keterangan].filter(Boolean).join(" · "),
+      [r.nomor, r.dipenuhi !== null ? `dipenuhi ${fmt(r.dipenuhi, 2)} ${r.satuan}` : "", r.alasan && `alasan: ${r.alasan}`, r.keterangan].filter(Boolean).join(" · "),
     ]),
   });
   return (
@@ -759,6 +800,7 @@ function Rekap({ klinik }: { klinik: string }) {
                   <td className="px-3 py-1.5 text-xs text-[var(--text-secondary)]">
                     {r.nomor}
                     {r.dipenuhi !== null && ` · dipenuhi ${fmt(r.dipenuhi, 2)} ${r.satuan}`}
+                    {r.alasan && ` · alasan: ${r.alasan}`}
                     {r.keterangan && ` · ${r.keterangan}`}
                   </td>
                 </tr>

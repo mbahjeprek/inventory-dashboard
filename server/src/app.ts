@@ -215,6 +215,8 @@ function requiredPerms(req: express.Request): Need {
   // Klinik > Laporan Harian: Lihat / Input / Edit / Hapus kunjungan (estate checked in the route).
   if (is(/^\/klinik-laporan(\/|$)/)) return [`klinik.${act}`];
   // Permintaan Obat: Lihat; buat / ubah / ajukan / catat pemenuhan with Input; hapus with Hapus.
+  // Pemenuhan: dipenuhi / tanggal with Input Klinik, the status approval with Approve Permintaan Obat (checked in the route).
+  if (is(/^\/klinik-permintaan\/\d+\/pemenuhan$/)) return ["klinik.input", "klinik.permintaan_approve"];
   if (is(/^\/klinik-permintaan(-rekap)?(\/|$)/)) return m === "GET" ? ["klinik.view"] : m === "DELETE" ? ["klinik.delete"] : ["klinik.input"];
   // Master Pasien: the patients of the account's clinics (estate checked in the route).
   if (is(/^\/pasien(\/|$)/)) return [`klinik.${act}`];
@@ -269,7 +271,7 @@ const PERM_AKSI: Record<string, string> = { view: "Lihat", input: "Input", edit:
 const permLabel = (p: string) => {
   const [m, a] = p.split(".");
   if (PERM_MODUL[m]) return `${PERM_AKSI[a] ?? a} ${PERM_MODUL[m]}`;
-  const other: Record<string, string> = { "dokumen.edit": "Dokumen & Link", "dokumen.kelola": "Kelola semua Dokumen & Link", "sop.view": "Lihat Daftar SOP", "sop.edit": "Ubah Daftar SOP", "sop.kunci": "Kunci Daftar SOP", "master.peta": "Lihat Peta Blok", "master.peta_edit": "Ubah Peta Blok", "master.alat": "Master Alat Berat", "master.users": "Pengguna", "monitor.log_user": "Log Aktivitas User" };
+  const other: Record<string, string> = { "dokumen.edit": "Dokumen & Link", "dokumen.kelola": "Kelola semua Dokumen & Link", "klinik.permintaan_approve": "Approve Permintaan Obat", "sop.view": "Lihat Daftar SOP", "sop.edit": "Ubah Daftar SOP", "sop.kunci": "Kunci Daftar SOP", "master.peta": "Lihat Peta Blok", "master.peta_edit": "Ubah Peta Blok", "master.alat": "Master Alat Berat", "master.users": "Pengguna", "monitor.log_user": "Log Aktivitas User" };
   return other[p] ?? (m === "master" ? `Master ${a.charAt(0).toUpperCase()}${a.slice(1)}` : p);
 };
 
@@ -4915,6 +4917,8 @@ app.get("/api/klinik-laporan/options", async (req, res) => {
 // rounded up to whole kemasan (BOX / BOTOL ...) where the obat has one. Urgensi: HIGH = out of stock or
 // under half a month left, MEDIUM = at / under the buffer or under a month left, else LOW.
 const PERMINTAAN_STATUS_LINE = ["MENUNGGU", "APPROVED", "SEBAGIAN", "DITOLAK"];
+// A refusal for lack of a permission inside a transaction (answered 403, not 400).
+class AksesError extends Error {}
 const PERMINTAAN_URGENSI = ["HIGH", "MEDIUM", "LOW"];
 const fmtQty = (n: number) => (Math.round(n * 100) / 100).toLocaleString("id-ID");
 
@@ -5110,13 +5114,17 @@ app.put("/api/klinik-permintaan/:id", async (req, res) => {
   res.json({ success: true });
 });
 
-// Fulfilment of a sent request, per item: status approval, how much came and when.
+// Fulfilment of a sent request, per item: status approval, how much came and when. The status (and its alasan)
+// is set only with Approve Permintaan Obat; Sebagian / Ditolak need an alasan. Dipenuhi / tanggal with Input Klinik.
 app.put("/api/klinik-permintaan/:id/pemenuhan", async (req, res) => {
   const p = await queryOne<any>("SELECT * FROM klinik_permintaan WHERE id = @id", { id: Number(req.params.id) || 0 });
   if (!p) return res.status(404).json({ error: "Permintaan tidak ditemukan" });
   if (!checkKlinik(req, res, p.klinik)) return;
   if (p.status === "DRAFT") return res.status(400).json({ error: "Ajukan permintaan dulu sebelum mencatat pemenuhan" });
   const items = (Array.isArray(req.body?.lines) ? req.body.lines : []).slice(0, 500);
+  const u = req.user!;
+  const bolehApprove = u.role === "superuser" || u.perms.includes("klinik.permintaan_approve");
+  const bolehInput = u.role === "superuser" || u.perms.includes("klinik.input");
   const done: string[] = [];
   try {
     await withTransaction(async (c) => {
@@ -5124,17 +5132,32 @@ app.put("/api/klinik-permintaan/:id/pemenuhan", async (req, res) => {
         const l = await queryOne<any>("SELECT * FROM klinik_permintaan_line WHERE id = @id AND permintaan_id = @pid", { id: Number(it?.id) || 0, pid: p.id }, c);
         if (!l) continue;
         const status = PERMINTAAN_STATUS_LINE.includes(it?.status) ? it.status : l.status;
+        // The alasan belongs to Sebagian / Ditolak only.
+        const alasan = status === "SEBAGIAN" || status === "DITOLAK" ? String(it?.alasan ?? l.alasan ?? "").trim().slice(0, 300) : "";
         const dipenuhi = it?.dipenuhi === "" || it?.dipenuhi === null || it?.dipenuhi === undefined ? null : Number(it.dipenuhi);
         if (dipenuhi !== null && (!Number.isFinite(dipenuhi) || dipenuhi < 0)) throw new Error(`${l.nama}: jumlah dipenuhi tidak valid`);
         const tgl = it?.tanggal_pemenuhan ? String(it.tanggal_pemenuhan) : null;
         if (tgl && !/^\d{4}-\d{2}-\d{2}$/.test(tgl)) throw new Error(`${l.nama}: tanggal pemenuhan tidak valid`);
-        if (status === l.status && dipenuhi === l.dipenuhi && tgl === l.tanggal_pemenuhan) continue;
-        await execute("UPDATE klinik_permintaan_line SET status = @status, dipenuhi = @dipenuhi, tanggal_pemenuhan = @tgl WHERE id = @id", { status, dipenuhi, tgl, id: l.id }, c);
-        done.push(`${l.nama}: ${status}${dipenuhi !== null ? ` ${fmtQty(dipenuhi)} ${l.satuan}` : ""}${tgl ? ` (${tgl.split("-").reverse().join("/")})` : ""}`);
+        const approvalBerubah = status !== l.status || alasan !== (l.alasan ?? "");
+        const pemenuhanBerubah = dipenuhi !== l.dipenuhi || tgl !== l.tanggal_pemenuhan;
+        if (!approvalBerubah && !pemenuhanBerubah) continue;
+        if (approvalBerubah && !bolehApprove) throw new AksesError(`${l.nama}: status approval hanya bisa diubah akun dengan hak Approve Permintaan Obat`);
+        if (pemenuhanBerubah && !bolehInput) throw new AksesError(`${l.nama}: jumlah / tanggal pemenuhan hanya bisa diisi akun dengan hak Input Klinik`);
+        if (approvalBerubah && (status === "SEBAGIAN" || status === "DITOLAK") && alasan.length < 3)
+          throw new Error(`${l.nama}: isi alasan ${status === "DITOLAK" ? "penolakan" : "kenapa hanya disetujui sebagian"}`);
+        await execute(
+          `UPDATE klinik_permintaan_line SET status = @status, alasan = @alasan, dipenuhi = @dipenuhi, tanggal_pemenuhan = @tgl
+             ${approvalBerubah ? ", approval_oleh = @oleh, approval_at = now()" : ""} WHERE id = @id`,
+          { status, alasan, dipenuhi, tgl, oleh: u.nama, id: l.id },
+          c
+        );
+        done.push(
+          `${l.nama}: ${status}${alasan ? ` (alasan: ${alasan})` : ""}${dipenuhi !== null ? ` ${fmtQty(dipenuhi)} ${l.satuan}` : ""}${tgl ? ` (${tgl.split("-").reverse().join("/")})` : ""}`
+        );
       }
     });
   } catch (e: any) {
-    return res.status(400).json({ error: e?.message ?? "Gagal menyimpan" });
+    return res.status(e instanceof AksesError ? 403 : 400).json({ error: e?.message ?? "Gagal menyimpan" });
   }
   if (done.length) await logActivity(req, { module: "KLINIK", estate: p.klinik, aksi: "Pemenuhan Permintaan Obat", objek: `${p.nomor} · ${done.length} item`, detail: done.slice(0, 60).join("; ") });
   res.json({ success: true, saved: done.length });
@@ -5165,7 +5188,7 @@ app.get("/api/klinik-permintaan-rekap", async (req, res) => {
     params.status = req.query.status;
   }
   const rows = await queryMany(
-    `SELECT l.id, p.id permintaan_id, p.nomor, p.tanggal, p.klinik, l.nama, l.satuan, l.jumlah, l.urgensi, l.status, l.dipenuhi, l.tanggal_pemenuhan, l.keterangan, l.stok_text
+    `SELECT l.id, p.id permintaan_id, p.nomor, p.tanggal, p.klinik, l.nama, l.satuan, l.jumlah, l.urgensi, l.status, l.alasan, l.dipenuhi, l.tanggal_pemenuhan, l.keterangan, l.stok_text
      FROM klinik_permintaan_line l JOIN klinik_permintaan p ON p.id = l.permintaan_id
      WHERE ${where.join(" AND ")} ORDER BY p.tanggal DESC, p.id DESC, l.urut`,
     params

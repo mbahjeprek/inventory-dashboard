@@ -49,6 +49,10 @@ export const OTHER_PERMS: { group: string; items: { key: string; label: string }
       { key: "master.users", label: "Pengguna" },
     ],
   },
+  {
+    group: "Klinik",
+    items: [{ key: "klinik.permintaan_approve", label: "Approve Permintaan Obat (setujui / sebagian / tolak per item; sebagian & tolak wajib alasan)" }],
+  },
   { group: "Monitoring", items: [{ key: "monitor.log_user", label: "Log Aktivitas User" }] },
   {
     group: "Koperasi PT.AKSS",

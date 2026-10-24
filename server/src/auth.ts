@@ -44,6 +44,8 @@ export const ALL_PERMS: string[] = [
   "dokumen.kelola",
   // Daftar SOP: Lihat; Ubah = add SOPs to a bagian, change / delete the ones not locked; Kunci = lock / unlock
   // an SOP or a whole bagian (and change the locked ones).
+  // Approve Permintaan Obat: set an item's status approval (Sebagian / Ditolak with an alasan).
+  "klinik.permintaan_approve",
   "sop.view",
   "sop.edit",
   "sop.kunci",

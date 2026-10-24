@@ -403,6 +403,10 @@ export type PermintaanLine = {
   stok_text: string;
   keterangan: string;
   status?: PermintaanLineStatus;
+  // Why Sebagian / Ditolak; who set the status approval last and when.
+  alasan?: string;
+  approval_oleh?: string | null;
+  approval_at?: string | null;
   dipenuhi?: number | null;
   tanggal_pemenuhan?: string | null;
 };
@@ -433,6 +437,7 @@ export type PermintaanRekapRow = {
   jumlah: number;
   urgensi: PermintaanUrgensi;
   status: PermintaanLineStatus;
+  alasan: string;
   dipenuhi: number | null;
   tanggal_pemenuhan: string | null;
   keterangan: string;
@@ -1619,7 +1624,7 @@ export const api = {
   permintaanGet: (id: number) => req<Permintaan>(`/api/klinik-permintaan/${id}`),
   permintaanCreate: (payload: PermintaanInput) => req<{ success: boolean; id: number; nomor: string }>("/api/klinik-permintaan", { method: "POST", body: JSON.stringify(payload) }),
   permintaanUpdate: (id: number, payload: PermintaanInput) => req<{ success: boolean }>(`/api/klinik-permintaan/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
-  permintaanPemenuhan: (id: number, lines: { id: number; status: PermintaanLineStatus; dipenuhi: number | null; tanggal_pemenuhan: string | null }[]) =>
+  permintaanPemenuhan: (id: number, lines: { id: number; status: PermintaanLineStatus; alasan: string; dipenuhi: number | null; tanggal_pemenuhan: string | null }[]) =>
     req<{ success: boolean; saved: number }>(`/api/klinik-permintaan/${id}/pemenuhan`, { method: "PUT", body: JSON.stringify({ lines }) }),
   permintaanDelete: (id: number) => req<{ success: boolean }>(`/api/klinik-permintaan/${id}`, { method: "DELETE" }),
   permintaanRekap: (params: Record<string, string>) => req<{ rows: PermintaanRekapRow[] }>(`/api/klinik-permintaan-rekap?${new URLSearchParams(params)}`),

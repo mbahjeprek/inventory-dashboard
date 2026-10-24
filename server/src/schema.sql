@@ -1242,3 +1242,10 @@ ALTER TABLE sop ADD COLUMN IF NOT EXISTS dikunci BOOLEAN NOT NULL DEFAULT false;
 -- tanggung_jawab, prosedur, rekaman, lampiran) plus who signs it (disusun / diperiksa / disetujui, each nama
 -- and jabatan); printed / exported to Word from the SOP's page. '{}' = not written in the app (only the link).
 ALTER TABLE sop ADD COLUMN IF NOT EXISTS isi JSONB NOT NULL DEFAULT '{}'::jsonb;
+
+-- Permintaan Obat approval: set (Approved / Sebagian / Ditolak) only with Approve Permintaan Obat
+-- (klinik.permintaan_approve); Sebagian and Ditolak need an alasan. approval_oleh / approval_at = who set the
+-- status last and when.
+ALTER TABLE klinik_permintaan_line ADD COLUMN IF NOT EXISTS alasan TEXT NOT NULL DEFAULT '';
+ALTER TABLE klinik_permintaan_line ADD COLUMN IF NOT EXISTS approval_oleh TEXT;
+ALTER TABLE klinik_permintaan_line ADD COLUMN IF NOT EXISTS approval_at TIMESTAMPTZ;
