@@ -391,6 +391,12 @@ export type PermintaanSaran = {
 export type PermintaanUrgensi = "HIGH" | "MEDIUM" | "LOW";
 export type PermintaanLineStatus = "MENUNGGU" | "APPROVED" | "SEBAGIAN" | "DITOLAK";
 export type PermintaanOrang = { nama: string; jabatan: string };
+export type PermintaanTtdOleh = { nama: string; jabatan: string; user_id?: number; at: string };
+export type PermintaanMenunggu = Pick<Permintaan, "id" | "klinik" | "nomor" | "tanggal" | "periode" | "departemen" | "created_by" | "diajukan_at" | "approval" | "ttd"> & {
+  items: number;
+  high: number;
+  berikut: keyof PermintaanTtd;
+};
 export type PermintaanTtd = { dibuat: PermintaanOrang; diketahui: PermintaanOrang; disetujui1: PermintaanOrang; disetujui2: PermintaanOrang };
 export type PermintaanLine = {
   id?: number;
@@ -417,9 +423,13 @@ export type Permintaan = {
   tanggal: string;
   periode: string;
   departemen: string;
-  status: "DRAFT" | "DIAJUKAN";
+  // DIAJUKAN = sent, being signed box by box; DISETUJUI = all four signed, its items can be approved / fulfilled.
+  status: "DRAFT" | "DIAJUKAN" | "DISETUJUI";
   catatan: string;
   ttd: PermintaanTtd;
+  approval: Partial<Record<keyof PermintaanTtd, PermintaanTtdOleh>>;
+  // The last refusal (sent back to the klinik as a draft).
+  tolak: (PermintaanTtdOleh & { level: keyof PermintaanTtd; alasan: string }) | null;
   created_by: string;
   created_at: string;
   diajukan_at: string | null;
@@ -1626,6 +1636,9 @@ export const api = {
   permintaanUpdate: (id: number, payload: PermintaanInput) => req<{ success: boolean }>(`/api/klinik-permintaan/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
   permintaanPemenuhan: (id: number, lines: { id: number; status: PermintaanLineStatus; alasan: string; dipenuhi: number | null; tanggal_pemenuhan: string | null }[]) =>
     req<{ success: boolean; saved: number }>(`/api/klinik-permintaan/${id}/pemenuhan`, { method: "PUT", body: JSON.stringify({ lines }) }),
+  permintaanMenunggu: () => req<{ rows: PermintaanMenunggu[] }>("/api/klinik-permintaan/menunggu"),
+  permintaanTtd: (id: number, body: { level: string; aksi: "SETUJU" | "TOLAK"; alasan?: string }) =>
+    req<{ success: boolean; status: Permintaan["status"] }>(`/api/klinik-permintaan/${id}/ttd`, { method: "POST", body: JSON.stringify(body) }),
   permintaanDelete: (id: number) => req<{ success: boolean }>(`/api/klinik-permintaan/${id}`, { method: "DELETE" }),
   permintaanRekap: (params: Record<string, string>) => req<{ rows: PermintaanRekapRow[] }>(`/api/klinik-permintaan-rekap?${new URLSearchParams(params)}`),
   lengkapiList: (kind: LengkapiKind, estate: string, bulan: string) => req<LengkapiList>(`/api/lengkapi/${kind}?${new URLSearchParams({ estate, bulan })}`),

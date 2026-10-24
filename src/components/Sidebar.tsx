@@ -18,6 +18,7 @@ import {
   Stethoscope,
   Activity,
   ClipboardCheck,
+  Signature,
   Droplet,
   ArrowLeftRight,
   Contact,
@@ -32,7 +33,7 @@ import { useAuth } from "../context/AuthContext";
 import { useEstateFilter } from "../hooks/useEstateFilter";
 import { useOpenPinjaman } from "../hooks/useOpenPinjaman";
 import { ChangePasswordModal } from "./ChangePasswordModal";
-import { canModule, hasDashboard, pageAllowed, userEstates, OPNAME_PATH, PINJAMAN_PATH, PASIEN_PATH, KOPERASI_PATH, KENDARAAN_PATH, PRUNING_PATH, DOKUMEN_PATH, SOP_PATH, type Module } from "../lib/access";
+import { canModule, hasDashboard, pageAllowed, userEstates, OPNAME_PATH, PINJAMAN_PATH, PASIEN_PATH, KOPERASI_PATH, KENDARAAN_PATH, PRUNING_PATH, DOKUMEN_PATH, SOP_PATH, PERSETUJUAN_PATH, type Module } from "../lib/access";
 
 // subtitle: shown only on the active menu, which grows into a gold card (see NavRow).
 type NavItem = { to: string; label: string; icon: typeof Package; subtitle?: string };
@@ -75,7 +76,12 @@ function pageOf(pathname: string): { module: ModuleLink; estate: string } | null
 const LAST_ESTATE_KEY = "sidebar-estate";
 
 const navSections: NavSection[] = [
-  { items: [{ to: "/", label: "Dashboard", icon: LayoutDashboard, subtitle: "Ringkasan semua estate" }] },
+  {
+    items: [
+      { to: "/", label: "Dashboard", icon: LayoutDashboard, subtitle: "Ringkasan semua estate" },
+      { to: PERSETUJUAN_PATH, label: "Persetujuan", icon: Signature, subtitle: "Tanda tangan Permintaan Obat" },
+    ],
+  },
   {
     title: "Inventory",
     collapsible: true,

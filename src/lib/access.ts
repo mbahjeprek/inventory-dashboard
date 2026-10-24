@@ -51,7 +51,13 @@ export const OTHER_PERMS: { group: string; items: { key: string; label: string }
   },
   {
     group: "Klinik",
-    items: [{ key: "klinik.permintaan_approve", label: "Approve Permintaan Obat (setujui / sebagian / tolak per item; sebagian & tolak wajib alasan)" }],
+    items: [
+      { key: "klinik.ttd_dibuat", label: "Tanda tangan Permintaan Obat: Dibuat oleh (Manager Estate)" },
+      { key: "klinik.ttd_diketahui", label: "Tanda tangan Permintaan Obat: Diketahui (GM Finance & Audit)" },
+      { key: "klinik.ttd_disetujui1", label: "Tanda tangan Permintaan Obat: Disetujui 1 (Corporate GM Plantation)" },
+      { key: "klinik.ttd_disetujui2", label: "Tanda tangan Permintaan Obat: Disetujui 2 (Head of Business Unit)" },
+      { key: "klinik.permintaan_approve", label: "Approve Permintaan Obat per item (setelah ditandatangani lengkap; sebagian & tolak wajib alasan)" },
+    ],
   },
   { group: "Monitoring", items: [{ key: "monitor.log_user", label: "Log Aktivitas User" }] },
   {
@@ -209,6 +215,9 @@ export const kebunTerlihat = (user: AuthUser | null) => !!user && (user.role ===
 
 // Dokumen & Link: every account sees the links of its estates; Kelola Dokumen adds / edits them.
 export const DOKUMEN_PATH = "/dokumen";
+// Persetujuan: the requests waiting for the account's signature, for whoever may sign a box of the Permintaan Obat.
+export const PERSETUJUAN_PATH = "/persetujuan";
+export const TTD_PERMS = ["klinik.ttd_dibuat", "klinik.ttd_diketahui", "klinik.ttd_disetujui1", "klinik.ttd_disetujui2"];
 // Daftar SOP: seen with Lihat, Ubah or Kunci Daftar SOP.
 export const SOP_PATH = "/sop";
 export const KOPERASI_ESTATE = "NILAM";
@@ -217,6 +226,7 @@ export const KOPERASI_ESTATE = "NILAM";
 // admin, HR, a Kendaraan-only account) has nothing there, so it lands on the first page it can open
 // instead - Koperasi first, Dokumen & Link (open to everyone) last.
 const LANDING_PAGES = [
+  "/persetujuan",
   KOPERASI_PATH,
   KENDARAAN_PATH,
   PRUNING_PATH,
@@ -249,6 +259,7 @@ export function pageAllowed(user: AuthUser | null, path: string): boolean {
   if (path === PINJAMAN_PATH) return MODULES.some((m) => canModule(user, m));
   if (path === PASIEN_PATH) return canModule(user, "KLINIK");
   if (path === DOKUMEN_PATH) return true;
+  if (path === PERSETUJUAN_PATH) return TTD_PERMS.some((p) => can(user, p));
   if (path === SOP_PATH || path.startsWith(`${SOP_PATH}/`)) return ["sop.view", "sop.edit", "sop.kunci"].some((p) => can(user, p));
   if (path === KOPERASI_PATH) return can(user, "koperasi.view") && userEstates(user).includes(KOPERASI_ESTATE);
   if (path === KENDARAAN_PATH) return can(user, "kendaraan.view");

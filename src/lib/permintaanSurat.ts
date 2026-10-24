@@ -16,6 +16,12 @@ export const TTD_DEFAULT = (klinik: string): PermintaanTtd => ({
   disetujui1: { nama: "FITRIONO EFENDI", jabatan: "Corporate GM Plantation" },
   disetujui2: { nama: "JOHAR LATIFAH", jabatan: "Head of Business Unit" },
 });
+// The order the boxes are signed in, with the name shown on screen.
+export const TTD_LEVEL_LABEL: Record<keyof PermintaanTtd, string> = { dibuat: "Dibuat oleh", diketahui: "Diketahui", disetujui1: "Disetujui 1", disetujui2: "Disetujui 2" };
+export const TTD_URUT: (keyof PermintaanTtd)[] = ["dibuat", "diketahui", "disetujui1", "disetujui2"];
+export const ttdBerikut = (p: Pick<Permintaan, "approval">) => TTD_URUT.find((k) => !p.approval?.[k]) ?? null;
+export const waktuTtd = (iso: string) =>
+  new Date(iso).toLocaleString("id-ID", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }).replace(",", "");
 export const TTD_LABEL: [keyof PermintaanTtd, string][] = [
   ["dibuat", "Dibuat Oleh,"],
   ["diketahui", "Diketahui,"],
@@ -39,10 +45,12 @@ export function permintaanHtml(p: Permintaan): string {
       </tr>`
     )
     .join("");
-  const ttd = TTD_LABEL.map(
-    ([k, judul]) =>
-      `<div class="ttd"><div>${esc(judul)}</div><div class="ruang"></div><div class="nama">${esc(p.ttd?.[k]?.nama || "(................................)")}</div><div class="jab">${esc(p.ttd?.[k]?.jabatan ?? "")}</div></div>`
-  ).join("");
+  // A box signed in the app: the signer's name and an electronic stamp with the time instead of the blank space.
+  const ttd = TTD_LABEL.map(([k, judul]) => {
+    const a = p.approval?.[k];
+    const ruang = a ? `<div class="ruang el"><div class="cap">DISETUJUI SECARA ELEKTRONIK<br>${esc(waktuTtd(a.at))}</div></div>` : `<div class="ruang"></div>`;
+    return `<div class="ttd"><div>${esc(judul)}</div>${ruang}<div class="nama">${esc(a?.nama || p.ttd?.[k]?.nama || "(................................)")}</div><div class="jab">${esc(a?.jabatan || p.ttd?.[k]?.jabatan || "")}</div></div>`;
+  }).join("");
   return `<!doctype html><html><head><meta charset="utf-8"><title>${esc(p.nomor)}</title><style>
     @page { size: A4 portrait; margin: 12mm 12mm 14mm 14mm; }
     body { font-family: "Times New Roman", serif; font-size: 11pt; color: #000; margin: 0; }
@@ -65,6 +73,8 @@ export function permintaanHtml(p: Permintaan): string {
     .ttd { flex: 1; text-align: center; padding: 4px 4px 6px; border-right: 1px solid #000; font-size: 10pt; }
     .ttd:last-child { border-right: 0; }
     .ttd .ruang { height: 62px; }
+    .ttd .ruang.el { display: flex; align-items: center; justify-content: center; }
+    .ttd .cap { border: 1.5px solid #1f4e9c; color: #1f4e9c; border-radius: 4px; padding: 3px 6px; font-size: 7.5pt; font-weight: bold; line-height: 1.35; font-family: Arial, sans-serif; }
     .ttd .nama { font-weight: bold; text-decoration: underline; text-transform: uppercase; }
     .ttd .jab { font-size: 9pt; text-transform: uppercase; }
     .alamat { display: flex; justify-content: space-between; gap: 20px; margin-top: 18px; padding-top: 5px; border-top: 3px double #000; font-size: 8.5pt; font-style: italic; page-break-inside: avoid; }

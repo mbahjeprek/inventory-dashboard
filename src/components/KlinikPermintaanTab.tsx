@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, FilePlus2, Printer, Save, Search, Send, Trash2, Wand2, X } from "lucide-react";
+import { ArrowLeft, Check, CircleDashed, FilePlus2, Printer, Save, Search, Send, Trash2, Wand2, X } from "lucide-react";
 import {
   api,
   errorText,
@@ -17,12 +17,13 @@ import { can } from "../lib/access";
 import { localToday } from "../lib/opname";
 import { printDocument, type TableReport } from "../lib/printTable";
 import { ExportButtons } from "./ExportButtons";
-import { TTD_DEFAULT, TTD_LABEL, URGENSI_LABEL, estateLabel, permintaanHtml } from "../lib/permintaanSurat";
+import { TTD_DEFAULT, TTD_LABEL, TTD_LEVEL_LABEL, TTD_URUT, URGENSI_LABEL, estateLabel, permintaanHtml, ttdBerikut, waktuTtd } from "../lib/permintaanSurat";
 
 // Klinik > Permintaan Obat: the "Form Permintaan Obat, BMHP dan Alat Medis" of the klinik, drafted from its
 // stock (saran = enough for N months of use, at least the buffer, in kemasan), edited, printed with the
-// kop and signatures, sent (DIAJUKAN), then its fulfilment recorded per item; and the Rekap of every
-// requested item like the request spreadsheet.
+// kop and signatures, sent (DIAJUKAN), signed box by box in the app (Dibuat oleh -> Diketahui -> Disetujui 1 ->
+// Disetujui 2, each by an account with that box's tick; DISETUJUI once all four), then its items approved and
+// fulfilled; and the Rekap of every requested item like the request spreadsheet.
 
 const fmt = (n: number | null | undefined, d = 0) => (n === null || n === undefined ? "-" : n.toLocaleString("id-ID", { maximumFractionDigits: d }));
 const tgl = (iso: string | null | undefined) => (iso ? iso.split("-").reverse().join("/") : "-");
@@ -133,16 +134,10 @@ function Daftar({ klinik, rekap, setView }: { klinik: string; rekap: boolean; se
                       {p.high > 0 && <span className="ml-1 text-[11px] text-[var(--accent-red)]">({p.high} high)</span>}
                     </td>
                     <td className="px-3 py-2">
-                      <span
-                        className={`text-xs px-2 py-0.5 rounded-full border ${
-                          p.status === "DRAFT" ? "border-[var(--border)] text-[var(--text-secondary)]" : "border-[var(--accent-blue-border)] text-[var(--accent-blue)] bg-[var(--accent-blue-bg)]"
-                        }`}
-                      >
-                        {p.status === "DRAFT" ? "Draft" : "Diajukan"}
-                      </span>
+                      <StatusSurat p={p} />
                     </td>
                     <td className="px-3 py-2 text-xs text-[var(--text-secondary)]">
-                      {p.status === "DRAFT" ? "-" : `${p.terpenuhi}/${p.items} terpenuhi${p.ditolak ? ` · ${p.ditolak} ditolak` : ""}`}
+                      {p.status !== "DISETUJUI" ? "-" : `${p.terpenuhi}/${p.items} terpenuhi${p.ditolak ? ` · ${p.ditolak} ditolak` : ""}`}
                     </td>
                     <td className="px-3 py-2 text-xs text-[var(--text-secondary)]">{p.created_by}</td>
                     <td className="px-3 py-2 whitespace-nowrap text-right">
@@ -184,6 +179,7 @@ function Editor({ klinik, id, onDone, onBack }: { klinik: string; id: number | n
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [loaded, setLoaded] = useState(false);
+  const [tolak, setTolak] = useState<Permintaan["tolak"]>(null);
 
   // An existing draft: its data; a new one: the klinik's last signatories, and the saran ticked.
   useEffect(() => {
@@ -194,6 +190,7 @@ function Editor({ klinik, id, onDone, onBack }: { klinik: string; id: number | n
         if (id) {
           const p = await api.permintaanGet(id);
           setNomor(p.nomor);
+          setTolak(p.tolak);
           setHead({ tanggal: p.tanggal, periode: p.periode, departemen: p.departemen, catatan: p.catatan });
           setTtd({ ...TTD_DEFAULT(klinik), ...p.ttd });
           const pl: Record<string, Pilih> = {};
@@ -293,7 +290,7 @@ function Editor({ klinik, id, onDone, onBack }: { klinik: string; id: number | n
     if (!ls.length) return setError("Pilih minimal satu obat");
     const bad = ls.find((l) => !(l.jumlah > 0));
     if (bad) return setError(`${bad.nama}: isi jumlah permintaan`);
-    if (ajukan && !window.confirm(`Ajukan permintaan ${ls.length} item? Setelah diajukan isinya tidak bisa diubah lagi (hanya pemenuhannya).`)) return;
+    if (ajukan && !window.confirm(`Ajukan permintaan ${ls.length} item? Setelah diajukan isinya tidak bisa diubah lagi; permintaan lalu ditandatangani berurutan (Dibuat oleh, Diketahui, Disetujui 1, Disetujui 2).`)) return;
     setSaving(true);
     try {
       const payload = { klinik, ...head, ttd, lines: ls, ajukan };
@@ -320,6 +317,8 @@ function Editor({ klinik, id, onDone, onBack }: { klinik: string; id: number | n
         ...head,
         status: "DRAFT",
         ttd,
+        approval: {},
+        tolak: null,
         created_by: "",
         created_at: "",
         diajukan_at: null,
@@ -337,6 +336,16 @@ function Editor({ klinik, id, onDone, onBack }: { klinik: string; id: number | n
         </button>
         <h2 className="font-semibold text-[var(--text-primary)]">{id ? `Ubah draft ${nomor}` : "Permintaan obat baru"}</h2>
       </div>
+      {tolak && (
+        <div className="rounded-lg border border-[var(--accent-red-border)] bg-[var(--accent-red-bg)] px-4 py-3 text-sm">
+          <p className="font-medium text-[var(--accent-red)]">
+            Ditolak oleh {tolak.nama}
+            {tolak.jabatan && ` (${tolak.jabatan})`} di kotak {TTD_LEVEL_LABEL[tolak.level]} · {waktuTtd(tolak.at)}
+          </p>
+          <p className="text-[var(--text-primary)] mt-0.5">Alasan: {tolak.alasan}</p>
+          <p className="text-xs text-[var(--text-secondary)] mt-1">Perbaiki permintaan lalu ajukan lagi; tanda tangan diulang dari Dibuat oleh.</p>
+        </div>
+      )}
 
       <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg p-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <label className="text-xs text-[var(--text-secondary)] space-y-1">
@@ -534,7 +543,7 @@ function Editor({ klinik, id, onDone, onBack }: { klinik: string; id: number | n
 // The status approval (and its alasan, needed for Sebagian / Ditolak) is set with Approve Permintaan Obat;
 // dipenuhi / tanggal pemenuhan with Input Klinik.
 const perluAlasan = (s: PermintaanLineStatus) => s === "SEBAGIAN" || s === "DITOLAK";
-function Detail({ id, onBack }: { id: number; onBack: () => void; onEdit: (id: number) => void }) {
+export function Detail({ id, onBack }: { id: number; onBack: () => void; onEdit?: (id: number) => void }) {
   const { user } = useAuth();
   const canInput = can(user, "klinik.input");
   const canApprove = can(user, "klinik.permintaan_approve");
@@ -558,6 +567,8 @@ function Detail({ id, onBack }: { id: number; onBack: () => void; onEdit: (id: n
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
   if (!p) return <p className="p-4 text-sm text-[var(--text-muted)]">{error || "Memuat..."}</p>;
+  // Items are approved / fulfilled only once the four boxes are signed.
+  const siap = p.status === "DISETUJUI";
   const set = (lid: number, patch: Partial<(typeof edit)[number]>) => setEdit((e) => ({ ...e, [lid]: { ...e[lid], ...patch } }));
   const semuaApproved = () => {
     const today = localToday();
@@ -606,6 +617,7 @@ function Detail({ id, onBack }: { id: number; onBack: () => void; onEdit: (id: n
           <Printer size={15} /> Cetak
         </button>
       </div>
+      <TtdPanel p={p} onDone={load} />
       <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-[#f8fafc] text-xs text-[var(--text-secondary)]">
@@ -634,8 +646,8 @@ function Detail({ id, onBack }: { id: number; onBack: () => void; onEdit: (id: n
                   <td className="px-2 py-1.5 text-xs text-[var(--text-secondary)]">{[l.stok_text, l.keterangan].filter(Boolean).join(" · ")}</td>
                   <td className="px-2 py-1">
                     <select
-                      disabled={!canApprove}
-                      title={canApprove ? undefined : "Status approval hanya bisa diubah akun dengan hak Approve Permintaan Obat"}
+                      disabled={!canApprove || !siap}
+                      title={!siap ? "Terbuka setelah permintaan ditandatangani lengkap" : canApprove ? undefined : "Status approval hanya bisa diubah akun dengan hak Approve Permintaan Obat"}
                       value={e?.status}
                       onChange={(ev) => {
                         const status = ev.target.value as PermintaanLineStatus;
@@ -657,7 +669,7 @@ function Detail({ id, onBack }: { id: number; onBack: () => void; onEdit: (id: n
                     </select>
                     {e && perluAlasan(e.status) && (
                       <input
-                        disabled={!canApprove}
+                        disabled={!canApprove || !siap}
                         value={e.alasan}
                         onChange={(ev) => set(l.id!, { alasan: ev.target.value })}
                         placeholder={e.status === "DITOLAK" ? "Alasan ditolak (wajib)" : "Alasan disetujui sebagian (wajib)"}
@@ -675,10 +687,10 @@ function Detail({ id, onBack }: { id: number; onBack: () => void; onEdit: (id: n
                     )}
                   </td>
                   <td className="px-2 py-1">
-                    <input disabled={!canInput} type="number" min={0} value={e?.dipenuhi} onChange={(ev) => set(l.id!, { dipenuhi: ev.target.value })} className={cellIn} />
+                    <input disabled={!canInput || !siap} type="number" min={0} value={e?.dipenuhi} onChange={(ev) => set(l.id!, { dipenuhi: ev.target.value })} className={cellIn} />
                   </td>
                   <td className="px-2 py-1">
-                    <input disabled={!canInput} type="date" value={e?.tanggal_pemenuhan} onChange={(ev) => set(l.id!, { tanggal_pemenuhan: ev.target.value })} className={cellIn} />
+                    <input disabled={!canInput || !siap} type="date" value={e?.tanggal_pemenuhan} onChange={(ev) => set(l.id!, { tanggal_pemenuhan: ev.target.value })} className={cellIn} />
                   </td>
                 </tr>
               );
@@ -686,7 +698,7 @@ function Detail({ id, onBack }: { id: number; onBack: () => void; onEdit: (id: n
           </tbody>
         </table>
       </div>
-      {(canInput || canApprove) && (
+      {(canInput || canApprove) && siap && (
         <div className="flex flex-wrap items-center gap-2">
           {error && <span className="text-sm text-[var(--accent-red)]">{error}</span>}
           {msg && <span className="text-sm text-[var(--accent-green)]">{msg}</span>}
@@ -818,6 +830,130 @@ function Rekap({ klinik }: { klinik: string }) {
           </tbody>
         </table>
       </div>
+    </div>
+  );
+}
+
+// The request's place in the sign-off: Draft (or sent back), waiting for a box, or signed in full.
+function StatusSurat({ p }: { p: Pick<Permintaan, "status" | "approval" | "tolak"> }) {
+  const cls = "text-xs px-2 py-0.5 rounded-full border whitespace-nowrap";
+  if (p.status === "DRAFT")
+    return p.tolak ? (
+      <span className={`${cls} border-[var(--accent-red-border)] text-[var(--accent-red)] bg-[var(--accent-red-bg)]`} title={`Alasan: ${p.tolak.alasan}`}>
+        Ditolak ({TTD_LEVEL_LABEL[p.tolak.level]})
+      </span>
+    ) : (
+      <span className={`${cls} border-[var(--border)] text-[var(--text-secondary)]`}>Draft</span>
+    );
+  if (p.status === "DISETUJUI") return <span className={`${cls} border-[var(--accent-green-border)] text-[var(--accent-green)] bg-[var(--accent-green-bg)]`}>Disetujui</span>;
+  const next = ttdBerikut(p);
+  return (
+    <span className={`${cls} border-[var(--accent-amber-border)] text-[var(--accent-amber)] bg-[var(--accent-amber-bg)]`}>
+      Menunggu {next ? TTD_LEVEL_LABEL[next] : "tanda tangan"} ({TTD_URUT.filter((k) => p.approval?.[k]).length}/4)
+    </span>
+  );
+}
+
+// ---- Tanda tangan: the four boxes in order; the account whose turn it is signs (Setujui) or refuses with an alasan ----
+function TtdPanel({ p, onDone }: { p: Permintaan; onDone: () => void }) {
+  const { user } = useAuth();
+  const [tolakMode, setTolakMode] = useState(false);
+  const [alasan, setAlasan] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  if (p.status === "DRAFT") return null;
+  const next = p.status === "DIAJUKAN" ? ttdBerikut(p) : null;
+  const sudahTtd = user?.role !== "superuser" && TTD_URUT.some((k) => p.approval?.[k]?.user_id === user?.id);
+  const giliranSaya = !!next && can(user, `klinik.ttd_${next}`) && !sudahTtd;
+  const kirim = async (aksi: "SETUJU" | "TOLAK") => {
+    if (!next) return;
+    if (aksi === "TOLAK" && alasan.trim().length < 3) return setError("Isi alasan penolakan");
+    if (aksi === "SETUJU" && !window.confirm(`Tandatangani permintaan ${p.nomor} sebagai ${TTD_LEVEL_LABEL[next]}?`)) return;
+    setBusy(true);
+    setError("");
+    try {
+      await api.permintaanTtd(p.id, { level: next, aksi, alasan: alasan.trim() });
+      setTolakMode(false);
+      setAlasan("");
+      onDone();
+    } catch (e) {
+      setError(errorText(e, "Gagal menyimpan"));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg p-3 space-y-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <p className="text-sm font-semibold text-[var(--text-primary)]">Tanda Tangan</p>
+        <StatusSurat p={p} />
+      </div>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+        {TTD_URUT.map((k) => {
+          const a = p.approval?.[k];
+          const now = k === next;
+          return (
+            <div
+              key={k}
+              className={`rounded-md border px-3 py-2 ${
+                a ? "border-[var(--accent-green-border)] bg-[var(--accent-green-bg)]" : now ? "border-[var(--accent-amber-border)] bg-[var(--accent-amber-bg)]" : "border-[var(--border)]"
+              }`}
+            >
+              <p className="text-[11px] text-[var(--text-secondary)] flex items-center gap-1">
+                {a ? <Check size={12} className="text-[var(--accent-green)]" /> : <CircleDashed size={12} />}
+                {TTD_LEVEL_LABEL[k]}
+              </p>
+              <p className="text-sm font-medium text-[var(--text-primary)] leading-tight mt-0.5">{a?.nama || p.ttd?.[k]?.nama || "-"}</p>
+              <p className="text-[11px] text-[var(--text-muted)]">{a?.jabatan || p.ttd?.[k]?.jabatan}</p>
+              <p className={`text-[11px] mt-0.5 ${a ? "text-[var(--accent-green)]" : now ? "text-[var(--accent-amber)]" : "text-[var(--text-muted)]"}`}>
+                {a ? `Ditandatangani ${waktuTtd(a.at)}` : now ? "Giliran tanda tangan" : "Belum"}
+              </p>
+            </div>
+          );
+        })}
+      </div>
+      {giliranSaya && (
+        <div className="flex flex-wrap items-center gap-2 border-t border-[var(--border)] pt-3">
+          {tolakMode ? (
+            <>
+              <input
+                autoFocus
+                value={alasan}
+                onChange={(e) => setAlasan(e.target.value)}
+                placeholder="Alasan penolakan (wajib), mis. jumlah terlalu banyak, obat X masih ada stok"
+                maxLength={500}
+                className={`${inputCls} flex-1 min-w-[240px]`}
+              />
+              <button onClick={() => kirim("TOLAK")} disabled={busy} className="inline-flex items-center gap-1.5 text-sm px-4 py-2 rounded-md bg-[var(--accent-red)] text-white hover:opacity-90 disabled:opacity-50">
+                Tolak & kembalikan
+              </button>
+              <button onClick={() => (setTolakMode(false), setError(""))} disabled={busy} className={btn}>
+                Batal
+              </button>
+            </>
+          ) : (
+            <>
+              <span className="text-sm text-[var(--text-secondary)]">
+                Giliran Anda menandatangani sebagai <b>{TTD_LEVEL_LABEL[next!]}</b>.
+              </span>
+              <span className="ml-auto" />
+              <button onClick={() => setTolakMode(true)} disabled={busy} className={btn}>
+                Tolak
+              </button>
+              <button onClick={() => kirim("SETUJU")} disabled={busy} className={btnBlue}>
+                <Check size={15} /> {busy ? "Menyimpan..." : "Setujui & tandatangani"}
+              </button>
+            </>
+          )}
+          {error && <span className="w-full text-xs text-[var(--accent-red)]">{error}</span>}
+        </div>
+      )}
+      {next && !giliranSaya && can(user, `klinik.ttd_${next}`) && sudahTtd && (
+        <p className="text-xs text-[var(--text-muted)]">Anda sudah menandatangani kotak lain; kotak {TTD_LEVEL_LABEL[next]} ditandatangani orang lain.</p>
+      )}
+      {p.status === "DIAJUKAN" && (
+        <p className="text-[11px] text-[var(--text-muted)]">Approval per item dan pemenuhan terbuka setelah keempat kotak ditandatangani.</p>
+      )}
     </div>
   );
 }

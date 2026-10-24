@@ -164,6 +164,7 @@ type Need = string[] | "super" | null;
 // Kebun (Pruning PT.AKSS, and its tab on the Peta Blok) is hidden for now: only a Super User sees it, whatever
 // pruning ticks an account has (they are kept for when it opens). Same switch in src/lib/access.ts.
 const KEBUN_HANYA_SUPER = true;
+const TTD_PERMS = ["klinik.ttd_dibuat", "klinik.ttd_diketahui", "klinik.ttd_disetujui1", "klinik.ttd_disetujui2"];
 const ACTIVITY_PERM: Record<string, string> = { BARANG: "gudang", BBM: "bbm", PUPUK: "pupuk", KLINIK: "klinik", OLI: "oli", KOPERASI: "koperasi", KENDARAAN: "kendaraan", PRUNING: "pruning" };
 function requiredPerms(req: express.Request): Need {
   // Inside app.use("/api") req.path is relative to the mount, inside a route it is the full path.
@@ -215,6 +216,10 @@ function requiredPerms(req: express.Request): Need {
   // Klinik > Laporan Harian: Lihat / Input / Edit / Hapus kunjungan (estate checked in the route).
   if (is(/^\/klinik-laporan(\/|$)/)) return [`klinik.${act}`];
   // Permintaan Obat: Lihat; buat / ubah / ajukan / catat pemenuhan with Input; hapus with Hapus.
+  // Tanda tangan Permintaan Obat: the waiting list and signing with a level's tick (the route checks which level
+  // is next); the signers may open a request without Lihat Klinik.
+  if (is(/^\/klinik-permintaan\/(menunggu|\d+\/ttd)$/)) return TTD_PERMS;
+  if (is(/^\/klinik-permintaan\/\d+$/) && m === "GET") return ["klinik.view", ...TTD_PERMS];
   // Pemenuhan: dipenuhi / tanggal with Input Klinik, the status approval with Approve Permintaan Obat (checked in the route).
   if (is(/^\/klinik-permintaan\/\d+\/pemenuhan$/)) return ["klinik.input", "klinik.permintaan_approve"];
   if (is(/^\/klinik-permintaan(-rekap)?(\/|$)/)) return m === "GET" ? ["klinik.view"] : m === "DELETE" ? ["klinik.delete"] : ["klinik.input"];
@@ -271,7 +276,9 @@ const PERM_AKSI: Record<string, string> = { view: "Lihat", input: "Input", edit:
 const permLabel = (p: string) => {
   const [m, a] = p.split(".");
   if (PERM_MODUL[m]) return `${PERM_AKSI[a] ?? a} ${PERM_MODUL[m]}`;
-  const other: Record<string, string> = { "dokumen.edit": "Dokumen & Link", "dokumen.kelola": "Kelola semua Dokumen & Link", "klinik.permintaan_approve": "Approve Permintaan Obat", "sop.view": "Lihat Daftar SOP", "sop.edit": "Ubah Daftar SOP", "sop.kunci": "Kunci Daftar SOP", "master.peta": "Lihat Peta Blok", "master.peta_edit": "Ubah Peta Blok", "master.alat": "Master Alat Berat", "master.users": "Pengguna", "monitor.log_user": "Log Aktivitas User" };
+  const other: Record<string, string> = { "dokumen.edit": "Dokumen & Link", "dokumen.kelola": "Kelola semua Dokumen & Link", "klinik.permintaan_approve": "Approve Permintaan Obat", "klinik.ttd_dibuat": "Tanda tangan Permintaan Obat (Dibuat oleh)",
+    "klinik.ttd_diketahui": "Tanda tangan Permintaan Obat (Diketahui)", "klinik.ttd_disetujui1": "Tanda tangan Permintaan Obat (Disetujui 1)",
+    "klinik.ttd_disetujui2": "Tanda tangan Permintaan Obat (Disetujui 2)", "sop.view": "Lihat Daftar SOP", "sop.edit": "Ubah Daftar SOP", "sop.kunci": "Kunci Daftar SOP", "master.peta": "Lihat Peta Blok", "master.peta_edit": "Ubah Peta Blok", "master.alat": "Master Alat Berat", "master.users": "Pengguna", "monitor.log_user": "Log Aktivitas User" };
   return other[p] ?? (m === "master" ? `Master ${a.charAt(0).toUpperCase()}${a.slice(1)}` : p);
 };
 
@@ -4977,7 +4984,7 @@ app.get("/api/klinik-permintaan", async (req, res) => {
   const klinik = String(req.query.klinik ?? "");
   if (!checkKlinik(req, res, klinik)) return;
   const rows = await queryMany(
-    `SELECT p.id, p.klinik, p.nomor, p.tanggal, p.periode, p.departemen, p.status, p.catatan, p.created_by, p.created_at, p.diajukan_at,
+    `SELECT p.id, p.klinik, p.nomor, p.tanggal, p.periode, p.departemen, p.status, p.catatan, p.created_by, p.created_at, p.diajukan_at, p.approval, p.tolak,
        COUNT(l.id)::int items,
        COUNT(l.id) FILTER (WHERE l.status = 'APPROVED')::int approved,
        COUNT(l.id) FILTER (WHERE l.status = 'SEBAGIAN')::int sebagian,
@@ -4991,6 +4998,24 @@ app.get("/api/klinik-permintaan", async (req, res) => {
   // Signatories for a new request: the klinik's last ones.
   const last = await queryOne<{ ttd: any }>("SELECT ttd FROM klinik_permintaan WHERE klinik = @klinik ORDER BY id DESC LIMIT 1", { klinik });
   res.json({ rows, ttd: last?.ttd ?? null });
+});
+
+// Requests waiting for this account's signature: of its kliniks, sent, the next box one it may sign.
+app.get("/api/klinik-permintaan/menunggu", async (req, res) => {
+  const u = req.user!;
+  const kliniks = KLINIK_OPTIONS.filter((k) => estateAllowed(u, k));
+  const rows = await queryMany<any>(
+    `SELECT p.id, p.klinik, p.nomor, p.tanggal, p.periode, p.departemen, p.status, p.created_by, p.diajukan_at, p.approval, p.ttd,
+       (SELECT COUNT(*) FROM klinik_permintaan_line l WHERE l.permintaan_id = p.id)::int items,
+       (SELECT COUNT(*) FROM klinik_permintaan_line l WHERE l.permintaan_id = p.id AND l.urgensi = 'HIGH')::int high
+     FROM klinik_permintaan p WHERE p.status = 'DIAJUKAN' AND p.klinik = ANY(@kliniks) ORDER BY p.diajukan_at, p.id`,
+    { kliniks }
+  );
+  res.json({
+    rows: rows
+      .map((r) => ({ ...r, berikut: ttdBerikut(r.approval) }))
+      .filter((r) => r.berikut && bolehTtd(u, r.berikut) && !(u.role !== "superuser" && TTD_LEVELS.some((k) => r.approval?.[k]?.user_id === u.id))),
+  });
 });
 
 app.get("/api/klinik-permintaan/:id", async (req, res) => {
@@ -5098,7 +5123,7 @@ app.put("/api/klinik-permintaan/:id", async (req, res) => {
   await withTransaction(async (c) => {
     await execute(
       `UPDATE klinik_permintaan SET tanggal = @tanggal, periode = @periode, departemen = @departemen, catatan = @catatan, ttd = @ttd::jsonb,
-         status = @status, diajukan_at = ${ajukan ? "now()" : "NULL"}, updated_at = now() WHERE id = @id`,
+         status = @status, diajukan_at = ${ajukan ? "now()" : "NULL"}, approval = '{}'::jsonb${ajukan ? ", tolak = NULL" : ""}, updated_at = now() WHERE id = @id`,
       { ...v.head, status: ajukan ? "DIAJUKAN" : "DRAFT", id: p.id },
       c
     );
@@ -5121,6 +5146,7 @@ app.put("/api/klinik-permintaan/:id/pemenuhan", async (req, res) => {
   if (!p) return res.status(404).json({ error: "Permintaan tidak ditemukan" });
   if (!checkKlinik(req, res, p.klinik)) return;
   if (p.status === "DRAFT") return res.status(400).json({ error: "Ajukan permintaan dulu sebelum mencatat pemenuhan" });
+  if (p.status !== "DISETUJUI") return res.status(400).json({ error: `Permintaan belum ditandatangani lengkap: menunggu ${TTD_LEVEL_LABEL[ttdBerikut(p.approval) ?? "dibuat"]}` });
   const items = (Array.isArray(req.body?.lines) ? req.body.lines : []).slice(0, 500);
   const u = req.user!;
   const bolehApprove = u.role === "superuser" || u.perms.includes("klinik.permintaan_approve");
@@ -5161,6 +5187,55 @@ app.put("/api/klinik-permintaan/:id/pemenuhan", async (req, res) => {
   }
   if (done.length) await logActivity(req, { module: "KLINIK", estate: p.klinik, aksi: "Pemenuhan Permintaan Obat", objek: `${p.nomor} · ${done.length} item`, detail: done.slice(0, 60).join("; ") });
   res.json({ success: true, saved: done.length });
+});
+
+// ---- Tanda tangan Permintaan Obat: the four boxes of the form, signed in order (see schema.sql approval) ----
+const TTD_LEVELS = ["dibuat", "diketahui", "disetujui1", "disetujui2"] as const;
+const TTD_LEVEL_LABEL: Record<string, string> = { dibuat: "Dibuat oleh", diketahui: "Diketahui", disetujui1: "Disetujui 1", disetujui2: "Disetujui 2" };
+const ttdBerikut = (approval: any) => TTD_LEVELS.find((k) => !approval?.[k]) ?? null;
+const bolehTtd = (u: SessionUser, level: string) => u.role === "superuser" || u.perms.includes(`klinik.ttd_${level}`);
+
+// Sign (SETUJU) or refuse (TOLAK, with alasan) the next box. One account signs one box of a request (a Super
+// User may sign any). The last box makes it DISETUJUI; a refusal sends it back to the klinik as a draft.
+app.post("/api/klinik-permintaan/:id/ttd", async (req, res) => {
+  const u = req.user!;
+  const p = await queryOne<any>("SELECT * FROM klinik_permintaan WHERE id = @id", { id: Number(req.params.id) || 0 });
+  if (!p) return res.status(404).json({ error: "Permintaan tidak ditemukan" });
+  if (!checkKlinik(req, res, p.klinik)) return;
+  if (p.status !== "DIAJUKAN") return res.status(400).json({ error: p.status === "DRAFT" ? "Permintaan belum diajukan" : "Permintaan sudah ditandatangani lengkap" });
+  const level = ttdBerikut(p.approval);
+  if (!level) return res.status(400).json({ error: "Permintaan sudah ditandatangani lengkap" });
+  if (req.body?.level && req.body.level !== level) return res.status(409).json({ error: `Giliran tanda tangan sekarang: ${TTD_LEVEL_LABEL[level]}` });
+  if (!bolehTtd(u, level)) return res.status(403).json({ error: `Akun ini tidak punya hak Tanda tangan Permintaan Obat (${TTD_LEVEL_LABEL[level]})` });
+  if (u.role !== "superuser" && TTD_LEVELS.some((k) => p.approval?.[k]?.user_id === u.id))
+    return res.status(403).json({ error: "Akun ini sudah menandatangani permintaan ini di kotak lain; satu orang satu tanda tangan" });
+  const jabatan = String(p.ttd?.[level]?.jabatan ?? "");
+  if (req.body?.aksi === "TOLAK") {
+    const alasan = String(req.body?.alasan ?? "").trim().slice(0, 500);
+    if (alasan.length < 3) return res.status(400).json({ error: "Isi alasan penolakan" });
+    const tolak = { level, nama: u.nama, jabatan, alasan, at: new Date().toISOString() };
+    await execute("UPDATE klinik_permintaan SET status = 'DRAFT', diajukan_at = NULL, approval = '{}'::jsonb, tolak = @tolak::jsonb, updated_at = now() WHERE id = @id", {
+      tolak: JSON.stringify(tolak),
+      id: p.id,
+    });
+    await logActivity(req, { module: "KLINIK", estate: p.klinik, aksi: "Tolak Permintaan Obat", objek: p.nomor, detail: `${TTD_LEVEL_LABEL[level]} · alasan: ${alasan}` });
+    return res.json({ success: true, status: "DRAFT" });
+  }
+  const approval = { ...(p.approval ?? {}), [level]: { nama: u.nama, jabatan, user_id: u.id, at: new Date().toISOString() } };
+  const lengkap = !ttdBerikut(approval);
+  await execute("UPDATE klinik_permintaan SET approval = @approval::jsonb, status = @status, updated_at = now() WHERE id = @id", {
+    approval: JSON.stringify(approval),
+    status: lengkap ? "DISETUJUI" : "DIAJUKAN",
+    id: p.id,
+  });
+  await logActivity(req, {
+    module: "KLINIK",
+    estate: p.klinik,
+    aksi: "Tanda Tangan Permintaan Obat",
+    objek: p.nomor,
+    detail: `${TTD_LEVEL_LABEL[level]}${jabatan ? ` (${jabatan})` : ""}${lengkap ? " · lengkap, siap diproses" : ` · berikutnya ${TTD_LEVEL_LABEL[ttdBerikut(approval)!]}`}`,
+  });
+  res.json({ success: true, status: lengkap ? "DISETUJUI" : "DIAJUKAN" });
 });
 
 app.delete("/api/klinik-permintaan/:id", async (req, res) => {

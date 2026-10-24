@@ -46,6 +46,11 @@ export const ALL_PERMS: string[] = [
   // an SOP or a whole bagian (and change the locked ones).
   // Approve Permintaan Obat: set an item's status approval (Sebagian / Ditolak with an alasan).
   "klinik.permintaan_approve",
+  // Tanda tangan Permintaan Obat, one tick per box of the form, signed in this order.
+  "klinik.ttd_dibuat",
+  "klinik.ttd_diketahui",
+  "klinik.ttd_disetujui1",
+  "klinik.ttd_disetujui2",
   "sop.view",
   "sop.edit",
   "sop.kunci",
