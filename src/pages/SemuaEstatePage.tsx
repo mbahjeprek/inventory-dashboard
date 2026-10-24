@@ -29,7 +29,7 @@ async function loadMatrix(key: Key, estates: Estate[]): Promise<Matrix> {
   const per = await Promise.all(
     estates.map(async (e) => {
       try {
-        if (key === "bbm") return { e, m: Object.fromEntries((await api.bbmSummary(e.estate)).saldoTerakhir.map((s) => [s.jenis_bbm, Number(s.saldo_stock)])) };
+        if (key === "bbm") return { e, m: Object.fromEntries((await api.bbmSummary(e.estate)).saldoTerakhir.map((s) => [s.jenis_bbm.replace("_", " "), Number(s.saldo_stock)])) };
         if (key === "pupuk") return { e, m: Object.fromEntries((await api.pupukSummary(e.estate)).saldoTerakhir.map((s) => [s.jenis_pupuk, Number(s.saldo_stock)])) };
         if (key === "oli") return { e, m: Object.fromEntries((await api.oliSummary(e.estate)).saldoTerakhir.map((s) => [s.jenis_oli, Number(s.saldo_stock)])) };
         if (key === "klinik") {

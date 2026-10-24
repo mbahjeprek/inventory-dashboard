@@ -3240,18 +3240,23 @@ function isoToIndoDate(iso: string): { tanggal: string; periode: string } {
   };
 }
 
-// A keterangan naming the other fuel ("BENSIN MASUK DARI ...") means the wrong Jenis BBM was picked:
-// Bensin got typed into the Solar ledger while the form opened on SOLAR (src/lib/bbmJenis.ts).
+// A keterangan naming another fuel ("BENSIN MASUK DARI ...") means the wrong Jenis BBM was picked:
+// Bensin got typed into the Solar ledger while the form opened on SOLAR (src/lib/bbmJenis.ts). Bensin Campur
+// (bensin mixed with 2T oil, at WJA) is its own fuel: "bensin campur" names it, a plain "bensin" the other one.
+const BBM_DISEBUT: Record<string, RegExp> = { SOLAR: /\bsolar\b/i, BENSIN_CAMPUR: /\bbensin\s*campur(an)?\b/i, BENSIN: /\bbensin\b(?!\s*campur)/i };
+const BBM_LABEL: Record<string, string> = { SOLAR: "Solar", BENSIN: "Bensin", BENSIN_CAMPUR: "Bensin Campur" };
 function wrongJenisBbm(jenis: string, keterangan: unknown) {
-  const other = jenis === "SOLAR" ? "BENSIN" : "SOLAR";
-  return new RegExp("\\b" + other + "\\b", "i").test(String(keterangan ?? "")) ? `Keterangan menyebut ${other}, tapi Jenis BBM ${jenis}. Ganti Jenis BBM ke ${other}.` : "";
+  const t = String(keterangan ?? "");
+  if (BBM_DISEBUT[jenis]?.test(t)) return "";
+  const other = Object.keys(BBM_DISEBUT).find((k) => k !== jenis && BBM_DISEBUT[k].test(t));
+  return other ? `Keterangan menyebut ${BBM_LABEL[other]}, tapi Jenis BBM ${BBM_LABEL[jenis] ?? jenis}. Ganti Jenis BBM ke ${BBM_LABEL[other]}.` : "";
 }
 
 // ---- Manual BBM transaction entry (mirrors the "Transaksi" flow on Inventory Gudang) ----
 app.post("/api/bbm", async (req, res) => {
   const { jenis_bbm, lokasi, tanggal_iso, tipe, jumlah, keterangan, no_spb, estate, kode_kendaraan, hm_terakhir } = req.body;
 
-  if (!["SOLAR", "BENSIN"].includes(jenis_bbm)) return res.status(400).json({ error: "Jenis BBM tidak valid" });
+  if (!BBM_JENIS.includes(jenis_bbm)) return res.status(400).json({ error: "Jenis BBM tidak valid" });
   if (!BBM_LOKASI_OPTIONS.includes(lokasi)) return res.status(400).json({ error: "Lokasi tidak valid" });
   if (!estateAllowed(req.user!, lokasi)) return res.status(403).json({ error: "Akses ditolak" });
   if (!["DITERIMA", "PEMAKAIAN"].includes(tipe)) return res.status(400).json({ error: "Tipe transaksi tidak valid" });
@@ -3296,7 +3301,7 @@ app.post("/api/bbm", async (req, res) => {
     module: "BBM",
     estate: lokasi,
     aksi: tipe === "DITERIMA" ? "Stok Masuk" : "Stok Keluar",
-    objek: `${jenis_bbm} · ${tanggal}${no_spb ? ` · SPB ${no_spb}` : ""}`,
+    objek: `${String(jenis_bbm).replace("_", " ")} · ${tanggal}${no_spb ? ` · SPB ${no_spb}` : ""}`,
     detail: [
       `Jumlah: ${jumlah} LTR`,
       `Saldo: ${lastSaldo} → ${saldoBaru}`,
@@ -3320,7 +3325,7 @@ const BBM_BATCH_MAX = 200;
 app.post("/api/bbm/batch", async (req, res) => {
   const { jenis_bbm, lokasi, tanggal_iso } = req.body ?? {};
   const rows: any[] = Array.isArray(req.body?.rows) ? req.body.rows : [];
-  if (!["SOLAR", "BENSIN"].includes(jenis_bbm)) return res.status(400).json({ error: "Jenis BBM tidak valid" });
+  if (!BBM_JENIS.includes(jenis_bbm)) return res.status(400).json({ error: "Jenis BBM tidak valid" });
   if (!BBM_LOKASI_OPTIONS.includes(lokasi)) return res.status(400).json({ error: "Lokasi tidak valid" });
   if (!estateAllowed(req.user!, lokasi)) return res.status(403).json({ error: "Akses ditolak" });
   if (!ISO_DATE.test(tanggal_iso || "")) return res.status(400).json({ error: "Tanggal tidak valid" });
@@ -3420,7 +3425,7 @@ app.post("/api/bbm/batch", async (req, res) => {
       module: "BBM",
       estate: lokasi,
       aksi: row.tipe === "DITERIMA" ? "Stok Masuk" : "Stok Keluar",
-      objek: `${jenis_bbm} · ${tanggal}${row.no_spb ? ` · SPB ${row.no_spb}` : ""}`,
+      objek: `${String(jenis_bbm).replace("_", " ")} · ${tanggal}${row.no_spb ? ` · SPB ${row.no_spb}` : ""}`,
       detail: [
         `Jumlah: ${row.jumlah} LTR`,
         `Saldo: ${before} → ${after}`,
@@ -3484,7 +3489,7 @@ app.put("/api/bbm/:id", requireSuperuser, async (req, res) => {
     module: "BBM",
     estate: existing.lokasi,
     aksi: "Edit Transaksi",
-    objek: `${existing.jenis_bbm} · ${existing.tanggal}${existing.no_spb ? ` · SPB ${existing.no_spb}` : ""}`,
+    objek: `${String(existing.jenis_bbm).replace("_", " ")} · ${existing.tanggal}${existing.no_spb ? ` · SPB ${existing.no_spb}` : ""}`,
     detail: describeChanges(existing, updated, {
       tanggal: "Tanggal",
       no_spb: "No. SPB",
@@ -3513,7 +3518,7 @@ app.delete("/api/bbm/:id", requireSuperuser, async (req, res) => {
     module: "BBM",
     estate: existing.lokasi,
     aksi: "Hapus Transaksi",
-    objek: `${existing.jenis_bbm} · ${existing.tanggal}${existing.no_spb ? ` · SPB ${existing.no_spb}` : ""}`,
+    objek: `${String(existing.jenis_bbm).replace("_", " ")} · ${existing.tanggal}${existing.no_spb ? ` · SPB ${existing.no_spb}` : ""}`,
     detail: [
       existing.diterima && `Stok Masuk: ${existing.diterima}`,
       existing.pemakaian && `Stok Keluar: ${existing.pemakaian}`,
@@ -6099,7 +6104,7 @@ app.get("/api/bbm", async (req, res) => {
   const params: any = {};
 
   wordSearch(search, ["jenis_bbm", "estate", "no_spb", "kode_kendaraan", "keterangan"], conditions, params);
-  if (jenis_bbm && ["SOLAR", "BENSIN"].includes(jenis_bbm)) {
+  if (jenis_bbm && BBM_JENIS.includes(jenis_bbm)) {
     conditions.push("jenis_bbm = @jenis_bbm");
     params.jenis_bbm = jenis_bbm;
   }
@@ -6162,7 +6167,8 @@ app.get("/api/bbm", async (req, res) => {
 // cancelled. Every module uses the same five estates.
 const OPNAME_MODULES: OpnameModule[] = ["GUDANG", "KLINIK", "BBM", "PUPUK", "OLI"];
 const OPNAME_LOG_MODULE: Record<OpnameModule, LogModule> = { GUDANG: "BARANG", KLINIK: "KLINIK", BBM: "BBM", PUPUK: "PUPUK", OLI: "OLI" };
-const BBM_JENIS = ["SOLAR", "BENSIN"];
+// Bensin Campur: bensin mixed with 2T oil (bought as such at WJA), its own ledger; shown only where it is used.
+const BBM_JENIS = ["SOLAR", "BENSIN", "BENSIN_CAMPUR"];
 // Nilam items, klinik batches and BBM saldo (INTEGER) are whole numbers; other gudang and pupuk take decimals.
 const opnameWhole = (o: { module: string; estate: string }) => o.module === "KLINIK" || o.module === "BBM" || (o.module === "GUDANG" && o.estate === "NILAM");
 
@@ -6248,10 +6254,12 @@ async function opnameSnapshot(module: OpnameModule, estate: string, client?: Poo
   }
   if (module === "BBM") {
     return queryMany(
-      `SELECT j kode, j nama, 'LTR' satuan, '' exp,
+      `SELECT j kode, replace(j, '_', ' ') nama, 'LTR' satuan, '' exp,
          COALESCE((SELECT saldo_stock FROM bbm_log WHERE jenis_bbm = j AND lokasi = @estate AND saldo_stock IS NOT NULL
                    ORDER BY tanggal_iso DESC, id DESC LIMIT 1), 0)::float8 stok_sistem
-       FROM unnest(@jenis::text[]) j`,
+       FROM unnest(@jenis::text[]) j
+       -- Bensin Campur only where it has been used.
+       WHERE j <> 'BENSIN_CAMPUR' OR EXISTS (SELECT 1 FROM bbm_log WHERE jenis_bbm = j AND lokasi = @estate)`,
       { estate, jenis: BBM_JENIS },
       client
     );
@@ -6943,7 +6951,7 @@ app.post("/api/stock-opname/:id/lines", async (req, res) => {
   const o = await loadOpname(req, res, "opname");
   if (!o) return;
   if (o.status !== "DRAFT") return res.status(400).json({ error: "Opname ini sudah diajukan, tidak bisa diubah" });
-  if (o.module === "BBM") return res.status(400).json({ error: "BBM selalu berisi Solar dan Bensin" });
+  if (o.module === "BBM") return res.status(400).json({ error: "BBM selalu berisi Solar dan Bensin (dan Bensin Campur di lokasi yang memakainya)" });
   let kode = String(req.body?.kode ?? "").trim();
   if (o.module === "PUPUK" || o.module === "OLI") kode = kode.toUpperCase();
   const exp = o.module === "KLINIK" ? String(req.body?.exp ?? "") : "";
@@ -8625,7 +8633,7 @@ app.get("/api/perbandingan", async (req, res) => {
   if (!CMP_MODULES.includes(m)) return res.status(400).json({ error: "Modul tidak valid" });
   if (!canLoan(req.user!, m, "view")) return res.status(403).json({ error: "Akses ditolak" });
   if (!ISO_DATE.test(dateFrom) || !ISO_DATE.test(dateTo) || dateFrom > dateTo) return res.status(400).json({ error: "Periode tidak valid" });
-  if (m === "BBM" && !BBM_JENIS.includes(kode)) return res.status(400).json({ error: "Pilih Solar atau Bensin" });
+  if (m === "BBM" && !BBM_JENIS.includes(kode)) return res.status(400).json({ error: "Pilih Solar, Bensin atau Bensin Campur" });
   const wanted = (estates ? estates.split(",") : [...ESTATES]).filter((e) => (ESTATES as readonly string[]).includes(e) && estateAllowed(req.user!, e));
   if (!wanted.length) return res.json({ unit: "", metric: "qty", bucket: "month", perEstate: [], prev: [], series: [] });
 
@@ -8676,7 +8684,7 @@ app.get("/api/perbandingan/barang", async (req, res) => {
       )
     );
   }
-  if (m === "BBM") return res.json(BBM_JENIS.map((j) => ({ kode: j, nama: j, satuan: "LTR" })));
+  if (m === "BBM") return res.json(BBM_JENIS.map((j) => ({ kode: j, nama: j.replace("_", " "), satuan: "LTR" })));
   const list =
     m === "OLI"
       ? await queryMany<{ v: string }>("SELECT nama v FROM master_oli ORDER BY nama")
@@ -8712,7 +8720,7 @@ function pakaiSource(module: PakaiModule, estate: string, alat: boolean): string
   }
   if (module === "BBM") {
     const unit = "COALESCE(NULLIF(trim(kode_kendaraan), ''), '(tanpa kode alat)')";
-    return `SELECT ${alat ? `jenis_bbm || '|' || ${unit}` : "jenis_bbm"} kode, ${alat ? unit : "jenis_bbm"} nama, 'LTR' satuan,
+    return `SELECT ${alat ? `jenis_bbm || '|' || ${unit}` : "jenis_bbm"} kode, ${alat ? unit : "replace(jenis_bbm, '_', ' ')"} nama, 'LTR' satuan,
         ${alat ? "jenis_bbm" : "''"} info, tanggal_iso d, pemakaian::float8 qty, id, COALESCE(no_spb, '') ref,
         concat_ws(' · ', NULLIF(kode_kendaraan, ''), NULLIF(estate, '')) tujuan, COALESCE(hm_terakhir, '') penerima, COALESCE(keterangan, '') ket
       FROM bbm_log WHERE lokasi = @estate AND pemakaian > 0 AND tanggal_iso LIKE '____-__-__'`;

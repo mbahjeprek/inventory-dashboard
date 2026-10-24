@@ -70,7 +70,7 @@ export function formDoBbmHtml(lokasi?: string): string {
     </div>
     <table class="daftar">
       <thead><tr>
-        <th style="width:34px">No</th><th>Jenis BBM<br>(Solar / Bensin)</th><th style="width:62px">Satuan</th>
+        <th style="width:34px">No</th><th>Jenis BBM<br>(Solar / Bensin / Bensin Campur)</th><th style="width:62px">Satuan</th>
         <th style="width:92px">Jumlah di DO<br>(Liter)</th><th style="width:92px">Jumlah Diterima<br>(Liter)</th><th style="width:78px">Selisih<br>(Liter)</th><th style="width:150px">Keterangan</th>
       </tr></thead>
       <tbody>${baris}</tbody>

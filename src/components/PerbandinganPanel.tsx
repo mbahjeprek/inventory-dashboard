@@ -25,6 +25,7 @@ const SOURCES: { key: string; label: string; module: OpnameModule; kode?: string
   { key: "KLINIK", label: "Klinik", module: "KLINIK" },
   { key: "SOLAR", label: "Solar", module: "BBM", kode: "SOLAR" },
   { key: "BENSIN", label: "Bensin", module: "BBM", kode: "BENSIN" },
+  { key: "BENSIN_CAMPUR", label: "Bensin Campur", module: "BBM", kode: "BENSIN_CAMPUR" },
   { key: "PUPUK", label: "Pupuk", module: "PUPUK" },
   { key: "OLI", label: "Oli", module: "OLI" },
 ];

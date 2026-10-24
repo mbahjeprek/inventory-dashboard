@@ -11,6 +11,7 @@ import { DokumenButton } from "../components/DokumenButton";
 import { PemakaianButton } from "../components/PemakaianPanel";
 import { fetchAllRows, printDocument, type TableReport } from "../lib/printTable";
 import { formDoBbmHtml } from "../lib/formDoBbm";
+import { JENIS_BBM, LOKASI_BENSIN_CAMPUR, jenisBbmLabel, type JenisBbm } from "../lib/bbmJenis";
 import { BbmTransactionModal } from "../components/BbmTransactionModal";
 import { BbmBatchModal } from "../components/BbmBatchModal";
 import { EditBbmModal } from "../components/EditBbmModal";
@@ -21,7 +22,7 @@ import { EvidenceLink, AttachEvidenceButton } from "../components/EvidenceInput"
 import { tanggalWaktu } from "../lib/datetime";
 import { loanTag } from "../lib/opname";
 
-const JENIS_OPTIONS = ["SOLAR", "BENSIN"];
+const JENIS_OPTIONS = JENIS_BBM;
 
 export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
   const [summary, setSummary] = useState<BbmSummary | null>(null);
@@ -118,7 +119,7 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
     const tgl = (iso: string) => (iso ? iso.split("-").reverse().join("/") : "");
     const filters = [
       search && `Cari: "${search}"`,
-      jenisBbm && `Jenis BBM: ${jenisBbm}`,
+      jenisBbm && `Jenis BBM: ${jenisBbmLabel(jenisBbm)}`,
       `Lokasi: ${lokasiLock || lokasi || "Semua"}`,
       alat && `Alat: ${alat}`,
     ].filter(Boolean);
@@ -181,9 +182,17 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
     summary?.saldoPerTanggal.find((s) => s.jenis_bbm === jenis && s.lokasi === lok)?.saldo_stock ?? 0;
 
   // A locked lokasi always gets its Solar and Bensin cards, even before its first transaction
-  // (Zamrud/Firus start empty); the all-lokasi view shows whichever lokasi have data.
+  // (Zamrud/Firus start empty), and Bensin Campur where it is bought (WJA) or has data; the all-lokasi view
+  // shows whichever lokasi have data.
+  const adaData = (jenis: string, lok: string) => !!summary?.saldoTerakhir.some((s) => s.jenis_bbm === jenis && s.lokasi === lok);
   const saldoCards = JENIS_OPTIONS.flatMap((jenis) =>
-    (lokasiLock ? [lokasiLock] : summary ? summary.saldoTerakhir.filter((s) => s.jenis_bbm === jenis).map((s) => s.lokasi) : [])
+    (lokasiLock
+      ? jenis !== "BENSIN_CAMPUR" || LOKASI_BENSIN_CAMPUR.includes(lokasiLock) || adaData(jenis, lokasiLock)
+        ? [lokasiLock]
+        : []
+      : summary
+        ? summary.saldoTerakhir.filter((s) => s.jenis_bbm === jenis).map((s) => s.lokasi)
+        : [])
       .sort()
       .map((lok) => ({ jenis, lok, saldo: saldoFor(jenis, lok) }))
   ).filter((c) => c.saldo !== undefined);
@@ -195,7 +204,7 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
           <h1 className="text-xl font-semibold text-[var(--text-primary)]">
             Inventory BBM{lokasiLock ? ` - ${lokasiLock}` : ""}
           </h1>
-          <p className="text-sm text-[var(--text-secondary)]">Monitoring stok & histori pemakaian Solar dan Bensin per lokasi</p>
+          <p className="text-sm text-[var(--text-secondary)]">Monitoring stok & histori pemakaian Solar, Bensin dan Bensin Campur per lokasi</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {(lokasiLock || lokasi) && <ActivityLogButton key={lokasiLock || lokasi} module="BBM" estate={lokasiLock || lokasi} />}
@@ -233,11 +242,11 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
           return (
             <StatCard
               key={`${jenis}-${lok}`}
-              label={`Stok ${jenis === "SOLAR" ? "Solar" : "Bensin"} - ${lok}${dateTo ? ` (per ${new Date(`${dateTo}T00:00:00`).toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" })})` : ""}`}
+              label={`Stok ${jenisBbmLabel(jenis)} - ${lok}${dateTo ? ` (per ${new Date(`${dateTo}T00:00:00`).toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" })})` : ""}`}
               value={(saldo ?? 0).toLocaleString("id-ID")}
               suffix="LTR"
               icon={jenis === "SOLAR" ? Fuel : Droplet}
-              tone={jenis === "SOLAR" ? "blue" : "amber"}
+              tone={jenis === "SOLAR" ? "blue" : jenis === "BENSIN" ? "amber" : "green"}
               active={active}
               footer={
                 <div>
@@ -290,7 +299,7 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
           <option value="">Semua Jenis BBM</option>
           {JENIS_OPTIONS.map((j) => (
             <option key={j} value={j}>
-              {j}
+              {jenisBbmLabel(j).toUpperCase()}
             </option>
           ))}
         </select>
@@ -483,7 +492,7 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
         <BbmBatchModal
           summary={summary}
           lokasiLock={lokasiLock}
-          jenisAwal={jenisBbm === "BENSIN" ? "BENSIN" : "SOLAR"}
+          jenisAwal={JENIS_BBM.includes(jenisBbm as JenisBbm) ? (jenisBbm as JenisBbm) : "SOLAR"}
           onClose={() => setShowBatch(false)}
           onSuccess={(count) => {
             setShowBatch(false);
@@ -499,7 +508,7 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
         <BbmTransactionModal
           summary={summary}
           lokasiLock={lokasiLock}
-          jenisAwal={jenisBbm === "BENSIN" ? "BENSIN" : "SOLAR"}
+          jenisAwal={JENIS_BBM.includes(jenisBbm as JenisBbm) ? (jenisBbm as JenisBbm) : "SOLAR"}
           onClose={() => setShowTransaksi(false)}
           onSuccess={() => {
             setShowTransaksi(false);
@@ -523,7 +532,7 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
 
       {confirmDelete && (
         <ConfirmDialog
-          message={`Hapus transaksi ${confirmDelete.jenis_bbm} - ${confirmDelete.lokasi} tanggal ${confirmDelete.tanggal}? Tindakan ini tidak bisa dibatalkan.`}
+          message={`Hapus transaksi ${jenisBbmLabel(confirmDelete.jenis_bbm)} - ${confirmDelete.lokasi} tanggal ${confirmDelete.tanggal}? Tindakan ini tidak bisa dibatalkan.`}
           onCancel={() => setConfirmDelete(null)}
           onConfirm={() => {
             handleDelete(confirmDelete);

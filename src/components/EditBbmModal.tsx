@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { jenisBbmLabel } from "../lib/bbmJenis";
 import { X } from "lucide-react";
 import { api, errorText, type BbmRecord } from "../lib/api";
 import { EditEvidenceField } from "./EvidenceInput";
@@ -66,7 +67,7 @@ export function EditBbmModal({
           <div>
             <h3 className="font-semibold text-sm text-[var(--text-primary)]">Edit Transaksi BBM</h3>
             <p className="text-xs text-[var(--text-secondary)]">
-              {record.jenis_bbm} · {record.lokasi}
+              {jenisBbmLabel(record.jenis_bbm)} · {record.lokasi}
             </p>
           </div>
           <button onClick={onClose} className="text-[var(--text-muted)] hover:text-[var(--text-primary)]">

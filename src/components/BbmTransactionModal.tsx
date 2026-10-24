@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { wrongJenis } from "../lib/bbmJenis";
+import { JENIS_BBM, jenisBbmLabel, wrongJenis, type JenisBbm } from "../lib/bbmJenis";
 import { X } from "lucide-react";
 import { api, errorText, type BbmSummary } from "../lib/api";
 import { AlatAutocomplete, type AlatOption } from "./AlatAutocomplete";
@@ -7,12 +7,13 @@ import { EvidenceInput, useEvidenceEnabled } from "./EvidenceInput";
 import { KirimTujuan, TransferShortcut } from "./TransferShortcut";
 import { PEMASOK, kirimKe } from "../lib/kirim";
 
-const JENIS_OPTIONS = ["SOLAR", "BENSIN"] as const;
+const JENIS_OPTIONS = JENIS_BBM;
 // BBM storage sites (see BBM_LOKASI_OPTIONS in server/src/app.ts). Sub-locations like AKSS/UKM are
 // distribution destinations picked via the Estate field, not separate storage.
 const LOKASI_BY_JENIS: Record<string, string[]> = {
   SOLAR: ["NILAM", "FIRUS", "ZAMRUD", "KNS", "WJA"],
   BENSIN: ["NILAM", "FIRUS", "ZAMRUD", "KNS", "WJA"],
+  BENSIN_CAMPUR: ["WJA", "NILAM", "FIRUS", "ZAMRUD", "KNS"],
 };
 
 // Local date (toISOString is UTC, which is still yesterday before 07:00 WIB).
@@ -31,11 +32,11 @@ export function BbmTransactionModal({
   summary: BbmSummary | null;
   lokasiLock?: string;
   // The jenis the page is showing, so a Bensin entry isn't typed into Solar by accident.
-  jenisAwal?: "SOLAR" | "BENSIN";
+  jenisAwal?: JenisBbm;
   onClose: () => void;
   onSuccess: () => void;
 }) {
-  const [jenisBbm, setJenisBbm] = useState<"SOLAR" | "BENSIN">(jenisAwal ?? "SOLAR");
+  const [jenisBbm, setJenisBbm] = useState<JenisBbm>(jenisAwal ?? "SOLAR");
   const [lokasi, setLokasi] = useState(lokasiLock ?? "NILAM");
   const [tipe, setTipe] = useState<"DITERIMA" | "PEMAKAIAN">("PEMAKAIAN");
   const [tanggal, setTanggal] = useState(todayIso());
@@ -137,7 +138,7 @@ export function BbmTransactionModal({
         <div className="flex items-center justify-between px-5 py-3 border-b border-[var(--border)]">
           <div>
             <h3 className="font-semibold text-sm text-[var(--text-primary)]">Input Transaksi BBM</h3>
-            <p className="text-xs text-[var(--text-secondary)]">Solar / Bensin per lokasi</p>
+            <p className="text-xs text-[var(--text-secondary)]">Solar / Bensin / Bensin Campur per lokasi</p>
           </div>
           <button onClick={onClose} className="text-[var(--text-muted)] hover:text-[var(--text-primary)]">
             <X size={18} />
@@ -164,7 +165,7 @@ export function BbmTransactionModal({
               <select
                 value={jenisBbm}
                 onChange={(e) => {
-                  const j = e.target.value as "SOLAR" | "BENSIN";
+                  const j = e.target.value as JenisBbm;
                   setJenisBbm(j);
                   if (!lokasiLock) setLokasi(LOKASI_BY_JENIS[j][0]);
                 }}
@@ -172,7 +173,7 @@ export function BbmTransactionModal({
               >
                 {JENIS_OPTIONS.map((j) => (
                   <option key={j} value={j}>
-                    {j}
+                    {jenisBbmLabel(j).toUpperCase()}
                   </option>
                 ))}
               </select>

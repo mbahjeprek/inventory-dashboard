@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { jenisBbmLabel } from "../lib/bbmJenis";
 import { Link } from "react-router-dom";
 import { Package, Fuel, Sprout, Stethoscope, Droplet, AlertTriangle, XCircle, CalendarClock, ChevronRight, History, CheckCircle2, HeartPulse } from "lucide-react";
 import { api, type ActivityLog, type BbmSummary, type KlinikSummary, type LaporanKlinikSummary, type OliSummary, type PupukSummary } from "../lib/api";
@@ -122,7 +123,9 @@ function EstateRow({ e, d, monthLabel }: { e: EstateInfo; d: EstateData; monthLa
   const failed = (v: unknown) => v === null;
   const bbmSaldo = (jenis: string) => d.bbm?.saldoTerakhir.find((x) => x.jenis_bbm === jenis && x.lokasi === e.estate)?.saldo_stock ?? 0;
   const bbmFlow = (jenis: string) => d.bbm?.perLokasi.find((x) => x.jenis_bbm === jenis && x.lokasi === e.estate);
-  const bbmEmpty = d.bbm && (["SOLAR", "BENSIN"] as const).every((j) => !Number(bbmSaldo(j)) && !bbmFlow(j));
+  // Bensin Campur only where it has data.
+  const bbmJenis = (["SOLAR", "BENSIN", "BENSIN_CAMPUR"] as const).filter((j) => j !== "BENSIN_CAMPUR" || Number(bbmSaldo(j)) || bbmFlow(j));
+  const bbmEmpty = d.bbm && bbmJenis.every((j) => !Number(bbmSaldo(j)) && !bbmFlow(j));
   const pupukJenis = d.pupuk ? Array.from(new Set(d.pupuk.saldoTerakhir.map((x) => x.jenis_pupuk))) : [];
   const oliJenis = d.oli ? Array.from(new Set([...d.oli.saldoTerakhir.map((x) => x.jenis_oli), ...d.oli.perJenis.map((x) => x.jenis_oli)])).sort() : [];
 
@@ -161,9 +164,9 @@ function EstateRow({ e, d, monthLabel }: { e: EstateInfo; d: EstateData; monthLa
           <EmptyCard text="Belum ada data BBM" />
         ) : (
           <div className="space-y-3">
-            {(["SOLAR", "BENSIN"] as const).map((jenis) => (
+            {bbmJenis.map((jenis) => (
               <div key={jenis} className="grid grid-cols-3 gap-2">
-                <Figure label={jenis === "SOLAR" ? "Solar" : "Bensin"} value={fmt(bbmSaldo(jenis))} suffix="LTR" />
+                <Figure label={jenisBbmLabel(jenis)} value={fmt(bbmSaldo(jenis))} suffix="LTR" />
                 <Figure label="Masuk" value={fmt(bbmFlow(jenis)?.diterima)} tone="green" />
                 <Figure label="Keluar" value={fmt(bbmFlow(jenis)?.pemakaian)} tone="red" />
               </div>
@@ -301,8 +304,8 @@ function estateSection(e: EstateInfo, d: EstateData, user: User, heading: string
     const saldo = (j: string) => n(d.bbm?.saldoTerakhir.find((x) => x.jenis_bbm === j && x.lokasi === e.estate)?.saldo_stock);
     const flow = (j: string) => d.bbm?.perLokasi.find((x) => x.jenis_bbm === j && x.lokasi === e.estate);
     if (ready("BBM", d.bbm, () => ["SOLAR", "BENSIN"].every((j) => !saldo(j) && !flow(j)), "Belum ada data BBM"))
-      for (const j of ["SOLAR", "BENSIN"])
-        rows.push(["BBM", j === "SOLAR" ? "Solar" : "Bensin", saldo(j), "LTR", n(flow(j)?.diterima), n(flow(j)?.pemakaian), minus(saldo(j))]);
+      for (const j of ["SOLAR", "BENSIN", "BENSIN_CAMPUR"].filter((j) => j !== "BENSIN_CAMPUR" || saldo(j) || flow(j)))
+        rows.push(["BBM", jenisBbmLabel(j), saldo(j), "LTR", n(flow(j)?.diterima), n(flow(j)?.pemakaian), minus(saldo(j))]);
   }
   if (canModule(user, "PUPUK")) {
     const jenis = d.pupuk ? Array.from(new Set(d.pupuk.saldoTerakhir.map((x) => x.jenis_pupuk))) : [];

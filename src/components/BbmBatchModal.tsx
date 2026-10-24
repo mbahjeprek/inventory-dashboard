@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { wrongJenis } from "../lib/bbmJenis";
+import { wrongJenis, type JenisBbm } from "../lib/bbmJenis";
 import { api, type BbmSummary } from "../lib/api";
 import type { AlatOption } from "./AlatAutocomplete";
 import { PEMASOK, tujuanColumn } from "../lib/kirim";
@@ -18,11 +18,11 @@ export function BbmBatchModal({
   summary: BbmSummary | null;
   lokasiLock?: string;
   // The jenis the page is showing, so a Bensin entry isn't typed into Solar by accident.
-  jenisAwal?: "SOLAR" | "BENSIN";
+  jenisAwal?: JenisBbm;
   onClose: () => void;
   onSuccess: (count: number) => void;
 }) {
-  const [jenis, setJenis] = useState<"SOLAR" | "BENSIN">(jenisAwal ?? "SOLAR");
+  const [jenis, setJenis] = useState<JenisBbm>(jenisAwal ?? "SOLAR");
   const [lokasi, setLokasi] = useState(lokasiLock ?? "NILAM");
   const [tanggal, setTanggal] = useState(localToday());
   const [estateOptions, setEstateOptions] = useState<string[]>([]);
@@ -133,9 +133,10 @@ export function BbmBatchModal({
       header={
         <>
           <HeaderField label="Jenis BBM">
-            <select value={jenis} onChange={(e) => setJenis(e.target.value as "SOLAR" | "BENSIN")} className={headerInputCls}>
+            <select value={jenis} onChange={(e) => setJenis(e.target.value as JenisBbm)} className={headerInputCls}>
               <option value="SOLAR">SOLAR</option>
               <option value="BENSIN">BENSIN</option>
+              <option value="BENSIN_CAMPUR">BENSIN CAMPUR</option>
             </select>
           </HeaderField>
           <HeaderField label="Lokasi">
