@@ -276,7 +276,7 @@ const PERM_AKSI: Record<string, string> = { view: "Lihat", input: "Input", edit:
 const permLabel = (p: string) => {
   const [m, a] = p.split(".");
   if (PERM_MODUL[m]) return `${PERM_AKSI[a] ?? a} ${PERM_MODUL[m]}`;
-  const other: Record<string, string> = { "dokumen.edit": "Dokumen & Link", "dokumen.kelola": "Kelola semua Dokumen & Link", "klinik.permintaan_approve": "Approve Permintaan Obat", "klinik.ttd_dibuat": "Tanda tangan Permintaan Obat (Dibuat oleh)",
+  const other: Record<string, string> = { "dokumen.edit": "Dokumen & Link", "dokumen.kelola": "Kelola semua Dokumen & Link", "klinik.permintaan_approve": "Approve Permintaan Obat", "ba.setujui": "Setujui Berita Acara Pemusnahan", "klinik.ttd_dibuat": "Tanda tangan Permintaan Obat (Dibuat oleh)",
     "klinik.ttd_diketahui": "Tanda tangan Permintaan Obat (Diketahui)", "klinik.ttd_disetujui1": "Tanda tangan Permintaan Obat (Disetujui 1)",
     "klinik.ttd_disetujui2": "Tanda tangan Permintaan Obat (Disetujui 2)", "sop.view": "Lihat Daftar SOP", "sop.edit": "Ubah Daftar SOP", "sop.kunci": "Kunci Daftar SOP", "master.peta": "Lihat Peta Blok", "master.peta_edit": "Ubah Peta Blok", "master.alat": "Master Alat Berat", "master.users": "Pengguna", "monitor.log_user": "Log Aktivitas User" };
   return other[p] ?? (m === "master" ? `Master ${a.charAt(0).toUpperCase()}${a.slice(1)}` : p);
@@ -8944,7 +8944,16 @@ function baBoleh(req: express.Request, res: express.Response, modul: string, uni
 const baLog = (req: express.Request, ba: { modul: string; unit: string; nomor: string }, aksi: string, detail: string) =>
   logActivity(req, { module: ba.modul === "KLINIK" ? "KLINIK" : "KOPERASI", estate: ba.unit, aksi, objek: `BA ${ba.nomor}`, detail });
 const BA_COLS = `b.id, b.modul, b.unit, b.nomor, b.tanggal, b.isian, b.items, b.status, b.created_at, COALESCE(u.nama, u.username, '') AS dibuat_nama,
-  b.disetujui_nama, b.disetujui_jabatan, b.disetujui_tgl, b.evidence_id, b.selesai_tgl, b.selesai_catatan, b.foto_musnah, b.batal_alasan`;
+  b.disetujui_nama, b.disetujui_jabatan, b.disetujui_tgl, b.evidence_id, b.selesai_tgl, b.selesai_catatan, b.foto_musnah, b.batal_alasan, b.ttd`;
+// Tanda tangan BA: who signs at the destruction, and whether a BA is signed in the app (made after it was).
+const BA_TTD_MUSNAH = ["pelaksana", "saksi1", "saksi2"];
+const BA_PERAN_LABEL: Record<string, string> = { pj: "Yang menyerahkan", pelaksana: "Pelaksana", saksi1: "Saksi 1", saksi2: "Saksi 2", mengetahui: "Mengetahui / menyetujui" };
+const baDigital = (ba: { ttd: any }) => !!ba.ttd?.pj;
+// Units whose BAs an account with Setujui Berita Acara approves: its kliniks, and the koperasi with Nilam.
+const baUnitSetuju = (u: SessionUser) =>
+  u.role === "superuser" || u.perms.includes("ba.setujui")
+    ? [...KLINIK_OPTIONS.filter((k) => estateAllowed(u, k)).map((k) => ({ modul: "KLINIK", unit: k })), ...(estateAllowed(u, KOPERASI) ? [{ modul: "KOPERASI", unit: KOPERASI }] : [])]
+    : [];
 
 app.get("/api/berita-acara", async (req, res) => {
   const modul = String(req.query.modul ?? "");
@@ -9015,15 +9024,19 @@ app.post("/api/berita-acara", async (req, res) => {
       const urut = (await queryOne<{ n: number }>("SELECT COALESCE(MAX(urut), 0) + 1 AS n FROM berita_acara WHERE modul = @modul AND unit = @unit AND tahun = @tahun", { modul, unit, tahun }, client))!.n;
       const nomor = `${String(urut).padStart(3, "0")}/BA-PMS/${modul === "KLINIK" ? `KLINIK-${unit}` : "KOPERASI"}/${b.tanggal.slice(5, 7)}/${tahun}`;
       const r = await queryOne<{ id: number }>(
-        `INSERT INTO berita_acara (modul, unit, tahun, urut, nomor, tanggal, isian, items, dibuat_oleh)
-         VALUES (@modul, @unit, @tahun, @urut, @nomor, @tanggal, @isian::jsonb, @items::jsonb, @uid) RETURNING id`,
-        { modul, unit, tahun, urut, nomor, tanggal: b.tanggal, isian: JSON.stringify(isian), items: JSON.stringify(items), uid: req.user!.id },
+        `INSERT INTO berita_acara (modul, unit, tahun, urut, nomor, tanggal, isian, items, dibuat_oleh, ttd)
+         VALUES (@modul, @unit, @tahun, @urut, @nomor, @tanggal, @isian::jsonb, @items::jsonb, @uid, @ttd::jsonb) RETURNING id`,
+        {
+          modul, unit, tahun, urut, nomor, tanggal: b.tanggal, isian: JSON.stringify(isian), items: JSON.stringify(items), uid: req.user!.id,
+          // Yang menyerahkan signs by making it, with the account.
+          ttd: JSON.stringify({ pj: { cara: "AKUN", nama: req.user!.nama, jabatan: String(isian?.pj?.jabatan ?? ""), user_id: req.user!.id, at: new Date().toISOString() } }),
+        },
         client
       );
       for (const id of ids) await execute("INSERT INTO berita_acara_item (ba_id, modul, ref_id) VALUES (@ba, @modul, @id)", { ba: r!.id, modul, id }, client);
       return { id: r!.id, nomor, n: items.length };
     });
-    await baLog(req, { modul, unit, nomor: ba.nomor }, "Buat Berita Acara", `${ba.n} barang · rencana pemusnahan ${b.tanggal} · menunggu persetujuan manager`);
+    await baLog(req, { modul, unit, nomor: ba.nomor }, "Buat Berita Acara", `${ba.n} barang · rencana pemusnahan ${b.tanggal} · ditandatangani yang menyerahkan, menunggu persetujuan`);
     res.json(ba);
   } catch (e) {
     if (e instanceof StockError) return res.status(400).json({ error: e.message });
@@ -9032,10 +9045,12 @@ app.post("/api/berita-acara", async (req, res) => {
 });
 
 // Persetujuan: the manager / perwakilan agreed (outside the app, e.g. a WhatsApp reply); its capture is the proof.
+// Only for a BA made before it was signed in the app, or by a Super User when the manager can't sign.
 app.put("/api/berita-acara/:id/setuju", async (req, res) => {
   const ba = await queryOne<any>("SELECT * FROM berita_acara WHERE id = @id", { id: req.params.id });
   if (!ba) return res.status(404).json({ error: "Berita acara tidak ditemukan" });
   if (!baBoleh(req, res, ba.modul, ba.unit, "input")) return;
+  if (baDigital(ba) && req.user!.role !== "superuser") return res.status(403).json({ error: "Berita acara ini disetujui Estate Manager di aplikasi (menu Persetujuan)" });
   if (ba.status !== "MENUNGGU") return res.status(409).json({ error: "Berita acara ini tidak sedang menunggu persetujuan" });
   const b = req.body ?? {};
   const nama = String(b.nama ?? "").trim();
@@ -9058,6 +9073,8 @@ app.put("/api/berita-acara/:id/selesai", async (req, res) => {
   if (!ba) return res.status(404).json({ error: "Berita acara tidak ditemukan" });
   if (!baBoleh(req, res, ba.modul, ba.unit, "input")) return;
   if (ba.status !== "DISETUJUI") return res.status(409).json({ error: ba.status === "MENUNGGU" ? "Berita acara ini belum disetujui manager" : "Berita acara ini sudah ditutup / dibatalkan" });
+  const kurang = baDigital(ba) ? BA_TTD_MUSNAH.filter((k) => !ba.ttd?.[k]) : [];
+  if (kurang.length) return res.status(400).json({ error: `Belum ditandatangani: ${kurang.map((k) => BA_PERAN_LABEL[k]).join(", ")}` });
   const b = req.body ?? {};
   if (!isIsoDate(b.tanggal) || b.tanggal > jakartaToday()) return res.status(400).json({ error: "Tanggal pemusnahan tidak valid" });
   const foto = b.evidence_id ? await claimEvidence(req, res) : null;
@@ -9070,6 +9087,79 @@ app.put("/api/berita-acara/:id/selesai", async (req, res) => {
     id: ba.id,
   });
   await baLog(req, ba, "Tutup Berita Acara", `barang dimusnahkan tanggal ${b.tanggal}${b.catatan ? ` · ${String(b.catatan).trim()}` : ""}${foto ? " · foto terlampir" : ""}`);
+  res.json({ success: true });
+});
+
+// The BAs waiting for this account's approval (Setujui Berita Acara, of its units).
+app.get("/api/berita-acara/menunggu", async (req, res) => {
+  const units = baUnitSetuju(req.user!);
+  if (!units.length) return res.json({ data: [] });
+  const data = await queryMany(
+    `SELECT ${BA_COLS} FROM berita_acara b LEFT JOIN users u ON u.id = b.dibuat_oleh
+      WHERE b.status = 'MENUNGGU' AND b.ttd ? 'pj' AND (b.modul || ':' || b.unit) = ANY(@units::text[]) ORDER BY b.created_at, b.id`,
+    { units: units.map((x) => `${x.modul}:${x.unit}`) }
+  );
+  res.json({ data: data.filter((b: any) => req.user!.role === "superuser" || b.ttd?.pj?.user_id !== req.user!.id) });
+});
+
+// Mengetahui / menyetujui in the app: SETUJU (status DISETUJUI, ready to destroy) or TOLAK with an alasan (the
+// BA is cancelled and its barang free for another). Not by the account that made it (a Super User may).
+app.put("/api/berita-acara/:id/persetujuan", async (req, res) => {
+  const u = req.user!;
+  const ba = await queryOne<any>("SELECT * FROM berita_acara WHERE id = @id", { id: req.params.id });
+  if (!ba) return res.status(404).json({ error: "Berita acara tidak ditemukan" });
+  if (!baUnitSetuju(u).some((x) => x.modul === ba.modul && x.unit === ba.unit)) return res.status(403).json({ error: "Akun ini tidak punya hak Setujui Berita Acara Pemusnahan untuk unit ini" });
+  if (ba.status !== "MENUNGGU") return res.status(409).json({ error: "Berita acara ini tidak sedang menunggu persetujuan" });
+  if (u.role !== "superuser" && ba.ttd?.pj?.user_id === u.id) return res.status(403).json({ error: "Pembuat berita acara tidak bisa menyetujuinya sendiri" });
+  const jabatan = String(ba.isian?.mengetahui?.jabatan ?? "");
+  if (req.body?.aksi === "TOLAK") {
+    const alasan = String(req.body?.alasan ?? "").trim().slice(0, 500);
+    if (alasan.length < 3) return res.status(400).json({ error: "Isi alasan penolakan" });
+    await execute("UPDATE berita_acara SET status = 'BATAL', batal_oleh = @uid, batal_alasan = @alasan WHERE id = @id", { uid: u.id, alasan: `Ditolak ${u.nama}: ${alasan}`, id: ba.id });
+    await baLog(req, ba, "Tolak Berita Acara", alasan);
+    return res.json({ success: true });
+  }
+  const ttd = { ...(ba.ttd ?? {}), mengetahui: { cara: "AKUN", nama: u.nama, jabatan, user_id: u.id, at: new Date().toISOString() } };
+  await execute(
+    `UPDATE berita_acara SET status = 'DISETUJUI', ttd = @ttd::jsonb, disetujui_nama = @nama, disetujui_jabatan = @jabatan, disetujui_tgl = @tgl, disetujui_input_oleh = @uid WHERE id = @id`,
+    { ttd: JSON.stringify(ttd), nama: u.nama, jabatan, tgl: jakartaToday(), uid: u.id, id: ba.id }
+  );
+  await baLog(req, ba, "Setujui Berita Acara", `ditandatangani ${u.nama}${jabatan ? ` (${jabatan})` : ""} di aplikasi`);
+  res.json({ success: true });
+});
+
+// Tanda tangan at the destruction (DISETUJUI): pelaksana / saksi1 / saksi2, by the account signing (AKUN) or
+// drawn on the screen (LAYAR, with the name on the BA); signing again replaces it.
+app.put("/api/berita-acara/:id/ttd", async (req, res) => {
+  const u = req.user!;
+  const ba = await queryOne<any>("SELECT * FROM berita_acara WHERE id = @id", { id: req.params.id });
+  if (!ba) return res.status(404).json({ error: "Berita acara tidak ditemukan" });
+  if (!baBoleh(req, res, ba.modul, ba.unit, "input")) return;
+  if (ba.status !== "DISETUJUI") return res.status(409).json({ error: ba.status === "MENUNGGU" ? "Tunggu persetujuan dulu; pelaksana dan saksi menandatangani saat pemusnahan" : "Berita acara ini sudah ditutup / dibatalkan" });
+  const peran = String(req.body?.peran ?? "");
+  if (!BA_TTD_MUSNAH.includes(peran)) return res.status(400).json({ error: "Kotak tanda tangan tidak valid" });
+  const cara = req.body?.cara === "AKUN" ? "AKUN" : "LAYAR";
+  const jabatan = String(req.body?.jabatan ?? ba.isian?.[peran]?.jabatan ?? "").trim().slice(0, 100);
+  let isi: any;
+  if (cara === "AKUN") {
+    const lain = Object.entries(ba.ttd ?? {}).find(([k, v]: [string, any]) => k !== peran && v?.cara === "AKUN" && v?.user_id === u.id);
+    if (lain && u.role !== "superuser") return res.status(403).json({ error: `Akun ini sudah menandatangani sebagai ${BA_PERAN_LABEL[lain[0]]}; satu orang satu tanda tangan` });
+    isi = { cara, nama: u.nama, jabatan, user_id: u.id, at: new Date().toISOString() };
+  } else {
+    const gambar = String(req.body?.gambar ?? "");
+    if (!/^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(gambar) || gambar.length > 400_000) return res.status(400).json({ error: "Tanda tangan di layar tidak terbaca; ulangi" });
+    const nama = String(req.body?.nama ?? ba.isian?.[peran]?.nama ?? "").trim().slice(0, 100);
+    if (!nama) return res.status(400).json({ error: "Isi nama yang menandatangani" });
+    isi = { cara, nama, jabatan, gambar, input_oleh: u.id, input_nama: u.nama, at: new Date().toISOString() };
+  }
+  const ganti = !!ba.ttd?.[peran];
+  await execute("UPDATE berita_acara SET ttd = jsonb_set(ttd, @path::text[], @isi::jsonb) WHERE id = @id", { path: [peran], isi: JSON.stringify(isi), id: ba.id });
+  await baLog(
+    req,
+    ba,
+    "Tanda Tangan Berita Acara",
+    `${BA_PERAN_LABEL[peran]}: ${isi.nama}${jabatan ? ` (${jabatan})` : ""} · ${cara === "AKUN" ? "dengan akun" : `di layar, dicatat ${u.nama}`}${ganti ? " · mengganti tanda tangan sebelumnya" : ""}`
+  );
   res.json({ success: true });
 });
 

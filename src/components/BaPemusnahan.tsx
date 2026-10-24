@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import { CheckCircle2, FileText, Printer, ShieldCheck, X } from "lucide-react";
-import { api, errorText, type BeritaAcara, type KlinikTarik, type KopTx } from "../lib/api";
+import { Check, CheckCircle2, CircleDashed, FileText, PenLine, Printer, ShieldCheck, UserCheck, X } from "lucide-react";
+import { api, errorText, type BaPeran, type BaTtd, type BeritaAcara, type KlinikTarik, type KopTx } from "../lib/api";
+import { SignaturePad } from "./SignaturePad";
 import { printDocument } from "../lib/printTable";
 import { isoDisplay, localToday } from "../lib/opname";
 import { BULAN, HARI, KOP_CSS, PERUSAHAAN, escHtml, jabatanDariGelar, kopHtml, namaLama, terbilang } from "../lib/surat";
@@ -9,9 +10,11 @@ import { can } from "../lib/access";
 import { EvidenceInput, EvidenceLink, useEvidenceEnabled } from "./EvidenceInput";
 
 // Berita Acara Pemusnahan (Klinik obat / BHP, Koperasi barang rusak): a stored document with an automatic
-// nomor. Made from the approved rows (each row on one active BA only) and printed as a formal letter;
-// sent to the manager / perwakilan, whose WhatsApp reply (a capture) is recorded as the approval; then
-// closed once the barang are destroyed. Names, positions, company and cara are remembered per unit.
+// nomor. Made from the approved rows (each row on one active BA only) and printed as a formal letter, signed
+// in the app: yang menyerahkan by making it, the Estate Manager / Ketua (Setujui Berita Acara) approves or
+// refuses it from Persetujuan, then at the destruction the pelaksana and both saksi sign - with their account
+// or drawn on the screen - and it is closed. (A BA made before this keeps its WhatsApp-capture approval.)
+// Names, positions, company and cara are remembered per unit.
 
 export type BaItem = BeritaAcara["items"][number] & { pilih: boolean };
 type Orang = { nama: string; jabatan: string };
@@ -36,10 +39,18 @@ export type BaJenis = {
 const esc = escHtml;
 const rp = (n: number) => `Rp ${Math.round(n).toLocaleString("id-ID")}`;
 const PERAN: Peran[] = ["pj", "pelaksana", "saksi1", "saksi2", "mengetahui"];
+const waktuJam = (iso: string) =>
+  new Date(iso).toLocaleString("id-ID", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Jakarta" }).replace(",", "");
+const TTD_MUSNAH: BaPeran[] = ["pelaksana", "saksi1", "saksi2"];
+const digital = (ba: Pick<BeritaAcara, "ttd">) => !!ba.ttd?.pj;
 const waktu = (iso: string) => new Date(iso).toLocaleDateString("id-ID", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "Asia/Jakarta" });
 
 // The letter of a stored BA (also reprinted later, with its approval / closing when there is one).
-export function baHtml(j: BaJenis, ba: Pick<BeritaAcara, "nomor" | "tanggal" | "items" | "status" | "disetujui_nama" | "disetujui_jabatan" | "disetujui_tgl" | "selesai_tgl">, f: Isian) {
+export function baHtml(
+  j: BaJenis,
+  ba: Pick<BeritaAcara, "nomor" | "tanggal" | "items" | "status" | "disetujui_nama" | "disetujui_jabatan" | "disetujui_tgl" | "selesai_tgl" | "ttd">,
+  f: Isian
+) {
   const rows = ba.items;
   const d = new Date(`${ba.tanggal}T00:00:00`);
   const tgl = `${HARI[d.getDay()]} tanggal ${terbilang(d.getDate())} bulan ${BULAN[d.getMonth()]} tahun ${terbilang(d.getFullYear())} (${isoDisplay(ba.tanggal)})`;
@@ -47,16 +58,29 @@ export function baHtml(j: BaJenis, ba: Pick<BeritaAcara, "nomor" | "tanggal" | "
   const nilai = rows.some((r) => r.nilai !== undefined && r.nilai !== null);
   const total = rows.reduce((s, r) => s + (r.nilai ?? 0), 0);
   const orang = PERAN.filter((k) => k !== "mengetahui" && f[k]?.nama?.trim());
-  const ttd = (judul: string, o: Orang, style = "") =>
-    `<div class="ttd" ${style}><div>${esc(judul)}</div><div class="ruang"></div><div class="nama">${esc(o?.nama || "(................................)")}</div><div>${esc(o?.jabatan ?? "")}</div></div>`;
+  // A box signed in the app: the drawn signature, or an electronic stamp for one signed with an account.
+  const ttd = (judul: string, k: Peran, style = "") => {
+    const o = f[k];
+    const t = ba.ttd?.[k];
+    const ruang = !t
+      ? `<div class="ruang"></div>`
+      : t.cara === "LAYAR" && t.gambar
+        ? `<div class="ruang el"><img src="${t.gambar}" alt="tanda tangan"></div>`
+        : `<div class="ruang el"><div class="cap">DITANDATANGANI SECARA ELEKTRONIK<br>${esc(waktuJam(t.at))}</div></div>`;
+    return `<div class="ttd" ${style}><div>${esc(judul)}</div>${ruang}<div class="nama">${esc(t?.nama || o?.nama || "(................................)")}</div><div>${esc(t?.jabatan || o?.jabatan || "")}</div></div>`;
+  };
   const body = rows
     .map(
       (t, i) =>
         `<tr><td class="c">${i + 1}</td><td>${esc(t.nama)}<div class="kecil">${esc(t.kode)}</div></td><td class="c">${esc(t.tgl)}</td><td class="r">${t.qty.toLocaleString("id-ID")}</td><td>${esc(t.satuan)}</td><td>${esc(t.alasan)}</td><td>${esc(t.keterangan)}<div class="kecil">${esc(t.info)}</div></td>${nilai ? `<td class="r">${esc(rp(t.nilai ?? 0))}</td>` : ""}</tr>`
     )
     .join("");
-  const setuju =
-    ba.status === "DISETUJUI" || ba.status === "SELESAI"
+  const m = ba.ttd?.mengetahui;
+  const setuju = m
+    ? `<p class="setuju">Persetujuan: disetujui oleh <b>${esc(m.nama)}</b>${m.jabatan ? ` (${esc(m.jabatan)})` : ""} secara elektronik di sistem pada ${esc(waktuJam(m.at))}.${
+        ba.status === "SELESAI" && ba.selesai_tgl ? ` Barang telah dimusnahkan pada ${esc(isoDisplay(ba.selesai_tgl))}.` : ""
+      }</p>`
+    : ba.status === "DISETUJUI" || ba.status === "SELESAI"
       ? `<p class="setuju">Persetujuan: disetujui oleh <b>${esc(ba.disetujui_nama)}</b>${ba.disetujui_jabatan ? ` (${esc(ba.disetujui_jabatan)})` : ""} pada ${esc(isoDisplay(ba.disetujui_tgl ?? ""))} melalui WhatsApp; bukti tersimpan di sistem.${ba.status === "SELESAI" && ba.selesai_tgl ? ` Barang telah dimusnahkan pada ${esc(isoDisplay(ba.selesai_tgl))}.` : ""}</p>`
       : "";
   return `<!doctype html><html><head><meta charset="utf-8"><title>${esc(j.judul)} ${esc(ba.nomor)}</title><style>
@@ -80,6 +104,9 @@ export function baHtml(j: BaJenis, ba: Pick<BeritaAcara, "nomor" | "tanggal" | "
     .ttds { display: flex; flex-wrap: wrap; justify-content: space-between; row-gap: 14px; margin-top: 14px; page-break-inside: avoid; }
     .ttd { width: 46%; text-align: center; }
     .ttd .ruang { height: 64px; }
+    .ttd .ruang.el { display: flex; align-items: center; justify-content: center; }
+    .ttd .ruang.el img { max-height: 62px; max-width: 90%; }
+    .ttd .cap { border: 1.5px solid #1f4e9c; color: #1f4e9c; border-radius: 4px; padding: 3px 6px; font-size: 7.5pt; font-weight: bold; line-height: 1.35; font-family: Arial, sans-serif; }
     .ttd .nama { font-weight: bold; text-decoration: underline; }
   </style></head><body>
     ${kopHtml(f.perusahaan, j.unitLabel)}
@@ -97,9 +124,9 @@ export function baHtml(j: BaJenis, ba: Pick<BeritaAcara, "nomor" | "tanggal" | "
     <p>Demikian Berita Acara Pemusnahan ini dibuat dengan sebenarnya dalam rangkap secukupnya untuk dapat dipergunakan sebagaimana mestinya.</p>
     <p style="text-align:right;margin-top:10px">${esc(j.kota)}, ${esc(`${d.getDate()} ${BULAN[d.getMonth()]} ${d.getFullYear()}`)}</p>
     <div class="ttds">
-      ${ttd("Yang Menyerahkan,", f.pj)}${ttd("Pelaksana Pemusnahan,", f.pelaksana)}
-      ${ttd("Saksi 1,", f.saksi1)}${ttd("Saksi 2,", f.saksi2)}
-      ${ttd("Mengetahui / Menyetujui,", f.mengetahui, 'style="margin:0 auto"')}
+      ${ttd("Yang Menyerahkan,", "pj")}${ttd("Pelaksana Pemusnahan,", "pelaksana")}
+      ${ttd("Saksi 1,", "saksi1")}${ttd("Saksi 2,", "saksi2")}
+      ${ttd("Mengetahui / Menyetujui,", "mengetahui", 'style="margin:0 auto"')}
     </div>
     ${setuju}
   </body></html>`;
@@ -178,7 +205,21 @@ export function BaForm({ jenis: j, items, onClose, onSaved }: { jenis: BaJenis; 
         /* no storage */
       }
       printDocument(
-        baHtml(j, { nomor: r.nomor, tanggal, items: dipilih, status: "MENUNGGU", disetujui_nama: "", disetujui_jabatan: "", disetujui_tgl: null, selesai_tgl: null }, f)
+        baHtml(
+          j,
+          {
+            nomor: r.nomor,
+            tanggal,
+            items: dipilih,
+            status: "MENUNGGU",
+            disetujui_nama: "",
+            disetujui_jabatan: "",
+            disetujui_tgl: null,
+            selesai_tgl: null,
+            ttd: { pj: { cara: "AKUN", nama: user?.nama ?? f.pj.nama, jabatan: f.pj.jabatan, at: new Date().toISOString() } },
+          },
+          f
+        )
       );
       onSaved();
     } catch (e) {
@@ -295,7 +336,7 @@ export function BaForm({ jenis: j, items, onClose, onSaved }: { jenis: BaJenis; 
 }
 
 const STATUS: Record<BeritaAcara["status"], { label: string; cls: string }> = {
-  MENUNGGU: { label: "Menunggu persetujuan manager", cls: "bg-[var(--accent-amber-bg)] border-[var(--accent-amber-border)] text-[var(--accent-amber)]" },
+  MENUNGGU: { label: "Menunggu persetujuan", cls: "bg-[var(--accent-amber-bg)] border-[var(--accent-amber-border)] text-[var(--accent-amber)]" },
   DISETUJUI: { label: "Disetujui, siap dimusnahkan", cls: "bg-[var(--accent-blue-bg)] border-[var(--accent-blue-border)] text-[var(--accent-blue)]" },
   SELESAI: { label: "Selesai, sudah dimusnahkan", cls: "bg-[var(--accent-green-bg)] border-[var(--accent-green-border)] text-[var(--accent-green)]" },
   BATAL: { label: "Batal", cls: "bg-[#f1f5f9] border-[var(--border)] text-[var(--text-muted)]" },
@@ -411,7 +452,10 @@ export function BaDaftar({ jenis: j, items, reload, onChanged }: { jenis: BaJeni
   const [buat, setBuat] = useState<BaItem[] | null | false>(false);
   const [setuju, setSetuju] = useState<BeritaAcara | null>(null);
   const [selesai, setSelesai] = useState<BeritaAcara | null>(null);
+  const [periksa, setPeriksa] = useState<BeritaAcara | null>(null);
+  const [tandaTangan, setTandaTangan] = useState<BeritaAcara | null>(null);
   const [error, setError] = useState("");
+  const canSetujui = can(user, "ba.setujui");
   useEffect(() => {
     api
       .baList(j.modul, j.unit)
@@ -422,6 +466,8 @@ export function BaDaftar({ jenis: j, items, reload, onChanged }: { jenis: BaJeni
     setBuat(false);
     setSetuju(null);
     setSelesai(null);
+    setPeriksa(null);
+    setTandaTangan(null);
     setMuat((n) => n + 1);
     onChanged?.();
   };
@@ -452,7 +498,7 @@ export function BaDaftar({ jenis: j, items, reload, onChanged }: { jenis: BaJeni
       <div className="flex flex-wrap items-center gap-2 p-3 border-b border-[var(--border)]">
         <h2 className="text-sm font-semibold text-[var(--text-primary)]">Berita Acara Pemusnahan</h2>
         {aktif > 0 && <span className="text-xs text-[var(--accent-amber)]">{aktif} belum selesai</span>}
-        <span className="text-xs text-[var(--text-muted)]">Buat → cetak & kirim ke manager → catat persetujuan (capture WA) → musnahkan → tutup</span>
+        <span className="text-xs text-[var(--text-muted)]">Buat → disetujui Estate Manager di aplikasi → musnahkan, pelaksana & saksi tanda tangan → tutup</span>
         {error && <span className="text-xs text-[var(--accent-red)]">{error}</span>}
         {canInput && (
           <button onClick={bukaBuat} className={`${btnPrimary} ml-auto`}>
@@ -503,13 +549,35 @@ export function BaDaftar({ jenis: j, items, reload, onChanged }: { jenis: BaJeni
                     {b.status === "BATAL" ? (
                       <span>Dibatalkan: {b.batal_alasan}</span>
                     ) : b.status === "MENUNGGU" ? (
-                      <span className="text-[var(--text-muted)]">Kirim BA ke manager / perwakilan, lalu catat persetujuannya dengan capture WA.</span>
+                      <span className="text-[var(--text-muted)]">
+                        {digital(b)
+                          ? `Menunggu persetujuan ${(b.isian as Isian).mengetahui?.jabatan || "Estate Manager"} di menu Persetujuan.`
+                          : "Kirim BA ke manager / perwakilan, lalu catat persetujuannya dengan capture WA."}
+                      </span>
                     ) : (
                       <>
                         <div>
                           Disetujui <b>{b.disetujui_nama}</b>
-                          {b.disetujui_jabatan ? ` (${b.disetujui_jabatan})` : ""} · {isoDisplay(b.disetujui_tgl ?? "")} <EvidenceLink id={b.evidence_id} label="capture WA" />
+                          {b.disetujui_jabatan ? ` (${b.disetujui_jabatan})` : ""} ·{" "}
+                          {b.ttd?.mengetahui ? (
+                            `${waktuJam(b.ttd.mengetahui.at)} di aplikasi`
+                          ) : (
+                            <>
+                              {isoDisplay(b.disetujui_tgl ?? "")} <EvidenceLink id={b.evidence_id} label="capture WA" />
+                            </>
+                          )}
                         </div>
+                        {digital(b) && (
+                          <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-0.5">
+                            {TTD_MUSNAH.map((k) => (
+                              <span key={k} className={`inline-flex items-center gap-1 ${b.ttd?.[k] ? "text-[var(--accent-green)]" : "text-[var(--text-muted)]"}`}>
+                                {b.ttd?.[k] ? <Check size={12} /> : <CircleDashed size={12} />}
+                                {j.peran[k].label.replace(/ \(.*\)$/, "")}
+                                {b.ttd?.[k] ? `: ${b.ttd[k]!.nama}` : ""}
+                              </span>
+                            ))}
+                          </div>
+                        )}
                         {b.status === "SELESAI" && (
                           <div>
                             Dimusnahkan {isoDisplay(b.selesai_tgl ?? "")}
@@ -523,13 +591,32 @@ export function BaDaftar({ jenis: j, items, reload, onChanged }: { jenis: BaJeni
                     <button onClick={() => cetakBa(j, b)} title="Cetak berita acara" className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded border border-[var(--border)] hover:bg-[#f1f5f9]">
                       <Printer size={13} /> Cetak
                     </button>
-                    {canInput && b.status === "MENUNGGU" && (
-                      <button onClick={() => setSetuju(b)} className="text-xs px-2 py-1 rounded bg-[var(--accent-blue)] text-white hover:opacity-90">
-                        Catat persetujuan
+                    {b.status === "MENUNGGU" && digital(b) && canSetujui && (user?.role === "superuser" || b.ttd?.pj?.user_id !== user?.id) && (
+                      <button onClick={() => setPeriksa(b)} className="text-xs px-2 py-1 rounded bg-[var(--accent-blue)] text-white hover:opacity-90">
+                        Setujui / Tolak
+                      </button>
+                    )}
+                    {canInput && b.status === "MENUNGGU" && (!digital(b) || user?.role === "superuser") && (
+                      <button
+                        onClick={() => setSetuju(b)}
+                        title={digital(b) ? "Bila Estate Manager tidak bisa menandatangani di aplikasi: catat persetujuan WA (Super User)" : undefined}
+                        className={digital(b) ? "text-xs px-2 py-1 rounded border border-[var(--border)] hover:bg-[#f1f5f9]" : "text-xs px-2 py-1 rounded bg-[var(--accent-blue)] text-white hover:opacity-90"}
+                      >
+                        {digital(b) ? "Catat manual (WA)" : "Catat persetujuan"}
+                      </button>
+                    )}
+                    {canInput && b.status === "DISETUJUI" && digital(b) && (
+                      <button onClick={() => setTandaTangan(b)} className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded bg-[var(--accent-blue)] text-white hover:opacity-90">
+                        <PenLine size={13} /> Tanda tangan
                       </button>
                     )}
                     {canInput && b.status === "DISETUJUI" && (
-                      <button onClick={() => setSelesai(b)} className="text-xs px-2 py-1 rounded bg-[var(--accent-green)] text-white hover:opacity-90">
+                      <button
+                        onClick={() => setSelesai(b)}
+                        disabled={digital(b) && TTD_MUSNAH.some((k) => !b.ttd?.[k])}
+                        title={digital(b) && TTD_MUSNAH.some((k) => !b.ttd?.[k]) ? "Pelaksana dan kedua saksi tanda tangan dulu" : undefined}
+                        className="text-xs px-2 py-1 rounded bg-[var(--accent-green)] text-white hover:opacity-90 disabled:opacity-40"
+                      >
                         Tutup: sudah dimusnahkan
                       </button>
                     )}
@@ -548,6 +635,8 @@ export function BaDaftar({ jenis: j, items, reload, onChanged }: { jenis: BaJeni
       {buat !== false && <BaForm jenis={j} items={buat} onClose={() => setBuat(false)} onSaved={done} />}
       {setuju && <SetujuModal ba={setuju} onClose={() => setSetuju(null)} onDone={done} />}
       {selesai && <SelesaiModal ba={selesai} onClose={() => setSelesai(null)} onDone={done} />}
+      {periksa && <BaPeriksaModal jenis={j} ba={periksa} onClose={() => setPeriksa(null)} onDone={done} />}
+      {tandaTangan && <BaTtdModal jenis={j} ba={tandaTangan} onClose={() => setTandaTangan(null)} onDone={done} />}
     </div>
   );
 }
@@ -630,3 +719,173 @@ export const itemsKoperasi = async (): Promise<BaItem[]> => {
     pilih: true,
   }));
 };
+
+// Mengetahui / menyetujui: the BA as it prints, then Setujui (signed with the account) or Tolak with an alasan
+// (the BA is cancelled). Also opened from Persetujuan.
+export function BaPeriksaModal({ jenis: j, ba, onClose, onDone }: { jenis: BaJenis; ba: BeritaAcara; onClose: () => void; onDone: () => void }) {
+  const [tolak, setTolak] = useState(false);
+  const [alasan, setAlasan] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const kirim = async (aksi: "SETUJU" | "TOLAK") => {
+    if (aksi === "TOLAK" && alasan.trim().length < 3) return setError("Isi alasan penolakan");
+    setBusy(true);
+    setError("");
+    try {
+      await api.baPersetujuan(ba.id, { aksi, alasan: alasan.trim() });
+      onDone();
+    } catch (e) {
+      setError(errorText(e, "Gagal menyimpan"));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Shell title={`Persetujuan ${ba.nomor}`} subtitle={`${j.unitLabel} · ${ba.items.length} barang · dibuat ${ba.dibuat_nama || "-"}`} onClose={onClose} wide>
+      <div className="space-y-3">
+        <iframe title="Berita acara" srcDoc={baHtml(j, ba, ba.isian as Isian).replace("<body>", '<body style="padding:14px 18px">')} className="w-full h-[55vh] rounded-md border border-[var(--border)] bg-white" />
+        {tolak ? (
+          <div className="space-y-2">
+            <input autoFocus value={alasan} onChange={(e) => setAlasan(e.target.value)} maxLength={500} placeholder="Alasan penolakan (wajib); berita acara dibatalkan" className={inputCls} />
+            {error && <p className="text-xs text-[var(--accent-red)]">{error}</p>}
+            <div className="flex justify-end gap-2">
+              <button onClick={() => (setTolak(false), setError(""))} disabled={busy} className={btnOutline}>
+                Kembali
+              </button>
+              <button onClick={() => kirim("TOLAK")} disabled={busy} className="inline-flex items-center gap-1.5 text-sm px-3.5 py-2 rounded-md bg-[var(--accent-red)] text-white hover:opacity-90 disabled:opacity-50">
+                Tolak & batalkan
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
+            {error && <p className="text-xs text-[var(--accent-red)]">{error}</p>}
+            <div className="flex flex-wrap justify-end gap-2">
+              <button onClick={() => cetakBa(j, ba)} className={`${btnOutline} mr-auto`}>
+                <Printer size={15} /> Cetak
+              </button>
+              <button onClick={() => setTolak(true)} disabled={busy} className={btnOutline}>
+                Tolak
+              </button>
+              <button onClick={() => kirim("SETUJU")} disabled={busy} className={btnPrimary}>
+                <ShieldCheck size={15} /> {busy ? "Menyimpan..." : "Setujui & tandatangani"}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </Shell>
+  );
+}
+
+// At the destruction: the pelaksana and both saksi sign, each drawn on the screen (its name as on the BA, can be
+// corrected) or with the account of whoever signs; a box signed already can be signed again.
+function BaTtdModal({ jenis: j, ba, onClose, onDone }: { jenis: BaJenis; ba: BeritaAcara; onClose: () => void; onDone: () => void }) {
+  const { user } = useAuth();
+  const [ttd, setTtd] = useState(ba.ttd ?? {});
+  const [aktif, setAktif] = useState<BaPeran | null>(TTD_MUSNAH.find((k) => !ba.ttd?.[k]) ?? null);
+  const [diubah, setDiubah] = useState(false);
+  const isian = ba.isian as Isian;
+  const tutup = () => (diubah ? onDone() : onClose());
+  return (
+    <Shell title={`Tanda tangan ${ba.nomor}`} subtitle="Pelaksana dan kedua saksi menandatangani saat pemusnahan" onClose={tutup} wide>
+      <div className="space-y-3">
+        {TTD_MUSNAH.map((k) => (
+          <TtdKotak
+            key={k}
+            label={j.peran[k].label}
+            orang={isian[k]}
+            ttd={ttd[k]}
+            buka={aktif === k}
+            onBuka={() => setAktif(aktif === k ? null : k)}
+            akunSaya={user?.nama ?? ""}
+            simpan={async (body) => {
+              await api.baTtd(ba.id, { peran: k, ...body });
+              const t: BaTtd = { cara: body.cara, nama: body.cara === "AKUN" ? user?.nama ?? "" : body.nama ?? "", jabatan: body.jabatan ?? "", at: new Date().toISOString(), gambar: body.gambar };
+              const next = { ...ttd, [k]: t };
+              setTtd(next);
+              setDiubah(true);
+              setAktif(TTD_MUSNAH.find((x) => !next[x]) ?? null);
+            }}
+          />
+        ))}
+        <div className="flex justify-end">
+          <button onClick={tutup} className={btnPrimary}>
+            Selesai
+          </button>
+        </div>
+      </div>
+    </Shell>
+  );
+}
+
+function TtdKotak({
+  label,
+  orang,
+  ttd,
+  buka,
+  onBuka,
+  akunSaya,
+  simpan,
+}: {
+  label: string;
+  orang: Orang | undefined;
+  ttd: BaTtd | undefined;
+  buka: boolean;
+  onBuka: () => void;
+  akunSaya: string;
+  simpan: (b: { cara: "AKUN" | "LAYAR"; nama?: string; jabatan?: string; gambar?: string }) => Promise<void>;
+}) {
+  const [nama, setNama] = useState(orang?.nama ?? "");
+  const [jabatan, setJabatan] = useState(orang?.jabatan ?? "");
+  const [gambar, setGambar] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const kirim = async (cara: "AKUN" | "LAYAR") => {
+    if (cara === "LAYAR" && !nama.trim()) return setError("Isi nama yang menandatangani");
+    if (cara === "LAYAR" && !gambar) return setError("Tanda tangan dulu di kotak");
+    setBusy(true);
+    setError("");
+    try {
+      await simpan({ cara, nama: nama.trim(), jabatan: jabatan.trim(), gambar: gambar ?? undefined });
+      setGambar(null);
+    } catch (e) {
+      setError(errorText(e, "Gagal menyimpan tanda tangan"));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className={`rounded-md border ${ttd ? "border-[var(--accent-green-border)]" : "border-[var(--border)]"}`}>
+      <button onClick={onBuka} className="w-full flex items-center gap-3 px-3 py-2 text-left">
+        {ttd ? <Check size={16} className="text-[var(--accent-green)] shrink-0" /> : <CircleDashed size={16} className="text-[var(--text-muted)] shrink-0" />}
+        <span className="flex-1 min-w-0">
+          <span className="block text-sm font-medium text-[var(--text-primary)]">{label}</span>
+          <span className="block text-xs text-[var(--text-secondary)] truncate">
+            {ttd ? `${ttd.nama}${ttd.jabatan ? ` · ${ttd.jabatan}` : ""} · ${ttd.cara === "AKUN" ? "dengan akun" : "di layar"} · ${waktuJam(ttd.at)}` : orang?.nama || "Belum ada nama"}
+          </span>
+        </span>
+        {ttd?.gambar && <img src={ttd.gambar} alt="" className="h-9 max-w-[120px] object-contain" />}
+        <span className="text-xs text-[var(--accent-blue)]">{buka ? "Tutup" : ttd ? "Ulangi" : "Tanda tangan"}</span>
+      </button>
+      {buka && (
+        <div className="border-t border-[var(--border)] p-3 space-y-2">
+          <div className="grid sm:grid-cols-2 gap-2">
+            <input value={nama} onChange={(e) => setNama(e.target.value)} placeholder="Nama" className={inputCls} />
+            <input value={jabatan} onChange={(e) => setJabatan(e.target.value)} placeholder="Jabatan" className={inputCls} />
+          </div>
+          <SignaturePad onChange={setGambar} />
+          {error && <p className="text-xs text-[var(--accent-red)]">{error}</p>}
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <button onClick={() => kirim("AKUN")} disabled={busy} title={`Ditandatangani sebagai ${akunSaya} (akun yang sedang login)`} className={`${btnOutline} mr-auto`}>
+              <UserCheck size={15} /> Dengan akun saya ({akunSaya})
+            </button>
+            <button onClick={() => kirim("LAYAR")} disabled={busy || !gambar} className={btnPrimary}>
+              <PenLine size={15} /> {busy ? "Menyimpan..." : "Simpan tanda tangan"}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

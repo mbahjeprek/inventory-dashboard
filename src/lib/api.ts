@@ -814,7 +814,12 @@ export type BeritaAcara = {
   selesai_catatan: string;
   foto_musnah: string | null;
   batal_alasan: string;
+  // Signed in the app (a BA made before it has {}): pj when made, mengetahui on approval, the rest at the destruction.
+  ttd: Partial<Record<BaPeran, BaTtd>>;
 };
+export type BaPeran = "pj" | "pelaksana" | "saksi1" | "saksi2" | "mengetahui";
+// AKUN = signed by the account (user_id); LAYAR = drawn on the screen (gambar, PNG data URL), entered by input_nama.
+export type BaTtd = { cara: "AKUN" | "LAYAR"; nama: string; jabatan: string; at: string; user_id?: number; gambar?: string; input_nama?: string };
 
 // Kendaraan & Alat Berat: one unit (see schema.sql kendaraan_unit) and a cell of the kondisi harian.
 export type KdUnit = {
@@ -1807,6 +1812,11 @@ export const api = {
     req<{ success: boolean }>(`/api/berita-acara/${id}/setuju`, { method: "PUT", body: JSON.stringify(body) }),
   baSelesai: (id: number, body: { tanggal: string; catatan: string; evidence_id: string | null }) =>
     req<{ success: boolean }>(`/api/berita-acara/${id}/selesai`, { method: "PUT", body: JSON.stringify(body) }),
+  baMenunggu: () => req<{ data: BeritaAcara[] }>("/api/berita-acara/menunggu"),
+  baPersetujuan: (id: number, body: { aksi: "SETUJU" | "TOLAK"; alasan?: string }) =>
+    req<{ success: boolean }>(`/api/berita-acara/${id}/persetujuan`, { method: "PUT", body: JSON.stringify(body) }),
+  baTtd: (id: number, body: { peran: BaPeran; cara: "AKUN" | "LAYAR"; nama?: string; jabatan?: string; gambar?: string }) =>
+    req<{ success: boolean }>(`/api/berita-acara/${id}/ttd`, { method: "PUT", body: JSON.stringify(body) }),
   baBatal: (id: number, alasan: string) => req<{ success: boolean }>(`/api/berita-acara/${id}/batal`, { method: "PUT", body: JSON.stringify({ alasan }) }),
   depoLaporan: (depo: string, dari: string, sampai: string) => req<DepoLaporan>(`/api/koperasi/depo?${new URLSearchParams({ depo, dari, sampai })}`),
   depoTx: (depo: string, dari: string, sampai: string) =>

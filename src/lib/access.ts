@@ -52,6 +52,7 @@ export const OTHER_PERMS: { group: string; items: { key: string; label: string }
   {
     group: "Klinik",
     items: [
+      { key: "ba.setujui", label: "Setujui Berita Acara Pemusnahan (Mengetahui / menyetujui: Estate Manager / Ketua Koperasi)" },
       { key: "klinik.ttd_dibuat", label: "Tanda tangan Permintaan Obat: Dibuat oleh (Manager Estate)" },
       { key: "klinik.ttd_diketahui", label: "Tanda tangan Permintaan Obat: Diketahui (GM Finance & Audit)" },
       { key: "klinik.ttd_disetujui1", label: "Tanda tangan Permintaan Obat: Disetujui 1 (Corporate GM Plantation)" },
@@ -215,7 +216,7 @@ export const kebunTerlihat = (user: AuthUser | null) => !!user && (user.role ===
 
 // Dokumen & Link: every account sees the links of its estates; Kelola Dokumen adds / edits them.
 export const DOKUMEN_PATH = "/dokumen";
-// Persetujuan: the requests waiting for the account's signature, for whoever may sign a box of the Permintaan Obat.
+// Persetujuan: what waits for the account's signature - a box of a Permintaan Obat, a Berita Acara Pemusnahan to approve.
 export const PERSETUJUAN_PATH = "/persetujuan";
 export const TTD_PERMS = ["klinik.ttd_dibuat", "klinik.ttd_diketahui", "klinik.ttd_disetujui1", "klinik.ttd_disetujui2"];
 // Daftar SOP: seen with Lihat, Ubah or Kunci Daftar SOP.
@@ -259,7 +260,7 @@ export function pageAllowed(user: AuthUser | null, path: string): boolean {
   if (path === PINJAMAN_PATH) return MODULES.some((m) => canModule(user, m));
   if (path === PASIEN_PATH) return canModule(user, "KLINIK");
   if (path === DOKUMEN_PATH) return true;
-  if (path === PERSETUJUAN_PATH) return TTD_PERMS.some((p) => can(user, p));
+  if (path === PERSETUJUAN_PATH) return [...TTD_PERMS, "ba.setujui"].some((p) => can(user, p));
   if (path === SOP_PATH || path.startsWith(`${SOP_PATH}/`)) return ["sop.view", "sop.edit", "sop.kunci"].some((p) => can(user, p));
   if (path === KOPERASI_PATH) return can(user, "koperasi.view") && userEstates(user).includes(KOPERASI_ESTATE);
   if (path === KENDARAAN_PATH) return can(user, "kendaraan.view");
