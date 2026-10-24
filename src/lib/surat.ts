@@ -29,8 +29,19 @@ export const KOP_CSS = `
   .kop-pt { font-weight: bold; font-size: 14pt; text-transform: uppercase; letter-spacing: 0.3px; }
   .kop-unit { font-weight: bold; font-size: 12pt; text-transform: uppercase; }`;
 export const kopHtml = (perusahaan: string, unit: string) =>
-  `<div class="kop"><img class="kop-logo" src="${escHtml(location.origin)}/logo-akss.png" alt="AKSS"><div class="kop-teks"><div class="kop-pt">${escHtml(perusahaan)}</div><div class="kop-unit">${escHtml(unit)}</div></div><div class="kop-spasi"></div></div>`;
+  `<div class="kop"><img class="kop-logo" src="${escHtml(logoUrl(perusahaan))}" alt="${escHtml(logoPerusahaan(perusahaan).alt)}"><div class="kop-teks"><div class="kop-pt">${escHtml(perusahaan)}</div><div class="kop-unit">${escHtml(unit)}</div></div><div class="kop-spasi"></div></div>`;
 export const PERUSAHAAN = "PT. Anugrah Kembang Sawit Sejahtera";
+// KNS belongs to PT. Kartika Nugraha Sakti: its letters carry that name and logo (the emblem; the full logo with the
+// name under it is logo-kns-lengkap.png). Every other estate is AKSS.
+export const PERUSAHAAN_KNS = "PT. Kartika Nugraha Sakti";
+export const perusahaanEstate = (estate?: string | null) => (estate === "KNS" ? PERUSAHAAN_KNS : PERUSAHAAN);
+// The logo of a company name as typed on a letter (Kartika -> KNS, else AKSS).
+export const logoPerusahaan = (perusahaan: string) => (/kartika/i.test(perusahaan) ? { file: "logo-kns.png", alt: "KNS" } : { file: "logo-akss.png", alt: "AKSS" });
+export const logoUrl = (perusahaan: string) => `${location.origin}/${logoPerusahaan(perusahaan).file}`;
+// A remembered company on a letter form: the estate's own unless another one was typed on purpose (the AKSS default
+// remembered for a KNS form becomes KNS).
+export const perusahaanIngat = (ingat: string | undefined, estate?: string | null) =>
+  !ingat || (ingat === PERUSAHAAN && estate === "KNS") ? perusahaanEstate(estate) : ingat;
 
 // The clinic staff who sign: the accounts carry the full name with its title ("Sukaena Amd.keb").
 // A name that already has a title is printed as it is (no second gelar), the jabatan follows the title,

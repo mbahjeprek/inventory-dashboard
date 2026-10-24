@@ -3,7 +3,7 @@ import { FileText, X } from "lucide-react";
 import type { Kunjungan } from "../lib/api";
 import { printDocument } from "../lib/printTable";
 import { isoDisplay } from "../lib/opname";
-import { KOP_CSS, PERUSAHAAN, escHtml as esc, jabatanDariGelar, kopHtml, penandatangan, tanggalPanjang, terbilang } from "../lib/surat";
+import { KOP_CSS, escHtml as esc, jabatanDariGelar, kopHtml, penandatangan, perusahaanIngat, tanggalPanjang, terbilang } from "../lib/surat";
 import { useAuth } from "../context/AuthContext";
 
 // Surat Keterangan Sakit from a kunjungan: the patient's data, the rest days from the visit and the
@@ -82,7 +82,7 @@ export function SuratSakitModal({ k, onClose }: { k: Kunjungan; onClose: () => v
       /* no storage */
     }
     return {
-      perusahaan: ingat.perusahaan || PERUSAHAAN,
+      perusahaan: perusahaanIngat(ingat.perusahaan, k.klinik),
       // The signer by its current account name (full name + title), not a name remembered from before.
       pemeriksa: penandatangan(user, k.created_by),
       jabatan: jabatanDariGelar(penandatangan(user, k.created_by)) || ingat.jabatan || "Bidan / Mantri Jaga",

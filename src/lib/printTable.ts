@@ -1,4 +1,4 @@
-import { KOP_CSS, PERUSAHAAN, kopHtml } from "./surat";
+import { KOP_CSS, kopHtml, perusahaanEstate } from "./surat";
 
 export type PrintColumn = { label: string; align?: "left" | "right"; nowrap?: boolean };
 type Cell = string | number | null | undefined;
@@ -13,6 +13,8 @@ export type TableReport = {
   landscape?: boolean;
   // Boxes to sign under the table (a Berita Acara): role and the person's name.
   signatures?: { label: string; nama: string }[];
+  // The estate it is for: picks the company of the kop (KNS -> PT. Kartika Nugraha Sakti).
+  estate?: string;
 };
 
 // A report of several tables one after another (e.g. Klinik > Laporan Harian > Ringkasan KPI: the
@@ -150,7 +152,7 @@ export function printTable(report: AnyReport) {
     .sign b { display: block; border-top: 1px solid #1a2634; padding-top: 2px; font-weight: 600; }
     ${signed ? `${KOP_CSS} .kop { margin-bottom: 10px; } .kop-pt { font-size: 12pt; } .kop-unit { font-size: 10pt; } .kop-logo, .kop-spasi { width: 90px; } h1 { text-align: center; }` : ""}
   </style></head><body>
-    ${signed ? kopHtml(PERUSAHAAN, "") : ""}
+    ${signed ? kopHtml(perusahaanEstate("estate" in report ? report.estate : undefined), "") : ""}
     <h1>${escapeHtml(title)}</h1>
     ${subtitle.map((s) => `<p class="meta">${escapeHtml(s)}</p>`).join("")}
     <p class="meta">Dicetak: ${escapeHtml(printedAtText())}${rowCount(report)}</p>

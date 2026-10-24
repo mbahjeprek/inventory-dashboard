@@ -4,7 +4,7 @@ import { api, errorText, type BaPeran, type BaTtd, type BeritaAcara, type Klinik
 import { SignaturePad } from "./SignaturePad";
 import { printDocument } from "../lib/printTable";
 import { isoDisplay, localToday } from "../lib/opname";
-import { BULAN, HARI, KOP_CSS, PERUSAHAAN, escHtml, jabatanDariGelar, kopHtml, namaLama, terbilang } from "../lib/surat";
+import { BULAN, HARI, KOP_CSS, escHtml, jabatanDariGelar, kopHtml, namaLama, perusahaanEstate, perusahaanIngat, terbilang } from "../lib/surat";
 import { useAuth } from "../context/AuthContext";
 import { can } from "../lib/access";
 import { EvidenceInput, EvidenceLink, useEvidenceEnabled } from "./EvidenceInput";
@@ -162,7 +162,7 @@ export function BaForm({ jenis: j, items, onClose, onSaved }: { jenis: BaJenis; 
   const { user } = useAuth();
   const awal = (): Isian => {
     const kosong = {
-      perusahaan: PERUSAHAAN,
+      perusahaan: perusahaanEstate(j.modul === "KLINIK" ? j.unit : null),
       tempat: j.tempat,
       cara: j.cara[0],
       pihakKetiga: "",
@@ -171,7 +171,7 @@ export function BaForm({ jenis: j, items, onClose, onSaved }: { jenis: BaJenis; 
     let isian = kosong;
     try {
       const s = JSON.parse(localStorage.getItem(j.storageKey) ?? "null");
-      if (s) isian = { ...kosong, ...s };
+      if (s) isian = { ...kosong, ...s, perusahaan: perusahaanIngat(s.perusahaan, j.modul === "KLINIK" ? j.unit : null) };
     } catch {
       /* no storage */
     }

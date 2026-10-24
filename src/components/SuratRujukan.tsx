@@ -3,7 +3,7 @@ import { FileText, X } from "lucide-react";
 import type { Kunjungan } from "../lib/api";
 import { printDocument } from "../lib/printTable";
 import { isoDisplay } from "../lib/opname";
-import { KOP_CSS, PERUSAHAAN, escHtml as esc, kopHtml, penandatangan, punyaGelar, tanggalPanjang } from "../lib/surat";
+import { KOP_CSS, escHtml as esc, kopHtml, penandatangan, perusahaanIngat, punyaGelar, tanggalPanjang } from "../lib/surat";
 import { useAuth } from "../context/AuthContext";
 
 // Surat Rujukan from a kunjungan, in the clinics' own format: kop "PT. ANUGRAH KEMBANG SAWIT SEJAHTERA /
@@ -116,7 +116,7 @@ export function SuratRujukanModal({ k, onClose }: { k: Kunjungan; onClose: () =>
     .map((o) => `- ${o.nama_obat}${o.qty !== null && o.qty !== undefined ? ` ${o.qty}${o.satuan ? ` ${o.satuan.toLowerCase()}` : ""}` : ""} (jam ......)`)
     .join("\n");
   const [f, setF] = useState<Isian>({
-    perusahaan: ingat.perusahaan || PERUSAHAAN,
+    perusahaan: perusahaanIngat(ingat.perusahaan, k.klinik),
     tujuan: k.provider || tujuanList[0] || "",
     kepada: "Dokter Jaga",
     alamat: k.tempat_tinggal || `Camp PT. AKSS Estate ${kotaOf(k.klinik)}`,

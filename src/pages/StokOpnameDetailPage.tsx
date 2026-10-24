@@ -373,6 +373,7 @@ export function StokOpnameDetailPage() {
       }`,
     ],
     landscape: true,
+    estate: opname.estate,
     signatures: [
       ...namaOf(opname.tim).map((n, i) => ({ label: i === 0 ? "Tim Penghitung" : " ", nama: n })),
       { label: "Saksi", nama: opname.saksi },

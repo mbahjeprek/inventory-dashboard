@@ -1,9 +1,11 @@
-import { PERUSAHAAN, escHtml as esc } from "./surat";
+import { escHtml as esc, logoPerusahaan, logoUrl, perusahaanEstate } from "./surat";
 
 // The blank "Bukti Penerimaan BBM (Delivery Order)" to fill in by hand when a tanker delivers, laid out like the
 // gudang's Bukti Penerimaan Barang: kop, nomor DO / PO, supplier, lokasi, the tanker and its seal, the lines
 // (jenis BBM, quantity on the DO vs received, selisih), how it was measured, and four signatures.
-export function formDoBbmHtml(): string {
+// The company (kop and logo) of the lokasi it is printed for: KNS -> PT. Kartika Nugraha Sakti, else AKSS.
+export function formDoBbmHtml(lokasi?: string): string {
+  const pt = perusahaanEstate(lokasi);
   const isian = (label: string) => `<tr><td class="lbl">${esc(label)}</td><td class="tt">:</td><td class="garis"></td></tr>`;
   const baris = Array.from({ length: 13 }, (_, i) => `<tr><td class="c">${i + 1}</td><td></td><td></td><td></td><td></td><td></td><td></td></tr>`).join("");
   const kotak = (judul: string, jabatan: string) => `<td><div class="tj">${esc(judul)}</div><div class="ruang"></div><div class="nm">(............................)</div><div class="jb">${esc(jabatan)}</div></td>`;
@@ -43,9 +45,9 @@ export function formDoBbmHtml(): string {
     .ket u { font-weight: bold; }
   </style></head><body>
     <div class="kop">
-      <img src="${esc(location.origin)}/logo-akss.png" alt="AKSS">
+      <img src="${esc(logoUrl(pt))}" alt="${esc(logoPerusahaan(pt).alt)}">
       <div class="t">
-        <div class="pt">${esc(PERUSAHAAN.toUpperCase())}</div>
+        <div class="pt">${esc(pt.toUpperCase())}</div>
         <div class="judul">BUKTI PENERIMAAN BBM</div>
         <div class="sub">(DELIVERY ORDER)</div>
       </div>

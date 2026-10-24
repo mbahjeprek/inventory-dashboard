@@ -1,5 +1,5 @@
 import type { Permintaan, PermintaanTtd, PermintaanUrgensi } from "./api";
-import { KOP_CSS, PERUSAHAAN, escHtml as esc, kopHtml, tanggalPanjang } from "./surat";
+import { KOP_CSS, escHtml as esc, kopHtml, perusahaanEstate, tanggalPanjang } from "./surat";
 
 // The printed "Form Permintaan Obat, BMHP dan Alat Medis" of a klinik, as the paper form: kop, title and
 // nomor, Tanggal / Periode / Estate / Departemen, the items (No, Uraian, Satuan, Jumlah, Urgensi,
@@ -98,7 +98,7 @@ export function permintaanHtml(p: Permintaan): string {
     .ttd .jab { font-size: 9pt; text-transform: uppercase; }
     .alamat { display: flex; justify-content: space-between; gap: 20px; margin-top: 18px; padding-top: 5px; border-top: 3px double #000; font-size: 8.5pt; font-style: italic; page-break-inside: avoid; }
   </style></head><body>
-    ${kopHtml(PERUSAHAAN, unit)}
+    ${kopHtml(perusahaanEstate(p.klinik), unit)}
     <h1>FORM PERMINTAAN OBAT, BMHP DAN ALAT MEDIS</h1>
     <div class="nomor">Nomor: ${esc(p.nomor)}</div>
     ${final ? `<div class="final">DISETUJUI LENGKAP · DOKUMEN FINAL</div>` : `<div class="draft">DRAFT - BELUM DISETUJUI</div>`}
@@ -120,7 +120,11 @@ export function permintaanHtml(p: Permintaan): string {
     <div class="ttds">${ttd}</div></div>
     <div class="alamat">
       <div><b>Alamat Kantor Pusat :</b><br>Altira Business Tower Floor Lt. 19 Unit A, B &amp; D<br>Jln. Yos Sudarso Kav. 85, Sunter Jaya<br>Tg. Priok, Jakarta Utara - DKI Jakarta</div>
-      <div><b>Alamat Estate :</b><br>Desa Sesayap Desa &amp; Tideng Pale<br>Kecamatan Sesayap Hilir &amp; Sesayap<br>Kabupaten Tana Tidung - Kaltara</div>
+      ${
+        p.klinik === "KNS"
+          ? ""
+          : `<div><b>Alamat Estate :</b><br>Desa Sesayap Desa &amp; Tideng Pale<br>Kecamatan Sesayap Hilir &amp; Sesayap<br>Kabupaten Tana Tidung - Kaltara</div>`
+      }
     </div>
   </body></html>`;
 }

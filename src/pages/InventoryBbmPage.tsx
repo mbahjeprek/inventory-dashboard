@@ -202,7 +202,7 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
           {(lokasiLock || lokasi) && <LengkapiDataButton kind="bbm" estate={lokasiLock || lokasi} onDone={load} />}
           {(lokasiLock || lokasi) && <DokumenButton modul="BBM" estate={lokasiLock || lokasi} />}
           <button
-            onClick={() => printDocument(formDoBbmHtml())}
+            onClick={() => printDocument(formDoBbmHtml(lokasiLock || lokasi))}
             title="Cetak form kosong Bukti Penerimaan BBM (DO) untuk diisi tangan saat BBM datang"
             className="inline-flex items-center gap-1.5 text-sm px-3.5 py-2 rounded-md border border-[var(--border)] bg-[var(--bg-card)] text-[var(--text-primary)] hover:bg-[#f1f5f9]"
           >
