@@ -31,6 +31,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { useEstateFilter } from "../hooks/useEstateFilter";
+import { usePersetujuan } from "../hooks/usePersetujuan";
 import { useOpenPinjaman } from "../hooks/useOpenPinjaman";
 import { ChangePasswordModal } from "./ChangePasswordModal";
 import { canModule, hasDashboard, pageAllowed, userEstates, OPNAME_PATH, PINJAMAN_PATH, PASIEN_PATH, KOPERASI_PATH, KENDARAAN_PATH, PRUNING_PATH, DOKUMEN_PATH, SOP_PATH, PERSETUJUAN_PATH, type Module } from "../lib/access";
@@ -216,6 +217,7 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: { mobileOpen?: bo
 
   const pickedEstates = useEstateFilter((s) => s.picked);
   const openLoans = useOpenPinjaman((s) => s.loans.length);
+  const menunggu = usePersetujuan((s) => s.jumlah?.total ?? 0);
 
   // Inventory menus list the estates the account may open (narrowed to the ones picked on the
   // dashboard, if any) and only the modules it may view. Master data / monitoring pages follow their
@@ -412,7 +414,7 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: { mobileOpen?: bo
                     {...it}
                     active={isPathActive(it.to, location.pathname)}
                     minimized={minimized}
-                    badge={it.to === PINJAMAN_PATH && openLoans > 0 ? openLoans : undefined}
+                    badge={it.to === PINJAMAN_PATH && openLoans > 0 ? openLoans : it.to === PERSETUJUAN_PATH && menunggu > 0 ? menunggu : undefined}
                   />
                 ))}
             </div>

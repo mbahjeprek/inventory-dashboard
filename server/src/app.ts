@@ -189,6 +189,8 @@ function requiredPerms(req: express.Request): Need {
   if (is(/^\/chat(\/|$)/)) return null;
   // Berita Acara Pemusnahan: each route checks the modul's permission (Klinik / Koperasi) and the unit itself.
   if (is(/^\/berita-acara(\/|$)/)) return null;
+  // Persetujuan: how much waits for the account's signature (the route counts only what it may sign).
+  if (is(/^\/persetujuan\/jumlah$/)) return null;
   // Pinjaman antar estate: each route checks the loan's module (view / input) and estates itself.
   if (is(/^\/pinjaman(\/|$)/)) return null;
   // Perbandingan antar estate: the route checks the module's Lihat and the estates itself.
@@ -9075,26 +9077,41 @@ app.post("/api/berita-acara", async (req, res) => {
   }
 });
 
-// Persetujuan: the manager / perwakilan agreed (outside the app, e.g. a WhatsApp reply); its capture is the proof.
-// Only for a BA made before it was signed in the app, or by a Super User when the manager can't sign.
+// Persetujuan via WhatsApp: the admin sent the BA to the manager / perwakilan, who replied YA (setuju) or TIDAK
+// (tolak, the BA is cancelled); the capture of the reply is the proof. The other way to the in-app signature.
 app.put("/api/berita-acara/:id/setuju", async (req, res) => {
   const ba = await queryOne<any>("SELECT * FROM berita_acara WHERE id = @id", { id: req.params.id });
   if (!ba) return res.status(404).json({ error: "Berita acara tidak ditemukan" });
   if (!baBoleh(req, res, ba.modul, ba.unit, "input")) return;
-  if (baDigital(ba) && req.user!.role !== "superuser") return res.status(403).json({ error: "Berita acara ini disetujui Estate Manager di aplikasi (menu Persetujuan)" });
   if (ba.status !== "MENUNGGU") return res.status(409).json({ error: "Berita acara ini tidak sedang menunggu persetujuan" });
   const b = req.body ?? {};
+  const tolak = b.tolak === true;
   const nama = String(b.nama ?? "").trim();
-  if (!nama) return res.status(400).json({ error: "Isi nama manager / perwakilan yang menyetujui" });
-  if (!isIsoDate(b.tanggal) || b.tanggal > jakartaToday()) return res.status(400).json({ error: "Tanggal persetujuan tidak valid" });
-  if (!b.evidence_id) return res.status(400).json({ error: "Lampirkan capture balasan WhatsApp persetujuannya" });
+  if (!nama) return res.status(400).json({ error: "Isi nama manager / perwakilan yang menjawab" });
+  if (!isIsoDate(b.tanggal) || b.tanggal > jakartaToday()) return res.status(400).json({ error: "Tanggal jawaban tidak valid" });
+  const alasan = String(b.alasan ?? "").trim().slice(0, 500);
+  if (tolak && alasan.length < 3) return res.status(400).json({ error: "Tulis alasan penolakan dari balasan WhatsApp" });
+  if (!b.evidence_id) return res.status(400).json({ error: "Lampirkan capture balasan WhatsApp-nya" });
   const evidence = await claimEvidence(req, res);
   if (evidence === undefined) return;
+  const jabatan = String(b.jabatan ?? "").trim();
+  if (tolak) {
+    await execute("UPDATE berita_acara SET status = 'BATAL', batal_oleh = @uid, batal_alasan = @alasan, evidence_id = @ev::uuid WHERE id = @id", {
+      uid: req.user!.id,
+      alasan: `Ditolak ${nama} via WhatsApp: ${alasan}`,
+      ev: evidence,
+      id: ba.id,
+    });
+    await baLog(req, ba, "Tolak Berita Acara", `${nama}${jabatan ? ` (${jabatan})` : ""} menjawab TIDAK via WhatsApp tanggal ${b.tanggal}: ${alasan} · bukti capture terlampir`);
+    return res.json({ success: true });
+  }
+  // A BA signed in the app gets the WhatsApp answer in its Mengetahui box.
+  const ttd = baDigital(ba) ? { ...ba.ttd, mengetahui: { cara: "WA", nama, jabatan, at: new Date().toISOString(), tanggal: b.tanggal, input_nama: req.user!.nama } } : ba.ttd;
   await execute(
-    `UPDATE berita_acara SET status = 'DISETUJUI', disetujui_nama = @nama, disetujui_jabatan = @jabatan, disetujui_tgl = @tgl, evidence_id = @ev::uuid, disetujui_input_oleh = @uid WHERE id = @id`,
-    { nama, jabatan: String(b.jabatan ?? "").trim(), tgl: b.tanggal, ev: evidence, uid: req.user!.id, id: ba.id }
+    `UPDATE berita_acara SET status = 'DISETUJUI', disetujui_nama = @nama, disetujui_jabatan = @jabatan, disetujui_tgl = @tgl, evidence_id = @ev::uuid, disetujui_input_oleh = @uid, ttd = @ttd::jsonb WHERE id = @id`,
+    { nama, jabatan, tgl: b.tanggal, ev: evidence, uid: req.user!.id, ttd: JSON.stringify(ttd ?? {}), id: ba.id }
   );
-  await baLog(req, ba, "Persetujuan Berita Acara", `disetujui ${nama}${b.jabatan ? ` (${b.jabatan})` : ""} tanggal ${b.tanggal} · bukti capture terlampir`);
+  await baLog(req, ba, "Persetujuan Berita Acara", `${nama}${jabatan ? ` (${jabatan})` : ""} menjawab YA via WhatsApp tanggal ${b.tanggal} · bukti capture terlampir`);
   res.json({ success: true });
 });
 
@@ -9119,6 +9136,31 @@ app.put("/api/berita-acara/:id/selesai", async (req, res) => {
   });
   await baLog(req, ba, "Tutup Berita Acara", `barang dimusnahkan tanggal ${b.tanggal}${b.catatan ? ` · ${String(b.catatan).trim()}` : ""}${foto ? " · foto terlampir" : ""}`);
   res.json({ success: true });
+});
+
+// Persetujuan: how many documents wait for this account (the reminder at login and the menu's badge).
+app.get("/api/persetujuan/jumlah", async (req, res) => {
+  const u = req.user!;
+  let permintaan = 0;
+  if (u.role === "superuser" || TTD_PERMS.some((x) => u.perms.includes(x))) {
+    const rows = await queryMany<{ approval: any }>("SELECT approval FROM klinik_permintaan WHERE status = 'DIAJUKAN' AND klinik = ANY(@kliniks)", {
+      kliniks: KLINIK_OPTIONS.filter((k) => estateAllowed(u, k)),
+    });
+    permintaan = rows.filter(
+      (r) => TTD_LEVELS.some((k) => !r.approval?.[k] && bolehTtd(u, k)) && !(u.role !== "superuser" && TTD_LEVELS.some((k) => r.approval?.[k]?.user_id === u.id))
+    ).length;
+  }
+  const units = baUnitSetuju(u);
+  const ba = units.length
+    ? (
+        await queryOne<{ n: number }>(
+          `SELECT COUNT(*)::int n FROM berita_acara WHERE status = 'MENUNGGU' AND ttd ? 'pj' AND (modul || ':' || unit) = ANY(@units::text[])
+             AND (@su OR (ttd->'pj'->>'user_id') IS DISTINCT FROM @uid::text)`,
+          { units: units.map((x) => `${x.modul}:${x.unit}`), su: u.role === "superuser", uid: String(u.id) }
+        )
+      )!.n
+    : 0;
+  res.json({ permintaan, ba, total: permintaan + ba });
 });
 
 // The BAs waiting for this account's approval (Setujui Berita Acara, of its units).

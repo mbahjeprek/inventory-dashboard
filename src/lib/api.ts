@@ -823,8 +823,9 @@ export type BeritaAcara = {
   ttd: Partial<Record<BaPeran, BaTtd>>;
 };
 export type BaPeran = "pj" | "pelaksana" | "saksi1" | "saksi2" | "mengetahui";
-// AKUN = signed by the account (user_id); LAYAR = drawn on the screen (gambar, PNG data URL), entered by input_nama.
-export type BaTtd = { cara: "AKUN" | "LAYAR"; nama: string; jabatan: string; at: string; user_id?: number; gambar?: string; input_nama?: string };
+// AKUN = signed by the account (user_id); LAYAR = drawn on the screen (gambar, PNG data URL), entered by input_nama;
+// WA = the manager answered YA on WhatsApp (tanggal), recorded by input_nama with the capture.
+export type BaTtd = { cara: "AKUN" | "LAYAR" | "WA"; nama: string; jabatan: string; at: string; user_id?: number; gambar?: string; input_nama?: string; tanggal?: string };
 
 // Kendaraan & Alat Berat: one unit (see schema.sql kendaraan_unit) and a cell of the kondisi harian.
 export type KdUnit = {
@@ -1816,7 +1817,9 @@ export const api = {
   baList: (modul: string, unit: string) => req<{ data: BeritaAcara[]; terpakai: number[] }>(`/api/berita-acara?${new URLSearchParams({ modul, unit })}`),
   baBuat: (body: { modul: string; unit: string; tanggal: string; isian: Record<string, any>; ref_ids: number[] }) =>
     req<{ id: number; nomor: string }>("/api/berita-acara", { method: "POST", body: JSON.stringify(body) }),
-  baSetuju: (id: number, body: { nama: string; jabatan: string; tanggal: string; evidence_id: string | null }) =>
+  persetujuanJumlah: () => req<{ permintaan: number; ba: number; total: number }>("/api/persetujuan/jumlah"),
+  // The manager's WhatsApp answer: YA (setuju) or TIDAK (tolak: true, with the alasan), its capture the proof.
+  baSetuju: (id: number, body: { nama: string; jabatan: string; tanggal: string; evidence_id: string | null; tolak?: boolean; alasan?: string }) =>
     req<{ success: boolean }>(`/api/berita-acara/${id}/setuju`, { method: "PUT", body: JSON.stringify(body) }),
   baSelesai: (id: number, body: { tanggal: string; catatan: string; evidence_id: string | null }) =>
     req<{ success: boolean }>(`/api/berita-acara/${id}/selesai`, { method: "PUT", body: JSON.stringify(body) }),

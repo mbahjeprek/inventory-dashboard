@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Check, CheckCircle2, CircleDashed, FileText, PenLine, Printer, ShieldCheck, UserCheck, X } from "lucide-react";
+import { Check, CheckCircle2, CircleDashed, FileText, MessageCircle, PenLine, Printer, ShieldCheck, UserCheck, X } from "lucide-react";
 import { api, errorText, type BaPeran, type BaTtd, type BeritaAcara, type KlinikTarik, type KopTx } from "../lib/api";
 import { SignaturePad } from "./SignaturePad";
 import { printDocument } from "../lib/printTable";
@@ -64,7 +64,9 @@ export function baHtml(
     const t = ba.ttd?.[k];
     const ruang = !t
       ? `<div class="ruang"></div>`
-      : t.cara === "LAYAR" && t.gambar
+      : t.cara === "WA"
+        ? `<div class="ruang el"><div class="cap">DISETUJUI VIA WHATSAPP<br>${esc(isoDisplay(t.tanggal ?? t.at.slice(0, 10)))}</div></div>`
+        : t.cara === "LAYAR" && t.gambar
         ? `<div class="ruang el"><img src="${t.gambar}" alt="tanda tangan"></div>`
         : `<div class="ruang el"><div class="cap">DITANDATANGANI SECARA ELEKTRONIK<br>${esc(waktuJam(t.at))}</div></div>`;
     return `<div class="ttd" ${style}><div>${esc(judul)}</div>${ruang}<div class="nama">${esc(t?.nama || o?.nama || "(................................)")}</div><div>${esc(t?.jabatan || o?.jabatan || "")}</div></div>`;
@@ -77,7 +79,9 @@ export function baHtml(
     .join("");
   const m = ba.ttd?.mengetahui;
   const setuju = m
-    ? `<p class="setuju">Persetujuan: disetujui oleh <b>${esc(m.nama)}</b>${m.jabatan ? ` (${esc(m.jabatan)})` : ""} secara elektronik di sistem pada ${esc(waktuJam(m.at))}.${
+    ? `<p class="setuju">Persetujuan: disetujui oleh <b>${esc(m.nama)}</b>${m.jabatan ? ` (${esc(m.jabatan)})` : ""} ${
+        m.cara === "WA" ? `melalui WhatsApp pada ${esc(isoDisplay(m.tanggal ?? m.at.slice(0, 10)))}; bukti capture tersimpan di sistem` : `secara elektronik di sistem pada ${esc(waktuJam(m.at))}`
+      }.${
         ba.status === "SELESAI" && ba.selesai_tgl ? ` Barang telah dimusnahkan pada ${esc(isoDisplay(ba.selesai_tgl))}.` : ""
       }</p>`
     : ba.status === "DISETUJUI" || ba.status === "SELESAI"
@@ -132,6 +136,32 @@ export function baHtml(
   </body></html>`;
 }
 export const cetakBa = (j: BaJenis, ba: BeritaAcara) => printDocument(baHtml(j, ba, ba.isian as Isian));
+
+// The BA as a WhatsApp message to the manager / perwakilan (who to send it to is picked in WhatsApp): what is to be
+// destroyed, and the answer asked - YA or TIDAK with the reason. Its reply's capture is recorded with Catat jawaban WA.
+function waLink(j: BaJenis, ba: BeritaAcara) {
+  const f = ba.isian as Isian;
+  const barang = ba.items
+    .slice(0, 40)
+    .map((t, i) => `${i + 1}. ${t.nama} - ${t.qty.toLocaleString("id-ID")} ${t.satuan} (${t.alasan}${t.tgl && t.tgl !== "-" ? `, ${t.tgl}` : ""})`)
+    .join("\n");
+  const teks = [
+    `*Mohon persetujuan ${j.judul}*`,
+    `Nomor: ${ba.nomor}`,
+    `Unit: ${j.unitLabel}`,
+    `Rencana pemusnahan: ${isoDisplay(ba.tanggal)} · ${f.cara}${f.pihakKetiga ? ` (${f.pihakKetiga})` : ""}`,
+    `Dibuat: ${ba.dibuat_nama || "-"}`,
+    "",
+    `Barang (${ba.items.length} item):`,
+    barang + (ba.items.length > 40 ? `\n... dan ${ba.items.length - 40} item lain` : ""),
+    "",
+    `Balas *YA* bila setuju, atau *TIDAK* disertai alasannya.`,
+    digital(ba) ? `Atau setujui langsung di aplikasi: ${location.origin}/persetujuan` : "",
+  ]
+    .filter((x) => x !== "")
+    .join("\n");
+  return `https://wa.me/?text=${encodeURIComponent(teks)}`;
+}
 
 const inputCls = "w-full text-sm rounded-md border border-[var(--border)] px-3 py-1.5 bg-white";
 const labelCls = "text-xs text-[var(--text-secondary)] mb-1 block";
@@ -342,22 +372,28 @@ const STATUS: Record<BeritaAcara["status"], { label: string; cls: string }> = {
   BATAL: { label: "Batal", cls: "bg-[#f1f5f9] border-[var(--border)] text-[var(--text-muted)]" },
 };
 
+// Jawaban WhatsApp: the manager / perwakilan answered YA (setuju) or TIDAK (tolak with the reason, the BA is
+// cancelled); the capture of the reply is the proof.
 function SetujuModal({ ba, onClose, onDone }: { ba: BeritaAcara; onClose: () => void; onDone: () => void }) {
   const fotoAktif = useEvidenceEnabled();
   const m = (ba.isian as Isian).mengetahui;
+  const [jawab, setJawab] = useState<"YA" | "TIDAK">("YA");
   const [nama, setNama] = useState(m?.nama ?? "");
   const [jabatan, setJabatan] = useState(m?.jabatan ?? "");
   const [tgl, setTgl] = useState(localToday());
+  const [alasan, setAlasan] = useState("");
   const [ev, setEv] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const tolak = jawab === "TIDAK";
   const save = async () => {
-    if (!nama.trim()) return setError("Isi nama manager / perwakilan");
-    if (fotoAktif && !ev) return setError("Lampirkan capture balasan WhatsApp persetujuannya");
+    if (!nama.trim()) return setError("Isi nama manager / perwakilan yang menjawab");
+    if (tolak && alasan.trim().length < 3) return setError("Tulis alasan penolakan dari balasan WhatsApp");
+    if (fotoAktif && !ev) return setError("Lampirkan capture balasan WhatsApp-nya");
     setBusy(true);
     setError("");
     try {
-      await api.baSetuju(ba.id, { nama: nama.trim(), jabatan: jabatan.trim(), tanggal: tgl, evidence_id: ev });
+      await api.baSetuju(ba.id, { nama: nama.trim(), jabatan: jabatan.trim(), tanggal: tgl, evidence_id: ev, tolak, alasan: alasan.trim() });
       onDone();
     } catch (e) {
       setError(errorText(e, "Gagal menyimpan"));
@@ -365,12 +401,25 @@ function SetujuModal({ ba, onClose, onDone }: { ba: BeritaAcara; onClose: () => 
       setBusy(false);
     }
   };
+  const pil = (v: "YA" | "TIDAK", label: string, on: string) => (
+    <button
+      type="button"
+      onClick={() => setJawab(v)}
+      className={`flex-1 text-sm px-3 py-2 rounded-md border font-medium ${jawab === v ? on : "border-[var(--border)] text-[var(--text-secondary)] hover:bg-[#f8fafc]"}`}
+    >
+      {label}
+    </button>
+  );
   return (
-    <Shell title={`Persetujuan ${ba.nomor}`} subtitle="Catat persetujuan manager / perwakilan dengan bukti capture WhatsApp" onClose={onClose}>
+    <Shell title={`Jawaban WA ${ba.nomor}`} subtitle="Catat jawaban manager / perwakilan dengan bukti capture WhatsApp" onClose={onClose}>
       <div className="space-y-3">
+        <div className="flex gap-2">
+          {pil("YA", "YA, setuju", "border-[var(--accent-green)] bg-[var(--accent-green-bg)] text-[var(--accent-green)]")}
+          {pil("TIDAK", "TIDAK, ditolak", "border-[var(--accent-red)] bg-[var(--accent-red-bg)] text-[var(--accent-red)]")}
+        </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className={labelCls}>Disetujui oleh</label>
+            <label className={labelCls}>Dijawab oleh</label>
             <input value={nama} onChange={(e) => setNama(e.target.value)} className={inputCls} />
           </div>
           <div>
@@ -378,18 +427,29 @@ function SetujuModal({ ba, onClose, onDone }: { ba: BeritaAcara; onClose: () => 
             <input value={jabatan} onChange={(e) => setJabatan(e.target.value)} className={inputCls} />
           </div>
           <div>
-            <label className={labelCls}>Tanggal persetujuan</label>
+            <label className={labelCls}>Tanggal jawaban</label>
             <input type="date" value={tgl} max={localToday()} onChange={(e) => e.target.value && setTgl(e.target.value)} className={inputCls} />
           </div>
         </div>
-        <EvidenceInput value={ev} onChange={setEv} label="Capture balasan WhatsApp persetujuan (wajib)" />
+        {tolak && (
+          <div>
+            <label className={labelCls}>Alasan penolakan (dari balasan WA)</label>
+            <input value={alasan} onChange={(e) => setAlasan(e.target.value)} maxLength={500} className={inputCls} />
+            <p className="text-[11px] text-[var(--text-muted)] mt-1">Berita acara dibatalkan; barangnya bisa dimasukkan ke berita acara baru.</p>
+          </div>
+        )}
+        <EvidenceInput value={ev} onChange={setEv} label="Capture balasan WhatsApp (wajib)" />
         {error && <p className="text-xs text-[var(--accent-red)]">{error}</p>}
         <div className="flex justify-end gap-2">
           <button onClick={onClose} className={btnOutline}>
             Batal
           </button>
-          <button onClick={save} disabled={busy} className={btnPrimary}>
-            <ShieldCheck size={15} /> {busy ? "Menyimpan..." : "Simpan persetujuan"}
+          <button
+            onClick={save}
+            disabled={busy}
+            className={tolak ? "inline-flex items-center gap-1.5 text-sm px-3.5 py-2 rounded-md bg-[var(--accent-red)] text-white hover:opacity-90 disabled:opacity-50" : btnPrimary}
+          >
+            <ShieldCheck size={15} /> {busy ? "Menyimpan..." : tolak ? "Simpan penolakan" : "Simpan persetujuan"}
           </button>
         </div>
       </div>
@@ -551,15 +611,15 @@ export function BaDaftar({ jenis: j, items, reload, onChanged }: { jenis: BaJeni
                     ) : b.status === "MENUNGGU" ? (
                       <span className="text-[var(--text-muted)]">
                         {digital(b)
-                          ? `Menunggu persetujuan ${(b.isian as Isian).mengetahui?.jabatan || "Estate Manager"} di menu Persetujuan.`
-                          : "Kirim BA ke manager / perwakilan, lalu catat persetujuannya dengan capture WA."}
+                          ? `Menunggu persetujuan ${(b.isian as Isian).mengetahui?.jabatan || "Estate Manager"} di menu Persetujuan, atau kirim WA lalu catat jawabannya.`
+                          : "Kirim BA ke manager / perwakilan lewat WA, lalu catat jawabannya dengan capture."}
                       </span>
                     ) : (
                       <>
                         <div>
                           Disetujui <b>{b.disetujui_nama}</b>
                           {b.disetujui_jabatan ? ` (${b.disetujui_jabatan})` : ""} ·{" "}
-                          {b.ttd?.mengetahui ? (
+                          {b.ttd?.mengetahui && b.ttd.mengetahui.cara !== "WA" ? (
                             `${waktuJam(b.ttd.mengetahui.at)} di aplikasi`
                           ) : (
                             <>
@@ -596,14 +656,21 @@ export function BaDaftar({ jenis: j, items, reload, onChanged }: { jenis: BaJeni
                         Setujui / Tolak
                       </button>
                     )}
-                    {canInput && b.status === "MENUNGGU" && (!digital(b) || user?.role === "superuser") && (
-                      <button
-                        onClick={() => setSetuju(b)}
-                        title={digital(b) ? "Bila Estate Manager tidak bisa menandatangani di aplikasi: catat persetujuan WA (Super User)" : undefined}
-                        className={digital(b) ? "text-xs px-2 py-1 rounded border border-[var(--border)] hover:bg-[#f1f5f9]" : "text-xs px-2 py-1 rounded bg-[var(--accent-blue)] text-white hover:opacity-90"}
-                      >
-                        {digital(b) ? "Catat manual (WA)" : "Catat persetujuan"}
-                      </button>
+                    {canInput && b.status === "MENUNGGU" && (
+                      <>
+                        <a
+                          href={waLink(j, b)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          title="Kirim ringkasan BA ke manager lewat WhatsApp; manager cukup membalas YA atau TIDAK"
+                          className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded border border-[#25d366] text-[#128c4a] hover:bg-[#e9fbf0]"
+                        >
+                          <MessageCircle size={13} /> Kirim WA
+                        </a>
+                        <button onClick={() => setSetuju(b)} title="Catat jawaban YA / TIDAK manager dengan capture WhatsApp-nya" className="text-xs px-2 py-1 rounded border border-[var(--border)] hover:bg-[#f1f5f9]">
+                          Catat jawaban WA
+                        </button>
+                      </>
                     )}
                     {canInput && b.status === "DISETUJUI" && digital(b) && (
                       <button onClick={() => setTandaTangan(b)} className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded bg-[var(--accent-blue)] text-white hover:opacity-90">

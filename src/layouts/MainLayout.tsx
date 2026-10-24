@@ -9,6 +9,8 @@ import { useTableDragScroll } from "../hooks/useDragScroll";
 import { StatusUpdateBanner, useStatusUpdate } from "../components/StatusUpdate";
 import { useAuth } from "../context/AuthContext";
 import { ChatWidget } from "../components/ChatWidget";
+import { PersetujuanReminder } from "../components/PersetujuanReminder";
+import { usePersetujuan } from "../hooks/usePersetujuan";
 
 export function MainLayout() {
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -16,6 +18,7 @@ export function MainLayout() {
 
   const refreshPinjaman = useOpenPinjaman((s) => s.refresh);
   const refreshStatus = useStatusUpdate((s) => s.refresh);
+  const refreshPersetujuan = usePersetujuan((s) => s.refresh);
   const { refresh: refreshUser } = useAuth();
   // Every list table can be dragged with the mouse, up / down and sideways.
   useTableDragScroll();
@@ -28,7 +31,8 @@ export function MainLayout() {
     refreshPinjaman();
     refreshStatus();
     refreshUser();
-  }, [location.pathname, refreshPinjaman, refreshStatus, refreshUser]);
+    refreshPersetujuan();
+  }, [location.pathname, refreshPinjaman, refreshStatus, refreshUser, refreshPersetujuan]);
 
   return (
     <div className="flex min-h-screen bg-[var(--bg-page)]">
@@ -52,6 +56,7 @@ export function MainLayout() {
         {/* Chat (its unread check every 20 s also keeps the account "online" while a tab is open). */}
         <ChatWidget />
         <SessionExpiredModal />
+        <PersetujuanReminder />
       </div>
     </div>
   );
