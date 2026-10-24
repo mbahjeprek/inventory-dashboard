@@ -31,8 +31,8 @@ export const KOP_CSS = `
 export const kopHtml = (perusahaan: string, unit: string) =>
   `<div class="kop"><img class="kop-logo" src="${escHtml(logoUrl(perusahaan))}" alt="${escHtml(logoPerusahaan(perusahaan).alt)}"><div class="kop-teks"><div class="kop-pt">${escHtml(perusahaan)}</div><div class="kop-unit">${escHtml(unit)}</div></div><div class="kop-spasi"></div></div>`;
 export const PERUSAHAAN = "PT. Anugrah Kembang Sawit Sejahtera";
-// KNS belongs to PT. Kartika Nugraha Sakti: its letters carry that name and logo (the emblem; the full logo with the
-// name under it is logo-kns-lengkap.png). Every other estate is AKSS.
+// KNS belongs to PT. Kartika Nugraha Sakti: its letters carry that name and its logo as given (emblem with the name
+// under it). Every other estate is AKSS.
 export const PERUSAHAAN_KNS = "PT. Kartika Nugraha Sakti";
 export const perusahaanEstate = (estate?: string | null) => (estate === "KNS" ? PERUSAHAAN_KNS : PERUSAHAAN);
 // The logo of a company name as typed on a letter (Kartika -> KNS, else AKSS).
