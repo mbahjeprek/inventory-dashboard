@@ -10984,9 +10984,50 @@ const sopRingkas = (s: any) =>
 app.get("/api/sop", async (req, res) => {
   const u = req.user!;
   const data = await queryMany(
-    `SELECT s.*, u.nama AS oleh FROM sop s LEFT JOIN users u ON u.id = s.user_id ORDER BY s.bagian = 'UMUM', s.bagian, s.urut, s.id`
+    `SELECT s.*, (s.isi <> '{}'::jsonb) AS ada_isi, u.nama AS oleh FROM sop s LEFT JOIN users u ON u.id = s.user_id
+      ORDER BY s.bagian = 'UMUM', s.bagian, s.urut, s.id`
   );
-  res.json({ data: data.map((s: any) => ({ ...s, boleh_ubah: sopUbah(u, s) })), edit: sopUbah(u), kunci: sopKunci(u) });
+  // The list leaves the written SOP out (it is read on the SOP's own page).
+  res.json({ data: data.map(({ isi, ...s }: any) => ({ ...s, boleh_ubah: sopUbah(u, s) })), edit: sopUbah(u), kunci: sopKunci(u) });
+});
+
+// One SOP with what is written in it, and its place (1.2) in the list.
+app.get("/api/sop/:id", async (req, res) => {
+  const u = req.user!;
+  const s = await queryOne<any>(
+    `SELECT s.*, u.nama AS oleh,
+       (SELECT COUNT(*) FROM sop x WHERE x.bagian = s.bagian AND (x.urut < s.urut OR (x.urut = s.urut AND x.id <= s.id)))::int AS nomor
+     FROM sop s LEFT JOIN users u ON u.id = s.user_id WHERE s.id = @id`,
+    { id: Number(req.params.id) || 0 }
+  );
+  if (!s) return res.status(404).json({ error: "SOP tidak ditemukan" });
+  res.json({ data: { ...s, boleh_ubah: sopUbah(u, s) }, edit: sopUbah(u), kunci: sopKunci(u) });
+});
+
+// The SOP written in the app: only the known sections, as plain text.
+const SOP_ISI: Record<string, string> = {
+  tujuan: "Tujuan", ruang_lingkup: "Ruang Lingkup", referensi: "Referensi", definisi: "Definisi", tanggung_jawab: "Tanggung Jawab",
+  prosedur: "Prosedur", rekaman: "Rekaman / Dokumen Terkait", lampiran: "Lampiran",
+  disusun_nama: "Disusun oleh", disusun_jabatan: "Jabatan penyusun", diperiksa_nama: "Diperiksa oleh", diperiksa_jabatan: "Jabatan pemeriksa",
+  disetujui_nama: "Disetujui oleh", disetujui_jabatan: "Jabatan penyetuju",
+};
+app.put("/api/sop/:id/isi", async (req, res) => {
+  const existing = await queryOne<any>("SELECT * FROM sop WHERE id = @id", { id: Number(req.params.id) || 0 });
+  if (!existing) return res.status(404).json({ error: "SOP tidak ditemukan" });
+  if (!sopUbah(req.user!, existing)) return res.status(403).json({ error: existing.dikunci ? SOP_TERKUNCI : "Akses ditolak" });
+  const b = req.body?.isi ?? {};
+  const isi: Record<string, string> = {};
+  for (const k of Object.keys(SOP_ISI)) {
+    const v = String(b[k] ?? "").replace(/\r\n/g, "\n").trim();
+    if (v) isi[k] = v.slice(0, 50000);
+  }
+  await execute("UPDATE sop SET isi = @isi::jsonb, updated_at = now() WHERE id = @id", { isi: JSON.stringify(isi), id: existing.id });
+  const lama = existing.isi ?? {};
+  const berubah = Object.entries(SOP_ISI)
+    .filter(([k]) => (lama[k] ?? "") !== (isi[k] ?? ""))
+    .map(([k, label]) => (k.endsWith("_nama") || k.endsWith("_jabatan") ? `${label}: ${lama[k] || "-"} → ${isi[k] || "-"}` : `${label} ${lama[k] ? (isi[k] ? "diubah" : "dihapus") : "diisi"}`));
+  if (berubah.length) await sopLog(req, "Edit Isi SOP", sopObjek(existing), berubah.join("; "));
+  res.json({ success: true });
 });
 
 app.post("/api/sop", async (req, res) => {

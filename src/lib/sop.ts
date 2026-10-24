@@ -27,3 +27,19 @@ export const SOP_STATUS: { value: SopStatus; label: string; color: string; bg: s
   { value: "BERLAKU", label: "Berlaku", color: "#15803d", bg: "#e7f7ed" },
 ];
 export const statusOf = (v: string) => SOP_STATUS.find((s) => s.value === v) ?? SOP_STATUS[0];
+
+// The sections of an SOP written in the app, in order, with a hint of what goes in each.
+export const SOP_ISI_BAGIAN: {
+  key: "tujuan" | "ruang_lingkup" | "referensi" | "definisi" | "tanggung_jawab" | "prosedur" | "rekaman" | "lampiran";
+  label: string;
+  hint: string;
+}[] = [
+  { key: "tujuan", label: "Tujuan", hint: "Untuk apa SOP ini dibuat." },
+  { key: "ruang_lingkup", label: "Ruang Lingkup", hint: "Kegiatan, area dan pihak yang diatur SOP ini." },
+  { key: "referensi", label: "Referensi", hint: "Peraturan / standar acuan, mis. Permentan ISPO, P&C RSPO, UU K3." },
+  { key: "definisi", label: "Definisi", hint: "Istilah yang dipakai di SOP ini." },
+  { key: "tanggung_jawab", label: "Tanggung Jawab", hint: "Siapa melakukan / mengawasi apa (Manager, Asisten, Mandor ...)." },
+  { key: "prosedur", label: "Prosedur", hint: "Langkah kerja berurutan. Satu langkah per baris: 1. ... 2. ..." },
+  { key: "rekaman", label: "Rekaman / Dokumen Terkait", hint: "Form, buku, laporan yang diisi saat SOP dijalankan." },
+  { key: "lampiran", label: "Lampiran", hint: "Bagan alir, form kosong, dsb." },
+];

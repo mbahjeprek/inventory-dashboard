@@ -1237,3 +1237,8 @@ END $$;
 
 -- Daftar SOP: dikunci = only an account with Kunci Daftar SOP (or a Super User) changes / deletes it.
 ALTER TABLE sop ADD COLUMN IF NOT EXISTS dikunci BOOLEAN NOT NULL DEFAULT false;
+
+-- Daftar SOP: isi = the SOP written in the app, per section (tujuan, ruang_lingkup, referensi, definisi,
+-- tanggung_jawab, prosedur, rekaman, lampiran) plus who signs it (disusun / diperiksa / disetujui, each nama
+-- and jabatan); printed / exported to Word from the SOP's page. '{}' = not written in the app (only the link).
+ALTER TABLE sop ADD COLUMN IF NOT EXISTS isi JSONB NOT NULL DEFAULT '{}'::jsonb;

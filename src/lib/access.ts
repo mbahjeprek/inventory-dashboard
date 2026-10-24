@@ -245,7 +245,7 @@ export function pageAllowed(user: AuthUser | null, path: string): boolean {
   if (path === PINJAMAN_PATH) return MODULES.some((m) => canModule(user, m));
   if (path === PASIEN_PATH) return canModule(user, "KLINIK");
   if (path === DOKUMEN_PATH) return true;
-  if (path === SOP_PATH) return ["sop.view", "sop.edit", "sop.kunci"].some((p) => can(user, p));
+  if (path === SOP_PATH || path.startsWith(`${SOP_PATH}/`)) return ["sop.view", "sop.edit", "sop.kunci"].some((p) => can(user, p));
   if (path === KOPERASI_PATH) return can(user, "koperasi.view") && userEstates(user).includes(KOPERASI_ESTATE);
   if (path === KENDARAAN_PATH) return can(user, "kendaraan.view");
   if (path === PRUNING_PATH) return !KEBUN_HANYA_SUPER && ["pruning.view", "pruning.input", "pruning.edit"].some((p) => can(user, p));

@@ -876,8 +876,31 @@ export type Sop = {
   // dikunci: only an account with Kunci Daftar SOP changes it; boleh_ubah: whether this account may change / delete it.
   dikunci: boolean;
   boleh_ubah: boolean;
+  // ada_isi: written in the app (the list); isi and nomor (its place in the bagian) come with one SOP.
+  ada_isi?: boolean;
+  isi?: SopIsi;
+  nomor?: number;
   updated_at: string;
 };
+export type SopIsi = Partial<
+  Record<
+    | "tujuan"
+    | "ruang_lingkup"
+    | "referensi"
+    | "definisi"
+    | "tanggung_jawab"
+    | "prosedur"
+    | "rekaman"
+    | "lampiran"
+    | "disusun_nama"
+    | "disusun_jabatan"
+    | "diperiksa_nama"
+    | "diperiksa_jabatan"
+    | "disetujui_nama"
+    | "disetujui_jabatan",
+    string
+  >
+>;
 export type SopInput = Pick<Sop, "bagian" | "judul" | "audit" | "no_dokumen" | "revisi" | "tgl_berlaku" | "pic" | "status" | "url" | "keterangan">;
 export type DokumenInput = Pick<Dokumen, "judul" | "url" | "kategori" | "modul" | "estate" | "keterangan" | "pic" | "pinned">;
 export type KopSlipLine = { anggota_kode: string; tanggal_iso: string; bon: string | null; barang_kode: string; barang_nama: string; satuan: string; qty: number; harga: number; total: number; bayar: string };
@@ -1812,6 +1835,8 @@ export const api = {
     req<{ success: boolean; n: number }>("/api/sop/kunci", { method: "PUT", body: JSON.stringify({ ...body, kunci }) }),
   sopTambah: (body: SopInput) => req<{ success: boolean; id: number; urut: number }>("/api/sop", { method: "POST", body: JSON.stringify(body) }),
   sopEdit: (id: number, body: SopInput) => req<{ success: boolean; urut: number }>(`/api/sop/${id}`, { method: "PUT", body: JSON.stringify(body) }),
+  sopDetail: (id: number) => req<{ data: Sop; edit: boolean; kunci: boolean }>(`/api/sop/${id}`),
+  sopIsi: (id: number, isi: SopIsi) => req<{ success: boolean }>(`/api/sop/${id}/isi`, { method: "PUT", body: JSON.stringify({ isi }) }),
   sopHapus: (id: number) => req<{ success: boolean }>(`/api/sop/${id}`, { method: "DELETE" }),
   dokumenHapus: (id: number) => req<{ success: boolean }>(`/api/dokumen/${id}`, { method: "DELETE" }),
   kopEditTx: (id: number, body: { barang_kode: string; qty: number; harga: number }) =>
