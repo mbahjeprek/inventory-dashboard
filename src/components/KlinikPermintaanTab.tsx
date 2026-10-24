@@ -637,7 +637,16 @@ function Detail({ id, onBack }: { id: number; onBack: () => void; onEdit: (id: n
                       disabled={!canApprove}
                       title={canApprove ? undefined : "Status approval hanya bisa diubah akun dengan hak Approve Permintaan Obat"}
                       value={e?.status}
-                      onChange={(ev) => set(l.id!, { status: ev.target.value as PermintaanLineStatus })}
+                      onChange={(ev) => {
+                        const status = ev.target.value as PermintaanLineStatus;
+                        // Approved: dipenuhi = the requested amount and today, where they are still empty.
+                        set(
+                          l.id!,
+                          status === "APPROVED" && canInput
+                            ? { status, dipenuhi: e?.dipenuhi || String(l.jumlah), tanggal_pemenuhan: e?.tanggal_pemenuhan || localToday() }
+                            : { status }
+                        );
+                      }}
                       className={cellIn}
                     >
                       {(Object.keys(STATUS_LABEL) as PermintaanLineStatus[]).map((s) => (
