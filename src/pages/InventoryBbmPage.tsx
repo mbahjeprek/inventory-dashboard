@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import { useEffect, useState } from "react";
-import { Search, ChevronLeft, ChevronRight, Fuel, Droplet, PackagePlus, Pencil, Trash2, ListPlus } from "lucide-react";
+import { Search, ChevronLeft, ChevronRight, Fuel, Droplet, PackagePlus, Pencil, Trash2, ListPlus, FileText } from "lucide-react";
 import { api, errorText, type BbmRecord, type BbmSummary } from "../lib/api";
 import { StatCard } from "../components/StatCard";
 import { ExportButtons } from "../components/ExportButtons";
@@ -9,7 +9,8 @@ import { ActivityLogButton } from "../components/ActivityLogButton";
 import { LengkapiDataButton } from "../components/LengkapiData";
 import { DokumenButton } from "../components/DokumenButton";
 import { PemakaianButton } from "../components/PemakaianPanel";
-import { fetchAllRows, type TableReport } from "../lib/printTable";
+import { fetchAllRows, printDocument, type TableReport } from "../lib/printTable";
+import { formDoBbmHtml } from "../lib/formDoBbm";
 import { BbmTransactionModal } from "../components/BbmTransactionModal";
 import { BbmBatchModal } from "../components/BbmBatchModal";
 import { EditBbmModal } from "../components/EditBbmModal";
@@ -200,6 +201,13 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
           {(lokasiLock || lokasi) && <ActivityLogButton key={lokasiLock || lokasi} module="BBM" estate={lokasiLock || lokasi} />}
           {(lokasiLock || lokasi) && <LengkapiDataButton kind="bbm" estate={lokasiLock || lokasi} onDone={load} />}
           {(lokasiLock || lokasi) && <DokumenButton modul="BBM" estate={lokasiLock || lokasi} />}
+          <button
+            onClick={() => printDocument(formDoBbmHtml())}
+            title="Cetak form kosong Bukti Penerimaan BBM (DO) untuk diisi tangan saat BBM datang"
+            className="inline-flex items-center gap-1.5 text-sm px-3.5 py-2 rounded-md border border-[var(--border)] bg-[var(--bg-card)] text-[var(--text-primary)] hover:bg-[#f1f5f9]"
+          >
+            <FileText size={16} /> Form DO Kosong
+          </button>
           {(lokasiLock || lokasi) && <PemakaianButton key={`p-${lokasiLock || lokasi}`} module="BBM" estate={lokasiLock || lokasi} />}
           {canInput && (
             <button
