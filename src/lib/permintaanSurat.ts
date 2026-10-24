@@ -31,17 +31,26 @@ export const TTD_LABEL: [keyof PermintaanTtd, string][] = [
 
 const qty = (n: number) => n.toLocaleString("id-ID", { maximumFractionDigits: 2 });
 
+const STATUS_CETAK: Record<string, string> = { MENUNGGU: "Menunggu", APPROVED: "Disetujui", SEBAGIAN: "Sebagian", DITOLAK: "Ditolak" };
+
+// Once sent, each item carries its approval: the amount approved and Disetujui / Sebagian / Ditolak with the alasan
+// (a refused line greyed and struck through); until all four boxes are signed the letter is marked DRAFT.
 export function permintaanHtml(p: Permintaan): string {
   const unit = `Klinik Estate ${estateLabel(p.klinik)}`;
+  const approval = p.status !== "DRAFT";
+  const final = p.status === "DISETUJUI";
+  const n = (s: string) => p.lines.filter((l) => (l.status ?? "MENUNGGU") === s).length;
   const rows = p.lines
     .map(
-      (l, i) => `<tr>
+      (l, i) => `<tr class="${l.status === "DITOLAK" ? "tolak" : ""}">
         <td class="c">${i + 1}</td>
-        <td>${esc(l.nama)}</td>
+        <td class="nm">${esc(l.nama)}</td>
         <td class="c">${esc(l.satuan)}</td>
         <td class="c">${qty(l.jumlah)}</td>
+        ${approval ? `<td class="c b">${l.disetujui === null || l.disetujui === undefined ? "-" : qty(l.disetujui)}</td>` : ""}
         <td class="c u-${l.urgensi.toLowerCase()}">${URGENSI_LABEL[l.urgensi]}</td>
         <td class="c">${esc([l.stok_text, l.keterangan].filter(Boolean).join(" · "))}</td>
+        ${approval ? `<td class="st st-${(l.status ?? "MENUNGGU").toLowerCase()}">${STATUS_CETAK[l.status ?? "MENUNGGU"]}${l.alasan ? `<div class="als">${esc(l.alasan)}</div>` : ""}</td>` : ""}
       </tr>`
     )
     .join("");
@@ -66,6 +75,16 @@ export function permintaanHtml(p: Permintaan): string {
     table.daftar tr { page-break-inside: avoid; }
     .c { text-align: center; }
     .u-high { font-weight: bold; }
+    .b { font-weight: bold; }
+    tr.tolak td { color: #777; }
+    tr.tolak td.nm { text-decoration: line-through; }
+    td.st { font-size: 9.5pt; font-weight: bold; }
+    td.st-sebagian { color: #9a5b00; }
+    td.st-ditolak, tr.tolak td.st-ditolak { color: #b00000; }
+    td.st .als { font-weight: normal; font-style: italic; color: #333; font-size: 8.5pt; }
+    .ringkas { margin-top: 6px; font-size: 9.5pt; }
+    .draft { position: fixed; top: 42%; left: 0; right: 0; text-align: center; font-size: 54pt; font-weight: bold; color: rgba(200, 0, 0, 0.13); transform: rotate(-24deg); z-index: -1; font-family: Arial, sans-serif; }
+    .final { text-align: center; font-size: 9pt; font-weight: bold; color: #1f4e9c; margin-top: -8px; margin-bottom: 8px; }
     .catatan { margin-top: 8px; font-size: 10pt; }
     .penutup { page-break-inside: avoid; break-inside: avoid; }
     .tempat { text-align: right; margin-top: 14px; }
@@ -82,6 +101,7 @@ export function permintaanHtml(p: Permintaan): string {
     ${kopHtml(PERUSAHAAN, unit)}
     <h1>FORM PERMINTAAN OBAT, BMHP DAN ALAT MEDIS</h1>
     <div class="nomor">Nomor: ${esc(p.nomor)}</div>
+    ${final ? `<div class="final">DISETUJUI LENGKAP · DOKUMEN FINAL</div>` : `<div class="draft">DRAFT - BELUM DISETUJUI</div>`}
     <table class="info">
       <tr><td>Tanggal</td><td>: ${esc(tanggalPanjang(p.tanggal))}</td></tr>
       <tr><td>Periode</td><td>: ${esc(p.periode)}</td></tr>
@@ -89,9 +109,12 @@ export function permintaanHtml(p: Permintaan): string {
       <tr><td>Departemen</td><td>: ${esc(p.departemen || unit)}</td></tr>
     </table>
     <table class="daftar">
-      <thead><tr><th style="width:30px">No</th><th>Uraian</th><th style="width:62px">Satuan</th><th style="width:52px">Jumlah</th><th style="width:58px">Urgensi</th><th style="width:150px">Keterangan/Stok</th></tr></thead>
+      <thead><tr><th style="width:30px">No</th><th>Uraian</th><th style="width:58px">Satuan</th><th style="width:52px">${approval ? "Diminta" : "Jumlah"}</th>${
+        approval ? `<th style="width:58px">Disetujui</th>` : ""
+      }<th style="width:54px">Urgensi</th><th style="width:${approval ? 110 : 150}px">Keterangan/Stok</th>${approval ? `<th style="width:120px">Status Approval</th>` : ""}</tr></thead>
       <tbody>${rows}</tbody>
     </table>
+    ${approval ? `<div class="ringkas">Hasil approval: ${n("APPROVED")} disetujui penuh · ${n("SEBAGIAN")} sebagian · ${n("DITOLAK")} ditolak${n("MENUNGGU") ? ` · ${n("MENUNGGU")} menunggu` : ""}.</div>` : ""}
     ${p.catatan ? `<div class="catatan"><b>Catatan:</b> ${esc(p.catatan)}</div>` : ""}
     <div class="penutup"><div class="tempat">${esc(estateLabel(p.klinik))}, ${esc(tanggalPanjang(p.tanggal))}</div>
     <div class="ttds">${ttd}</div></div>

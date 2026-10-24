@@ -5170,15 +5170,16 @@ app.put("/api/klinik-permintaan/:id/pemenuhan", async (req, res) => {
         // The approved amount follows the status: all of it, none, or (Sebagian) what was typed.
         const disetujuiIn = it?.disetujui === "" || it?.disetujui === null || it?.disetujui === undefined ? l.disetujui : Number(it.disetujui);
         const disetujui = status === "APPROVED" ? l.jumlah : status === "DITOLAK" ? 0 : status === "SEBAGIAN" ? disetujuiIn : null;
-        const dipenuhi = it?.dipenuhi === "" || it?.dipenuhi === null || it?.dipenuhi === undefined ? null : Number(it.dipenuhi);
+        const dipenuhi = it?.dipenuhi === undefined ? l.dipenuhi : it.dipenuhi === "" || it.dipenuhi === null ? null : Number(it.dipenuhi);
         if (dipenuhi !== null && (!Number.isFinite(dipenuhi) || dipenuhi < 0)) throw new Error(`${l.nama}: jumlah dipenuhi tidak valid`);
-        const tgl = it?.tanggal_pemenuhan ? String(it.tanggal_pemenuhan) : null;
+        const tgl = it?.tanggal_pemenuhan === undefined ? l.tanggal_pemenuhan : it.tanggal_pemenuhan ? String(it.tanggal_pemenuhan) : null;
         if (tgl && !/^\d{4}-\d{2}-\d{2}$/.test(tgl)) throw new Error(`${l.nama}: tanggal pemenuhan tidak valid`);
         const approvalBerubah = status !== l.status || alasan !== (l.alasan ?? "") || disetujui !== l.disetujui;
         const pemenuhanBerubah = dipenuhi !== l.dipenuhi || tgl !== l.tanggal_pemenuhan;
         if (!approvalBerubah && !pemenuhanBerubah) continue;
         if (approvalBerubah && !bolehApprove)
           throw new AksesError(`${l.nama}: status approval hanya bisa diubah akun dengan hak Approve Permintaan Obat atau penanda tangan Diketahui / Disetujui`);
+        if (approvalBerubah && p.status === "DISETUJUI") throw new Error(`${l.nama}: permintaan sudah disetujui lengkap (final); approval item tidak bisa diubah lagi`);
         if (approvalBerubah && (l.approval_level ?? 0) > itemRank(u))
           throw new AksesError(
             `${l.nama}: sudah diputuskan ${l.approval_oleh ?? ""} (${ITEM_RANK_LABEL[l.approval_level]}); hanya level yang sama atau lebih tinggi yang bisa mengubahnya`
@@ -5243,17 +5244,27 @@ app.post("/api/klinik-permintaan/:id/ttd", async (req, res) => {
   }
   const approval = { ...(p.approval ?? {}), [level]: { nama: u.nama, jabatan, user_id: u.id, at: new Date().toISOString() } };
   const lengkap = !ttdBerikut(approval);
-  await execute("UPDATE klinik_permintaan SET approval = @approval::jsonb, status = @status, updated_at = now() WHERE id = @id", {
-    approval: JSON.stringify(approval),
-    status: lengkap ? "DISETUJUI" : "DIAJUKAN",
-    id: p.id,
+  const otomatis = await withTransaction(async (c) => {
+    await execute(
+      "UPDATE klinik_permintaan SET approval = @approval::jsonb, status = @status, updated_at = now() WHERE id = @id",
+      { approval: JSON.stringify(approval), status: lengkap ? "DISETUJUI" : "DIAJUKAN", id: p.id },
+      c
+    );
+    // The fourth signature closes it: an item nobody decided is approved in full by that signer.
+    if (!lengkap) return [] as { nama: string }[];
+    return queryMany<{ nama: string }>(
+      `UPDATE klinik_permintaan_line SET status = 'APPROVED', disetujui = jumlah, alasan = '', approval_oleh = @oleh, approval_at = now(), approval_level = @rank
+        WHERE permintaan_id = @id AND status = 'MENUNGGU' RETURNING nama`,
+      { oleh: u.nama, rank: itemRank(u), id: p.id },
+      c
+    );
   });
   await logActivity(req, {
     module: "KLINIK",
     estate: p.klinik,
     aksi: "Tanda Tangan Permintaan Obat",
     objek: p.nomor,
-    detail: `${TTD_LEVEL_LABEL[level]}${jabatan ? ` (${jabatan})` : ""}${lengkap ? " · lengkap, siap diproses" : ` · belum: ${TTD_LEVELS.filter((k) => !approval[k]).map((k) => TTD_LEVEL_LABEL[k]).join(", ")}`}`,
+    detail: `${TTD_LEVEL_LABEL[level]}${jabatan ? ` (${jabatan})` : ""}${lengkap ? ` · lengkap, final${otomatis.length ? ` · ${otomatis.length} item yang masih menunggu otomatis Approved` : ""}` : ` · belum: ${TTD_LEVELS.filter((k) => !approval[k]).map((k) => TTD_LEVEL_LABEL[k]).join(", ")}`}`,
   });
   res.json({ success: true, status: lengkap ? "DISETUJUI" : "DIAJUKAN" });
 });

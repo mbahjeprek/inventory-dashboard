@@ -1646,7 +1646,7 @@ export const api = {
   permintaanUpdate: (id: number, payload: PermintaanInput) => req<{ success: boolean }>(`/api/klinik-permintaan/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
   permintaanPemenuhan: (
     id: number,
-    lines: { id: number; status: PermintaanLineStatus; alasan: string; disetujui: number | null; dipenuhi: number | null; tanggal_pemenuhan: string | null }[]
+    lines: { id: number; status: PermintaanLineStatus; alasan: string; disetujui: number | null }[]
   ) =>
     req<{ success: boolean; saved: number }>(`/api/klinik-permintaan/${id}/pemenuhan`, { method: "PUT", body: JSON.stringify({ lines }) }),
   permintaanMenunggu: () => req<{ rows: PermintaanMenunggu[] }>("/api/klinik-permintaan/menunggu"),
