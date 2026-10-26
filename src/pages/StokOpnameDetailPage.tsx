@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { OpnamePihakForm, pihakDari, pihakKurang } from "../components/OpnamePihakForm";
+import type { OpnamePihak } from "../lib/api";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   ArrowLeft,
@@ -182,6 +184,13 @@ export function StokOpnameDetailPage() {
   const rekon = opname.status === "DRAFT" && opname.hitung_buta && !!opname.dibuka_at;
   const whole = opnameWhole(opname.module, opname.estate);
   const locName = `${OPNAME_MODULE_LABEL[opname.module]} ${opname.estate}`;
+  // The people one by one with jabatan (older opnames: the names only) and the penyetuju.
+  const pihakOf = pihakDari(opname);
+  const orangTeks = (l: { nama: string; jabatan: string }[]) =>
+    l
+      .filter((o) => o.nama)
+      .map((o) => (o.jabatan ? `${o.nama} (${o.jabatan})` : o.nama))
+      .join(", ") || "-";
   const locked = opname.status === "DRAFT" || opname.status === "SUBMITTED";
   // A superuser may still correct the counts of a submitted or approved opname; on an approved one the
   // stock moves by the difference (only lines counted at approval, see PUT /api/stock-opname/:id).
@@ -359,7 +368,7 @@ export function StokOpnameDetailPage() {
   const buildReport = async (): Promise<TableReport> => ({
     title: `Berita Acara Stok Opname #${opname.id} - ${locName}`,
     subtitle: [
-      `Tim penghitung: ${opname.tim || "-"} · Saksi: ${opname.saksi || "-"} · Pemegang gudang: ${opname.pemegang || "-"}${opname.hitung_buta ? " · Hitung buta" : ""}`,
+      `Tim penghitung: ${orangTeks(pihakOf.tim)} · Saksi: ${orangTeks(pihakOf.saksi)} · Pemegang gudang: ${orangTeks([pihakOf.pemegang])}${pihakOf.penyetuju.nama ? ` · Disetujui oleh: ${orangTeks([pihakOf.penyetuju])}` : ""}${opname.hitung_buta ? " · Hitung buta" : ""}`,
       `Tanggal opname: ${tanggalWaktu(opname.tanggal, opname.created_at)} · Status: ${OPNAME_STATUS[opname.status].label}${opname.catatan ? ` · ${opname.catatan}` : ""}`,
       [
         `Dibuat: ${opname.created_by_nama ?? "-"} (${when(opname.created_at)})`,
@@ -375,10 +384,10 @@ export function StokOpnameDetailPage() {
     landscape: true,
     estate: opname.estate,
     signatures: [
-      ...namaOf(opname.tim).map((n, i) => ({ label: i === 0 ? "Tim Penghitung" : " ", nama: n })),
-      { label: "Saksi", nama: opname.saksi },
-      { label: "Pemegang Gudang", nama: opname.pemegang },
-      { label: "Disetujui", nama: opname.approved_by_nama ?? "" },
+      ...pihakOf.tim.filter((o) => o.nama).map((o, i) => ({ label: i === 0 ? "Tim Penghitung" : " ", nama: o.nama, jabatan: o.jabatan })),
+      ...pihakOf.saksi.filter((o) => o.nama).map((o, i) => ({ label: i === 0 ? "Saksi" : " ", nama: o.nama, jabatan: o.jabatan })),
+      { label: "Pemegang Gudang", nama: pihakOf.pemegang.nama, jabatan: pihakOf.pemegang.jabatan },
+      { label: "Disetujui", nama: opname.approved_by_nama ?? pihakOf.penyetuju.nama, jabatan: pihakOf.penyetuju.jabatan },
     ],
     columns: [
       { label: "No", align: "right" },
@@ -622,18 +631,30 @@ export function StokOpnameDetailPage() {
       </div>
 
       <div className="flex flex-wrap items-start gap-x-6 gap-y-2 text-sm rounded-lg border border-[var(--border)] bg-[var(--bg-card)] px-4 py-3">
-        <div>
-          <div className="text-[11px] uppercase tracking-wide text-[var(--text-muted)]">Tim penghitung</div>
-          <div className="font-medium text-[var(--text-primary)]">{opname.tim || <span className="text-[var(--accent-red)]">belum diisi</span>}</div>
-        </div>
-        <div>
-          <div className="text-[11px] uppercase tracking-wide text-[var(--text-muted)]">Saksi</div>
-          <div className="font-medium text-[var(--text-primary)]">{opname.saksi || <span className="text-[var(--accent-red)]">belum diisi</span>}</div>
-        </div>
-        <div>
-          <div className="text-[11px] uppercase tracking-wide text-[var(--text-muted)]">Pemegang gudang</div>
-          <div className="font-medium text-[var(--text-primary)]">{opname.pemegang || <span className="text-[var(--accent-red)]">belum diisi</span>}</div>
-        </div>
+        {(
+          [
+            ["Tim penghitung", pihakOf.tim],
+            ["Saksi", pihakOf.saksi],
+            ["Pemegang gudang", [pihakOf.pemegang]],
+            ["Disetujui oleh", [pihakOf.penyetuju]],
+          ] as const
+        ).map(([label, orang]) => (
+          <div key={label}>
+            <div className="text-[11px] uppercase tracking-wide text-[var(--text-muted)]">{label}</div>
+            {orang.filter((o) => o.nama).length ? (
+              orang
+                .filter((o) => o.nama)
+                .map((o, i) => (
+                  <div key={i} className="font-medium text-[var(--text-primary)] leading-tight">
+                    {o.nama}
+                    {o.jabatan ? <span className="font-normal text-xs text-[var(--text-muted)]"> · {o.jabatan}</span> : null}
+                  </div>
+                ))
+            ) : (
+              <div className="font-medium text-[var(--accent-red)]">belum diisi</div>
+            )}
+          </div>
+        ))}
         <div>
           <div className="text-[11px] uppercase tracking-wide text-[var(--text-muted)]">Cara hitung</div>
           <div className="font-medium text-[var(--text-primary)]">
@@ -642,7 +663,7 @@ export function StokOpnameDetailPage() {
         </div>
         {canCount && (
           <button onClick={() => setEditTim(true)} className="ml-auto inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-md border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[#f1f5f9]">
-            <Pencil size={13} /> Ubah tim
+            <Pencil size={13} /> Ubah tim & approval
           </button>
         )}
       </div>
@@ -1154,47 +1175,31 @@ function AddJenisModal({ oli, estate, onClose, onConfirm }: { oli: boolean; esta
   return <SmallFormModal title={`Tambah Jenis ${noun}`} label={`Jenis ${noun.toLowerCase()}`} options={jenis} confirmLabel="Tambah" onClose={onClose} onConfirm={onConfirm} />;
 }
 
-const namaOf = (v: string) => v.split(/[\n,;]+/).map((x) => x.trim()).filter(Boolean);
 
-// Tim penghitung / saksi / pemegang of a DRAFT opname (opnames made before had none).
+// The people of an opname not approved yet (older ones kept names only): one by one with jabatan, and the penyetuju.
 function TimModal({ opname, onClose, onSaved }: { opname: Opname; onClose: () => void; onSaved: () => Promise<void> }) {
-  const [tim, setTim] = useState(opname.tim);
-  const [saksi, setSaksi] = useState(opname.saksi);
-  const [pemegang, setPemegang] = useState(opname.pemegang);
+  const [pihak, setPihak] = useState<OpnamePihak>(() => pihakDari(opname));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const save = async () => {
-    if (namaOf(tim).length < 2) return setError("Isi tim penghitung minimal 2 orang (pisahkan dengan koma)");
-    if (!saksi.trim() || !pemegang.trim()) return setError("Isi saksi dan pemegang gudang");
+    const kurang = pihakKurang(pihak);
+    if (kurang) return setError(kurang);
     setBusy(true);
     setError("");
     try {
-      await api.opnameInfo(opname.id, { tim, saksi, pemegang });
+      const clean = (l: OpnamePihak["tim"]) => l.filter((o) => o.nama.trim());
+      await api.opnameInfo(opname.id, { pihak: { ...pihak, tim: clean(pihak.tim), saksi: clean(pihak.saksi) } });
       await onSaved();
     } catch (e) {
       setError(errorText(e, "Gagal menyimpan"));
       setBusy(false);
     }
   };
-  const inputCls = "w-full text-sm rounded-md border border-[var(--border)] px-3 py-2";
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg w-full max-w-md shadow-xl p-5 space-y-3">
-        <h3 className="font-semibold text-sm text-[var(--text-primary)]">Tim Stok Opname #{opname.id}</h3>
-        <div>
-          <label className="text-xs text-[var(--text-secondary)] mb-1 block">Tim penghitung (minimal 2 orang, pisahkan dengan koma)</label>
-          <input value={tim} onChange={(e) => setTim(e.target.value)} className={inputCls} autoFocus />
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="text-xs text-[var(--text-secondary)] mb-1 block">Saksi</label>
-            <input value={saksi} onChange={(e) => setSaksi(e.target.value)} className={inputCls} />
-          </div>
-          <div>
-            <label className="text-xs text-[var(--text-secondary)] mb-1 block">Pemegang gudang</label>
-            <input value={pemegang} onChange={(e) => setPemegang(e.target.value)} className={inputCls} />
-          </div>
-        </div>
+    <div className="fixed inset-0 bg-black/40 flex items-start justify-center z-50 p-4 overflow-y-auto">
+      <div className="bg-white rounded-lg w-full max-w-2xl shadow-xl p-5 space-y-3 my-4">
+        <h3 className="font-semibold text-sm text-[var(--text-primary)]">Tim & approval Stok Opname #{opname.id}</h3>
+        <OpnamePihakForm value={pihak} onChange={setPihak} module={opname.module} estate={opname.estate} />
         {error && <p className="text-xs text-[var(--accent-red)]">{error}</p>}
         <div className="flex justify-end gap-2">
           <button onClick={onClose} className="px-4 py-2 text-sm rounded-md border border-[var(--border)] text-[var(--text-secondary)]">

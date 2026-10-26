@@ -12,7 +12,7 @@ export type TableReport = {
   rows: Cell[][];
   landscape?: boolean;
   // Boxes to sign under the table (a Berita Acara): role and the person's name.
-  signatures?: { label: string; nama: string }[];
+  signatures?: { label: string; nama: string; jabatan?: string }[];
   // The estate it is for: picks the company of the kop (KNS -> PT. Kartika Nugraha Sakti).
   estate?: string;
 };
@@ -150,6 +150,7 @@ export function printTable(report: AnyReport) {
     .sign div { flex: 1 1 150px; text-align: center; font-size: 8.5pt; }
     .sign span { display: block; height: 52px; }
     .sign b { display: block; border-top: 1px solid #1a2634; padding-top: 2px; font-weight: 600; }
+    .sign i { display: block; font-style: normal; color: #5b6b7c; font-size: 7.5pt; }
     ${signed ? `${KOP_CSS} .kop { margin-bottom: 10px; } .kop-pt { font-size: 12pt; } .kop-unit { font-size: 10pt; } .kop-logo, .kop-spasi { width: 90px; } h1 { text-align: center; }` : ""}
   </style></head><body>
     ${signed ? kopHtml(perusahaanEstate("estate" in report ? report.estate : undefined), "") : ""}
@@ -157,7 +158,7 @@ export function printTable(report: AnyReport) {
     ${subtitle.map((s) => `<p class="meta">${escapeHtml(s)}</p>`).join("")}
     <p class="meta">Dicetak: ${escapeHtml(printedAtText())}${rowCount(report)}</p>
     ${asSections(report).map(table).join("")}
-    ${"signatures" in report && report.signatures?.length ? `<div class="sign">${report.signatures.map((s) => `<div>${escapeHtml(s.label)}<span></span><b>${escapeHtml(s.nama || " ")}</b></div>`).join("")}</div>` : ""}
+    ${"signatures" in report && report.signatures?.length ? `<div class="sign">${report.signatures.map((s) => `<div>${escapeHtml(s.label)}<span></span><b>${escapeHtml(s.nama || " ")}</b>${s.jabatan ? `<i>${escapeHtml(s.jabatan)}</i>` : ""}</div>`).join("")}</div>` : ""}
   </body></html>`;
 
   printDocument(html);
@@ -281,6 +282,7 @@ export async function exportExcel(report: AnyReport, fileName: string) {
     ws.addRow([]);
     ws.addRow([]);
     ws.addRow(report.signatures.map((s) => `(${s.nama || "........................"})`));
+    if (report.signatures.some((s) => s.jabatan)) ws.addRow(report.signatures.map((s) => s.jabatan ?? ""));
   }
 
   const buf = await wb.xlsx.writeBuffer();

@@ -6649,6 +6649,38 @@ async function logOpname(req: express.Request, o: OpnameRow, aksi: string, detai
 
 // The team / witness names of an opname: one per line or comma, tidied.
 const namaList = (v: unknown) => String(v ?? "").split(/[\n,;]+/).map((s) => s.trim()).filter(Boolean);
+// The people of an opname one by one (see schema.sql opname.pihak): every one with nama and jabatan, at least two
+// counters and one saksi, a pemegang, and the account that approves (one with Approve Opname of the module and the
+// estate). Returns the error text, or the pihak with the joined names for tim / saksi / pemegang.
+type Orang = { nama: string; jabatan: string };
+async function opnamePihak(b: any, module: string, estate: string): Promise<string | { pihak: any; tim: string; saksi: string; pemegang: string }> {
+  const orang = (x: any): Orang => ({ nama: String(x?.nama ?? "").trim().slice(0, 100), jabatan: String(x?.jabatan ?? "").trim().slice(0, 100) });
+  const daftar = (v: any) => (Array.isArray(v) ? v.map(orang).filter((o) => o.nama) : []);
+  const p = b?.pihak ?? {};
+  const tim = daftar(p.tim);
+  const saksi = daftar(p.saksi);
+  const pemegang = orang(p.pemegang);
+  if (tim.length < 2) return "Isi tim penghitung minimal 2 orang";
+  if (!saksi.length) return "Isi minimal satu saksi";
+  if (!pemegang.nama) return "Isi nama pemegang gudang / stok";
+  const tanpa = [...tim, ...saksi, pemegang].find((o) => !o.jabatan);
+  if (tanpa) return `Isi jabatan ${tanpa.nama}`;
+  const uid = Number(p.penyetuju?.user_id) || 0;
+  if (!uid) return "Pilih siapa yang menyetujui (approval)";
+  const u = await queryOne<any>("SELECT id, nama, role, estate, estates, perms FROM users WHERE id = @id", { id: uid });
+  const boleh = u && (u.role === "superuser" || (parseList(u.perms, ALL_PERMS).includes(`${module.toLowerCase()}.approve`) && parseList(u.estates ?? u.estate, ESTATES).includes(estate)));
+  if (!boleh) return "Akun penyetuju tidak punya hak Approve Opname untuk modul dan estate ini";
+  const penyetuju = { user_id: u.id, nama: u.nama, jabatan: String(p.penyetuju?.jabatan ?? "").trim().slice(0, 100) };
+  if (!penyetuju.jabatan) return "Isi jabatan penyetuju";
+  return {
+    pihak: { tim, saksi, pemegang, penyetuju },
+    tim: tim.map((o) => o.nama).join(", "),
+    saksi: saksi.map((o) => o.nama).join(", "),
+    pemegang: pemegang.nama,
+  };
+}
+const pihakTeks = (p: any) =>
+  `tim: ${p.tim.map((o: Orang) => `${o.nama} (${o.jabatan})`).join(", ")}; saksi: ${p.saksi.map((o: Orang) => `${o.nama} (${o.jabatan})`).join(", ")}; pemegang: ${p.pemegang.nama} (${p.pemegang.jabatan}); disetujui oleh: ${p.penyetuju.nama} (${p.penyetuju.jabatan})`;
 // Hitung buta: while the count runs, stok sistem (and so the selisih) is hidden from whoever counts;
 // an approver / Super User sees it, everyone sees it once the count is finished (dibuka_at).
 const opnameHidden = (u: SessionUser, o: OpnameRow) =>
@@ -6685,13 +6717,9 @@ app.get("/api/stock-opname", async (req, res) => {
 
 app.post("/api/stock-opname", async (req, res) => {
   const { module, estate, tanggal, catatan } = req.body ?? {};
-  const tim = namaList(req.body?.tim);
-  const saksi = namaList(req.body?.saksi);
-  const pemegang = String(req.body?.pemegang ?? "").trim();
-  if (tim.length < 2) return res.status(400).json({ error: "Isi tim penghitung minimal 2 orang" });
-  if (!saksi.length) return res.status(400).json({ error: "Isi nama saksi" });
-  if (!pemegang) return res.status(400).json({ error: "Isi nama pemegang gudang / stok" });
   if (!OPNAME_MODULES.includes(module)) return res.status(400).json({ error: "Modul tidak valid" });
+  const ph = await opnamePihak(req.body, module, estate);
+  if (typeof ph === "string") return res.status(400).json({ error: ph });
   if (!(ESTATES as readonly string[]).includes(estate)) return res.status(400).json({ error: "Estate tidak valid" });
   if (!ISO_DATE.test(tanggal || "")) return res.status(400).json({ error: "Tanggal tidak valid" });
   if (!estateAllowed(req.user!, estate) || !opnameCan(req.user!, module, "opname")) return res.status(403).json({ error: "Akses ditolak" });
@@ -6702,8 +6730,8 @@ app.post("/api/stock-opname", async (req, res) => {
   try {
     o = await withTransaction(async (client) => {
       const row = (await queryOne<OpnameRow>(
-        `INSERT INTO opname (module, estate, tanggal, catatan, created_by, created_by_nama, tim, saksi, pemegang, hitung_buta)
-         VALUES (@module, @estate, @tanggal, @catatan, @uid, @unama, @tim, @saksi, @pemegang, @buta) RETURNING *`,
+        `INSERT INTO opname (module, estate, tanggal, catatan, created_by, created_by_nama, tim, saksi, pemegang, pihak, hitung_buta)
+         VALUES (@module, @estate, @tanggal, @catatan, @uid, @unama, @tim, @saksi, @pemegang, @pihak::jsonb, @buta) RETURNING *`,
         {
           module,
           estate,
@@ -6711,9 +6739,10 @@ app.post("/api/stock-opname", async (req, res) => {
           catatan: String(catatan ?? "").trim(),
           uid: u.id,
           unama: u.nama,
-          tim: tim.join(", "),
-          saksi: saksi.join(", "),
-          pemegang,
+          tim: ph.tim,
+          saksi: ph.saksi,
+          pemegang: ph.pemegang,
+          pihak: JSON.stringify(ph.pihak),
           buta: req.body?.hitung_buta !== false,
         },
         client
@@ -6733,8 +6762,22 @@ app.post("/api/stock-opname", async (req, res) => {
     if (e.code === "23505") return res.status(409).json({ error: `${opnameName({ module, estate })} masih punya stok opname yang belum selesai` });
     throw e;
   }
-  await logOpname(req, o, "Buat Stok Opname", `Tanggal: ${isoToDisplay(tanggal)}; ${count} item; tim: ${tim.join(", ")}; saksi: ${saksi.join(", ")}; pemegang: ${pemegang}${o.hitung_buta ? "; hitung buta" : ""}; transaksi stok dikunci`);
+  await logOpname(req, o, "Buat Stok Opname", `Tanggal: ${isoToDisplay(tanggal)}; ${count} item; ${pihakTeks(ph.pihak)}${o.hitung_buta ? "; hitung buta" : ""}; transaksi stok dikunci`);
   res.json({ success: true, id: o.id });
+});
+
+// Who may approve an opname of a module / estate: accounts with its Approve Opname and that estate, and Super Users.
+app.get("/api/stock-opname/penyetuju", async (req, res) => {
+  const module = String(req.query.module ?? "");
+  const estate = String(req.query.estate ?? "");
+  if (!OPNAME_MODULES.includes(module as any) || !(ESTATES as readonly string[]).includes(estate)) return res.status(400).json({ error: "Modul / estate tidak valid" });
+  if (!estateAllowed(req.user!, estate) || !opnameCan(req.user!, module, "view")) return res.status(403).json({ error: "Akses ditolak" });
+  const users = await queryMany<any>("SELECT id, nama, username, role, estate, estates, perms FROM users ORDER BY role <> 'superuser', nama");
+  res.json(
+    users
+      .filter((u) => u.role === "superuser" || (parseList(u.perms, ALL_PERMS).includes(`${module.toLowerCase()}.approve`) && parseList(u.estates ?? u.estate, ESTATES).includes(estate)))
+      .map((u) => ({ id: u.id, nama: u.nama, superuser: u.role === "superuser" }))
+  );
 });
 
 app.get("/api/stock-opname/:id", async (req, res) => {
@@ -7054,23 +7097,20 @@ app.get("/api/stock-opname-log", async (req, res) => {
   res.json({ data, total });
 });
 
-// Tim / saksi / pemegang of a DRAFT (filled or corrected later; opnames from before had none).
+// Tim / saksi / pemegang / penyetuju before approval (filled or corrected later; opnames from before had none).
 app.put("/api/stock-opname/:id/info", async (req, res) => {
-  const tim = namaList(req.body?.tim);
-  const saksi = namaList(req.body?.saksi);
-  const pemegang = String(req.body?.pemegang ?? "").trim();
-  if (tim.length < 2) return res.status(400).json({ error: "Isi tim penghitung minimal 2 orang" });
-  if (!saksi.length) return res.status(400).json({ error: "Isi nama saksi" });
-  if (!pemegang) return res.status(400).json({ error: "Isi nama pemegang gudang / stok" });
-  const o = await withTransaction(async (client) => {
+  const done = await withTransaction(async (client) => {
     const o = await loadOpname(req, res, "opname", client);
     if (!o) return null;
-    if (o.status !== "DRAFT") return refuse(res, 400, "Opname ini sudah diajukan");
-    await execute("UPDATE opname SET tim = @tim, saksi = @saksi, pemegang = @pemegang WHERE id = @id", { tim: tim.join(", "), saksi: saksi.join(", "), pemegang, id: o.id }, client);
-    return o;
+    // Before approval: a DRAFT, or a submitted one (the penyetuju can still be changed).
+    if (o.status !== "DRAFT" && o.status !== "SUBMITTED") return refuse(res, 400, "Opname ini sudah selesai");
+    const ph = await opnamePihak(req.body, o.module, o.estate);
+    if (typeof ph === "string") return refuse(res, 400, ph);
+    await execute("UPDATE opname SET tim = @tim, saksi = @saksi, pemegang = @pemegang, pihak = @pihak::jsonb WHERE id = @id", { tim: ph.tim, saksi: ph.saksi, pemegang: ph.pemegang, pihak: JSON.stringify(ph.pihak), id: o.id }, client);
+    return { o, ph };
   });
-  if (!o) return;
-  await logOpname(req, o, "Edit Tim Stok Opname", `Tim: ${tim.join(", ")}; saksi: ${saksi.join(", ")}; pemegang: ${pemegang}`);
+  if (!done) return;
+  await logOpname(req, done.o, "Edit Tim Stok Opname", pihakTeks(done.ph.pihak));
   res.json({ success: true });
 });
 
@@ -7120,6 +7160,10 @@ app.post("/api/stock-opname/:id/approve", async (req, res) => {
       const o = await loadOpname(req, res, "approve", client);
       if (!o) return null;
       if (o.status !== "SUBMITTED") return refuse(res, 400, "Opname ini tidak sedang menunggu approval");
+      // Addressed to one account: only it (or a Super User) approves.
+      const tujuan = (o as any).pihak?.penyetuju;
+      if (tujuan?.user_id && tujuan.user_id !== u.id && u.role !== "superuser")
+        return refuse(res, 403, `Opname ini ditujukan ke ${tujuan.nama}${tujuan.jabatan ? ` (${tujuan.jabatan})` : ""} untuk approval`);
       // The count is checked by someone else; a superuser may approve their own.
       if (o.submitted_by === u.id && u.role !== "superuser") return refuse(res, 403, "Opname yang Anda ajukan sendiri harus disetujui orang lain");
       // Nor by someone who counted it.

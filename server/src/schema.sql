@@ -1282,3 +1282,8 @@ UPDATE klinik_permintaan_line SET disetujui = CASE status WHEN 'APPROVED' THEN j
 ALTER TABLE kendaraan_harian ADD COLUMN IF NOT EXISTS lokasi TEXT NOT NULL DEFAULT '';
 ALTER TABLE kendaraan_harian ADD COLUMN IF NOT EXISTS pekerjaan TEXT NOT NULL DEFAULT '';
 ALTER TABLE kendaraan_unit ADD COLUMN IF NOT EXISTS operator TEXT NOT NULL DEFAULT '';
+
+-- Stok opname: the people of the Berita Acara one by one with their jabatan - pihak = { tim: [{nama, jabatan}],
+-- saksi: [{nama, jabatan}], pemegang: {nama, jabatan}, penyetuju: {user_id, nama, jabatan} }. tim / saksi / pemegang
+-- keep the names joined (older opnames, the checks). With a penyetuju only that account (or a Super User) approves.
+ALTER TABLE opname ADD COLUMN IF NOT EXISTS pihak JSONB NOT NULL DEFAULT '{}'::jsonb;

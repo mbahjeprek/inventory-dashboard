@@ -1012,11 +1012,15 @@ export type Opname = {
   tim: string;
   saksi: string;
   pemegang: string;
+  // The same people one by one with their jabatan, and the account that approves ({} on older opnames).
+  pihak: OpnamePihak | Record<string, never>;
   hitung_buta: boolean;
   dibuka_at: string | null;
   dibuka_oleh_nama: string | null;
   disembunyikan?: boolean;
 };
+export type OpnameOrang = { nama: string; jabatan: string };
+export type OpnamePihak = { tim: OpnameOrang[]; saksi: OpnameOrang[]; pemegang: OpnameOrang; penyetuju: OpnameOrang & { user_id: number } };
 export type OpnameListRow = Opname & { total: number; dihitung: number; selisih: number };
 export type OpnameLine = {
   id: number;
@@ -1948,10 +1952,12 @@ export const api = {
     req<{ data: { id: number; created_at: string; module: string; estate: string; aksi: string; objek: string; detail: string; nama: string; username: string }[]; total: number }>(
       `/api/stock-opname-log?${new URLSearchParams(Object.entries(p).filter(([, v]) => v !== undefined && v !== "").map(([k, v]) => [k, String(v)]))}`
     ),
-  opnameInfo: (id: number, payload: { tim: string; saksi: string; pemegang: string }) =>
+  opnamePenyetuju: (module: OpnameModule, estate: string) =>
+    req<{ id: number; nama: string; superuser: boolean }[]>(`/api/stock-opname/penyetuju?${new URLSearchParams({ module, estate })}`),
+  opnameInfo: (id: number, payload: { pihak: OpnamePihak }) =>
     req<{ success: boolean }>(`/api/stock-opname/${id}/info`, { method: "PUT", body: JSON.stringify(payload) }),
   opnameBuka: (id: number) => req<{ success: boolean }>(`/api/stock-opname/${id}/buka`, { method: "POST", body: "{}" }),
-  createOpname: (payload: { module: OpnameModule; estate: string; tanggal: string; catatan?: string; tim: string; saksi: string; pemegang: string; hitung_buta: boolean }) =>
+  createOpname: (payload: { module: OpnameModule; estate: string; tanggal: string; catatan?: string; pihak: OpnamePihak; hitung_buta: boolean }) =>
     req<{ success: boolean; id: number }>("/api/stock-opname", { method: "POST", body: JSON.stringify(payload) }),
   opname: (id: number) => req<{ opname: Opname; lines: OpnameLine[] }>(`/api/stock-opname/${id}`),
   saveOpname: (id: number, payload: { catatan?: string; lines: { id: number; stok_fisik: number | null; keterangan: string; exp_fisik?: string | null }[] }) =>
