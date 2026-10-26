@@ -15,7 +15,6 @@ import { PetaBlokPage } from "./pages/PetaBlokPage";
 import { MasterBarangPage } from "./pages/MasterBarangPage";
 import { KoperasiPage } from "./pages/KoperasiPage";
 import { KendaraanPage } from "./pages/KendaraanPage";
-import { PruningPage } from "./pages/PruningPage";
 import { UsersPage } from "./pages/UsersPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { InventoryPupukPage } from "./pages/InventoryPupukPage";
@@ -349,14 +348,6 @@ function App() {
                 element={
                   <RequirePageAccess>
                     <KendaraanPage />
-                  </RequirePageAccess>
-                }
-              />
-              <Route
-                path="/pruning"
-                element={
-                  <RequirePageAccess>
-                    <PruningPage />
                   </RequirePageAccess>
                 }
               />

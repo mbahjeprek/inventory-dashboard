@@ -79,14 +79,6 @@ export const OTHER_PERMS: { group: string; items: { key: string; label: string }
       { key: "kendaraan.edit", label: "Edit Kendaraan (tambah / ubah data unit)" },
     ],
   },
-  {
-    group: "Pruning PT.AKSS",
-    items: [
-      { key: "pruning.view", label: "Lihat Pruning (riwayat & rekap per blok)" },
-      { key: "pruning.input", label: "Input Pruning" },
-      { key: "pruning.edit", label: "Edit Pruning (ubah / hapus input, target Ha & SPH blok)" },
-    ],
-  },
 ];
 
 export const ALL_PERMS: string[] = [
@@ -208,11 +200,11 @@ export const KOPERASI_PATH = "/koperasi";
 // Kendaraan & Alat Berat (PT.AKSS): seen with Lihat Kendaraan.
 export const KENDARAAN_PATH = "/kendaraan";
 
-// Pruning PT.AKSS: seen with Lihat, Input or Edit Pruning - but the Kebun menu is hidden for now, Super User
-// only (KEBUN_HANYA_SUPER, the same switch on the server).
+// Pruning PT.AKSS: the menu was removed (its data stays in the database, its server routes Super User only);
+// nobody opens it, the Peta Blok has no Pruning tab and Pengguna no Pruning ticks.
 export const PRUNING_PATH = "/pruning";
 export const KEBUN_HANYA_SUPER = true;
-export const kebunTerlihat = (user: AuthUser | null) => !!user && (user.role === "superuser" || !KEBUN_HANYA_SUPER);
+export const kebunTerlihat = (_user: AuthUser | null) => false;
 
 // Dokumen & Link: every account sees the links of its estates; Kelola Dokumen adds / edits them.
 export const DOKUMEN_PATH = "/dokumen";
@@ -230,7 +222,6 @@ const LANDING_PAGES = [
   "/persetujuan",
   KOPERASI_PATH,
   KENDARAAN_PATH,
-  PRUNING_PATH,
   "/log-user",
   "/users",
   "/karyawan",
@@ -255,6 +246,7 @@ export function landingPath(user: AuthUser | null): string {
 // Whether a non-inventory page (sidebar / router) may be opened.
 export function pageAllowed(user: AuthUser | null, path: string): boolean {
   if (!user) return false;
+  if (path === PRUNING_PATH) return false;
   if (user.role === "superuser") return true;
   if (path === OPNAME_PATH || path.startsWith(`${OPNAME_PATH}/`)) return hasOpnameAccess(user);
   if (path === PINJAMAN_PATH) return MODULES.some((m) => canModule(user, m));
