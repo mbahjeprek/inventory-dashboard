@@ -42,6 +42,8 @@ export function BbmTransactionModal({
   const [tanggal, setTanggal] = useState(todayIso());
   const [jumlah, setJumlah] = useState(1);
   const [keterangan, setKeterangan] = useState("");
+  // OPEX / CAPEX of a Stock Out (optional; also markable later from the list).
+  const [beban, setBeban] = useState("");
   const [noSpb, setNoSpb] = useState("");
   // Nilam's Stock Out into another estate's tank: booked as a Transfer.
   const [ke, setKe] = useState("");
@@ -123,6 +125,7 @@ export function BbmTransactionModal({
         estate: tipe === "DITERIMA" || lokasi === PEMASOK ? lokasi : estate,
         kode_kendaraan: keluar ? kodeKendaraan : "",
         hm_terakhir: keluar && !isGenset ? hmTerakhir : "",
+        beban: keluar ? beban : "",
       });
       onSuccess();
     } catch (e) {
@@ -289,6 +292,16 @@ export function BbmTransactionModal({
             </div>
             )}
           </div>
+          )}
+          {tipe === "PEMAKAIAN" && !ke && (
+            <div>
+              <label className="text-xs text-[var(--text-secondary)] mb-1 block">Beban (OPEX / CAPEX)</label>
+              <select value={beban} onChange={(e) => setBeban(e.target.value)} className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-1.5 bg-white">
+                <option value="">-- Belum ditentukan --</option>
+                <option value="OPEX">OPEX (operasional)</option>
+                <option value="CAPEX">CAPEX (investasi / proyek)</option>
+              </select>
+            </div>
           )}
 
           <div className="grid grid-cols-2 gap-3">

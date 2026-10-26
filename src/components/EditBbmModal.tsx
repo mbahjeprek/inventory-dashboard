@@ -25,6 +25,7 @@ export function EditBbmModal({
   const [estateOptions, setEstateOptions] = useState<string[]>([]);
   const [kodeKendaraan, setKodeKendaraan] = useState(record.kode_kendaraan || "");
   const [hmTerakhir, setHmTerakhir] = useState(record.hm_terakhir || "");
+  const [beban, setBeban] = useState(record.beban || "");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
@@ -51,6 +52,7 @@ export function EditBbmModal({
         estate,
         kode_kendaraan: kodeKendaraan,
         hm_terakhir: hmTerakhir,
+        beban: Number(pemakaian) > 0 ? beban : "",
       });
       onSuccess();
     } catch (e) {
@@ -158,6 +160,17 @@ export function EditBbmModal({
               />
             </div>
           </div>
+
+          {Number(pemakaian) > 0 && (
+            <div>
+              <label className="text-xs text-[var(--text-secondary)] mb-1 block">Beban (OPEX / CAPEX)</label>
+              <select value={beban} onChange={(e) => setBeban(e.target.value)} className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-2 bg-white">
+                <option value="">-- Belum ditentukan --</option>
+                <option value="OPEX">OPEX (operasional)</option>
+                <option value="CAPEX">CAPEX (investasi / proyek)</option>
+              </select>
+            </div>
+          )}
 
           <div>
             <label className="text-xs text-[var(--text-secondary)] mb-1 block">Keterangan</label>

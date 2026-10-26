@@ -3255,6 +3255,7 @@ function wrongJenisBbm(jenis: string, keterangan: unknown) {
 // ---- Manual BBM transaction entry (mirrors the "Transaksi" flow on Inventory Gudang) ----
 app.post("/api/bbm", async (req, res) => {
   const { jenis_bbm, lokasi, tanggal_iso, tipe, jumlah, keterangan, no_spb, estate, kode_kendaraan, hm_terakhir } = req.body;
+  const beban = tipe === "PEMAKAIAN" ? bbmBeban(req.body?.beban) : "";
 
   if (!BBM_JENIS.includes(jenis_bbm)) return res.status(400).json({ error: "Jenis BBM tidak valid" });
   if (!BBM_LOKASI_OPTIONS.includes(lokasi)) return res.status(400).json({ error: "Lokasi tidak valid" });
@@ -3274,9 +3275,9 @@ app.post("/api/bbm", async (req, res) => {
 
   const result = await queryOne<{ id: number }>(
     `INSERT INTO bbm_log
-      (jenis_bbm, lokasi, estate, periode, tanggal, tanggal_iso, no_spb, stock_awal, diterima, pinjam, pemakaian, saldo_stock, keterangan, status_kepemilikan, kode_kendaraan, hm_terakhir, evidence_id)
+      (jenis_bbm, lokasi, estate, periode, tanggal, tanggal_iso, no_spb, stock_awal, diterima, pinjam, pemakaian, saldo_stock, keterangan, status_kepemilikan, kode_kendaraan, hm_terakhir, beban, evidence_id)
      VALUES
-      (@jenis_bbm, @lokasi, @estate, @periode, @tanggal, @tanggal_iso, @no_spb, NULL, @diterima, NULL, @pemakaian, @saldo_stock, @keterangan, NULL, @kode_kendaraan, @hm_terakhir, @evidenceId::uuid)
+      (@jenis_bbm, @lokasi, @estate, @periode, @tanggal, @tanggal_iso, @no_spb, NULL, @diterima, NULL, @pemakaian, @saldo_stock, @keterangan, NULL, @kode_kendaraan, @hm_terakhir, @beban, @evidenceId::uuid)
      RETURNING id`,
     {
       evidenceId,
@@ -3293,6 +3294,7 @@ app.post("/api/bbm", async (req, res) => {
       keterangan: keterangan || "",
       kode_kendaraan: kode_kendaraan || "",
       hm_terakhir: hm_terakhir || "",
+      beban,
     }
   );
   await rechainSaldo("BBM", lokasi, jenis_bbm, tanggal_iso);
@@ -3308,6 +3310,7 @@ app.post("/api/bbm", async (req, res) => {
       tipe === "PEMAKAIAN" && estate && `Estate: ${estate}`,
       kode_kendaraan && `Kendaraan: ${kode_kendaraan}`,
       hm_terakhir && `HM: ${hm_terakhir}`,
+      beban && `Beban: ${beban}`,
       keterangan && `Keterangan: ${keterangan}`,
     ]
       .filter(Boolean)
@@ -3333,7 +3336,7 @@ app.post("/api/bbm/batch", async (req, res) => {
   if (rows.length > BBM_BATCH_MAX) return res.status(400).json({ error: `Maksimal ${BBM_BATCH_MAX} baris sekali simpan` });
 
   // ke / item: a Stok Keluar sent into another estate's stock, booked as a Transfer.
-  type BatchRow = { tipe: "DITERIMA" | "PEMAKAIAN"; jumlah: number; estate: string; no_spb: string; keterangan: string; kode_kendaraan: string; hm_terakhir: string; ke: string; item?: LoanItem };
+  type BatchRow = { tipe: "DITERIMA" | "PEMAKAIAN"; jumlah: number; estate: string; no_spb: string; keterangan: string; kode_kendaraan: string; hm_terakhir: string; beban: string; ke: string; item?: LoanItem };
   const clean: BatchRow[] = [];
   for (const [i, r] of rows.entries()) {
     const refuseRow = (error: string) => res.status(400).json({ error: `Baris ${i + 1}: ${error}`, row: i });
@@ -3363,6 +3366,7 @@ app.post("/api/bbm/batch", async (req, res) => {
       keterangan: String(r?.keterangan ?? "").trim(),
       kode_kendaraan: keluar ? String(r?.kode_kendaraan ?? "").trim() : "",
       hm_terakhir: keluar ? String(r?.hm_terakhir ?? "").trim() : "",
+      beban: keluar && !ke ? bbmBeban(r?.beban) : "",
     });
   }
   const ev = await claimBatchEvidence(req, res, rows.length);
@@ -3390,8 +3394,8 @@ app.post("/api/bbm/batch", async (req, res) => {
         }
         await execute(
           `INSERT INTO bbm_log
-            (jenis_bbm, lokasi, estate, periode, tanggal, tanggal_iso, no_spb, diterima, pemakaian, saldo_stock, keterangan, kode_kendaraan, hm_terakhir, evidence_id)
-           VALUES (@jenis_bbm, @lokasi, @estate, @periode, @tanggal, @tanggal_iso, @no_spb, @diterima, @pemakaian, @saldo, @keterangan, @kode_kendaraan, @hm_terakhir, @evidenceId::uuid)`,
+            (jenis_bbm, lokasi, estate, periode, tanggal, tanggal_iso, no_spb, diterima, pemakaian, saldo_stock, keterangan, kode_kendaraan, hm_terakhir, beban, evidence_id)
+           VALUES (@jenis_bbm, @lokasi, @estate, @periode, @tanggal, @tanggal_iso, @no_spb, @diterima, @pemakaian, @saldo, @keterangan, @kode_kendaraan, @hm_terakhir, @beban, @evidenceId::uuid)`,
           {
             jenis_bbm,
             lokasi,
@@ -3432,6 +3436,7 @@ app.post("/api/bbm/batch", async (req, res) => {
         row.tipe === "PEMAKAIAN" && `Estate: ${row.estate}`,
         row.kode_kendaraan && `Kendaraan: ${row.kode_kendaraan}`,
         row.hm_terakhir && `HM: ${row.hm_terakhir}`,
+        row.beban && `Beban: ${row.beban}`,
         row.keterangan && `Keterangan: ${row.keterangan}`,
         `Input Banyak (${booked.length + transfers.length} baris)`,
       ]
@@ -3476,11 +3481,13 @@ app.put("/api/bbm/:id", requireSuperuser, async (req, res) => {
     estate: estate ?? "",
     kode_kendaraan: kode_kendaraan ?? existing.kode_kendaraan ?? "",
     hm_terakhir: hm_terakhir ?? existing.hm_terakhir ?? "",
+    beban: req.body?.beban === undefined ? existing.beban ?? "" : bbmBeban(req.body.beban),
   };
+  if (!(Number(updated.pemakaian) > 0)) updated.beban = "";
   await execute(
     `UPDATE bbm_log SET
        tanggal = @tanggal, tanggal_iso = @tanggal_iso, periode = @periode, no_spb = @no_spb, diterima = @diterima, pemakaian = @pemakaian, saldo_stock = @saldo_stock,
-       keterangan = @keterangan, estate = @estate, kode_kendaraan = @kode_kendaraan, hm_terakhir = @hm_terakhir
+       keterangan = @keterangan, estate = @estate, kode_kendaraan = @kode_kendaraan, hm_terakhir = @hm_terakhir, beban = @beban
      WHERE id = @id`,
     { ...updated, id: req.params.id }
   );
@@ -3500,9 +3507,29 @@ app.put("/api/bbm/:id", requireSuperuser, async (req, res) => {
       estate: "Estate",
       kode_kendaraan: "Kode Kendaraan",
       hm_terakhir: "HM",
+      beban: "Beban",
     }),
   });
   await useEditEvidence(newEvidence, [{ table: "bbm_log", where: "id = @id", params: { id: existing.id } }]);
+  res.json({ success: true });
+});
+
+// Beban of a Stock Out: OPEX / CAPEX, or '' to clear - marked from the list without opening the row.
+app.put("/api/bbm/:id/beban", async (req, res) => {
+  const existing = await queryOne<any>("SELECT * FROM bbm_log WHERE id = @id", { id: req.params.id });
+  if (!existing) return res.status(404).json({ error: "Transaksi tidak ditemukan" });
+  if (!estateAllowed(req.user!, existing.lokasi)) return res.status(403).json({ error: "Akses ditolak" });
+  if (!(Number(existing.pemakaian) > 0)) return res.status(400).json({ error: "OPEX / CAPEX hanya untuk Stock Out" });
+  const beban = bbmBeban(req.body?.beban);
+  if (beban === (existing.beban ?? "")) return res.json({ success: true });
+  await execute("UPDATE bbm_log SET beban = @beban WHERE id = @id", { beban, id: existing.id });
+  await logActivity(req, {
+    module: "BBM",
+    estate: existing.lokasi,
+    aksi: "Edit Transaksi",
+    objek: `${String(existing.jenis_bbm).replace("_", " ")} · ${existing.tanggal}${existing.no_spb ? ` · SPB ${existing.no_spb}` : ""}`,
+    detail: `Beban: ${existing.beban || "-"} → ${beban || "-"}`,
+  });
   res.json({ success: true });
 });
 
@@ -6129,6 +6156,10 @@ app.get("/api/bbm", async (req, res) => {
   const total = (await queryOne<any>(`SELECT COUNT(*) c FROM bbm_log ${where}`, params))!.c;
   const pemakaianSum = (await queryOne<any>(`SELECT SUM(pemakaian) s FROM bbm_log ${where}`, params))!.s || 0;
   const diterimaSum = (await queryOne<any>(`SELECT SUM(diterima) s FROM bbm_log ${where}`, params))!.s || 0;
+  const bebanSum = (await queryOne<any>(
+    `SELECT COALESCE(SUM(pemakaian) FILTER (WHERE beban = 'OPEX'), 0)::float8 opex, COALESCE(SUM(pemakaian) FILTER (WHERE beban = 'CAPEX'), 0)::float8 capex FROM bbm_log ${where}`,
+    params
+  ))!;
 
   const limit = Math.min(parseInt(pageSize) || 50, 500);
   const offset = (Math.max(parseInt(page) || 1, 1) - 1) * limit;
@@ -6156,6 +6187,8 @@ app.get("/api/bbm", async (req, res) => {
     total: Number(total),
     pemakaianSum: Number(pemakaianSum),
     diterimaSum: Number(diterimaSum),
+    opexSum: bebanSum.opex,
+    capexSum: bebanSum.capex,
     page: parseInt(page),
     pageSize: limit,
   });
@@ -6167,6 +6200,8 @@ app.get("/api/bbm", async (req, res) => {
 // cancelled. Every module uses the same five estates.
 const OPNAME_MODULES: OpnameModule[] = ["GUDANG", "KLINIK", "BBM", "PUPUK", "OLI"];
 const OPNAME_LOG_MODULE: Record<OpnameModule, LogModule> = { GUDANG: "BARANG", KLINIK: "KLINIK", BBM: "BBM", PUPUK: "PUPUK", OLI: "OLI" };
+// OPEX (operasional) / CAPEX (investasi / proyek) of a BBM Stock Out; anything else = not marked.
+const bbmBeban = (v: unknown) => (["OPEX", "CAPEX"].includes(String(v ?? "").toUpperCase()) ? String(v).toUpperCase() : "");
 // Bensin Campur: bensin mixed with 2T oil (bought as such at WJA), its own ledger; shown only where it is used.
 const BBM_JENIS = ["SOLAR", "BENSIN", "BENSIN_CAMPUR"];
 // Nilam items, klinik batches and BBM saldo (INTEGER) are whole numbers; other gudang and pupuk take decimals.

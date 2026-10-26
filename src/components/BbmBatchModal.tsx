@@ -84,11 +84,24 @@ export function BbmBatchModal({
             off: (c: Cells) => masuk(c) && lokasi,
           },
         ]),
+    {
+      key: "beban",
+      label: "OPEX / CAPEX",
+      width: 105,
+      type: "select" as const,
+      carry: true,
+      options: [
+        { value: "", label: "--" },
+        { value: "OPEX", label: "OPEX" },
+        { value: "CAPEX", label: "CAPEX" },
+      ],
+      off: (c: Cells) => (masuk(c) || kirim(c)) && "-",
+    },
     { key: "spb", label: "No. SPB", width: 90, carry: true },
     { key: "ket", label: "Keterangan", width: 220, placeholder: (c) => (masuk(c) ? "cth. Kiriman dari ..." : "cth. Genset 02 B") },
   ];
   const blank = isBlankIn(columns);
-  const blankRow: Cells = { tipe: "PEMAKAIAN", ke: "", kendaraan: "", jumlah: "", hm: "", estate: lokasi, spb: "", ket: "" };
+  const blankRow: Cells = { tipe: "PEMAKAIAN", ke: "", kendaraan: "", jumlah: "", hm: "", estate: lokasi, beban: "", spb: "", ket: "" };
 
   const saldoAwal = summary?.saldoTerakhir.find((s) => s.jenis_bbm === jenis && s.lokasi === lokasi)?.saldo_stock ?? 0;
   const run = (rows: Cells[]) =>
@@ -190,6 +203,7 @@ export function BbmBatchModal({
             keterangan: kirim(c) && c.spb.trim() ? `SPB ${c.spb.trim()}: ${c.ket.trim()}` : c.ket.trim(),
             kode_kendaraan: masuk(c) || kirim(c) ? "" : c.kendaraan.trim(),
             hm_terakhir: masuk(c) || kirim(c) || genset(c) ? "" : c.hm.trim(),
+            beban: masuk(c) || kirim(c) ? "" : c.beban ?? "",
             ke: kirim(c) ? c.ke : "",
             evidence_id: c.__ev || undefined,
           })),

@@ -1287,3 +1287,6 @@ ALTER TABLE kendaraan_unit ADD COLUMN IF NOT EXISTS operator TEXT NOT NULL DEFAU
 -- saksi: [{nama, jabatan}], pemegang: {nama, jabatan}, penyetuju: {user_id, nama, jabatan} }. tim / saksi / pemegang
 -- keep the names joined (older opnames, the checks). With a penyetuju only that account (or a Super User) approves.
 ALTER TABLE opname ADD COLUMN IF NOT EXISTS pihak JSONB NOT NULL DEFAULT '{}'::jsonb;
+
+-- BBM: beban of a Stock Out - OPEX (operasional) or CAPEX (investasi / proyek); '' = not marked yet.
+ALTER TABLE bbm_log ADD COLUMN IF NOT EXISTS beban TEXT NOT NULL DEFAULT '';

@@ -519,6 +519,7 @@ export type BbmBatchRow = {
   keterangan: string;
   kode_kendaraan: string;
   hm_terakhir: string;
+  beban?: string;
   // Nilam: another estate = sent into its stock, booked as a Transfer.
   ke?: string;
   // The row's own foto bukti (Input Banyak: one per row, optional).
@@ -548,6 +549,8 @@ export type BbmRecord = {
   status_kepemilikan: string | null;
   kode_kendaraan: string | null;
   hm_terakhir: string | null;
+  // OPEX / CAPEX of a Stock Out ('' = not marked).
+  beban?: string;
   total_hm?: number | null;
 };
 
@@ -1693,7 +1696,7 @@ export const api = {
 
   bbm: (params: Record<string, string | number>) => {
     const qs = new URLSearchParams(params as any).toString();
-    return req<{ data: BbmRecord[]; total: number; pemakaianSum: number; diterimaSum: number; page: number; pageSize: number }>(
+    return req<{ data: BbmRecord[]; total: number; pemakaianSum: number; diterimaSum: number; opexSum: number; capexSum: number; page: number; pageSize: number }>(
       `/api/bbm?${qs}`
     );
   },
@@ -1711,7 +1714,9 @@ export const api = {
     estate?: string;
     kode_kendaraan?: string;
     hm_terakhir?: string;
+    beban?: string;
   }) => req<{ success: boolean; id: number; saldo_stock: number }>("/api/bbm", { method: "POST", body: JSON.stringify(payload) }),
+  setBbmBeban: (id: number, beban: string) => req<{ success: boolean }>(`/api/bbm/${id}/beban`, { method: "PUT", body: JSON.stringify({ beban }) }),
 
   // Input Banyak (all rows or none; a refused row comes back as ApiError.data.row, 0-based).
   createNilamBatch: (payload: { tanggal_iso?: string; evidence_id: string; rows: { item_kode: string; type: "IN" | "OUT"; qty: number; tujuan: string; penerima: string; note: string; evidence_id?: string }[] }) =>
@@ -1758,6 +1763,7 @@ export const api = {
       estate?: string;
       kode_kendaraan?: string;
       hm_terakhir?: string;
+      beban?: string;
       // A new foto bukti (replaces the current one).
       evidence_id?: string;
     }
