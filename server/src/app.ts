@@ -9289,6 +9289,7 @@ function kdUnitBody(res: express.Response, b: any) {
     tgl_rusak: kdDate(b.tgl_rusak),
     tgl_selesai: kdDate(b.tgl_selesai),
     keterangan: t(b.keterangan),
+    operator: t(b.operator),
     aktif: b.aktif !== false,
   };
   if (!u.kode || !u.nama || !u.jenis) return void res.status(400).json({ error: "Kode unit, nama dan jenis wajib diisi" });
@@ -9305,8 +9306,8 @@ app.post("/api/kendaraan/unit", async (req, res) => {
   const pt = kdPt(req.body?.pt);
   try {
     const row = await queryOne<{ id: number }>(
-      `INSERT INTO kendaraan_unit (pt, kode, id_unit, status, grup, jenis, nama, kepemilikan, tgl_perolehan, pemilik, alokasi, info, kondisi, tgl_rusak, tgl_selesai, keterangan, aktif)
-       VALUES (@pt, @kode, @id_unit, @status, @grup, @jenis, @nama, @kepemilikan, @tgl_perolehan, @pemilik, @alokasi, @info, @kondisi, @tgl_rusak, @tgl_selesai, @keterangan, @aktif) RETURNING id`,
+      `INSERT INTO kendaraan_unit (pt, kode, id_unit, status, grup, jenis, nama, kepemilikan, tgl_perolehan, pemilik, alokasi, info, kondisi, tgl_rusak, tgl_selesai, keterangan, operator, aktif)
+       VALUES (@pt, @kode, @id_unit, @status, @grup, @jenis, @nama, @kepemilikan, @tgl_perolehan, @pemilik, @alokasi, @info, @kondisi, @tgl_rusak, @tgl_selesai, @keterangan, @operator, @aktif) RETURNING id`,
       { pt, ...u }
     );
     await logActivity(req, { module: "KENDARAAN", estate: kdLogEstate(u.alokasi), aksi: "Tambah Unit", objek: `${u.kode} - ${u.nama}`, detail: kdText(u) });
@@ -9326,7 +9327,7 @@ app.put("/api/kendaraan/unit/:id", async (req, res) => {
     await execute(
       `UPDATE kendaraan_unit SET kode = @kode, id_unit = @id_unit, status = @status, grup = @grup, jenis = @jenis, nama = @nama, kepemilikan = @kepemilikan,
          tgl_perolehan = @tgl_perolehan, pemilik = @pemilik, alokasi = @alokasi, info = @info, kondisi = @kondisi, tgl_rusak = @tgl_rusak,
-         tgl_selesai = @tgl_selesai, keterangan = @keterangan, aktif = @aktif, updated_at = now() WHERE id = @id`,
+         tgl_selesai = @tgl_selesai, keterangan = @keterangan, operator = @operator, aktif = @aktif, updated_at = now() WHERE id = @id`,
       { ...u, id: before.id }
     );
   } catch (e: any) {
@@ -9381,12 +9382,12 @@ app.put("/api/kendaraan/unit/:id/kondisi", async (req, res) => {
   res.json({ success: true, harian: harianDiisi });
 });
 
-// Kondisi harian of a month (bulan = 'YYYY-MM'): every cell R / S / B.
+// Kondisi harian of a month (bulan = 'YYYY-MM'): every cell R / S / B with its lokasi and pekerjaan.
 app.get("/api/kendaraan/harian", async (req, res) => {
   const bulan = String(req.query.bulan ?? "");
   if (!/^\d{4}-\d{2}$/.test(bulan)) return res.status(400).json({ error: "Bulan tidak valid" });
   const cells = await queryMany(
-    `SELECT h.unit_id, h.tanggal, h.kondisi FROM kendaraan_harian h JOIN kendaraan_unit u ON u.id = h.unit_id
+    `SELECT h.unit_id, h.tanggal, h.kondisi, h.lokasi, h.pekerjaan FROM kendaraan_harian h JOIN kendaraan_unit u ON u.id = h.unit_id
       WHERE u.pt = @pt AND h.tanggal LIKE @like`,
     { pt: kdPt(req.query.pt), like: `${bulan}-%` }
   );
@@ -9409,8 +9410,8 @@ app.post("/api/kendaraan/harian/isi", async (req, res) => {
   }
   const sql =
     mode === "kemarin"
-      ? `INSERT INTO kendaraan_harian (unit_id, tanggal, kondisi, user_id)
-         SELECT h.unit_id, @tgl::text, h.kondisi, @uid FROM kendaraan_harian h JOIN kendaraan_unit u ON u.id = h.unit_id
+      ? `INSERT INTO kendaraan_harian (unit_id, tanggal, kondisi, lokasi, pekerjaan, user_id)
+         SELECT h.unit_id, @tgl::text, h.kondisi, h.lokasi, h.pekerjaan, @uid FROM kendaraan_harian h JOIN kendaraan_unit u ON u.id = h.unit_id
           WHERE u.pt = @pt AND u.aktif AND u.status = 'INTERNAL' AND h.tanggal = to_char(@tgl::text::date - 1, 'YYYY-MM-DD')
          ON CONFLICT (unit_id, tanggal) DO NOTHING`
       : `INSERT INTO kendaraan_harian (unit_id, tanggal, kondisi, user_id)
@@ -9429,26 +9430,34 @@ app.post("/api/kendaraan/harian/isi", async (req, res) => {
       estate: "NILAM",
       aksi: "Kondisi Harian",
       objek: `Semua unit internal ${b.tanggal}`,
-      detail: `${mode === "kemarin" ? "salin dari kemarin" : "isi R (rusak = B, standby = S)"} · ${n} unit diisi (yang sudah terisi tidak diubah)`,
+      detail: `${mode === "kemarin" ? "salin dari kemarin (kondisi, lokasi, pekerjaan)" : "isi R (rusak = B, standby = S)"} · ${n} unit diisi (yang sudah terisi tidak diubah)`,
     });
   res.json({ success: true, n });
 });
 
-// One cell: kondisi R / S / B, or '' to clear it.
+// One cell: kondisi R / S / B, or '' to clear it; lokasi / pekerjaan when sent (kept as they are otherwise).
 app.put("/api/kendaraan/harian", async (req, res) => {
   const b = req.body ?? {};
   const kondisi = String(b.kondisi ?? "").toUpperCase();
+  const detail = b.lokasi !== undefined || b.pekerjaan !== undefined;
+  const lokasi = String(b.lokasi ?? "").trim().slice(0, 200);
+  const pekerjaan = String(b.pekerjaan ?? "").trim().slice(0, 300);
+  if (detail && !kondisi && (lokasi || pekerjaan)) return res.status(400).json({ error: "Pilih kondisinya (R / S / B) untuk mengisi lokasi dan pekerjaan" });
   if (!isIsoDate(b.tanggal) || b.tanggal > jakartaToday()) return res.status(400).json({ error: "Tanggal tidak valid (tidak boleh setelah hari ini)" });
   if (!["", "R", "S", "B"].includes(kondisi)) return res.status(400).json({ error: "Kondisi harus R, S atau B" });
   const u = await queryOne("SELECT id, kode, nama, alokasi, pt FROM kendaraan_unit WHERE id = @id", { id: Number(b.unit_id) || 0 });
   if (!u) return res.status(404).json({ error: "Unit tidak ditemukan" });
-  const before = await queryOne<{ kondisi: string }>("SELECT kondisi FROM kendaraan_harian WHERE unit_id = @id AND tanggal = @tgl", { id: u.id, tgl: b.tanggal });
-  if ((before?.kondisi ?? "") === kondisi) return res.json({ success: true });
+  const before = await queryOne<{ kondisi: string; lokasi: string; pekerjaan: string }>("SELECT kondisi, lokasi, pekerjaan FROM kendaraan_harian WHERE unit_id = @id AND tanggal = @tgl", {
+    id: u.id,
+    tgl: b.tanggal,
+  });
+  if ((before?.kondisi ?? "") === kondisi && (!detail || ((before?.lokasi ?? "") === lokasi && (before?.pekerjaan ?? "") === pekerjaan))) return res.json({ success: true });
   if (kondisi)
     await execute(
-      `INSERT INTO kendaraan_harian (unit_id, tanggal, kondisi, user_id) VALUES (@id, @tgl, @k, @uid)
-       ON CONFLICT (unit_id, tanggal) DO UPDATE SET kondisi = EXCLUDED.kondisi, user_id = EXCLUDED.user_id, updated_at = now()`,
-      { id: u.id, tgl: b.tanggal, k: kondisi, uid: req.user!.id }
+      `INSERT INTO kendaraan_harian (unit_id, tanggal, kondisi, lokasi, pekerjaan, user_id) VALUES (@id, @tgl, @k, @lokasi, @pekerjaan, @uid)
+       ON CONFLICT (unit_id, tanggal) DO UPDATE SET kondisi = EXCLUDED.kondisi, user_id = EXCLUDED.user_id, updated_at = now()
+         ${detail ? ", lokasi = EXCLUDED.lokasi, pekerjaan = EXCLUDED.pekerjaan" : ""}`,
+      { id: u.id, tgl: b.tanggal, k: kondisi, lokasi, pekerjaan, uid: req.user!.id }
     );
   else await execute("DELETE FROM kendaraan_harian WHERE unit_id = @id AND tanggal = @tgl", { id: u.id, tgl: b.tanggal });
   await logActivity(req, {
@@ -9456,7 +9465,9 @@ app.put("/api/kendaraan/harian", async (req, res) => {
     estate: kdLogEstate(u.alokasi),
     aksi: "Kondisi Harian",
     objek: `${u.kode} - ${u.nama}`,
-    detail: `${b.tanggal}: ${before?.kondisi || "-"} → ${kondisi || "-"}`,
+    detail: `${b.tanggal}: ${before?.kondisi || "-"} → ${kondisi || "-"}${
+      detail && ((before?.lokasi ?? "") !== lokasi || (before?.pekerjaan ?? "") !== pekerjaan) ? ` · lokasi: ${lokasi || "-"} · pekerjaan: ${pekerjaan || "-"}` : ""
+    }`,
   });
   res.json({ success: true });
 });

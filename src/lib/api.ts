@@ -846,10 +846,12 @@ export type KdUnit = {
   tgl_rusak: string | null;
   tgl_selesai: string | null;
   keterangan: string;
+  operator: string;
   aktif: boolean;
   updated_at: string;
 };
-export type KdHarian = { unit_id: number; tanggal: string; kondisi: "R" | "S" | "B" };
+// A day of a unit: kondisi, and where / on what it works (the Rencana Kerja Harian).
+export type KdHarian = { unit_id: number; tanggal: string; kondisi: "R" | "S" | "B"; lokasi: string; pekerjaan: string };
 export type KdUnitInput = Omit<KdUnit, "id" | "pt" | "updated_at">;
 
 export type KopRingkasan = {
@@ -1845,7 +1847,7 @@ export const api = {
     req<{ success: boolean; harian: number }>(`/api/kendaraan/unit/${id}/kondisi`, { method: "PUT", body: JSON.stringify(body) }),
   kdIsiHarian: (body: { tanggal: string; mode: "kemarin" | "semua" | "kosongkan" }) => req<{ success: boolean; n: number }>("/api/kendaraan/harian/isi", { method: "POST", body: JSON.stringify(body) }),
   kdHarian: (bulan: string) => req<KdHarian[]>(`/api/kendaraan/harian?bulan=${bulan}`),
-  kdSetHarian: (body: { unit_id: number; tanggal: string; kondisi: string }) => req<{ success: boolean }>("/api/kendaraan/harian", { method: "PUT", body: JSON.stringify(body) }),
+  kdSetHarian: (body: { unit_id: number; tanggal: string; kondisi: string; lokasi?: string; pekerjaan?: string }) => req<{ success: boolean }>("/api/kendaraan/harian", { method: "PUT", body: JSON.stringify(body) }),
   kopTx: (params: Record<string, string | number>) =>
     req<{ data: KopTx[]; total: number; sum_total: number; sum_qty: number }>(`/api/koperasi/tx?${new URLSearchParams(params as any)}`),
   kopJual: (body: { tanggal: string; anggota_kode: string; bayar: KopBayar; keterangan: string; evidence_id: string | null; items: KopLineInput[] }) =>

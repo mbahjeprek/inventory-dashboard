@@ -294,7 +294,7 @@ function UnitTab({ units, canInput, canEdit, onChanged }: { units: KdUnit[]; can
   const jenisList = [...new Set(units.map((u) => u.jenis))].sort();
   const shown = units.filter(
     (u) =>
-      (!q || [u.kode, u.nama, u.id_unit, u.info, u.pemilik, u.keterangan].some((v) => v.toLowerCase().includes(q))) &&
+      (!q || [u.kode, u.nama, u.id_unit, u.info, u.pemilik, u.keterangan, u.operator].some((v) => v.toLowerCase().includes(q))) &&
       (!status || u.status === status) &&
       (!jenis || u.jenis === jenis) &&
       (!estate || estateOf(u) === estate) &&
@@ -522,6 +522,7 @@ function UnitModal({ unit, units, onClose, onSuccess }: { unit: KdUnit | null; u
     tgl_rusak: null,
     tgl_selesai: null,
     keterangan: "",
+    operator: "",
     aktif: true,
   };
   const [f, setF] = useState<KdUnitInput>(unit ? { ...unit } : kosong);
@@ -595,6 +596,7 @@ function UnitModal({ unit, units, onClose, onSuccess }: { unit: KdUnit | null; u
           {field("Tgl perolehan", <input type="date" value={f.tgl_perolehan ?? ""} onChange={(e) => set("tgl_perolehan", e.target.value || null)} className={inputCls} />)}
         </div>
         {field("Identitas (nopol / no. rangka / lainnya)", <input value={f.info} onChange={(e) => set("info", e.target.value)} className={inputCls} />)}
+        {field("Operator", <input value={f.operator} onChange={(e) => set("operator", e.target.value)} placeholder="Nama operator / driver" className={inputCls} />)}
         {field("Keterangan", <textarea value={f.keterangan} onChange={(e) => set("keterangan", e.target.value)} rows={2} className={inputCls} />)}
         <label className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
           <input type="checkbox" checked={f.aktif} onChange={(e) => set("aktif", e.target.checked)} /> Aktif (tidak aktif = sudah dijual / dikembalikan / dipulangkan)
@@ -614,33 +616,44 @@ function UnitModal({ unit, units, onClose, onSuccess }: { unit: KdUnit | null; u
   );
 }
 
-// ---- Kondisi Harian: R / S / B per internal unit per day of a month; a click cycles the cell ----
+// ---- Kondisi Harian (Rencana Kerja Harian): R / S / B per internal unit per day of a month, with where it works
+// (lokasi) and on what (pekerjaan). In Kondisi mode a click cycles the cell; in Lokasi & pekerjaan mode it opens
+// the day of that unit to fill all three. A dot marks a cell with lokasi / pekerjaan. ----
 const NEXT: Record<string, string> = { "": "R", R: "S", S: "B", B: "" };
+type Sel = { k: string; lokasi: string; pekerjaan: string };
 function HarianTab({ units, canInput }: { units: KdUnit[]; canInput: boolean }) {
   const [bulan, setBulan] = useState(localToday().slice(0, 7));
-  const [cells, setCells] = useState<Map<string, string> | null>(null);
+  const [cells, setCells] = useState<Map<string, Sel> | null>(null);
   const [jenis, setJenis] = useState("");
   const [error, setError] = useState("");
   const [note, setNote] = useState("");
   const [tglIsi, setTglIsi] = useState(localToday());
   const [busy, setBusy] = useState(false);
   const [muat, setMuat] = useState(0);
+  const [mode, setMode] = useState<"kondisi" | "detail">("kondisi");
+  const [buka, setBuka] = useState<{ u: KdUnit; d: string } | null>(null);
   useEffect(() => {
     setCells(null);
     api
       .kdHarian(bulan)
-      .then((r: KdHarian[]) => setCells(new Map(r.map((c) => [`${c.unit_id}|${c.tanggal}`, c.kondisi]))))
+      .then((r: KdHarian[]) => setCells(new Map(r.map((c) => [`${c.unit_id}|${c.tanggal}`, { k: c.kondisi, lokasi: c.lokasi ?? "", pekerjaan: c.pekerjaan ?? "" }]))))
       .catch(() => setCells(new Map()));
   }, [bulan, muat]);
   // One date for all units at once; only empty cells are filled, so a typed S / B stays.
-  const isi = async (mode: "kemarin" | "semua" | "kosongkan") => {
-    if (mode === "kosongkan" && !window.confirm(`Hapus kondisi harian SEMUA unit pada ${isoDisplay(tglIsi)}?`)) return;
+  const isi = async (m: "kemarin" | "semua" | "kosongkan") => {
+    if (m === "kosongkan" && !window.confirm(`Hapus kondisi harian SEMUA unit pada ${isoDisplay(tglIsi)}?`)) return;
     setBusy(true);
     setError("");
     setNote("");
     try {
-      const r = await api.kdIsiHarian({ tanggal: tglIsi, mode });
-      setNote(mode === "kosongkan" ? `${r.n} sel tanggal ${isoDisplay(tglIsi)} dikosongkan` : r.n ? `${r.n} unit diisi untuk ${isoDisplay(tglIsi)}` : `Tidak ada sel kosong yang bisa diisi untuk ${isoDisplay(tglIsi)}${mode === "kemarin" ? " (kemarin kosong?)" : ""}`);
+      const r = await api.kdIsiHarian({ tanggal: tglIsi, mode: m });
+      setNote(
+        m === "kosongkan"
+          ? `${r.n} sel tanggal ${isoDisplay(tglIsi)} dikosongkan`
+          : r.n
+            ? `${r.n} unit diisi untuk ${isoDisplay(tglIsi)}`
+            : `Tidak ada sel kosong yang bisa diisi untuk ${isoDisplay(tglIsi)}${m === "kemarin" ? " (kemarin kosong?)" : ""}`
+      );
       if (tglIsi.slice(0, 7) !== bulan) setBulan(tglIsi.slice(0, 7));
       else setMuat((n) => n + 1);
     } catch (e) {
@@ -654,36 +667,37 @@ function HarianTab({ units, canInput }: { units: KdUnit[]; canInput: boolean }) 
   const today = localToday();
   const list = units.filter((u) => !jenis || u.jenis === jenis).sort((a, b) => a.jenis.localeCompare(b.jenis) || a.kode.localeCompare(b.kode, undefined, { numeric: true }));
   const jenisList = [...new Set(units.map((u) => u.jenis))].sort();
-  const get = (u: KdUnit, d: string) => cells?.get(`${u.id}|${d}`) ?? "";
+  const sel = (u: KdUnit, d: string) => cells?.get(`${u.id}|${d}`);
+  const get = (u: KdUnit, d: string) => sel(u, d)?.k ?? "";
   const rekap = (u: KdUnit) => {
     const v = days.map((d) => get(u, d)).filter(Boolean);
     const r = v.filter((x) => x === "R").length;
     const s = v.filter((x) => x === "S").length;
     return { r, s, b: v.filter((x) => x === "B").length, isi: v.length, last: [...days].reverse().map((d) => get(u, d)).find(Boolean) ?? "" };
   };
-  const klik = async (u: KdUnit, d: string) => {
-    if (!canInput || d > today || !cells) return;
-    const now = get(u, d);
-    const next = NEXT[now];
-    setError("");
+  const tulis = (u: KdUnit, d: string, v: Sel | undefined) =>
     setCells((m) => {
       const n = new Map(m);
-      if (next) n.set(`${u.id}|${d}`, next);
+      if (v?.k) n.set(`${u.id}|${d}`, v);
       else n.delete(`${u.id}|${d}`);
       return n;
     });
+  const klik = async (u: KdUnit, d: string) => {
+    if (!canInput || d > today || !cells) return;
+    if (mode === "detail") return setBuka({ u, d });
+    const now = sel(u, d);
+    const next = NEXT[now?.k ?? ""];
+    setError("");
+    tulis(u, d, next ? { k: next, lokasi: now?.lokasi ?? "", pekerjaan: now?.pekerjaan ?? "" } : undefined);
     try {
       await api.kdSetHarian({ unit_id: u.id, tanggal: d, kondisi: next });
     } catch (e) {
       setError(errorText(e, "Gagal menyimpan"));
-      setCells((m) => {
-        const n = new Map(m);
-        if (now) n.set(`${u.id}|${d}`, now);
-        else n.delete(`${u.id}|${d}`);
-        return n;
-      });
+      tulis(u, d, now);
     }
   };
+  // Lokasi / pekerjaan suggestions: what was typed this month.
+  const saran = (f: "lokasi" | "pekerjaan") => [...new Set([...(cells?.values() ?? [])].map((c) => c[f]).filter(Boolean))].sort();
   // Per jenis: units by their last kondisi of the month, achieve = running / units.
   const perJenis = jenisList
     .map((j) => {
@@ -699,16 +713,42 @@ function HarianTab({ units, canInput }: { units: KdUnit[]; canInput: boolean }) 
     sections: [
       {
         heading: "Per unit",
-        columns: [{ label: "Kode" }, { label: "Nama" }, { label: "Jenis" }, ...days.map((d) => ({ label: String(Number(d.slice(8))) })), { label: "R", align: "right" as const }, { label: "S", align: "right" as const }, { label: "B", align: "right" as const }, { label: "Ach", align: "right" as const }],
+        columns: [
+          { label: "Kode" },
+          { label: "Nama" },
+          { label: "Jenis" },
+          { label: "Operator" },
+          ...days.map((d) => ({ label: String(Number(d.slice(8))) })),
+          { label: "R", align: "right" as const },
+          { label: "S", align: "right" as const },
+          { label: "B", align: "right" as const },
+          { label: "Ach", align: "right" as const },
+        ],
         rows: list.map((u) => {
           const x = rekap(u);
-          return [u.kode, u.nama, u.jenis, ...days.map((d) => get(u, d)), x.r, x.s, x.b, x.isi ? pct(x.r + x.s, x.isi) : ""];
+          return [u.kode, u.nama, u.jenis, u.operator, ...days.map((d) => get(u, d)), x.r, x.s, x.b, x.isi ? pct(x.r + x.s, x.isi) : ""];
         }),
       },
       {
         heading: "Kesiapan per jenis (kondisi terakhir di bulan ini)",
-        columns: [{ label: "Jenis" }, { label: "Unit", align: "right" as const }, { label: "R", align: "right" as const }, { label: "S", align: "right" as const }, { label: "B", align: "right" as const }, { label: "Achieve", align: "right" as const }],
+        columns: [
+          { label: "Jenis" },
+          { label: "Unit", align: "right" as const },
+          { label: "R", align: "right" as const },
+          { label: "S", align: "right" as const },
+          { label: "B", align: "right" as const },
+          { label: "Achieve", align: "right" as const },
+        ],
         rows: [...perJenis.map((x) => [x.j, x.n, x.r, x.s, x.b, pct(x.r, x.n)]), ["TOTAL", tot.n, tot.r, tot.s, tot.b, pct(tot.r, tot.n)]],
+      },
+      {
+        heading: "Rencana kerja harian (lokasi & pekerjaan)",
+        columns: [{ label: "Tanggal", nowrap: true }, { label: "Kode" }, { label: "Jenis" }, { label: "Operator" }, { label: "Kondisi" }, { label: "Lokasi" }, { label: "Pekerjaan" }],
+        rows: days.flatMap((d) =>
+          list
+            .filter((u) => sel(u, d)?.lokasi || sel(u, d)?.pekerjaan)
+            .map((u) => [isoDisplay(d), u.kode, u.jenis, u.operator, get(u, d), sel(u, d)!.lokasi, sel(u, d)!.pekerjaan])
+        ),
       },
     ],
   });
@@ -718,7 +758,7 @@ function HarianTab({ units, canInput }: { units: KdUnit[]; canInput: boolean }) 
         <div className="flex flex-wrap items-center gap-2 rounded-lg border border-[var(--accent-blue-border)] bg-[var(--accent-blue-bg)] px-4 py-3 text-sm">
           <span className="font-medium text-[var(--accent-blue)]">Isi sekaligus untuk tanggal</span>
           <input type="date" value={tglIsi} max={today} onChange={(e) => e.target.value && setTglIsi(e.target.value)} className="text-sm rounded-md border border-[var(--border)] px-3 py-1.5 bg-white" />
-          <button onClick={() => isi("kemarin")} disabled={busy} className={btnOutline} title="Kondisi semua unit sama dengan hari sebelumnya">
+          <button onClick={() => isi("kemarin")} disabled={busy} className={btnOutline} title="Kondisi, lokasi dan pekerjaan semua unit sama dengan hari sebelumnya">
             Salin dari kemarin
           </button>
           <button onClick={() => isi("semua")} disabled={busy} className={btnPrimary} title="R untuk semua unit; B untuk yang tercatat rusak / mangkrak, S untuk yang standby">
@@ -748,6 +788,20 @@ function HarianTab({ units, canInput }: { units: KdUnit[]; canInput: boolean }) 
               </option>
             ))}
           </select>
+          {canInput && (
+            <div className="inline-flex rounded-md border border-[var(--border)] overflow-hidden text-xs">
+              {(
+                [
+                  ["kondisi", "Klik: kondisi"],
+                  ["detail", "Klik: lokasi & pekerjaan"],
+                ] as const
+              ).map(([v, l]) => (
+                <button key={v} onClick={() => setMode(v)} className={`px-2.5 py-1.5 ${mode === v ? "bg-[var(--accent-blue)] text-white" : "bg-white text-[var(--text-secondary)] hover:bg-[#f1f5f9]"}`}>
+                  {l}
+                </button>
+              ))}
+            </div>
+          )}
           <span className="text-xs text-[var(--text-muted)]">
             {list.length} unit internal ·{" "}
             {(["R", "S", "B"] as const).map((k) => (
@@ -755,7 +809,8 @@ function HarianTab({ units, canInput }: { units: KdUnit[]; canInput: boolean }) 
                 {k}
               </span>
             ))}{" "}
-            = running / standby sebagian / breakdown{canInput ? " · klik sel untuk mengisi (R → S → B → kosong)" : ""}
+            = running / standby sebagian / breakdown · titik = ada lokasi / pekerjaan
+            {canInput ? (mode === "kondisi" ? " · klik sel: R → S → B → kosong" : " · klik sel untuk mengisi lokasi & pekerjaan") : ""}
           </span>
           {error && <span className="text-xs text-[var(--accent-red)]">{error}</span>}
           <div className="ml-auto">
@@ -796,18 +851,24 @@ function HarianTab({ units, canInput }: { units: KdUnit[]; canInput: boolean }) 
                     <tr key={u.id} className="border-t border-[var(--border)]">
                       <td className="sticky left-0 z-10 bg-[var(--bg-card)] px-2 py-1 whitespace-nowrap">
                         <span className="font-mono text-[var(--text-primary)]">{u.kode}</span> <span className="text-[var(--text-muted)]">{u.alokasi}</span>
+                        {u.operator && <div className="text-[10px] text-[var(--text-muted)] leading-tight">op. {u.operator}</div>}
                       </td>
                       {days.map((d) => {
-                        const k = get(u, d);
+                        const c = sel(u, d);
+                        const k = c?.k ?? "";
+                        const ada = !!(c?.lokasi || c?.pekerjaan);
                         return (
                           <td key={d} className="p-0 text-center">
                             <button
                               onClick={() => klik(u, d)}
                               disabled={!canInput || d > today}
-                              title={`${u.kode} ${isoDisplay(d)}${k ? `: ${k}` : ""}`}
-                              className={`w-7 h-6 text-[11px] font-semibold ${k ? HARIAN[k] : d > today ? "bg-[#f8fafc]" : "hover:bg-[#eef4ff]"} ${canInput && d <= today ? "cursor-pointer" : "cursor-default"}`}
+                              title={`${u.kode} ${isoDisplay(d)}${k ? `: ${k}` : ""}${c?.lokasi ? `\nLokasi: ${c.lokasi}` : ""}${c?.pekerjaan ? `\nPekerjaan: ${c.pekerjaan}` : ""}`}
+                              className={`relative w-7 h-6 text-[11px] font-semibold ${k ? HARIAN[k] : d > today ? "bg-[#f8fafc]" : "hover:bg-[#eef4ff]"} ${
+                                canInput && d <= today ? "cursor-pointer" : "cursor-default"
+                              }`}
                             >
                               {k}
+                              {ada && <span className="absolute top-0.5 right-0.5 w-1 h-1 rounded-full bg-[#1e5bb5]" />}
                             </button>
                           </td>
                         );
@@ -824,6 +885,18 @@ function HarianTab({ units, canInput }: { units: KdUnit[]; canInput: boolean }) 
           </div>
         )}
       </div>
+
+      {buka && (
+        <SelHarian
+          unit={buka.u}
+          tanggal={buka.d}
+          awal={sel(buka.u, buka.d)}
+          saranLokasi={saran("lokasi")}
+          saranPekerjaan={saran("pekerjaan")}
+          onClose={() => setBuka(null)}
+          onSaved={(v) => (tulis(buka.u, buka.d, v), setBuka(null))}
+        />
+      )}
 
       <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg">
         <h2 className="px-4 py-3 text-sm font-semibold text-[var(--text-primary)] border-b border-[var(--border)]">Kesiapan unit per jenis - {bulanLabel(bulan)} (kondisi terakhir)</h2>
@@ -860,6 +933,99 @@ function HarianTab({ units, canInput }: { units: KdUnit[]; canInput: boolean }) 
               </tr>
             </tbody>
           </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// One unit's day: kondisi, lokasi and pekerjaan (lokasi / pekerjaan suggested from the month's entries).
+function SelHarian({
+  unit,
+  tanggal,
+  awal,
+  saranLokasi,
+  saranPekerjaan,
+  onClose,
+  onSaved,
+}: {
+  unit: KdUnit;
+  tanggal: string;
+  awal: Sel | undefined;
+  saranLokasi: string[];
+  saranPekerjaan: string[];
+  onClose: () => void;
+  onSaved: (v: Sel | undefined) => void;
+}) {
+  const [k, setK] = useState(awal?.k ?? "R");
+  const [lokasi, setLokasi] = useState(awal?.lokasi ?? "");
+  const [pekerjaan, setPekerjaan] = useState(awal?.pekerjaan ?? "");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const simpan = async (hapus = false) => {
+    setBusy(true);
+    setError("");
+    try {
+      await api.kdSetHarian({ unit_id: unit.id, tanggal, kondisi: hapus ? "" : k, lokasi: hapus ? "" : lokasi.trim(), pekerjaan: hapus ? "" : pekerjaan.trim() });
+      onSaved(hapus ? undefined : { k, lokasi: lokasi.trim(), pekerjaan: pekerjaan.trim() });
+    } catch (e) {
+      setError(errorText(e, "Gagal menyimpan"));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-start justify-center p-4" onClick={onClose}>
+      <div className="bg-[var(--bg-card)] rounded-lg shadow-xl w-full max-w-md mt-16" onClick={(e) => e.stopPropagation()}>
+        <div className="px-5 py-4 border-b border-[var(--border)]">
+          <h3 className="font-semibold text-[var(--text-primary)]">
+            {unit.kode} · {isoDisplay(tanggal)}
+          </h3>
+          <p className="text-xs text-[var(--text-muted)]">
+            {unit.nama}
+            {unit.operator ? ` · op. ${unit.operator}` : ""}
+          </p>
+        </div>
+        <div className="p-5 space-y-3">
+          <div className="flex gap-2">
+            {(["R", "S", "B"] as const).map((x) => (
+              <button key={x} onClick={() => setK(x)} className={`flex-1 py-2 rounded-md border text-sm font-semibold ${k === x ? `${HARIAN[x]} border-transparent` : "border-[var(--border)] text-[var(--text-secondary)]"}`}>
+                {x === "R" ? "R · Running" : x === "S" ? "S · Standby" : "B · Breakdown"}
+              </button>
+            ))}
+          </div>
+          <label className="block space-y-1">
+            <span className="text-xs text-[var(--text-secondary)]">Lokasi</span>
+            <input list="kd-lokasi" value={lokasi} onChange={(e) => setLokasi(e.target.value)} placeholder="mis. Divisi B / Blok C12" className={inputCls} />
+            <datalist id="kd-lokasi">
+              {saranLokasi.map((x) => (
+                <option key={x} value={x} />
+              ))}
+            </datalist>
+          </label>
+          <label className="block space-y-1">
+            <span className="text-xs text-[var(--text-secondary)]">Pekerjaan</span>
+            <input list="kd-pekerjaan" value={pekerjaan} onChange={(e) => setPekerjaan(e.target.value)} placeholder="mis. Perawatan jalan / Langsir TBS" className={inputCls} />
+            <datalist id="kd-pekerjaan">
+              {saranPekerjaan.map((x) => (
+                <option key={x} value={x} />
+              ))}
+            </datalist>
+          </label>
+          {error && <p className="text-xs text-[var(--accent-red)]">{error}</p>}
+          <div className="flex justify-end gap-2">
+            {awal && (
+              <button onClick={() => simpan(true)} disabled={busy} className="mr-auto text-sm text-[var(--accent-red)] hover:underline">
+                Kosongkan
+              </button>
+            )}
+            <button onClick={onClose} className={btnOutline}>
+              Batal
+            </button>
+            <button onClick={() => simpan()} disabled={busy} className={btnPrimary}>
+              {busy ? "Menyimpan..." : "Simpan"}
+            </button>
+          </div>
         </div>
       </div>
     </div>

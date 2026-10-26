@@ -1276,3 +1276,9 @@ ALTER TABLE klinik_permintaan_line ADD COLUMN IF NOT EXISTS approval_level INTEG
 ALTER TABLE klinik_permintaan_line ADD COLUMN IF NOT EXISTS disetujui DOUBLE PRECISION;
 UPDATE klinik_permintaan_line SET disetujui = CASE status WHEN 'APPROVED' THEN jumlah WHEN 'DITOLAK' THEN 0 END
  WHERE disetujui IS NULL AND status IN ('APPROVED', 'DITOLAK');
+
+-- Rencana Kerja Harian of the units: per day where a unit works (lokasi) and on what (pekerjaan), besides its
+-- kondisi; and who operates it (operator, on the unit).
+ALTER TABLE kendaraan_harian ADD COLUMN IF NOT EXISTS lokasi TEXT NOT NULL DEFAULT '';
+ALTER TABLE kendaraan_harian ADD COLUMN IF NOT EXISTS pekerjaan TEXT NOT NULL DEFAULT '';
+ALTER TABLE kendaraan_unit ADD COLUMN IF NOT EXISTS operator TEXT NOT NULL DEFAULT '';
