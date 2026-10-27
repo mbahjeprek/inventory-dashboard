@@ -141,8 +141,7 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
         { label: "Stock Out", align: "right" },
         { label: "Saldo Stock", align: "right" },
         { label: "Keterangan" },
-        { label: "OPEX", align: "right" },
-        { label: "CAPEX", align: "right" },
+        { label: "Kategori" },
         { label: "Status Kepemilikan" },
         { label: "Kode Kendaraan" },
         { label: "HM Terakhir Sebelum Permintaan Solar" },
@@ -159,8 +158,7 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
         r.pemakaian || ((r.pinjam ?? 0) < 0 ? -r.pinjam! : null),
         r.saldo_stock,
         r.keterangan,
-        r.beban === "OPEX" ? r.pemakaian : null,
-        r.beban === "CAPEX" ? r.pemakaian : null,
+        r.beban || "",
         r.status_kepemilikan,
         r.kode_kendaraan,
         r.hm_terakhir,
@@ -169,7 +167,7 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
     };
   };
 
-  // OPEX / CAPEX of a Stock Out marked from the list (clicking the marked one clears it).
+  // Kategori (OPEX / CAPEX) of a Stock Out picked right in the list.
   const setBeban = async (r: BbmRecord, beban: string) => {
     const lama = r.beban ?? "";
     setRows((x) => x.map((y) => (y.id === r.id ? { ...y, beban } : y)));
@@ -185,7 +183,7 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
       });
     } catch (e) {
       setRows((x) => x.map((y) => (y.id === r.id ? { ...y, beban: lama } : y)));
-      window.alert(errorText(e, "Gagal menyimpan OPEX / CAPEX", true));
+      window.alert(errorText(e, "Gagal menyimpan kategori", true));
     }
   };
 
@@ -402,8 +400,7 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
                 <th className="px-4 py-2.5 text-right whitespace-nowrap">Stock Out</th>
                 <th className="px-4 py-2.5 text-right whitespace-nowrap">Saldo Stock</th>
                 <th className="px-4 py-2.5">Keterangan</th>
-                <th className="px-4 py-2.5 text-right whitespace-nowrap">OPEX</th>
-                <th className="px-4 py-2.5 text-right whitespace-nowrap">CAPEX</th>
+                <th className="px-4 py-2.5 whitespace-nowrap">Kategori</th>
                 <th className="px-4 py-2.5 text-center">Bukti</th>
                 <th className="px-4 py-2.5">Status Kepemilikan</th>
                 <th className="px-4 py-2.5">Kode Kendaraan</th>
@@ -415,13 +412,13 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={showActions ? 15 : 14} className="px-4 py-8 text-center text-[var(--text-muted)]">
+                  <td colSpan={showActions ? 14 : 13} className="px-4 py-8 text-center text-[var(--text-muted)]">
                     Memuat...
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={showActions ? 15 : 14} className="px-4 py-8 text-center text-[var(--text-muted)]">
+                  <td colSpan={showActions ? 14 : 13} className="px-4 py-8 text-center text-[var(--text-muted)]">
                     Tidak ada data
                   </td>
                 </tr>
@@ -443,11 +440,9 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
                     <td className="col-grow px-4 py-2.5 text-[var(--text-secondary)] text-xs whitespace-normal break-words" title={r.keterangan}>
                       {r.keterangan || "-"}
                     </td>
-                    {(["OPEX", "CAPEX"] as const).map((b) => (
-                      <td key={b} className="px-4 py-2.5 text-right whitespace-nowrap">
-                        <BebanCell r={r} b={b} bisa={!r.pinjaman_id && !!r.pemakaian && canEditRow(user, "BBM", r)} onSet={(v) => setBeban(r, v)} />
-                      </td>
-                    ))}
+                    <td className="px-4 py-2.5 whitespace-nowrap">
+                      <KategoriCell r={r} bisa={!r.pinjaman_id && !!r.pemakaian && canEditRow(user, "BBM", r)} onSet={(v) => setBeban(r, v)} />
+                    </td>
                     <td className="px-4 py-2.5 text-center whitespace-nowrap">
                       {r.evidence_id ? (
                         <EvidenceLink id={r.evidence_id} label="Lihat" />
@@ -579,19 +574,20 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
   );
 }
 
-// An OPEX / CAPEX cell: the Stock Out litres when the row is marked so; for whoever may edit it, a click marks the
-// row (or clears it when it is already marked so).
-function BebanCell({ r, b, bisa, onSet }: { r: BbmRecord; b: "OPEX" | "CAPEX"; bisa: boolean; onSet: (v: string) => void }) {
-  const ya = r.beban === b;
-  const isi = ya ? <span className="font-medium text-[var(--text-primary)]">{(r.pemakaian ?? 0).toLocaleString("id-ID")}</span> : <span className="text-[var(--text-muted)]">-</span>;
-  if (!bisa) return isi;
+// The Kategori of a row: for a Stock Out, OPEX or CAPEX - a dropdown for whoever may edit the row, else the text.
+function KategoriCell({ r, bisa, onSet }: { r: BbmRecord; bisa: boolean; onSet: (v: string) => void }) {
+  const warna = r.beban === "CAPEX" ? "text-[#6d28d9]" : r.beban === "OPEX" ? "text-[var(--accent-blue)]" : "text-[var(--text-muted)]";
+  if (!bisa) return <span className={`text-xs font-medium ${warna}`}>{r.beban || "-"}</span>;
   return (
-    <button
-      onClick={() => onSet(ya ? "" : b)}
-      title={ya ? `Hapus tanda ${b}` : `Tandai sebagai ${b}`}
-      className={`min-w-[44px] px-2 py-0.5 rounded border text-right ${ya ? "border-[var(--accent-blue-border)] bg-[var(--accent-blue-bg)]" : "border-dashed border-[var(--border)] hover:border-[var(--accent-blue)] hover:text-[var(--accent-blue)]"}`}
+    <select
+      value={r.beban || ""}
+      onChange={(e) => onSet(e.target.value)}
+      title="Kategori biaya Stock Out ini"
+      className={`text-xs font-medium rounded-md border border-[var(--border)] bg-white px-2 py-1 ${warna}`}
     >
-      {isi}
-    </button>
+      <option value="">-- Pilih --</option>
+      <option value="OPEX">OPEX</option>
+      <option value="CAPEX">CAPEX</option>
+    </select>
   );
 }

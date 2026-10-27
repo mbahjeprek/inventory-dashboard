@@ -295,7 +295,7 @@ export function BbmTransactionModal({
           )}
           {tipe === "PEMAKAIAN" && !ke && (
             <div>
-              <label className="text-xs text-[var(--text-secondary)] mb-1 block">Beban (OPEX / CAPEX)</label>
+              <label className="text-xs text-[var(--text-secondary)] mb-1 block">Kategori</label>
               <select value={beban} onChange={(e) => setBeban(e.target.value)} className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-1.5 bg-white">
                 <option value="">-- Belum ditentukan --</option>
                 <option value="OPEX">OPEX (operasional)</option>

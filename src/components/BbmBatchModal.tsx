@@ -86,7 +86,7 @@ export function BbmBatchModal({
         ]),
     {
       key: "beban",
-      label: "OPEX / CAPEX",
+      label: "Kategori",
       width: 105,
       type: "select" as const,
       carry: true,

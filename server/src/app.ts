@@ -3310,7 +3310,7 @@ app.post("/api/bbm", async (req, res) => {
       tipe === "PEMAKAIAN" && estate && `Estate: ${estate}`,
       kode_kendaraan && `Kendaraan: ${kode_kendaraan}`,
       hm_terakhir && `HM: ${hm_terakhir}`,
-      beban && `Beban: ${beban}`,
+      beban && `Kategori: ${beban}`,
       keterangan && `Keterangan: ${keterangan}`,
     ]
       .filter(Boolean)
@@ -3436,7 +3436,7 @@ app.post("/api/bbm/batch", async (req, res) => {
         row.tipe === "PEMAKAIAN" && `Estate: ${row.estate}`,
         row.kode_kendaraan && `Kendaraan: ${row.kode_kendaraan}`,
         row.hm_terakhir && `HM: ${row.hm_terakhir}`,
-        row.beban && `Beban: ${row.beban}`,
+        row.beban && `Kategori: ${row.beban}`,
         row.keterangan && `Keterangan: ${row.keterangan}`,
         `Input Banyak (${booked.length + transfers.length} baris)`,
       ]
@@ -3507,7 +3507,7 @@ app.put("/api/bbm/:id", requireSuperuser, async (req, res) => {
       estate: "Estate",
       kode_kendaraan: "Kode Kendaraan",
       hm_terakhir: "HM",
-      beban: "Beban",
+      beban: "Kategori",
     }),
   });
   await useEditEvidence(newEvidence, [{ table: "bbm_log", where: "id = @id", params: { id: existing.id } }]);
@@ -3519,7 +3519,7 @@ app.put("/api/bbm/:id/beban", async (req, res) => {
   const existing = await queryOne<any>("SELECT * FROM bbm_log WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Transaksi tidak ditemukan" });
   if (!estateAllowed(req.user!, existing.lokasi)) return res.status(403).json({ error: "Akses ditolak" });
-  if (!(Number(existing.pemakaian) > 0)) return res.status(400).json({ error: "OPEX / CAPEX hanya untuk Stock Out" });
+  if (!(Number(existing.pemakaian) > 0)) return res.status(400).json({ error: "Kategori OPEX / CAPEX hanya untuk Stock Out" });
   const beban = bbmBeban(req.body?.beban);
   if (beban === (existing.beban ?? "")) return res.json({ success: true });
   await execute("UPDATE bbm_log SET beban = @beban WHERE id = @id", { beban, id: existing.id });
@@ -3528,7 +3528,7 @@ app.put("/api/bbm/:id/beban", async (req, res) => {
     estate: existing.lokasi,
     aksi: "Edit Transaksi",
     objek: `${String(existing.jenis_bbm).replace("_", " ")} · ${existing.tanggal}${existing.no_spb ? ` · SPB ${existing.no_spb}` : ""}`,
-    detail: `Beban: ${existing.beban || "-"} → ${beban || "-"}`,
+    detail: `Kategori: ${existing.beban || "-"} → ${beban || "-"}`,
   });
   res.json({ success: true });
 });
