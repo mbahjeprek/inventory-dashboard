@@ -30,10 +30,15 @@ function useBarang() {
   return { items, loading, byKode, itemOf };
 }
 
-export function KopJualBatchModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: (count: number) => void }) {
+// depo: Input Galon of the Depo Air tab - the barang is the depot's air galon (no Kode Barang column), the rows are
+// that depot's sales, kasbon (potong gaji) like any Stock Out.
+export function KopJualBatchModal({ onClose, onSuccess, depo }: { onClose: () => void; onSuccess: (count: number) => void; depo?: "NILAM" | "FIRUS" }) {
   const [tanggal, setTanggal] = useState(localToday());
   const periode = tanggal.slice(0, 7);
-  const { items, loading, byKode, itemOf } = useBarang();
+  const { items, loading, byKode, itemOf: itemOfBarang } = useBarang();
+  const galon = depo ? items.find((i) => i.depo_air && i.aktif !== false) : undefined;
+  const itemOf = (c: Cells) => (depo ? galon : itemOfBarang(c));
+  const depoNama = depo === "FIRUS" ? "Depo Firus" : "Depo Nilam";
   const [anggota, setAnggota] = useState<KopAnggota[]>([]);
   const [limit, setLimit] = useState(1_500_000);
   // Potong gaji already taken in the periode, per anggota.
@@ -97,20 +102,24 @@ export function KopJualBatchModal({ onClose, onSuccess }: { onClose: () => void;
         return extra.has(norm(c.anggota).replace(/\s/g, "")) ? "tidak ada di master karyawan" : "mencari...";
       },
     },
-    {
-      key: "barang",
-      label: "Kode Barang",
-      width: 240,
-      options: items.map((i) => ({ value: i.kode, label: `${i.nama} · ${i.lacak_stok ? `stok ${fmtNum(i.stok)} ${i.satuan}` : "tanpa stok"} · ${rp(i.harga_jual)}`, stok: i.lacak_stok ? Number(i.stok) : null })),
-      placeholder: loading ? "memuat daftar..." : "ketik kode / nama",
-      hint: (c) => {
-        const i = itemOf(c);
-        return i ? `${i.nama} · ${i.lacak_stok ? `stok ${fmtNum(i.stok)} ${i.satuan}` : "tanpa stok"}` : norm(c.barang) && !loading ? "tidak ada di daftar barang" : undefined;
-      },
-    },
+    ...(depo
+      ? []
+      : [
+          {
+            key: "barang",
+            label: "Kode Barang",
+            width: 240,
+            options: items.map((i) => ({ value: i.kode, label: `${i.nama} · ${i.lacak_stok ? `stok ${fmtNum(i.stok)} ${i.satuan}` : "tanpa stok"} · ${rp(i.harga_jual)}`, stok: i.lacak_stok ? Number(i.stok) : null })),
+            placeholder: loading ? "memuat daftar..." : "ketik kode / nama",
+            hint: (c: Cells) => {
+              const i = itemOf(c);
+              return i ? `${i.nama} · ${i.lacak_stok ? `stok ${fmtNum(i.stok)} ${i.satuan}` : "tanpa stok"}` : norm(c.barang) && !loading ? "tidak ada di daftar barang" : undefined;
+            },
+          },
+        ]),
     {
       key: "jumlah",
-      label: "Jumlah",
+      label: depo ? "Jumlah galon" : "Jumlah",
       width: 130,
       type: "number",
       align: "right",
@@ -157,7 +166,7 @@ export function KopJualBatchModal({ onClose, onSuccess }: { onClose: () => void;
     const a = anggotaOf(c);
     const q = parseNum(c.jumlah);
     const h = hargaOf(c);
-    const missing = [!a && "Anggota (NIK yang terdaftar)", !itemOf(c) && "Barang (pilih dari daftar)", !(q > 0) && "Jumlah", !(h >= 0) && "Harga"].filter(Boolean);
+    const missing = [!a && "Anggota (NIK yang terdaftar)", !itemOf(c) && (depo ? "Barang air galon (tandai Depo Air di Stok Barang)" : "Barang (pilih dari daftar)"), !(q > 0) && "Jumlah", !(h >= 0) && "Harga"].filter(Boolean);
     if (missing.length) return `Wajib diisi: ${missing.join(", ")}`;
     if (!a!.aktif) return `${a!.nama} sudah tidak aktif`;
     if (a!.jenis === "KARYAWAN" && nunggak.has(a!.kode.toUpperCase()))
@@ -173,6 +182,7 @@ export function KopJualBatchModal({ onClose, onSuccess }: { onClose: () => void;
     const res = await api.kopJualBatch({
       tanggal,
       evidence_id: evidenceId || null,
+      ...(depo ? { depo } : {}),
       rows: rows.map((c) => ({ anggota_kode: kodeOf(c), barang_kode: itemOf(c)!.kode, qty: parseNum(c.jumlah), harga: hargaOf(c) })),
     });
     return res.count;
@@ -180,16 +190,22 @@ export function KopJualBatchModal({ onClose, onSuccess }: { onClose: () => void;
 
   return (
     <BatchGrid
-      title="Input Banyak Stock Out"
-      subtitle={`Banyak karyawan sekaligus; baris satu orang jadi satu bon, dipotong gaji ${new Date(`${periode}-01T00:00:00`).toLocaleDateString("id-ID", { month: "long", year: "numeric" })}`}
-      draftKey="batch:koperasi:jual"
+      title={depo ? `Input Galon · ${depoNama}` : "Input Banyak Stock Out"}
+      subtitle={
+        depo
+          ? `${galon ? `${galon.nama} · ${rp(galon.harga_jual)} / galon` : loading ? "memuat..." : "barang air galon belum ditandai Depo Air"} · kasbon, dipotong gaji ${new Date(`${periode}-01T00:00:00`).toLocaleDateString("id-ID", { month: "long", year: "numeric" })}`
+          : `Banyak karyawan sekaligus; baris satu orang jadi satu bon, dipotong gaji ${new Date(`${periode}-01T00:00:00`).toLocaleDateString("id-ID", { month: "long", year: "numeric" })}`
+      }
+      draftKey={depo ? `batch:koperasi:galon:${depo}` : "batch:koperasi:jual"}
       header={
         <>
           <HeaderField label="Tanggal stock out">
             <input type="date" value={tanggal} max={localToday()} onChange={(e) => setTanggal(e.target.value)} className={headerInputCls} />
           </HeaderField>
           <p className="text-xs text-[var(--text-secondary)] self-center max-w-md">
-            Isi NIK sekali, barang berikutnya untuk orang yang sama cukup diketik di baris bawahnya (NIK terisi otomatis). Harga kosong = harga jual barang. Limit {rp(limit)} per orang per bulan.
+            {depo
+              ? `Satu baris per pembeli: NIK / nama dan jumlah galon. Semua tercatat di ${depoNama}. Limit ${rp(limit)} per orang per bulan.`
+              : `Isi NIK sekali, barang berikutnya untuk orang yang sama cukup diketik di baris bawahnya (NIK terisi otomatis). Harga kosong = harga jual barang. Limit ${rp(limit)} per orang per bulan.`}
           </p>
         </>
       }
@@ -207,7 +223,13 @@ export function KopJualBatchModal({ onClose, onSuccess }: { onClose: () => void;
         const orang = new Set(rows.map(kodeOf).filter(Boolean)).size;
         return (
           <>
-            {orang} orang · total <b className="text-[var(--text-primary)]">{rp(total)}</b>
+            {orang} orang ·{" "}
+            {depo && (
+              <>
+                <b className="text-[var(--text-primary)]">{fmtNum(rows.reduce((s, c) => s + (parseNum(c.jumlah) > 0 ? parseNum(c.jumlah) : 0), 0))} galon</b> ·{" "}
+              </>
+            )}
+            total <b className="text-[var(--text-primary)]">{rp(total)}</b>
           </>
         );
       }}
@@ -215,7 +237,7 @@ export function KopJualBatchModal({ onClose, onSuccess }: { onClose: () => void;
       onClose={onClose}
       onSuccess={onSuccess}
       evidenceOptional
-      carryDown
+      carryDown={!depo}
       evidenceLabel="Foto bon (opsional, satu untuk semua baris)"
     />
   );

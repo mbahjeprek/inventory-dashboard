@@ -7,6 +7,7 @@ import { ExportButtons } from "./ExportButtons";
 import { Panel, Tip } from "./KoperasiDashboard";
 import { EvidenceInput, EvidenceLink } from "./EvidenceInput";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { KopJualBatchModal } from "./KoperasiBatchModal";
 import { printDocument } from "../lib/printTable";
 import { isoDisplay, localToday } from "../lib/opname";
 import { KOP_CSS, PERUSAHAAN, escHtml as esc, kopHtml } from "../lib/surat";
@@ -206,7 +207,24 @@ function BiayaModal({ depoAwal, kategori, onClose, onSaved }: { depoAwal: string
 }
 
 export function DepoAirTab({ periode, reload, canInput, canEdit }: { periode: string; reload: number; canInput: boolean; canEdit: boolean }) {
-  const [depo, setDepo] = useState("NILAM");
+  // The depot last opened is remembered (per browser), so the admin lands on the depot they enter for.
+  const [depo, setDepoState] = useState(() => {
+    try {
+      const v = localStorage.getItem("depo-air-depo");
+      return v === "FIRUS" || v === "" ? v : "NILAM";
+    } catch {
+      return "NILAM";
+    }
+  });
+  const setDepo = (v: string) => {
+    setDepoState(v);
+    try {
+      localStorage.setItem("depo-air-depo", v);
+    } catch {
+      // per-viewer convenience only
+    }
+  };
+  const [inputGalon, setInputGalon] = useState(false);
   // The period: one month (the page's periode) by default, or a range of months.
   const [rentang, setRentang] = useState<Rentang>("bulan");
   const [custom, setCustom] = useState({ dari: geser(periode, -2), sampai: periode });
@@ -309,8 +327,18 @@ export function DepoAirTab({ periode, reload, canInput, canEdit }: { periode: st
           </button>
           <ExportButtons total={d ? 1 : 0} buildReport={buildReport} fileName={`depo-air-${(depo || "gabungan").toLowerCase()}-${satuBulan ? dari : `${dari}_${sampai}`}`} />
           {canInput && (
-            <button onClick={() => setBiayaBaru(true)} className="inline-flex items-center gap-1.5 text-sm px-3.5 py-2 rounded-md bg-[var(--accent-blue)] text-white hover:opacity-90">
+            <button onClick={() => setBiayaBaru(true)} className="inline-flex items-center gap-1.5 text-sm px-3.5 py-2 rounded-md border border-[var(--accent-blue-border)] bg-white text-[var(--accent-blue)] hover:bg-[var(--accent-blue-bg)]">
               <Plus size={15} /> Biaya
+            </button>
+          )}
+          {canInput && (
+            <button
+              onClick={() => setInputGalon(true)}
+              disabled={!depo}
+              title={depo ? `Penjualan galon ${DEPO_LABEL[depo]} (kasbon)` : "Pilih Depo Nilam atau Depo Firus dulu"}
+              className="inline-flex items-center gap-1.5 text-sm px-3.5 py-2 rounded-md bg-[var(--accent-blue)] text-white hover:opacity-90 disabled:opacity-50"
+            >
+              <Droplets size={15} /> Input Galon{depo ? ` ${depo === "FIRUS" ? "Firus" : "Nilam"}` : ""}
             </button>
           )}
         </div>
@@ -593,6 +621,9 @@ export function DepoAirTab({ periode, reload, canInput, canEdit }: { periode: st
         </>
       )}
 
+      {inputGalon && (depo === "NILAM" || depo === "FIRUS") && (
+        <KopJualBatchModal depo={depo} onClose={() => setInputGalon(false)} onSuccess={() => (setInputGalon(false), setMuat((n) => n + 1))} />
+      )}
       {biayaBaru && d && <BiayaModal depoAwal={depo} kategori={d.kategori} onClose={() => setBiayaBaru(false)} onSaved={() => (setBiayaBaru(false), setMuat((n) => n + 1))} />}
       {hapus && (
         <ConfirmDialog

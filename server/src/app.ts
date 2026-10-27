@@ -10176,6 +10176,9 @@ app.post("/api/koperasi/jual/batch", async (req, res) => {
   }));
   if (!rows.length) return res.status(400).json({ error: "Belum ada baris" });
   if (rows.length > 500) return res.status(400).json({ error: "Maksimal 500 baris sekali simpan" });
+  // Input Galon of the Depo Air tab: the depot that served them (else the trigger guesses it from the buyer).
+  const depo = b.depo === undefined || b.depo === null || b.depo === "" ? null : String(b.depo).toUpperCase();
+  if (depo !== null && !DEPO.includes(depo)) return res.status(400).json({ error: "Depo tidak valid" });
   const evidence = b.evidence_id ? await claimEvidence(req, res) : null;
   if (evidence === undefined) return;
   const periode = kopMonth(b.tanggal);
@@ -10214,8 +10217,8 @@ app.post("/api/koperasi/jual/batch", async (req, res) => {
       }
       const barang = new Map(
         (
-          await queryMany<{ kode: string; nama: string; lacak_stok: boolean; harga_jual: number }>(
-            "SELECT kode, nama, lacak_stok, harga_jual::float8 harga_jual FROM koperasi_barang WHERE kode = ANY(@k::text[]) AND koperasi = @kop FOR UPDATE",
+          await queryMany<{ kode: string; nama: string; lacak_stok: boolean; harga_jual: number; depo_air: boolean }>(
+            "SELECT kode, nama, lacak_stok, harga_jual::float8 harga_jual, depo_air FROM koperasi_barang WHERE kode = ANY(@k::text[]) AND koperasi = @kop FOR UPDATE",
             { k: [...new Set(rows.map((r) => r.barang_kode))], kop: KOPERASI },
             client
           )
@@ -10223,6 +10226,8 @@ app.post("/api/koperasi/jual/batch", async (req, res) => {
       );
       const noBarang = rows.findIndex((r) => !barang.has(r.barang_kode));
       if (noBarang >= 0) return refuse(noBarang, `barang ${rows[noBarang].barang_kode} tidak ada di master koperasi`);
+      const bukanDepo = depo ? rows.findIndex((r) => !barang.get(r.barang_kode)!.depo_air) : -1;
+      if (bukanDepo >= 0) return refuse(bukanDepo, "Input Galon hanya untuk barang depo air");
       // At the master harga jual, as a single Stock Out.
       for (const r of rows) r.harga = barang.get(r.barang_kode)!.harga_jual;
       // Karyawan with an unpaid bill past its due date can't take goods.
@@ -10261,8 +10266,8 @@ app.post("/api/koperasi/jual/batch", async (req, res) => {
       const stamp = Date.now().toString(36).toUpperCase();
       const bonOf = new Map(kodes.map((k, i) => [k, `KOP-${b.tanggal.replace(/-/g, "")}-${stamp}-${i + 1}`]));
       await execute(
-        `INSERT INTO koperasi_tx (koperasi, jenis, tanggal_iso, periode, bon, barang_kode, qty, harga, total, anggota_kode, bayar, keterangan, evidence_id, user_id)
-         SELECT @kop, 'JUAL', @tanggal, @periode, x.bon, x.kode, x.qty, x.harga, ROUND((x.qty * x.harga)::numeric, 2), x.anggota, x.bayar, 'Input banyak', @evidence::uuid, @uid
+        `INSERT INTO koperasi_tx (koperasi, jenis, tanggal_iso, periode, bon, barang_kode, qty, harga, total, anggota_kode, bayar, keterangan, evidence_id, user_id, depo)
+         SELECT @kop, 'JUAL', @tanggal, @periode, x.bon, x.kode, x.qty, x.harga, ROUND((x.qty * x.harga)::numeric, 2), x.anggota, x.bayar, @ket, @evidence::uuid, @uid, @depo
            FROM json_to_recordset(@rows::json) AS x(bon text, kode text, qty float8, harga float8, anggota text, bayar text)`,
         {
           kop: KOPERASI,
@@ -10270,6 +10275,8 @@ app.post("/api/koperasi/jual/batch", async (req, res) => {
           periode,
           evidence,
           uid: req.user!.id,
+          depo,
+          ket: depo ? `Input Galon Depo ${depo === "FIRUS" ? "Firus" : "Nilam"}` : "Input banyak",
           rows: JSON.stringify(
             rows.map((r) => ({
               bon: bonOf.get(r.anggota_kode),
