@@ -11664,6 +11664,8 @@ const LENGKAPI: Record<string, LengkapiKind> = {
           "COALESCE(pemakaian, 0) > 0 AND COALESCE(kode_kendaraan, '') NOT ILIKE '%GENSET%' AND NOT EXISTS (SELECT 1 FROM alat_berat a WHERE upper(a.kode) = upper(kode_kendaraan) AND a.jenis_unit = 'GENSET')",
       },
       { key: "keterangan", label: "Keterangan", type: "text", applies: "true" },
+      // OPEX / CAPEX of a Stock Out (a transfer to another estate has none).
+      { key: "beban", label: "Kategori", type: "text", applies: "COALESCE(pemakaian, 0) > 0" },
     ],
   },
   pupuk: {
@@ -11799,6 +11801,10 @@ app.get("/api/lengkapi/:kind", async (req, res) => {
     ).map((r) => r.v);
     options.blok = (await queryMany<{ v: string }>("SELECT DISTINCT upper(blok) v FROM master_blok WHERE estate = @estate ORDER BY 1", { estate })).map((r) => r.v);
   }
+  if (k.module === "bbm" && want.has("beban")) {
+    options.beban = ["OPEX", "CAPEX"];
+    pilihan.push("beban");
+  }
   if (want.has("tujuan")) {
     options.tujuan = k.table === "stock_out_log" ? NILAM_TUJUAN : GUDANG_TUJUAN[estate] ?? [];
     // The other gudang only supply their own estates; Gudang Nilam's history also has free-typed tujuan.
@@ -11855,7 +11861,7 @@ app.put("/api/lengkapi/:kind", async (req, res) => {
             }
             if (nv === (cur === null ? null : Number(cur))) continue;
           } else {
-            nv = String(v).trim().slice(0, 200);
+            nv = f.key === "beban" ? bbmBeban(v) : String(v).trim().slice(0, 200);
             if (nv === String(cur ?? "").trim()) continue;
           }
           set[f.key] = nv;

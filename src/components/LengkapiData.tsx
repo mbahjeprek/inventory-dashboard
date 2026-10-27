@@ -95,8 +95,12 @@ function LengkapiModal({ kinds, estate, onClose, onDone }: { kinds: LengkapiKind
   const changedIds = (data?.rows ?? []).filter((r) => edits[r.id]?.evidence_id || changedKeys(r).length).map((r) => r.id);
   // Isi semua: one value for every still-empty cell of a column among the rows shown.
   const isiSemua = (key: string, label: string) => {
-    const v = window.prompt(`Isi ${label} untuk semua baris yang masih kosong${only ? " (yang tampil)" : ""}:`);
-    if (!v?.trim()) return;
+    const pilih = data?.pilihan?.includes(key) ? data.options?.[key] ?? [] : null;
+    const ketik = window.prompt(`Isi ${label} untuk semua baris yang masih kosong${only ? " (yang tampil)" : ""}${pilih ? ` (${pilih.join(" / ")})` : ""}:`);
+    if (!ketik?.trim()) return;
+    // A fixed list (e.g. Kategori OPEX / CAPEX): only one of its choices, whatever the case typed.
+    const v = pilih ? pilih.find((o) => o.toLowerCase() === ketik.trim().toLowerCase()) : ketik;
+    if (!v) return window.alert(`${label} harus salah satu dari: ${pilih!.join(", ")}`);
     setEdits((e) => {
       const n = { ...e };
       for (const r of rows)
