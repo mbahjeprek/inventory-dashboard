@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { PetugasBaris, usePetugas } from "../components/PetugasAlur";
 import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, Banknote, Boxes, ChevronRight, ChevronsDownUp, ChevronsUpDown, CalendarClock, Check, ClipboardCheck, Droplets, FileText, HandCoins, ShieldCheck, LayoutDashboard, ListPlus, Lock, Package, Receipt, PackageX, Pencil, Plus, Search, ShoppingBasket, Trash2, Truck, UserPlus, Users, X } from "lucide-react";
 import {
   api,
@@ -2746,6 +2747,7 @@ const jamKop = (iso: string) =>
 // many were approved this periode.
 function KopAlurRusak({ periode, reload }: { periode: string; reload: number }) {
   const [n, setN] = useState<{ menunggu: number; disetujui: number; ditolak: number } | null>(null);
+  const petugas = usePetugas("KOPERASI", "NILAM");
   useEffect(() => {
     const hitung = (status: string, p = "") => api.kopTx({ jenis: "RUSAK", status, periode: p, page: 1, pageSize: 1 }).then((r) => r.total);
     Promise.all([hitung("MENUNGGU"), hitung("DISETUJUI", periode), hitung("DITOLAK", periode)])
@@ -2753,10 +2755,10 @@ function KopAlurRusak({ periode, reload }: { periode: string; reload: number }) 
       .catch(() => setN(null));
   }, [periode, reload]);
   const langkah = [
-    { icon: PackageX, judul: "1. Tarik & simpan", isi: "Petugas: tarik dari rak, hitung, foto, catat Rusak / Expired (stok langsung ditahan)", angka: "" },
-    { icon: ClipboardCheck, judul: "2. Periksa", isi: "Orang kedua (hak Approve Koperasi) cocokkan fisik & foto", angka: n?.menunggu ? `${n.menunggu} menunggu` : "" },
-    { icon: ShieldCheck, judul: "3. Disetujui", isi: "Stok resmi keluar; ditolak = stok kembali", angka: n ? `${n.disetujui} disetujui${n.ditolak ? ` · ${n.ditolak} ditolak` : ""} (${periodeLabel(periode)})` : "" },
-    { icon: FileText, judul: "4. Berita Acara", isi: "Musnahkan disaksikan 2 orang, cetak & tanda tangani BA", angka: "" },
+    { icon: PackageX, judul: "1. Tarik & simpan", isi: "Petugas: tarik dari rak, hitung, foto, catat Rusak / Expired (stok langsung ditahan)", angka: "", siapa: petugas && { judul: "Petugas", nama: petugas.input, kosong: "belum ada akun dengan hak Input Koperasi" } },
+    { icon: ClipboardCheck, judul: "2. Periksa", isi: "Orang kedua (hak Approve Koperasi) cocokkan fisik & foto", angka: n?.menunggu ? `${n.menunggu} menunggu` : "", siapa: petugas && { judul: "Pemeriksa (bukan yang menginput)", nama: petugas.approve, kosong: "belum ada akun dengan hak Approve Koperasi" } },
+    { icon: ShieldCheck, judul: "3. Disetujui", isi: "Stok resmi keluar; ditolak = stok kembali", angka: n ? `${n.disetujui} disetujui${n.ditolak ? ` · ${n.ditolak} ditolak` : ""} (${periodeLabel(periode)})` : "", siapa: petugas && { judul: "Diputuskan oleh pemeriksa", nama: petugas.approve, kosong: "belum ada akun dengan hak Approve Koperasi" } },
+    { icon: FileText, judul: "4. Berita Acara", isi: "Musnahkan disaksikan 2 orang, cetak & tanda tangani BA", angka: "", siapa: petugas && { judul: "Menyetujui BA", nama: petugas.ba, kosong: "belum ada akun dengan hak Setujui Berita Acara" } },
   ];
   return (
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 -mt-1">
@@ -2767,6 +2769,7 @@ function KopAlurRusak({ periode, reload }: { periode: string; reload: number }) 
           </div>
           <div className="mt-0.5 text-[11px] text-[var(--text-secondary)]">{l.isi}</div>
           {l.angka && <div className={`mt-1 text-xs font-medium ${i === 1 ? "text-[var(--accent-amber)]" : "text-[var(--accent-green)]"}`}>{l.angka}</div>}
+          {l.siapa && <PetugasBaris judul={l.siapa.judul} nama={l.siapa.nama} kosong={l.siapa.kosong} pengganti={petugas?.pengganti ?? []} />}
         </div>
       ))}
     </div>

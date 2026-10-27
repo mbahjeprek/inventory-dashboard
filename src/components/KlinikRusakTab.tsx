@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { PetugasBaris, usePetugas } from "./PetugasAlur";
 import { CalendarClock, Check, ClipboardCheck, FileText, PackageX, ShieldCheck, Trash2, X } from "lucide-react";
 import { api, errorText, type KlinikBatch, type KlinikExpiredBatch, type KlinikTarik, type PickerItem } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
@@ -262,12 +263,27 @@ const jam = (iso: string) =>
   new Date(iso).toLocaleString("id-ID", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Jakarta" });
 
 // The four steps on top of the tab, with how many are at each one; a step's count filters the list.
-function AlurProses({ menunggu, disetujui, ditolak, expired, onStatus }: { menunggu: number; disetujui: number; ditolak: number; expired: number; onStatus: (s: string) => void }) {
+function AlurProses({
+  klinik,
+  menunggu,
+  disetujui,
+  ditolak,
+  expired,
+  onStatus,
+}: {
+  klinik: string;
+  menunggu: number;
+  disetujui: number;
+  ditolak: number;
+  expired: number;
+  onStatus: (s: string) => void;
+}) {
+  const petugas = usePetugas("KLINIK", klinik);
   const langkah = [
-    { icon: PackageX, judul: "1. Tarik & karantina", isi: "Petugas klinik: pisahkan ke kotak karantina, hitung, foto, klik Tarik", angka: expired ? `${expired} batch perlu ditarik` : "", st: "" },
-    { icon: ClipboardCheck, judul: "2. Periksa", isi: "Orang kedua (hak Approve Klinik) cocokkan fisik & foto", angka: menunggu ? `${menunggu} menunggu` : "", st: "MENUNGGU" },
-    { icon: ShieldCheck, judul: "3. Disetujui", isi: "Stok resmi keluar; ditolak = stok kembali ke batch", angka: `${disetujui} disetujui${ditolak ? ` · ${ditolak} ditolak` : ""}`, st: "DISETUJUI" },
-    { icon: Trash2, judul: "4. Berita Acara", isi: "Musnahkan (limbah B3 / insinerator) disaksikan 2 orang, cetak & tanda tangani BA", angka: "", st: "" },
+    { icon: PackageX, judul: "1. Tarik & karantina", isi: "Petugas klinik: pisahkan ke kotak karantina, hitung, foto, klik Tarik", angka: expired ? `${expired} batch perlu ditarik` : "", st: "", siapa: petugas && { judul: "Petugas", nama: petugas.input, kosong: "belum ada akun dengan hak Input Klinik" } },
+    { icon: ClipboardCheck, judul: "2. Periksa", isi: "Orang kedua (hak Approve Klinik) cocokkan fisik & foto", angka: menunggu ? `${menunggu} menunggu` : "", st: "MENUNGGU", siapa: petugas && { judul: "Pemeriksa (bukan yang menarik)", nama: petugas.approve, kosong: "belum ada akun dengan hak Approve Klinik" } },
+    { icon: ShieldCheck, judul: "3. Disetujui", isi: "Stok resmi keluar; ditolak = stok kembali ke batch", angka: `${disetujui} disetujui${ditolak ? ` · ${ditolak} ditolak` : ""}`, st: "DISETUJUI", siapa: petugas && { judul: "Diputuskan oleh pemeriksa", nama: petugas.approve, kosong: "belum ada akun dengan hak Approve Klinik" } },
+    { icon: Trash2, judul: "4. Berita Acara", isi: "Musnahkan (limbah B3 / insinerator) disaksikan 2 orang, cetak & tanda tangani BA", angka: "", st: "", siapa: petugas && { judul: "Menyetujui BA", nama: petugas.ba, kosong: "belum ada akun dengan hak Setujui Berita Acara" } },
   ];
   return (
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
@@ -285,6 +301,7 @@ function AlurProses({ menunggu, disetujui, ditolak, expired, onStatus }: { menun
           </div>
           <div className="mt-0.5 text-[11px] text-[var(--text-secondary)]">{l.isi}</div>
           {l.angka && <div className={`mt-1 text-xs font-medium ${i === 1 ? "text-[var(--accent-amber)]" : i === 0 ? "text-[var(--accent-red)]" : "text-[var(--accent-green)]"}`}>{l.angka}</div>}
+          {l.siapa && <PetugasBaris judul={l.siapa.judul} nama={l.siapa.nama} kosong={l.siapa.kosong} pengganti={petugas?.pengganti ?? []} />}
         </button>
       ))}
     </div>
@@ -429,7 +446,7 @@ export function KlinikRusakTab({ klinik, refreshKey, onChanged }: { klinik: stri
   const n = (st: string) => (rows ?? []).filter((t) => (t.status ?? "DISETUJUI") === st).length;
   return (
     <div className="space-y-4">
-      <AlurProses menunggu={n("MENUNGGU")} disetujui={n("DISETUJUI")} ditolak={n("DITOLAK")} expired={expired.length} onStatus={setStatus} />
+      <AlurProses klinik={klinik} menunggu={n("MENUNGGU")} disetujui={n("DISETUJUI")} ditolak={n("DITOLAK")} expired={expired.length} onStatus={setStatus} />
       {expired.length > 0 && (
         <div className="bg-[var(--bg-card)] border border-[var(--accent-red-border)] rounded-lg">
           <div className="flex flex-wrap items-center gap-2 px-4 py-3 border-b border-[var(--accent-red-border)] bg-[var(--accent-red-bg)] rounded-t-lg">

@@ -189,6 +189,8 @@ function requiredPerms(req: express.Request): Need {
   if (is(/^\/chat(\/|$)/)) return null;
   // Berita Acara Pemusnahan: each route checks the modul's permission (Klinik / Koperasi) and the unit itself.
   if (is(/^\/berita-acara(\/|$)/)) return null;
+  // Petugas: who does each step of a Barang Rusak / Expired flow (the route checks the modul and unit).
+  if (is(/^\/petugas$/)) return null;
   // Persetujuan: how much waits for the account's signature (the route counts only what it may sign).
   if (is(/^\/persetujuan\/jumlah$/)) return null;
   // Pinjaman antar estate: each route checks the loan's module (view / input) and estates itself.
@@ -9248,6 +9250,22 @@ app.get("/api/persetujuan/jumlah", async (req, res) => {
       )!.n
     : 0;
   res.json({ permintaan, ba, total: permintaan + ba });
+});
+
+// Who does each step of a Barang Rusak / Expired flow of a unit (Koperasi at Nilam, or a Klinik): the accounts with
+// Input (tarik & catat), Approve (periksa) and Setujui Berita Acara of that unit, and the Super Users who may stand
+// in for any of them. Seen by whoever may see that modul there.
+app.get("/api/petugas", async (req, res) => {
+  const u = req.user!;
+  const modul = String(req.query.modul ?? "").toUpperCase();
+  const unit = modul === "KOPERASI" ? KOPERASI : String(req.query.unit ?? "").toUpperCase();
+  if (!["KOPERASI", "KLINIK"].includes(modul) || !(ESTATES as readonly string[]).includes(unit)) return res.status(400).json({ error: "Modul / unit tidak valid" });
+  const m = modul.toLowerCase();
+  if (!estateAllowed(u, unit) || !(u.role === "superuser" || u.perms.includes(`${m}.view`))) return res.status(403).json({ error: "Akses ditolak" });
+  const users = await queryMany<any>("SELECT nama, role, estate, estates, perms FROM users ORDER BY nama");
+  const punya = (perm: string) =>
+    users.filter((x) => x.role !== "superuser" && parseList(x.perms, ALL_PERMS).includes(perm) && parseList(x.estates ?? x.estate, ESTATES).includes(unit)).map((x) => x.nama);
+  res.json({ input: punya(`${m}.input`), approve: punya(`${m}.approve`), ba: punya("ba.setujui"), pengganti: users.filter((x) => x.role === "superuser").map((x) => x.nama) });
 });
 
 // The BAs waiting for this account's approval (Setujui Berita Acara, of its units).

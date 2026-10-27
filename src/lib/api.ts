@@ -1829,6 +1829,9 @@ export const api = {
   baList: (modul: string, unit: string) => req<{ data: BeritaAcara[]; terpakai: number[] }>(`/api/berita-acara?${new URLSearchParams({ modul, unit })}`),
   baBuat: (body: { modul: string; unit: string; tanggal: string; isian: Record<string, any>; ref_ids: number[] }) =>
     req<{ id: number; nomor: string }>("/api/berita-acara", { method: "POST", body: JSON.stringify(body) }),
+  // Who does each step of a Barang Rusak / Expired flow of a unit (from the accounts' ticks), see PetugasAlur.
+  petugas: (modul: "KOPERASI" | "KLINIK", unit: string) =>
+    req<{ input: string[]; approve: string[]; ba: string[]; pengganti: string[] }>(`/api/petugas?${new URLSearchParams({ modul, unit })}`),
   persetujuanJumlah: () => req<{ permintaan: number; ba: number; total: number }>("/api/persetujuan/jumlah"),
   // The manager's WhatsApp answer: YA (setuju) or TIDAK (tolak: true, with the alasan), its capture the proof.
   baSetuju: (id: number, body: { nama: string; jabatan: string; tanggal: string; evidence_id: string | null; tolak?: boolean; alasan?: string }) =>
