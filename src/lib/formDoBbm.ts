@@ -3,7 +3,7 @@ import { escHtml as esc, logoPerusahaan, logoUrl, perusahaanEstate } from "./sur
 // The blank "Bukti Penerimaan BBM (Delivery Order)" to fill in by hand when a tanker delivers, laid out like the
 // gudang's Bukti Penerimaan Barang: kop, nomor DO / PO, supplier, lokasi, the tanker and its seal, the lines
 // (jenis BBM, quantity on the DO vs received, selisih), how it was measured, and four signatures.
-// The company (kop and logo) of the lokasi it is printed for: KNS -> PT. Kartika Nugraha Sakti, else AKSS.
+// The company (kop and logo) of the lokasi it is printed for: KNS -> PT. Kartika Nugraha Sakti, WJA -> PT. Wana Jaya Abadi, else AKSS.
 export function formDoBbmHtml(lokasi?: string): string {
   const pt = perusahaanEstate(lokasi);
   const isian = (label: string) => `<tr><td class="lbl">${esc(label)}</td><td class="tt">:</td><td class="garis"></td></tr>`;

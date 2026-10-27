@@ -1,3 +1,4 @@
+import { GUDANG_TUJUAN } from "./api";
 // Pieces of the formal letters printed from the app (Berita Acara, Surat Keterangan Sakit).
 export const HARI = ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"];
 export const BULAN = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
@@ -31,17 +32,22 @@ export const KOP_CSS = `
 export const kopHtml = (perusahaan: string, unit: string) =>
   `<div class="kop"><img class="kop-logo" src="${escHtml(logoUrl(perusahaan))}" alt="${escHtml(logoPerusahaan(perusahaan).alt)}"><div class="kop-teks"><div class="kop-pt">${escHtml(perusahaan)}</div><div class="kop-unit">${escHtml(unit)}</div></div><div class="kop-spasi"></div></div>`;
 export const PERUSAHAAN = "PT. Anugrah Kembang Sawit Sejahtera";
-// KNS belongs to PT. Kartika Nugraha Sakti: its letters carry that name and its logo as given (emblem with the name
-// under it). Every other estate is AKSS.
+// KNS belongs to PT. Kartika Nugraha Sakti and WJA to PT. Wana Jaya Abadi (with the estates they supply): their
+// letters carry that name and its logo. Every other estate is AKSS.
 export const PERUSAHAAN_KNS = "PT. Kartika Nugraha Sakti";
-export const perusahaanEstate = (estate?: string | null) => (estate === "KNS" ? PERUSAHAAN_KNS : PERUSAHAAN);
-// The logo of a company name as typed on a letter (Kartika -> KNS, else AKSS).
-export const logoPerusahaan = (perusahaan: string) => (/kartika/i.test(perusahaan) ? { file: "logo-kns.png", alt: "KNS" } : { file: "logo-akss.png", alt: "AKSS" });
+export const PERUSAHAAN_WJA = "PT. Wana Jaya Abadi";
+export const perusahaanEstate = (estate?: string | null) => {
+  const e = (estate ?? "").toUpperCase();
+  return e === "KNS" || GUDANG_TUJUAN.KNS.includes(e) ? PERUSAHAAN_KNS : e === "WJA" || GUDANG_TUJUAN.WJA.includes(e) ? PERUSAHAAN_WJA : PERUSAHAAN;
+};
+// The logo of a company name as typed on a letter (Kartika -> KNS, Wana Jaya -> WJA, else AKSS).
+export const logoPerusahaan = (perusahaan: string) =>
+  /kartika/i.test(perusahaan) ? { file: "logo-kns.png", alt: "KNS" } : /wana\s*jaya/i.test(perusahaan) ? { file: "logo-wja.png", alt: "WJA" } : { file: "logo-akss.png", alt: "AKSS" };
 export const logoUrl = (perusahaan: string) => `${location.origin}/${logoPerusahaan(perusahaan).file}`;
 // A remembered company on a letter form: the estate's own unless another one was typed on purpose (the AKSS default
-// remembered for a KNS form becomes KNS).
+// remembered for a KNS / WJA form becomes that estate's company).
 export const perusahaanIngat = (ingat: string | undefined, estate?: string | null) =>
-  !ingat || (ingat === PERUSAHAAN && estate === "KNS") ? perusahaanEstate(estate) : ingat;
+  !ingat || (ingat === PERUSAHAAN && perusahaanEstate(estate) !== PERUSAHAAN) ? perusahaanEstate(estate) : ingat;
 
 // The clinic staff who sign: the accounts carry the full name with its title ("Sukaena Amd.keb").
 // A name that already has a title is printed as it is (no second gelar), the jabatan follows the title,
