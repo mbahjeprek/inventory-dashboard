@@ -16,6 +16,8 @@ export function formDoBbmHtml(lokasi?: string): string {
     .kop { display: flex; align-items: center; gap: 12px; }
     .kop img { width: 92px; height: auto; }
     .kop .t { flex: 1; text-align: center; padding-right: 92px; }
+    .kop.lebar img { width: 170px; }
+    .kop.lebar .t { padding-right: 170px; }
     .pt { font-weight: bold; font-size: 13pt; text-decoration: underline; }
     .judul { font-weight: bold; font-size: 12.5pt; text-decoration: underline; margin-top: 8px; }
     .sub { font-size: 9.5pt; margin-top: 1px; }
@@ -44,7 +46,7 @@ export function formDoBbmHtml(lokasi?: string): string {
     .ket { margin-top: 14px; font-size: 9.5pt; }
     .ket u { font-weight: bold; }
   </style></head><body>
-    <div class="kop">
+    <div class="kop${logoPerusahaan(pt).lebar ? " lebar" : ""}">
       <img src="${esc(logoUrl(pt))}" alt="${esc(logoPerusahaan(pt).alt)}">
       <div class="t">
         <div class="pt">${esc(pt.toUpperCase())}</div>

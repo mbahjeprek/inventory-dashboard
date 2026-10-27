@@ -26,11 +26,12 @@ export const KOP_CSS = `
   .kop { display: flex; align-items: center; gap: 10px; border-bottom: 3px double #000; padding-bottom: 6px; margin-bottom: 4px; }
   .kop-logo { width: 112px; height: auto; flex: none; }
   .kop-spasi { width: 112px; flex: none; }
+  .kop-lebar .kop-logo, .kop-lebar .kop-spasi { width: 170px; }
   .kop-teks { flex: 1; text-align: center; line-height: 1.3; }
   .kop-pt { font-weight: bold; font-size: 14pt; text-transform: uppercase; letter-spacing: 0.3px; }
   .kop-unit { font-weight: bold; font-size: 12pt; text-transform: uppercase; }`;
 export const kopHtml = (perusahaan: string, unit: string) =>
-  `<div class="kop"><img class="kop-logo" src="${escHtml(logoUrl(perusahaan))}" alt="${escHtml(logoPerusahaan(perusahaan).alt)}"><div class="kop-teks"><div class="kop-pt">${escHtml(perusahaan)}</div><div class="kop-unit">${escHtml(unit)}</div></div><div class="kop-spasi"></div></div>`;
+  `<div class="kop${logoPerusahaan(perusahaan).lebar ? " kop-lebar" : ""}"><img class="kop-logo" src="${escHtml(logoUrl(perusahaan))}" alt="${escHtml(logoPerusahaan(perusahaan).alt)}"><div class="kop-teks"><div class="kop-pt">${escHtml(perusahaan)}</div><div class="kop-unit">${escHtml(unit)}</div></div><div class="kop-spasi"></div></div>`;
 export const PERUSAHAAN = "PT. Anugrah Kembang Sawit Sejahtera";
 // KNS belongs to PT. Kartika Nugraha Sakti and WJA to PT. Wana Jaya Abadi (with the estates they supply): their
 // letters carry that name and its logo. Every other estate is AKSS.
@@ -40,9 +41,10 @@ export const perusahaanEstate = (estate?: string | null) => {
   const e = (estate ?? "").toUpperCase();
   return e === "KNS" || GUDANG_TUJUAN.KNS.includes(e) ? PERUSAHAAN_KNS : e === "WJA" || GUDANG_TUJUAN.WJA.includes(e) ? PERUSAHAAN_WJA : PERUSAHAAN;
 };
-// The logo of a company name as typed on a letter (Kartika -> KNS, Wana Jaya -> WJA, else AKSS).
+// The logo of a company name as typed on a letter (Kartika -> KNS, Wana Jaya -> WJA, else AKSS). WJA's is wide
+// (the emblem with the name under it in one line), so its kop gives it more room (lebar) to keep the name readable.
 export const logoPerusahaan = (perusahaan: string) =>
-  /kartika/i.test(perusahaan) ? { file: "logo-kns.png", alt: "KNS" } : /wana\s*jaya/i.test(perusahaan) ? { file: "logo-wja.png", alt: "WJA" } : { file: "logo-akss.png", alt: "AKSS" };
+  /kartika/i.test(perusahaan) ? { file: "logo-kns.png", alt: "KNS" } : /wana\s*jaya/i.test(perusahaan) ? { file: "logo-wja.png", alt: "WJA", lebar: true } : { file: "logo-akss.png", alt: "AKSS" };
 export const logoUrl = (perusahaan: string) => `${location.origin}/${logoPerusahaan(perusahaan).file}`;
 // A remembered company on a letter form: the estate's own unless another one was typed on purpose (the AKSS default
 // remembered for a KNS / WJA form becomes that estate's company).
