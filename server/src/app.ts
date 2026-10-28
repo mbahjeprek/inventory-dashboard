@@ -9635,7 +9635,8 @@ function kopPermintaanBody(req: express.Request): { error?: string; tanggal?: st
       jumlah: Number(l?.jumlah),
       satuan: String(l?.satuan ?? "").trim().toUpperCase().slice(0, 30),
       isi: l?.isi === null || l?.isi === undefined || l?.isi === "" ? null : Number(l.isi),
-      tgl_masuk: isIsoDate(l?.tgl_masuk) ? l.tgl_masuk : null,
+      // Recorded by hand (came in without a Stock In): only from the request's date up to today.
+      tgl_masuk: isIsoDate(l?.tgl_masuk) && l.tgl_masuk >= b.tanggal && l.tgl_masuk <= jakartaToday() ? l.tgl_masuk : null,
     }))
     .filter((l) => l.nama || l.barang_kode);
   if (!lines.length) return { error: "Belum ada barang yang diminta" };

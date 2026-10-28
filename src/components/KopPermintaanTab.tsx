@@ -11,7 +11,7 @@ import { ConfirmDialog } from "./ConfirmDialog";
 // nomor, printed with the kop and the two signatures, and shows per barang when it came in (Tgl Masuk: the first
 // Stock In of that barang after the request, or a date typed for one that came in another way).
 
-type Baris = { key: number; kode: string; teks: string; nama: string; jenis: string; jumlah: string; satuan: string; isi: string; tgl_masuk: string; masuk: string | null };
+type Baris = { key: number; kode: string; teks: string; nama: string; jenis: string; jumlah: string; satuan: string; isi: string; tgl_masuk: string; masuk: string | null; manual?: boolean };
 let nextKey = 1;
 const barisKosong = (): Baris => ({ key: nextKey++, kode: "", teks: "", nama: "", jenis: "", jumlah: "", satuan: "", isi: "", tgl_masuk: "", masuk: null });
 const labelBarang = (b: Pick<KopBarang, "kode" | "nama">) => `${b.kode} · ${b.nama}`;
@@ -55,7 +55,7 @@ export function KopPermintaanTab({ canInput, canEdit }: { canInput: boolean; can
       <div className="p-3 flex flex-wrap items-center gap-2 border-b border-[var(--border)]">
         <div>
           <div className="text-sm font-medium text-[var(--text-primary)]">Permintaan Barang</div>
-          <div className="text-xs text-[var(--text-muted)]">Daftar order barang koperasi, dicetak dengan kop surat. Tgl Masuk terisi otomatis dari Stock In.</div>
+          <div className="text-xs text-[var(--text-muted)]">Daftar order barang koperasi, dicetak dengan kop surat. Setelah disimpan, Tgl Masuk tiap barang terisi sendiri saat Stock In-nya dicatat.</div>
         </div>
         {canInput && (
           <button onClick={() => setBuka("baru")} className="ml-auto inline-flex items-center gap-1.5 text-sm px-3.5 py-2 rounded-md bg-[var(--accent-blue)] text-white hover:opacity-90">
@@ -263,6 +263,8 @@ function PermintaanForm({
   };
   const setOrang = (k: keyof KopPermintaanTtd, f: "nama" | "jabatan", v: string) => setTtd((t) => ({ ...t, [k]: { ...t[k], [f]: v } }));
   const ro = !bisaUbah;
+  // Tgl Masuk only once the request exists: a new one is only what is asked; it then fills from Stock In.
+  const tersimpan = savedId !== null;
 
   return (
     <div className="fixed inset-0 z-50 bg-black/40 flex items-start justify-center p-2 sm:p-6 overflow-y-auto" onClick={onClose}>
@@ -323,9 +325,11 @@ function PermintaanForm({
                     <th className="py-1.5 pr-2 w-20 text-right" title="Stok koperasi sekarang">
                       Stok skrg
                     </th>
-                    <th className="py-1.5 pr-2 w-36" title="Otomatis dari Stock In pertama barang ini setelah tanggal permintaan; atau isi sendiri">
-                      Tgl Masuk
-                    </th>
+                    {tersimpan && (
+                      <th className="py-1.5 pr-2 w-36" title="Otomatis dari Stock In pertama barang ini setelah tanggal permintaan">
+                        Tgl Masuk
+                      </th>
+                    )}
                     <th className="w-8" />
                   </tr>
                 </thead>
@@ -348,13 +352,13 @@ function PermintaanForm({
                           {r.teks.trim() && !r.kode && <div className="text-[10px] text-[var(--accent-amber)] mt-0.5">di luar daftar barang koperasi</div>}
                         </td>
                         <td className="py-1 pr-2">
-                          <input value={r.jenis} disabled={ro} onChange={(e) => ubah(r.key, { jenis: e.target.value })} placeholder="135 GR" className={inputCls} />
+                          <input value={r.jenis} disabled={ro} onChange={(e) => ubah(r.key, { jenis: e.target.value })} placeholder="cth. 135 GR" className={inputCls} />
                         </td>
                         <td className="py-1 pr-2">
                           <input value={r.jumlah} disabled={ro} inputMode="decimal" onChange={(e) => ubah(r.key, { jumlah: e.target.value })} className={`${inputCls} text-right`} />
                         </td>
                         <td className="py-1 pr-2">
-                          <input value={r.satuan} disabled={ro} onChange={(e) => ubah(r.key, { satuan: e.target.value.toUpperCase() })} placeholder="DUS" list="kop-pmt-satuan" className={inputCls} />
+                          <input value={r.satuan} disabled={ro} onChange={(e) => ubah(r.key, { satuan: e.target.value.toUpperCase() })} placeholder="cth. DUS" list="kop-pmt-satuan" className={inputCls} />
                         </td>
                         <td className="py-1 pr-2">
                           <input value={r.isi} disabled={ro} inputMode="decimal" onChange={(e) => ubah(r.key, { isi: e.target.value })} className={`${inputCls} text-right`} />
@@ -369,15 +373,46 @@ function PermintaanForm({
                             ""
                           )}
                         </td>
-                        <td className="py-1 pr-2">
-                          {r.masuk && !r.tgl_masuk ? (
-                            <div className="pt-1.5 text-xs text-[var(--accent-green)] font-medium" title="Dari Stock In">
-                              {isoDisplay(r.masuk)} <span className="font-normal text-[var(--text-muted)]">(Stock In)</span>
-                            </div>
-                          ) : (
-                            <input type="date" value={r.tgl_masuk} disabled={ro} onChange={(e) => ubah(r.key, { tgl_masuk: e.target.value })} className={`${inputCls} text-xs`} title="Kosong = otomatis dari Stock In" />
-                          )}
-                        </td>
+                        {tersimpan && (
+                          <td className="py-1 pr-2">
+                            {r.masuk && !r.tgl_masuk ? (
+                              <div className="pt-1.5 text-xs text-[var(--accent-green)] font-medium" title="Dari Stock In">
+                                {isoDisplay(r.masuk)} <span className="font-normal text-[var(--text-muted)]">(Stock In)</span>
+                              </div>
+                            ) : r.tgl_masuk || r.manual ? (
+                              <div className="flex items-center gap-1">
+                                <input
+                                  type="date"
+                                  value={r.tgl_masuk}
+                                  min={tanggal}
+                                  max={localToday()}
+                                  disabled={ro}
+                                  onChange={(e) => ubah(r.key, { tgl_masuk: e.target.value })}
+                                  className={`${inputCls} text-xs`}
+                                  title="Tanggal barang ini diterima (dicatat manual, tanpa Stock In)"
+                                />
+                                {!ro && (
+                                  <button onClick={() => ubah(r.key, { tgl_masuk: "", manual: false })} title="Batal catat manual" className="p-0.5 text-[var(--text-muted)] hover:text-[var(--accent-red)]">
+                                    <X size={13} />
+                                  </button>
+                                )}
+                              </div>
+                            ) : (
+                              <div className="pt-1.5 text-xs text-[var(--text-muted)]">
+                                Belum masuk
+                                {!ro && (
+                                  <button
+                                    onClick={() => ubah(r.key, { manual: true })}
+                                    title="Barang sudah diterima tapi tidak lewat Stock In: catat tanggalnya"
+                                    className="ml-1.5 text-[var(--accent-blue)] hover:underline"
+                                  >
+                                    Catat manual
+                                  </button>
+                                )}
+                              </div>
+                            )}
+                          </td>
+                        )}
                         <td className="py-1 pt-1.5">
                           {!ro && (
                             <button onClick={() => setRows((rs) => rs.filter((x) => x.key !== r.key))} title="Hapus baris" className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--accent-red)] hover:bg-[#f1f5f9]">

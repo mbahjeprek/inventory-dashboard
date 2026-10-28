@@ -22,6 +22,8 @@ const qty = (n: number | null | undefined) => (n === null || n === undefined ? "
 
 export function permintaanKoperasiHtml(p: KopPermintaan): string {
   const ttd = kopTtdLengkap(p.ttd);
+  // Nothing in yet: a pure request, without the Tgl Masuk column; once some came in it shows when.
+  const adaMasuk = p.lines.some((l) => l.masuk ?? l.tgl_masuk);
   const rows = p.lines
     .map(
       (l, i) => `<tr>
@@ -33,7 +35,7 @@ export function permintaanKoperasiHtml(p: KopPermintaan): string {
         <td class="c">${esc(l.satuan)}</td>
         <td class="c">${qty(l.isi)}</td>
         <td class="c">${l.isi ? qty(l.jumlah * l.isi) : ""}</td>
-        <td class="c">${esc(isoDisplay(l.masuk ?? l.tgl_masuk ?? ""))}</td>
+        ${adaMasuk ? `<td class="c">${esc(isoDisplay(l.masuk ?? l.tgl_masuk ?? ""))}</td>` : ""}
       </tr>`
     )
     .join("");
@@ -72,7 +74,7 @@ export function permintaanKoperasiHtml(p: KopPermintaan): string {
       <tr><td>Unit</td><td>: Koperasi Karyawan PT.AKSS</td></tr>
     </table>
     <table class="daftar">
-      <thead><tr><th style="width:28px">No</th><th style="width:56px">Kode</th><th>Nama Barang</th><th style="width:78px">Jenis/Type</th><th style="width:50px">Jumlah</th><th style="width:52px">Satuan</th><th style="width:52px">Isi/Dlm Satuan</th><th style="width:50px">Total</th><th style="width:72px">Tgl Masuk</th></tr></thead>
+      <thead><tr><th style="width:28px">No</th><th style="width:56px">Kode</th><th>Nama Barang</th><th style="width:78px">Jenis/Type</th><th style="width:50px">Jumlah</th><th style="width:52px">Satuan</th><th style="width:52px">Isi/Dlm Satuan</th><th style="width:50px">Total</th>${adaMasuk ? `<th style="width:72px">Tgl Masuk</th>` : ""}</tr></thead>
       <tbody>${rows}</tbody>
     </table>
     ${p.catatan ? `<div class="catatan"><b>Catatan:</b> ${esc(p.catatan)}</div>` : ""}
