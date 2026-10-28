@@ -74,7 +74,9 @@ function toSessionUser(row: UserRow): SessionUser {
 
 // Short per-instance cache so every API call doesn't hit the users table; cleared when an account
 // is changed here, so a new checkbox applies within seconds everywhere.
-const sessionCache = new Map<number, { user: SessionUser; at: number }>();
+const sessionCache = new Map<number, { user: SessionUser; at: number; pv: string }>();
+// The password a session belongs to (see signSession): the start of the stored hash's salt.
+const pvOf = (hash: string | null | undefined) => String(hash ?? "").slice(0, 16);
 const SESSION_TTL_MS = 15_000;
 // A session in use is renewed (a fresh 7-day cookie) at most once an hour, so an account working in
 // the app is never logged out in the middle of a form - only one left unused for 7 days.
@@ -93,18 +95,29 @@ async function sessionFromCookie(req: express.Request, res?: express.Response): 
   const token = req.cookies?.[COOKIE_NAME];
   const claims = token ? verifySession(token) : null;
   if (!claims) return null;
-  const renew = (u: SessionUser) => {
-    if (res && claims.iat && Date.now() / 1000 - claims.iat > SESSION_RENEW_S) setSessionCookie(res, signSession(u));
+  // A session opened with an earlier password (changed / reset since) is logged out; one from before pv existed is
+  // renewed at once so it carries it.
+  const check = (u: SessionUser, pv: string) => {
+    if (claims.pv && claims.pv !== pv) return null;
+    if (res && (!claims.pv || (claims.iat && Date.now() / 1000 - claims.iat > SESSION_RENEW_S))) setSessionCookie(res, signSession(u, pv));
     return u;
   };
-  await markSeen(claims.id, req);
   const hit = sessionCache.get(claims.id);
-  if (hit && Date.now() - hit.at < SESSION_TTL_MS) return renew(hit.user);
-  const row = await queryOne<UserRow>("SELECT id, username, nama, role, estate, estates, perms, temp_full_until, temp_full_modules, edit_lampau_until FROM users WHERE id = @id", { id: claims.id });
+  if (hit && Date.now() - hit.at < SESSION_TTL_MS) {
+    const u = check(hit.user, hit.pv);
+    if (u) await markSeen(claims.id, req);
+    return u;
+  }
+  const row = await queryOne<UserRow & { pv: string }>(
+    "SELECT id, username, nama, role, estate, estates, perms, temp_full_until, temp_full_modules, edit_lampau_until, left(password_hash, 16) AS pv FROM users WHERE id = @id",
+    { id: claims.id }
+  );
   if (!row) return null;
   const user = toSessionUser(row);
-  sessionCache.set(user.id, { user, at: Date.now() });
-  return renew(user);
+  sessionCache.set(user.id, { user, at: Date.now(), pv: row.pv });
+  const u = check(user, row.pv);
+  if (u) await markSeen(claims.id, req);
+  return u;
 }
 
 // Wrong passwords are counted (login_gagal) over a quarter of an hour, in the database so every server instance sees
@@ -141,7 +154,7 @@ app.post("/api/auth/login", async (req, res) => {
   await execute("DELETE FROM login_gagal WHERE username = @nama AND ip = @ip", { nama, ip }).catch(() => {});
 
   const user = toSessionUser(row);
-  setSessionCookie(res, signSession(user));
+  setSessionCookie(res, signSession(user, pvOf(row.password_hash)));
   // Login history for the Log Aktivitas User page; a failure here never blocks the login.
   await execute("INSERT INTO login_log (user_id) VALUES (@id)", { id: user.id }).catch((e) => console.error("login log failed", e));
   res.json({ user });
@@ -2079,7 +2092,12 @@ app.post("/api/auth/change-password", async (req, res) => {
   if (!verifyPassword(String(currentPassword ?? ""), row.password_hash)) {
     return res.status(400).json({ error: "Password lama salah" });
   }
-  await execute("UPDATE users SET password_hash = @hash WHERE id = @id", { hash: hashPassword(newPassword), id: req.user!.id });
+  // Every other session of this account (another device, someone who knew the old password) is logged out; this one
+  // gets a new cookie and stays in.
+  const hash = hashPassword(newPassword);
+  await execute("UPDATE users SET password_hash = @hash WHERE id = @id", { hash, id: req.user!.id });
+  sessionCache.delete(req.user!.id);
+  setSessionCookie(res, signSession(req.user!, pvOf(hash)));
   res.json({ success: true });
 });
 
