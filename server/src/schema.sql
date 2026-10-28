@@ -1323,3 +1323,9 @@ CREATE TABLE IF NOT EXISTS koperasi_permintaan_line (
 );
 CREATE INDEX IF NOT EXISTS idx_koperasi_permintaan_line ON koperasi_permintaan_line(permintaan_id);
 CREATE INDEX IF NOT EXISTS idx_koperasi_permintaan_line_kode ON koperasi_permintaan_line(barang_kode);
+-- Its signatures, signed in the app: status DRAFT -> DIAJUKAN (Ajukan: the koperasi signs Dibuat oleh) -> DISETUJUI (HR,
+-- with Pelunasan Koperasi, signs Diketahui oleh) or DITOLAK (tolak = {user_id, nama, alasan, at}; fixed and sent again).
+-- approval = { dibuat: {user_id, nama, at}, diketahui: {user_id, nama, at} }.
+ALTER TABLE koperasi_permintaan ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'DRAFT';
+ALTER TABLE koperasi_permintaan ADD COLUMN IF NOT EXISTS approval JSONB NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE koperasi_permintaan ADD COLUMN IF NOT EXISTS tolak JSONB;

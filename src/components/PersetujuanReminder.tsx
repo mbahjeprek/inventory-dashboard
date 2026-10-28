@@ -31,6 +31,7 @@ export function PersetujuanReminder() {
   const baris = [
     jumlah.ba > 0 && `${jumlah.ba} Berita Acara Pemusnahan menunggu persetujuan Anda`,
     jumlah.permintaan > 0 && `${jumlah.permintaan} Permintaan Obat menunggu tanda tangan Anda`,
+    !!jumlah.kop && `${jumlah.kop} Permintaan Barang Koperasi menunggu persetujuan Anda`,
   ].filter(Boolean) as string[];
   return (
     <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => setBuka(false)}>

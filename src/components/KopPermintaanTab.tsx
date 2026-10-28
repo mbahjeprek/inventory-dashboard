@@ -1,6 +1,19 @@
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, ClipboardList, Pencil, Plus, Printer, Trash2, X } from "lucide-react";
-import { api, errorText, type KopBarang, type KopPermintaan, type KopPermintaanLine, type KopPermintaanRow, type KopPermintaanTtd } from "../lib/api";
+import { AlertTriangle, Check, ClipboardList, Pencil, Plus, Printer, Send, Trash2, X } from "lucide-react";
+import {
+  api,
+  errorText,
+  type KopBarang,
+  type KopPermintaan,
+  type KopPermintaanLine,
+  type KopPermintaanRow,
+  type KopPermintaanSign,
+  type KopPermintaanStatus,
+  type KopPermintaanTtd,
+} from "../lib/api";
+import { useAuth } from "../context/AuthContext";
+import { can } from "../lib/access";
+import { waktuTtd } from "../lib/permintaanSurat";
 import { kopTtdLengkap, permintaanKoperasiHtml } from "../lib/permintaanKoperasi";
 import { printDocument } from "../lib/printTable";
 import { fmtQty, isoDisplay, localToday } from "../lib/opname";
@@ -9,15 +22,29 @@ import { ConfirmDialog } from "./ConfirmDialog";
 
 // Permintaan Barang Koperasi: the koperasi's order lists (was an Excel sheet per order). Each one is saved with its
 // nomor, printed with the kop and the two signatures, and shows per barang when it came in (Tgl Masuk: the first
-// Stock In of that barang after the request, or a date typed for one that came in another way).
+// Stock In of that barang after the request, or a date typed for one that came in another way). Signed in the app:
+// the koperasi sends it (Ajukan = signs Dibuat oleh), HR (Pelunasan Koperasi) approves it (signs Diketahui oleh) or
+// refuses it with an alasan, after which it is fixed and sent again. Once approved only Tgl Masuk can still be recorded.
 
-type Baris = { key: number; kode: string; teks: string; nama: string; jenis: string; jumlah: string; satuan: string; isi: string; tgl_masuk: string; masuk: string | null; manual?: boolean };
+const STATUS: Record<KopPermintaanStatus, { label: string; cls: string }> = {
+  DRAFT: { label: "Draft", cls: "bg-[#f1f5f9] border-[var(--border)] text-[var(--text-secondary)]" },
+  DIAJUKAN: { label: "Menunggu HR", cls: "bg-[var(--accent-amber-bg)] border-[var(--accent-amber-border)] text-[var(--accent-amber)]" },
+  DISETUJUI: { label: "Disetujui HR", cls: "bg-[var(--accent-green-bg)] border-[var(--accent-green-border)] text-[var(--accent-green)]" },
+  DITOLAK: { label: "Ditolak HR", cls: "bg-[var(--accent-red-bg)] border-[var(--accent-red-border)] text-[var(--accent-red)]" },
+};
+export function StatusPermintaan({ status }: { status: KopPermintaanStatus }) {
+  const st = STATUS[status] ?? STATUS.DRAFT;
+  return <span className={`text-xs font-medium px-2 py-0.5 rounded-full border whitespace-nowrap ${st.cls}`}>{st.label}</span>;
+}
+
+type Baris = { key: number; kode: string; teks: string; nama: string; jenis: string; jumlah: string; satuan: string; isi: string; tgl_masuk: string; masuk: string | null; manual?: boolean; id?: number };
 let nextKey = 1;
 const barisKosong = (): Baris => ({ key: nextKey++, kode: "", teks: "", nama: "", jenis: "", jumlah: "", satuan: "", isi: "", tgl_masuk: "", masuk: null });
 const labelBarang = (b: Pick<KopBarang, "kode" | "nama">) => `${b.kode} · ${b.nama}`;
 const inputCls = "w-full text-sm rounded-md border border-[var(--border)] px-2 py-1.5 bg-white";
 
 export function KopPermintaanTab({ canInput, canEdit }: { canInput: boolean; canEdit: boolean }) {
+  const { user } = useAuth();
   const [list, setList] = useState<Awaited<ReturnType<typeof api.kopPermintaanList>> | null>(null);
   const [error, setError] = useState("");
   const [buka, setBuka] = useState<number | "baru" | null>(null);
@@ -76,6 +103,7 @@ export function KopPermintaanTab({ canInput, canEdit }: { canInput: boolean; can
               <tr className="bg-[#f8fafc] text-left text-xs uppercase text-[var(--text-secondary)]">
                 <th className="px-3 py-2.5">Nomor</th>
                 <th className="px-3 py-2.5">Tanggal</th>
+                <th className="px-3 py-2.5">Status</th>
                 <th className="px-3 py-2.5 text-right">Item</th>
                 <th className="px-3 py-2.5">Sudah masuk</th>
                 <th className="px-3 py-2.5">Catatan</th>
@@ -94,6 +122,10 @@ export function KopPermintaanTab({ canInput, canEdit }: { canInput: boolean; can
                       </button>
                     </td>
                     <td className="px-3 py-2 whitespace-nowrap">{isoDisplay(r.tanggal)}</td>
+                    <td className="px-3 py-2">
+                      <StatusPermintaan status={r.status} />
+                      {r.status === "DITOLAK" && r.tolak?.alasan && <div className="text-[11px] text-[var(--accent-red)] mt-0.5">{r.tolak.alasan}</div>}
+                    </td>
                     <td className="px-3 py-2 text-right tabular-nums">{r.item}</td>
                     <td className="px-3 py-2 whitespace-nowrap">
                       <span
@@ -115,7 +147,7 @@ export function KopPermintaanTab({ canInput, canEdit }: { canInput: boolean; can
                       <button onClick={() => setBuka(r.id)} title={canInput ? "Buka / ubah" : "Lihat"} className="p-1.5 rounded text-[var(--text-secondary)] hover:bg-[#f1f5f9]">
                         <Pencil size={15} />
                       </button>
-                      {canEdit && (
+                      {canEdit && (r.status !== "DISETUJUI" || user?.role === "superuser") && (
                         <button onClick={() => setHapus(r)} title="Hapus" className="p-1.5 rounded text-[var(--text-muted)] hover:text-[var(--accent-red)] hover:bg-[#f1f5f9]">
                           <Trash2 size={15} />
                         </button>
@@ -134,6 +166,7 @@ export function KopPermintaanTab({ canInput, canEdit }: { canInput: boolean; can
           ttdTerakhir={list.ttd}
           terakhir={list.terakhir}
           bisaUbah={canInput}
+          bisaSetujui={can(user, "koperasi.pelunasan")}
           onClose={() => setBuka(null)}
           onSaved={() => setMuat((n) => n + 1)}
         />
@@ -143,11 +176,12 @@ export function KopPermintaanTab({ canInput, canEdit }: { canInput: boolean; can
   );
 }
 
-function PermintaanForm({
+export function PermintaanForm({
   id,
   ttdTerakhir,
   terakhir,
   bisaUbah,
+  bisaSetujui,
   onClose,
   onSaved,
 }: {
@@ -155,9 +189,14 @@ function PermintaanForm({
   ttdTerakhir: Partial<KopPermintaanTtd> | null;
   terakhir: { kode: string; jenis: string; satuan: string; isi: number | null }[];
   bisaUbah: boolean;
+  bisaSetujui: boolean;
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const { user } = useAuth();
+  const [sign, setSign] = useState<KopPermintaanSign>({ status: "DRAFT", approval: {}, tolak: null });
+  const [tolakMode, setTolakMode] = useState(false);
+  const [alasan, setAlasan] = useState("");
   const [barang, setBarang] = useState<KopBarang[]>([]);
   const [nomor, setNomor] = useState<string | null>(null);
   const [savedId, setSavedId] = useState<number | null>(id);
@@ -181,12 +220,14 @@ function PermintaanForm({
       .kopPermintaanGet(id)
       .then((p) => {
         setNomor(p.nomor);
+        setSign({ status: p.status, approval: p.approval ?? {}, tolak: p.tolak });
         setTanggal(p.tanggal);
         setCatatan(p.catatan);
         setTtd(kopTtdLengkap(p.ttd));
         setRows(
           p.lines.map((l) => ({
             key: nextKey++,
+            id: l.id,
             kode: l.barang_kode ?? "",
             teks: l.barang_kode ? `${l.barang_kode} · ${l.nama}` : l.nama,
             nama: l.nama,
@@ -233,7 +274,7 @@ function PermintaanForm({
   const tambahMenipis = () => setRows((rs) => [...rs.filter((r) => r.teks.trim() || r.jumlah.trim()), ...menipis.map(dariBarang)]);
 
   const isiRows = rows.filter((r) => r.teks.trim() || r.jumlah.trim());
-  const simpan = async (lanjut: "tutup" | "cetak") => {
+  const simpan = async (ajukan: boolean) => {
     const lines: KopPermintaanLine[] = isiRows.map((r) => ({
       barang_kode: r.kode || null,
       nama: r.nama || r.teks.trim(),
@@ -249,12 +290,11 @@ function PermintaanForm({
     setSaving(true);
     setError("");
     try {
-      const res = await api.kopPermintaanSave(savedId, { tanggal, catatan, ttd, lines });
+      const res = await api.kopPermintaanSave(savedId, { tanggal, catatan, ttd, lines, ajukan });
       setSavedId(res.id);
       setNomor(res.nomor);
       onSaved();
-      if (lanjut === "cetak") printDocument(permintaanKoperasiHtml(await api.kopPermintaanGet(res.id)));
-      else onClose();
+      onClose();
     } catch (e) {
       setError(errorText(e, "Gagal menyimpan"));
     } finally {
@@ -262,9 +302,29 @@ function PermintaanForm({
     }
   };
   const setOrang = (k: keyof KopPermintaanTtd, f: "nama" | "jabatan", v: string) => setTtd((t) => ({ ...t, [k]: { ...t[k], [f]: v } }));
-  const ro = !bisaUbah;
   // Tgl Masuk only once the request exists: a new one is only what is asked; it then fills from Stock In.
   const tersimpan = savedId !== null;
+  // Its content is changed by the koperasi until HR approves; Tgl Masuk can be recorded at any time after.
+  const ro = !bisaUbah || sign.status === "DISETUJUI";
+  const bolehMasuk = bisaUbah && tersimpan;
+  // HR: a request sent, not by itself (a Super User may approve any).
+  const giliranHr = bisaSetujui && sign.status === "DIAJUKAN" && (user?.role === "superuser" || sign.approval.dibuat?.user_id !== user?.id);
+  const run = async (fn: () => Promise<unknown>, gagal: string) => {
+    setSaving(true);
+    setError("");
+    try {
+      await fn();
+      onSaved();
+      onClose();
+    } catch (e) {
+      setError(errorText(e, gagal));
+    } finally {
+      setSaving(false);
+    }
+  };
+  const simpanMasuk = () =>
+    run(() => api.kopPermintaanMasuk(savedId!, rows.filter((r) => r.id).map((r) => ({ id: r.id!, tgl_masuk: r.tgl_masuk || null }))), "Gagal menyimpan Tgl Masuk");
+  const cetak = async () => savedId && printDocument(permintaanKoperasiHtml((await api.kopPermintaanGet(savedId)) as KopPermintaan));
 
   return (
     <div className="fixed inset-0 z-50 bg-black/40 flex items-start justify-center p-2 sm:p-6 overflow-y-auto" onClick={onClose}>
@@ -284,6 +344,28 @@ function PermintaanForm({
           <p className="p-5 text-sm text-[var(--text-muted)]">Memuat...</p>
         ) : (
           <div className="p-5 space-y-4">
+            {tersimpan && (
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs rounded-md border border-[var(--border)] bg-[#f8fafc] px-3 py-2">
+                <StatusPermintaan status={sign.status} />
+                {sign.approval.dibuat && (
+                  <span>
+                    Diajukan <b>{sign.approval.dibuat.nama}</b> · {waktuTtd(sign.approval.dibuat.at)}
+                  </span>
+                )}
+                {sign.approval.diketahui && (
+                  <span>
+                    Disetujui HR <b>{sign.approval.diketahui.nama}</b> · {waktuTtd(sign.approval.diketahui.at)}
+                  </span>
+                )}
+                {sign.status === "DITOLAK" && sign.tolak && (
+                  <span className="text-[var(--accent-red)]">
+                    Ditolak <b>{sign.tolak.nama}</b> · {waktuTtd(sign.tolak.at)}: {sign.tolak.alasan}. Perbaiki lalu Ajukan lagi.
+                  </span>
+                )}
+                {sign.status === "DIAJUKAN" && bisaUbah && !giliranHr && <span className="text-[var(--text-muted)]">Mengubah isinya menarik kembali pengajuan; klik Ajukan lagi setelah selesai.</span>}
+                {sign.status === "DISETUJUI" && <span className="text-[var(--text-muted)]">Isi sudah dikunci; Tgl Masuk tetap bisa dicatat.</span>}
+              </div>
+            )}
             <div className="flex flex-wrap items-end gap-3">
               <div>
                 <label className="text-xs text-[var(--text-secondary)] mb-1 block">Tanggal</label>
@@ -386,12 +468,12 @@ function PermintaanForm({
                                   value={r.tgl_masuk}
                                   min={tanggal}
                                   max={localToday()}
-                                  disabled={ro}
+                                  disabled={!bolehMasuk}
                                   onChange={(e) => ubah(r.key, { tgl_masuk: e.target.value })}
                                   className={`${inputCls} text-xs`}
                                   title="Tanggal barang ini diterima (dicatat manual, tanpa Stock In)"
                                 />
-                                {!ro && (
+                                {bolehMasuk && (
                                   <button onClick={() => ubah(r.key, { tgl_masuk: "", manual: false })} title="Batal catat manual" className="p-0.5 text-[var(--text-muted)] hover:text-[var(--accent-red)]">
                                     <X size={13} />
                                   </button>
@@ -400,7 +482,7 @@ function PermintaanForm({
                             ) : (
                               <div className="pt-1.5 text-xs text-[var(--text-muted)]">
                                 Belum masuk
-                                {!ro && (
+                                {bolehMasuk && (
                                   <button
                                     onClick={() => ubah(r.key, { manual: true })}
                                     title="Barang sudah diterima tapi tidak lewat Stock In: catat tanggalnya"
@@ -452,30 +534,70 @@ function PermintaanForm({
               ))}
             </div>
 
+            {tolakMode && (
+              <div className="rounded-md border border-[var(--accent-red-border)] bg-[var(--accent-red-bg)] p-3 space-y-2">
+                <label className="text-xs font-medium text-[var(--accent-red)] block">Alasan ditolak (dibaca koperasi untuk diperbaiki)</label>
+                <input value={alasan} onChange={(e) => setAlasan(e.target.value)} autoFocus placeholder="mis. jumlah gula terlalu banyak, kurangi jadi 3 dus" className={inputCls} />
+                <div className="flex justify-end gap-2">
+                  <button onClick={() => setTolakMode(false)} className="px-3 py-1.5 text-sm rounded-md border border-[var(--border)] bg-white">
+                    Batal
+                  </button>
+                  <button
+                    onClick={() => (alasan.trim() ? run(() => api.kopPermintaanTolak(savedId!, alasan.trim()), "Gagal menolak") : setError("Tulis alasan penolakannya"))}
+                    disabled={saving}
+                    className="px-3 py-1.5 text-sm rounded-md bg-[var(--accent-red)] text-white disabled:opacity-50"
+                  >
+                    Tolak permintaan
+                  </button>
+                </div>
+              </div>
+            )}
             {error && <p className="text-sm text-[var(--accent-red)]">{error}</p>}
             <div className="flex flex-wrap items-center justify-end gap-2">
               <span className="mr-auto text-xs text-[var(--text-muted)]">{isiRows.length} barang</span>
               <button onClick={onClose} className="px-4 py-2 text-sm rounded-md border border-[var(--border)] text-[var(--text-secondary)]">
-                {ro ? "Tutup" : "Batal"}
+                {ro && !giliranHr ? "Tutup" : "Batal"}
               </button>
-              {ro ? (
-                savedId && (
-                  <button
-                    onClick={async () => printDocument(permintaanKoperasiHtml((await api.kopPermintaanGet(savedId)) as KopPermintaan))}
-                    className="inline-flex items-center gap-1.5 px-4 py-2 text-sm rounded-md bg-[var(--accent-blue)] text-white"
-                  >
-                    <Printer size={15} /> Cetak
-                  </button>
-                )
-              ) : (
+              {tersimpan && (
+                <button onClick={cetak} className="inline-flex items-center gap-1.5 px-4 py-2 text-sm rounded-md border border-[var(--border)] text-[var(--text-secondary)]">
+                  <Printer size={15} /> Cetak
+                </button>
+              )}
+              {giliranHr ? (
                 <>
-                  <button onClick={() => simpan("tutup")} disabled={saving} className="px-4 py-2 text-sm rounded-md border border-[var(--accent-blue-border)] text-[var(--accent-blue)] disabled:opacity-50">
-                    {saving ? "Menyimpan..." : "Simpan"}
+                  <button onClick={() => setTolakMode(true)} disabled={saving} className="px-4 py-2 text-sm rounded-md border border-[var(--accent-red-border)] text-[var(--accent-red)] disabled:opacity-50">
+                    Tolak
                   </button>
-                  <button onClick={() => simpan("cetak")} disabled={saving} className="inline-flex items-center gap-1.5 px-4 py-2 text-sm rounded-md bg-[var(--accent-blue)] text-white disabled:opacity-50">
-                    <Printer size={15} /> Simpan &amp; Cetak
+                  <button
+                    onClick={() => run(() => api.kopPermintaanSetujui(savedId!), "Gagal menyetujui")}
+                    disabled={saving}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 text-sm rounded-md bg-[var(--accent-green)] text-white disabled:opacity-50"
+                  >
+                    <Check size={15} /> Setujui
                   </button>
                 </>
+              ) : !ro ? (
+                <>
+                  <button onClick={() => simpan(false)} disabled={saving} className="px-4 py-2 text-sm rounded-md border border-[var(--accent-blue-border)] text-[var(--accent-blue)] disabled:opacity-50">
+                    {saving ? "Menyimpan..." : "Simpan draft"}
+                  </button>
+                  <button
+                    onClick={() => simpan(true)}
+                    disabled={saving}
+                    title="Tanda tangan Dibuat oleh secara elektronik dan kirim ke HR untuk disetujui"
+                    className="inline-flex items-center gap-1.5 px-4 py-2 text-sm rounded-md bg-[var(--accent-blue)] text-white disabled:opacity-50"
+                  >
+                    <Send size={15} /> Ajukan ke HR
+                  </button>
+                </>
+              ) : (
+                sign.status === "DISETUJUI" &&
+                bolehMasuk &&
+                rows.some((r) => r.manual || r.tgl_masuk) && (
+                  <button onClick={simpanMasuk} disabled={saving} className="px-4 py-2 text-sm rounded-md bg-[var(--accent-blue)] text-white disabled:opacity-50">
+                    {saving ? "Menyimpan..." : "Simpan Tgl Masuk"}
+                  </button>
+                )
               )}
             </div>
           </div>

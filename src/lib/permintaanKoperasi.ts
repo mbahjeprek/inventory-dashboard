@@ -1,9 +1,11 @@
-import type { KopPermintaan, KopPermintaanTtd } from "./api";
+import type { KopPermintaan, KopPermintaanCap, KopPermintaanTtd } from "./api";
 import { KOP_CSS, PERUSAHAAN, escHtml as esc, kopHtml, tanggalPanjang } from "./surat";
 import { isoDisplay } from "./opname";
+import { waktuTtd } from "./permintaanSurat";
 
 // Form Permintaan Barang Koperasi as the koperasi's Excel sheet had it: kop of PT.AKSS / Koperasi Karyawan, the list
-// (kode, nama, jenis / type, jumlah, satuan, isi per satuan, total, tgl masuk), place and date, and two signatures.
+// (kode, nama, jenis / type, jumlah, satuan, isi per satuan, total, tgl masuk), place and date, and two signatures:
+// a box signed in the app carries an electronic stamp (who and when); until HR approves, the letter is marked as such.
 
 export const KOP_PMT_TTD_DEFAULT: KopPermintaanTtd = {
   dibuat: { nama: "M. RAMLI", jabatan: "Admin Koperasi" },
@@ -39,8 +41,14 @@ export function permintaanKoperasiHtml(p: KopPermintaan): string {
       </tr>`
     )
     .join("");
-  const kotak = (judul: string, o: { nama: string; jabatan: string }) =>
-    `<div class="ttd"><div>${esc(judul)}</div><div class="ruang"></div><div class="nama">${esc(o.nama || "(................................)")}</div><div class="jab">${esc(o.jabatan)}</div></div>`;
+  const kotak = (judul: string, o: { nama: string; jabatan: string }, cap: KopPermintaanCap | undefined, kata: string) =>
+    `<div class="ttd"><div>${esc(judul)}</div>${
+      cap ? `<div class="ruang el"><div class="cap">${kata} SECARA ELEKTRONIK<br>${esc(cap.nama)} · ${esc(waktuTtd(cap.at))}</div></div>` : `<div class="ruang"></div>`
+    }<div class="nama">${esc(o.nama || "(................................)")}</div><div class="jab">${esc(o.jabatan)}</div></div>`;
+  const tanda =
+    p.status === "DISETUJUI"
+      ? `<div class="final">DISETUJUI HR · DOKUMEN FINAL</div>`
+      : `<div class="draft">${p.status === "DIAJUKAN" ? "MENUNGGU PERSETUJUAN HR" : p.status === "DITOLAK" ? "DITOLAK HR" : "DRAFT - BELUM DIAJUKAN"}</div>`;
   return `<!doctype html><html><head><meta charset="utf-8"><title>${esc(p.nomor)}</title><style>
     @page { size: A4 portrait; margin: 12mm 12mm 14mm 14mm; }
     body { font-family: "Times New Roman", serif; font-size: 11pt; color: #000; margin: 0; }
@@ -62,6 +70,11 @@ export function permintaanKoperasiHtml(p: KopPermintaan): string {
     .ttd { flex: 1; text-align: center; padding: 4px 4px 6px; border-right: 1px solid #000; }
     .ttd:last-child { border-right: 0; }
     .ttd .ruang { height: 70px; }
+    .ttd .ruang.el { display: flex; align-items: center; justify-content: center; }
+    .ttd .cap { border: 1.5px solid #1f4e9c; color: #1f4e9c; border-radius: 4px; padding: 3px 6px; font-size: 7.5pt; font-weight: bold; line-height: 1.35; font-family: Arial, sans-serif; }
+    .draft { position: fixed; top: 42%; left: 0; right: 0; text-align: center; font-size: 46pt; font-weight: bold; color: rgba(200, 0, 0, 0.13); transform: rotate(-24deg); z-index: -1; font-family: Arial, sans-serif; }
+    .final { text-align: center; font-size: 9pt; font-weight: bold; color: #1f4e9c; margin-top: -8px; margin-bottom: 8px; }
+    .tolak { margin-top: 8px; font-size: 10pt; color: #b00000; }
     .ttd .nama { font-weight: bold; text-decoration: underline; text-transform: uppercase; }
     .ttd .jab { font-size: 10pt; }
     .alamat { display: flex; justify-content: space-between; gap: 20px; margin-top: 18px; padding-top: 5px; border-top: 3px double #000; font-size: 8.5pt; font-style: italic; page-break-inside: avoid; }
@@ -69,6 +82,7 @@ export function permintaanKoperasiHtml(p: KopPermintaan): string {
     ${kopHtml(PERUSAHAAN, "Koperasi Karyawan")}
     <h1>FORM PERMINTAAN BARANG KOPERASI</h1>
     <div class="nomor">Nomor: ${esc(p.nomor)}</div>
+    ${tanda}
     <table class="info">
       <tr><td>Tanggal</td><td>: ${esc(tanggalPanjang(p.tanggal))}</td></tr>
       <tr><td>Unit</td><td>: Koperasi Karyawan PT.AKSS</td></tr>
@@ -78,8 +92,9 @@ export function permintaanKoperasiHtml(p: KopPermintaan): string {
       <tbody>${rows}</tbody>
     </table>
     ${p.catatan ? `<div class="catatan"><b>Catatan:</b> ${esc(p.catatan)}</div>` : ""}
+    ${p.status === "DITOLAK" && p.tolak ? `<div class="tolak"><b>Ditolak HR</b> (${esc(p.tolak.nama)}, ${esc(waktuTtd(p.tolak.at))}): ${esc(p.tolak.alasan)}</div>` : ""}
     <div class="penutup"><div class="tempat">Tideng Pale, ${esc(tanggalPanjang(p.tanggal))}</div>
-    <div class="ttds">${kotak("Dibuat oleh,", ttd.dibuat)}${kotak("Diketahui oleh,", ttd.diketahui)}</div></div>
+    <div class="ttds">${kotak("Dibuat oleh,", ttd.dibuat, p.approval?.dibuat, "DIAJUKAN")}${kotak("Diketahui oleh,", ttd.diketahui, p.approval?.diketahui, "DISETUJUI")}</div></div>
     <div class="alamat">
       <div><b>Alamat Kantor Pusat :</b><br>Altira Business Tower Floor Lt. 19 Unit A, B &amp; D<br>Jln. Yos Sudarso Kav. 85, Sunter Jaya<br>Tg. Priok, Jakarta Utara - DKI Jakarta</div>
       <div><b>Alamat Estate :</b><br>Desa Sesayap Desa &amp; Tideng Pale<br>Kecamatan Sesayap Hilir &amp; Sesayap<br>Kabupaten Tana Tidung - Kaltara</div>

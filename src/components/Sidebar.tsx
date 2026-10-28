@@ -79,7 +79,7 @@ const navSections: NavSection[] = [
   {
     items: [
       { to: "/", label: "Dashboard", icon: LayoutDashboard, subtitle: "Ringkasan semua estate" },
-      { to: PERSETUJUAN_PATH, label: "Persetujuan", icon: Signature, subtitle: "Permintaan Obat & Berita Acara" },
+      { to: PERSETUJUAN_PATH, label: "Persetujuan", icon: Signature, subtitle: "Permintaan Obat, Barang & Berita Acara" },
     ],
   },
   {

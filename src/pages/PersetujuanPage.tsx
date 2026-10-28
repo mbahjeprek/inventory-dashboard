@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Signature } from "lucide-react";
-import { api, errorText, type BeritaAcara, type PermintaanMenunggu } from "../lib/api";
+import { api, errorText, type BeritaAcara, type KopPermintaanRow, type PermintaanMenunggu } from "../lib/api";
+import { PermintaanForm } from "../components/KopPermintaanTab";
 import { Detail } from "../components/KlinikPermintaanTab";
 import { BaPeriksaModal, jenisKlinik, jenisKoperasi } from "../components/BaPemusnahan";
 import { useAuth } from "../context/AuthContext";
@@ -9,7 +10,8 @@ import { TTD_LEVEL_LABEL, TTD_URUT, estateLabel, waktuTtd } from "../lib/permint
 
 // Persetujuan: what waits for this account's signature - the Permintaan Obat of its kliniks whose next box it has
 // the tick for (and hasn't signed another box of), opened with their Tanda Tangan panel; and the Berita Acara
-// Pemusnahan of its kliniks / koperasi to approve (Setujui Berita Acara), opened as they print with Setujui / Tolak.
+// Pemusnahan of its kliniks / koperasi to approve (Setujui Berita Acara), opened as they print with Setujui / Tolak;
+// and for HR (Pelunasan Koperasi) the Permintaan Barang Koperasi sent by the koperasi, opened with Setujui / Tolak.
 const tgl = (iso: string) => iso.split("-").reverse().join("/");
 
 export function PersetujuanPage() {
@@ -21,12 +23,23 @@ export function PersetujuanPage() {
   const bolehBa = can(user, "ba.setujui");
   const [bas, setBas] = useState<BeritaAcara[] | null>(null);
   const [periksa, setPeriksa] = useState<BeritaAcara | null>(null);
+  const bolehKop = can(user, "koperasi.pelunasan");
+  const [kop, setKop] = useState<Awaited<ReturnType<typeof api.kopPermintaanList>> | null>(null);
+  const [bukaKop, setBukaKop] = useState<number | null>(null);
+  const kopMenunggu: KopPermintaanRow[] = (kop?.rows ?? []).filter(
+    (r) => r.status === "DIAJUKAN" && (user?.role === "superuser" || r.approval?.dibuat?.user_id !== user?.id)
+  );
   const load = () => {
     if (bolehPermintaan)
       api
         .permintaanMenunggu()
         .then((r) => (setRows(r.rows), setError("")))
         .catch((e) => (setRows([]), setError(errorText(e, "Gagal memuat"))));
+    if (bolehKop)
+      api
+        .kopPermintaanList()
+        .then(setKop)
+        .catch((e) => (setKop({ rows: [], ttd: null, terakhir: [] }), setError(errorText(e, "Gagal memuat permintaan barang koperasi"))));
     if (bolehBa)
       api
         .baMenunggu()
@@ -46,6 +59,74 @@ export function PersetujuanPage() {
         <p className="text-sm text-[var(--text-secondary)]">Dokumen yang menunggu tanda tangan / persetujuan Anda.</p>
       </div>
       {error && <p className="text-sm text-[var(--accent-red)]">{error}</p>}
+      {bolehKop && (
+        <section className="space-y-2">
+          <h2 className="text-sm font-semibold text-[var(--text-primary)]">
+            Permintaan Barang Koperasi{" "}
+            {kopMenunggu.length > 0 && <span className="ml-1 text-xs font-normal text-[var(--accent-amber)]">{kopMenunggu.length} menunggu</span>}
+          </h2>
+          <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-[#f8fafc] text-xs text-[var(--text-secondary)]">
+                <tr className="text-left">
+                  <th className="px-3 py-2">Nomor</th>
+                  <th className="px-3 py-2">Tanggal</th>
+                  <th className="px-3 py-2 text-right">Barang</th>
+                  <th className="px-3 py-2">Diajukan</th>
+                  <th className="px-3 py-2" />
+                </tr>
+              </thead>
+              <tbody>
+                {kop === null ? (
+                  <tr>
+                    <td colSpan={5} className="px-3 py-6 text-center text-[var(--text-muted)]">
+                      Memuat...
+                    </td>
+                  </tr>
+                ) : !kopMenunggu.length ? (
+                  <tr>
+                    <td colSpan={5} className="px-3 py-6 text-center text-[var(--text-muted)]">
+                      Tidak ada permintaan barang yang menunggu persetujuan Anda.
+                    </td>
+                  </tr>
+                ) : (
+                  kopMenunggu.map((r) => (
+                    <tr key={r.id} className="border-t border-[var(--border)] hover:bg-[#f8fafc] align-top">
+                      <td className="px-3 py-2 font-medium">
+                        <button onClick={() => setBukaKop(r.id)} className="text-[var(--accent-blue)] hover:underline text-left">
+                          {r.nomor}
+                        </button>
+                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap">{tgl(r.tanggal)}</td>
+                      <td className="px-3 py-2 text-right">{r.item}</td>
+                      <td className="px-3 py-2 text-xs">{r.approval?.dibuat ? `${r.approval.dibuat.nama} · ${waktuTtd(r.approval.dibuat.at)}` : "-"}</td>
+                      <td className="px-3 py-2 text-right">
+                        <button
+                          onClick={() => setBukaKop(r.id)}
+                          className="inline-flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-md bg-[var(--accent-blue)] text-white hover:opacity-90"
+                        >
+                          <Signature size={15} /> Periksa & setujui
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+      {bukaKop !== null && kop && (
+        <PermintaanForm
+          id={bukaKop}
+          ttdTerakhir={kop.ttd}
+          terakhir={kop.terakhir}
+          bisaUbah={false}
+          bisaSetujui
+          onClose={() => setBukaKop(null)}
+          onSaved={load}
+        />
+      )}
       {bolehBa && (
         <section className="space-y-2">
           <h2 className="text-sm font-semibold text-[var(--text-primary)]">

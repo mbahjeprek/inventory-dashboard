@@ -722,8 +722,16 @@ export type KopBarang = {
 export type KopPermintaanOrang = { nama: string; jabatan: string };
 export type KopPermintaanTtd = { dibuat: KopPermintaanOrang; diketahui: KopPermintaanOrang };
 export type KopPermintaanLine = { barang_kode: string | null; nama: string; jenis: string; jumlah: number; satuan: string; isi: number | null; tgl_masuk: string | null; masuk?: string | null };
-export type KopPermintaan = { id: number; nomor: string; tanggal: string; catatan: string; ttd: Partial<KopPermintaanTtd>; created_by: string; lines: KopPermintaanLine[] };
-export type KopPermintaanRow = { id: number; nomor: string; tanggal: string; catatan: string; created_by: string; item: number; masuk: number };
+// Signed in the app: DRAFT -> DIAJUKAN (Dibuat oleh signed) -> DISETUJUI (HR signed Diketahui oleh) / DITOLAK (with the alasan).
+export type KopPermintaanStatus = "DRAFT" | "DIAJUKAN" | "DISETUJUI" | "DITOLAK";
+export type KopPermintaanCap = { user_id: number; nama: string; at: string };
+export type KopPermintaanSign = {
+  status: KopPermintaanStatus;
+  approval: { dibuat?: KopPermintaanCap; diketahui?: KopPermintaanCap };
+  tolak: (KopPermintaanCap & { alasan: string }) | null;
+};
+export type KopPermintaan = KopPermintaanSign & { id: number; nomor: string; tanggal: string; catatan: string; ttd: Partial<KopPermintaanTtd>; created_by: string; lines: (KopPermintaanLine & { id?: number })[] };
+export type KopPermintaanRow = KopPermintaanSign & { id: number; nomor: string; tanggal: string; catatan: string; created_by: string; item: number; masuk: number };
 export type KopAnggota = {
   kode: string;
   jenis: "KARYAWAN" | "INSTANSI";
@@ -1830,8 +1838,12 @@ export const api = {
   kopPermintaanList: () =>
     req<{ rows: KopPermintaanRow[]; ttd: Partial<KopPermintaanTtd> | null; terakhir: { kode: string; jenis: string; satuan: string; isi: number | null }[] }>("/api/koperasi/permintaan"),
   kopPermintaanGet: (id: number) => req<KopPermintaan>(`/api/koperasi/permintaan/${id}`),
-  kopPermintaanSave: (id: number | null, body: { tanggal: string; catatan: string; ttd: KopPermintaanTtd; lines: KopPermintaanLine[] }) =>
+  kopPermintaanSave: (id: number | null, body: { tanggal: string; catatan: string; ttd: KopPermintaanTtd; lines: KopPermintaanLine[]; ajukan?: boolean }) =>
     req<{ success: boolean; id: number; nomor: string }>(id ? `/api/koperasi/permintaan/${id}` : "/api/koperasi/permintaan", { method: id ? "PUT" : "POST", body: JSON.stringify(body) }),
+  kopPermintaanMasuk: (id: number, lines: { id: number; tgl_masuk: string | null }[]) =>
+    req<{ success: boolean }>(`/api/koperasi/permintaan/${id}/masuk`, { method: "PUT", body: JSON.stringify({ lines }) }),
+  kopPermintaanSetujui: (id: number) => req<{ success: boolean }>(`/api/koperasi/permintaan/${id}/setujui`, { method: "POST", body: "{}" }),
+  kopPermintaanTolak: (id: number, alasan: string) => req<{ success: boolean }>(`/api/koperasi/permintaan/${id}/tolak`, { method: "POST", body: JSON.stringify({ alasan }) }),
   kopPermintaanDelete: (id: number) => req<{ success: boolean }>(`/api/koperasi/permintaan/${id}`, { method: "DELETE" }),
   kopBarang: (params: { search?: string; aktif?: string } = {}) => req<KopBarang[]>(`/api/koperasi/barang?${new URLSearchParams(params as any)}`),
   kopKedatangan: (kode: string) =>
@@ -1850,7 +1862,7 @@ export const api = {
   // Who does each step of a Barang Rusak / Expired flow of a unit (from the accounts' ticks), see PetugasAlur.
   petugas: (modul: "KOPERASI" | "KLINIK", unit: string) =>
     req<{ input: string[]; approve: string[]; ba: string[]; pengganti: string[] }>(`/api/petugas?${new URLSearchParams({ modul, unit })}`),
-  persetujuanJumlah: () => req<{ permintaan: number; ba: number; total: number }>("/api/persetujuan/jumlah"),
+  persetujuanJumlah: () => req<{ permintaan: number; ba: number; kop?: number; total: number }>("/api/persetujuan/jumlah"),
   // The manager's WhatsApp answer: YA (setuju) or TIDAK (tolak: true, with the alasan), its capture the proof.
   baSetuju: (id: number, body: { nama: string; jabatan: string; tanggal: string; evidence_id: string | null; tolak?: boolean; alasan?: string }) =>
     req<{ success: boolean }>(`/api/berita-acara/${id}/setuju`, { method: "PUT", body: JSON.stringify(body) }),

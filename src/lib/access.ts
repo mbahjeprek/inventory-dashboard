@@ -67,7 +67,7 @@ export const OTHER_PERMS: { group: string; items: { key: string; label: string }
       { key: "koperasi.view", label: "Lihat Koperasi" },
       { key: "koperasi.input", label: "Input Koperasi (pengambilan, pembelian, rusak)" },
       { key: "koperasi.edit", label: "Edit Koperasi (hapus transaksi, barang, anggota)" },
-      { key: "koperasi.pelunasan", label: "Pelunasan Koperasi (tandai lunas / belum lunas, untuk HR)" },
+      { key: "koperasi.pelunasan", label: "Pelunasan Koperasi & Setujui Permintaan Barang (untuk HR)" },
       { key: "koperasi.approve", label: "Approve Koperasi (periksa barang rusak / expired dan koreksi stok, selesaikan stok opname; bukan yang menginput)" },
     ],
   },
@@ -252,7 +252,7 @@ export function pageAllowed(user: AuthUser | null, path: string): boolean {
   if (path === PINJAMAN_PATH) return MODULES.some((m) => canModule(user, m));
   if (path === PASIEN_PATH) return canModule(user, "KLINIK");
   if (path === DOKUMEN_PATH) return true;
-  if (path === PERSETUJUAN_PATH) return [...TTD_PERMS, "ba.setujui"].some((p) => can(user, p));
+  if (path === PERSETUJUAN_PATH) return [...TTD_PERMS, "ba.setujui", "koperasi.pelunasan"].some((p) => can(user, p));
   if (path === SOP_PATH || path.startsWith(`${SOP_PATH}/`)) return ["sop.view", "sop.edit", "sop.kunci"].some((p) => can(user, p));
   if (path === KOPERASI_PATH) return can(user, "koperasi.view") && userEstates(user).includes(KOPERASI_ESTATE);
   if (path === KENDARAAN_PATH) return can(user, "kendaraan.view");
