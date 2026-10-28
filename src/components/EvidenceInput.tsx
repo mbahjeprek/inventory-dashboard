@@ -73,6 +73,21 @@ export function useEvidenceEnabled() {
 // Link that opens the foto bukti of a transaction (the server redirects to the stored photo).
 export const evidenceUrl = (id: string) => `/api/evidence/${id}`;
 
+// A phone / tablet (touch screen): there the Kamera button opens the back camera straight away. A laptop
+// ignores "capture" (it would only open the file dialog again), so it doesn't get the button.
+export const pakaiKamera = () => typeof window !== "undefined" && !!window.matchMedia?.("(pointer: coarse)").matches;
+
+// "Kamera": take the foto bukti with the phone's camera (the picture goes to `onFile` like an upload).
+export function KameraButton({ onFile, disabled, className, size = 12, label = "Kamera" }: { onFile: (f: File | undefined) => void; disabled?: boolean; className: string; size?: number; label?: string }) {
+  if (!pakaiKamera()) return null;
+  return (
+    <label className={`${className} ${disabled ? "opacity-50 pointer-events-none" : "cursor-pointer"}`} title="Ambil foto langsung dengan kamera HP" onClick={(e) => e.stopPropagation()}>
+      <Camera size={size} /> {label}
+      <input type="file" accept="image/*" capture="environment" className="hidden" disabled={disabled} onChange={(e) => (onFile(e.target.files?.[0]), (e.target.value = ""))} />
+    </label>
+  );
+}
+
 export function EvidenceLink({ id, label }: { id: string | null | undefined; label?: string }) {
   const [open, setOpen] = useState(false);
   if (!id) return null;
@@ -439,6 +454,13 @@ export function EvidenceInput({ value, onChange, label = "Foto Bukti" }: { value
             >
               <ClipboardPaste size={13} /> Tempel
             </button>
+            <KameraButton
+              onFile={pick}
+              disabled={busy}
+              size={13}
+              className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-md border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[#f1f5f9]"
+              label="Foto ulang"
+            />
             <button
               type="button"
               onClick={() => input.current?.click()}
@@ -479,6 +501,12 @@ export function EvidenceInput({ value, onChange, label = "Foto Bukti" }: { value
             </span>
             {!busy && !dragging && <span className="hidden sm:block text-[11px] text-[var(--text-muted)]">atau Ctrl+V untuk tempel · seret gambar ke sini</span>}
           </button>
+          <KameraButton
+            onFile={pick}
+            disabled={busy}
+            size={16}
+            className="flex flex-col items-center justify-center gap-0.5 rounded-md border border-[var(--accent-blue-border)] bg-[var(--accent-blue-bg)] px-4 text-xs font-medium text-[var(--accent-blue)]"
+          />
           <button
             type="button"
             onClick={pasteButton}

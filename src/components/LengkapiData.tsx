@@ -3,7 +3,7 @@ import { ClipboardList, ClipboardPaste, ImagePlus, Loader2, Save, X } from "luci
 import { api, errorText, type LengkapiKind, type LengkapiList, type LengkapiRow } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { can } from "../lib/access";
-import { EvidenceLink, shrink } from "./EvidenceInput";
+import { EvidenceLink, KameraButton, shrink } from "./EvidenceInput";
 
 // Lengkapi Data: every transaction of one month of an estate in one table, with the fields the input
 // form asks for (No. SPB / BPB, kendaraan & HM, blok, keterangan, foto bukti) as inputs - the empty ones
@@ -337,6 +337,11 @@ function LengkapiModal({ kinds, estate, onClose, onDone }: { kinds: LengkapiKind
                                   {uploading === r.id ? <Loader2 size={12} className="animate-spin" /> : <ImagePlus size={12} />} {r.evidence_id ? "Ganti" : "Upload"}
                                   <input type="file" accept="image/*" className="hidden" onChange={(e) => (pickFoto(r.id, e.target.files?.[0]), (e.target.value = ""))} />
                                 </label>
+                                <KameraButton
+                                  onFile={(f) => pickFoto(r.id, f)}
+                                  disabled={uploading === r.id}
+                                  className="inline-flex items-center gap-1 px-2 py-1 rounded border border-[var(--accent-blue-border)] bg-[var(--accent-blue-bg)] text-[var(--accent-blue)]"
+                                />
                                 <button
                                   type="button"
                                   onClick={(e) => (e.stopPropagation(), tempel(r.id))}

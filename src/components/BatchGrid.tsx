@@ -2,7 +2,7 @@ import { Fragment, useEffect, useRef, useState, type KeyboardEvent, type ReactNo
 import { createPortal, flushSync } from "react-dom";
 import { ClipboardPaste, Copy, ImagePlus, Loader2, Plus, Trash2, X } from "lucide-react";
 import { api, ApiError, errorText } from "../lib/api";
-import { EvidenceInput, EvidenceLink, shrink, useEvidenceEnabled } from "./EvidenceInput";
+import { EvidenceInput, EvidenceLink, KameraButton, pakaiKamera, shrink, useEvidenceEnabled } from "./EvidenceInput";
 
 // Input Banyak: many Stok Masuk / Keluar typed as a table and saved in one go with one foto bukti.
 // Each inventory describes its columns and rules (BbmBatchModal, GudangBatchModal, ...); this table
@@ -296,7 +296,7 @@ export function BatchGrid({
   const optionsOf = (col: GridCol, c: Cells) => (typeof col.options === "function" ? col.options(c) : (col.options ?? []));
   const inputCls = (key: number, extraCls = "") =>
     `w-full text-sm rounded-md border px-2 py-1.5 bg-white ${rowErrors[key] ? "border-[var(--accent-red)]" : "border-[var(--border)]"} ${extraCls}`;
-  const minWidth = 60 + columns.reduce((t, c) => t + (c.width ?? 160), 0) + (saldo ? 100 : 0) + (perRow ? 160 : 0);
+  const minWidth = 60 + columns.reduce((t, c) => t + (c.width ?? 160), 0) + (saldo ? 100 : 0) + (perRow ? (pakaiKamera() ? 230 : 160) : 0);
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-2 sm:p-4">
@@ -356,7 +356,7 @@ export function BatchGrid({
                   </th>
                 ))}
                 {saldo && <th className="py-1.5 pr-2 w-[100px] text-right">{saldoLabel}</th>}
-                {perRow && <th className="py-1.5 pr-2 w-[150px]" title="Opsional: bisa dilengkapi nanti di Lengkapi Data">Foto Bukti</th>}
+                {perRow && <th className="py-1.5 pr-2" style={{ width: pakaiKamera() ? 220 : 150 }} title="Opsional: bisa dilengkapi nanti di Lengkapi Data">Foto Bukti</th>}
                 <th className="py-1.5 w-[60px]" />
               </tr>
             </thead>
@@ -444,6 +444,11 @@ export function BatchGrid({
                                 {fotoBusy === r.key ? <Loader2 size={12} className="animate-spin" /> : <ImagePlus size={12} />} Upload
                                 <input type="file" accept="image/*" className="hidden" onChange={(e) => (uploadFoto(r.key, e.target.files?.[0]), (e.target.value = ""))} />
                               </label>
+                              <KameraButton
+                                onFile={(f) => uploadFoto(r.key, f)}
+                                disabled={fotoBusy === r.key}
+                                className="inline-flex items-center gap-1 px-1.5 py-1 rounded border border-[var(--accent-blue-border)] bg-[var(--accent-blue-bg)] text-[var(--accent-blue)]"
+                              />
                               <button
                                 type="button"
                                 onClick={(e) => (e.stopPropagation(), tempelFoto(r.key))}
