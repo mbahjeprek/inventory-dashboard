@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { PetugasBaris, usePetugas } from "../components/PetugasAlur";
-import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, Banknote, Boxes, ChevronRight, ChevronsDownUp, ChevronsUpDown, CalendarClock, Check, ClipboardCheck, Droplets, FileText, HandCoins, ShieldCheck, LayoutDashboard, ListPlus, Lock, Package, Receipt, PackageX, Pencil, Plus, Search, ShoppingBasket, Trash2, Truck, UserPlus, Users, X } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, Banknote, Boxes, ChevronRight, ChevronsDownUp, ChevronsUpDown, CalendarClock, Check, ClipboardCheck, ClipboardList, Droplets, FileText, HandCoins, ShieldCheck, LayoutDashboard, ListPlus, Lock, Package, Receipt, PackageX, Pencil, Plus, Search, ShoppingBasket, Trash2, Truck, UserPlus, Users, X } from "lucide-react";
 import {
   api,
   errorText,
@@ -24,6 +24,7 @@ import { EvidenceInput, EvidenceLink, useEvidenceEnabled } from "../components/E
 import { printTable } from "../lib/printTable";
 import { BaDaftar, itemsKoperasi, jenisKoperasi } from "../components/BaPemusnahan";
 import { DepoAirTab } from "../components/DepoAirTab";
+import { KopPermintaanTab } from "../components/KopPermintaanTab";
 import { fmtQty, isoDisplay, localToday } from "../lib/opname";
 import { tanggalWaktu } from "../lib/datetime";
 import { KopBeliBatchModal, KopJualBatchModal } from "../components/KoperasiBatchModal";
@@ -63,7 +64,7 @@ const BAYAR_CLS: Record<KopBayar, string> = {
   INSTANSI: "bg-[#f1f5f9] border-[var(--border)] text-[var(--text-secondary)]",
 };
 
-type Tab = "dashboard" | "jual" | "rekap" | "stok" | "opname" | "beli" | "depo" | "anggota";
+type Tab = "dashboard" | "jual" | "rekap" | "stok" | "opname" | "beli" | "permintaan" | "depo" | "anggota";
 const TABS: { key: Tab; label: string; icon: typeof Package }[] = [
   { key: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { key: "jual", label: "Stock Out", icon: ShoppingBasket },
@@ -71,6 +72,7 @@ const TABS: { key: Tab; label: string; icon: typeof Package }[] = [
   { key: "stok", label: "Stok Barang", icon: Boxes },
   { key: "opname", label: "Stok Opname", icon: ClipboardCheck },
   { key: "beli", label: "Stock In, Rusak & Koreksi", icon: Truck },
+  { key: "permintaan", label: "Permintaan Barang", icon: ClipboardList },
   { key: "depo", label: "Depo Air", icon: Droplets },
   { key: "anggota", label: "Anggota", icon: Users },
 ];
@@ -275,6 +277,7 @@ export function KoperasiPage() {
           <TxTable jenis="KOREKSI" periode={periode} reload={reload} canEdit={canEdit} onChanged={done} />
         </div>
       )}
+      {tab === "permintaan" && <KopPermintaanTab canInput={canInput} canEdit={canEdit} />}
       {tab === "depo" && <DepoAirTab periode={periode} reload={reload} canInput={canInput} canEdit={canEdit} />}
       {tab === "anggota" && <AnggotaTab reload={reload} canEdit={canEdit} onChanged={done} />}
 

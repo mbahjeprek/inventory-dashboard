@@ -268,13 +268,15 @@ function requiredPerms(req: express.Request): Need {
   }
   if (is(/^\/koperasi(\/|$)/)) {
     if (m === "GET") return ["koperasi.view"];
+    // Permintaan Barang: made / changed with Input, deleted with Edit (below).
     // Pelunasan (record / tandai lunas / delete a payment): its own tick, given to HR only.
     if (is(/^\/koperasi\/bayar(\/|$)/)) return ["koperasi.pelunasan"];
     // Barang Rusak / Expired and Koreksi Stok: checked (Setujui / Tolak) by a second account with Approve Koperasi;
     // finishing a stok opname (it books the koreksi) too.
     if (is(/^\/koperasi\/(rusak|koreksi)\/\d+\/periksa$/) || is(/^\/koperasi\/opname\/\d+\/selesai$/)) return ["koperasi.approve"];
     const input =
-      (m === "POST" && is(/^\/koperasi\/((jual|beli|rusak)(\/batch)?|opname|koreksi|depo\/biaya)$/)) || (m === "PUT" && is(/^\/koperasi\/opname\/\d+\/lines$/));
+      (m === "POST" && is(/^\/koperasi\/((jual|beli|rusak)(\/batch)?|opname|koreksi|depo\/biaya|permintaan)$/)) ||
+      (m === "PUT" && (is(/^\/koperasi\/opname\/\d+\/lines$/) || is(/^\/koperasi\/permintaan\/\d+$/)));
     return input ? ["koperasi.input"] : ["koperasi.edit"];
   }
   return "super";
@@ -9614,6 +9616,120 @@ const kopStokSql = `SUM(CASE WHEN t.sumber = 'IMPORT-REKAP2023' OR t.status = 'D
 app.use("/api/koperasi", (req, res, next) => {
   if (!estateAllowed(req.user!, KOPERASI)) return res.status(403).json({ error: "Koperasi hanya untuk akun estate Nilam" });
   next();
+});
+
+// ---- Permintaan Barang Koperasi (see schema.sql koperasi_permintaan): the koperasi's order list, printed with the kop ----
+// Tgl Masuk of a line: typed, else the first Stock In (not refused) of its kode on / after the request's tanggal.
+const KOP_PMT_MASUK = `COALESCE(l.tgl_masuk, (SELECT MIN(t.tanggal_iso) FROM koperasi_tx t
+  WHERE t.koperasi = p.koperasi AND t.jenis = 'BELI' AND t.barang_kode = l.barang_kode AND t.tanggal_iso >= p.tanggal AND t.status IS DISTINCT FROM 'DITOLAK'))`;
+type KopPmtLine = { barang_kode: string | null; nama: string; jenis: string; jumlah: number; satuan: string; isi: number | null; tgl_masuk: string | null };
+function kopPermintaanBody(req: express.Request): { error?: string; tanggal?: string; catatan?: string; ttd?: unknown; lines?: KopPmtLine[] } {
+  const b = req.body ?? {};
+  if (!isIsoDate(b.tanggal)) return { error: "Tanggal tidak valid" };
+  const raw: any[] = Array.isArray(b.lines) ? b.lines : [];
+  const lines: KopPmtLine[] = raw
+    .map((l) => ({
+      barang_kode: String(l?.barang_kode ?? "").trim().toUpperCase() || null,
+      nama: String(l?.nama ?? "").trim().slice(0, 200),
+      jenis: String(l?.jenis ?? "").trim().slice(0, 100),
+      jumlah: Number(l?.jumlah),
+      satuan: String(l?.satuan ?? "").trim().toUpperCase().slice(0, 30),
+      isi: l?.isi === null || l?.isi === undefined || l?.isi === "" ? null : Number(l.isi),
+      tgl_masuk: isIsoDate(l?.tgl_masuk) ? l.tgl_masuk : null,
+    }))
+    .filter((l) => l.nama || l.barang_kode);
+  if (!lines.length) return { error: "Belum ada barang yang diminta" };
+  if (lines.length > 300) return { error: "Maksimal 300 barang per permintaan" };
+  const bad = lines.findIndex((l) => !l.nama || !(l.jumlah > 0) || (l.isi !== null && !(l.isi >= 0)));
+  if (bad >= 0) return { error: `Baris ${bad + 1}: nama barang dan jumlah (> 0) wajib diisi` };
+  const orang = (o: any) => ({ nama: String(o?.nama ?? "").trim().slice(0, 100), jabatan: String(o?.jabatan ?? "").trim().slice(0, 100) });
+  return { tanggal: b.tanggal, catatan: String(b.catatan ?? "").trim().slice(0, 1000), ttd: { dibuat: orang(b.ttd?.dibuat), diketahui: orang(b.ttd?.diketahui) }, lines };
+}
+async function kopPermintaanLines(c: any, id: number, lines: KopPmtLine[]) {
+  await execute("DELETE FROM koperasi_permintaan_line WHERE permintaan_id = @id", { id }, c);
+  await execute(
+    `INSERT INTO koperasi_permintaan_line (permintaan_id, urut, barang_kode, nama, jenis, jumlah, satuan, isi, tgl_masuk)
+     SELECT @id, x.urut, NULLIF(x.barang_kode, ''), x.nama, x.jenis, x.jumlah, x.satuan, x.isi, x.tgl_masuk
+     FROM json_to_recordset(@rows::json) AS x(urut int, barang_kode text, nama text, jenis text, jumlah float8, satuan text, isi float8, tgl_masuk text)`,
+    { id, rows: JSON.stringify(lines.map((l, i) => ({ ...l, urut: i + 1 }))) },
+    c
+  );
+}
+const kopPmtDetail = (lines: KopPmtLine[]) => lines.slice(0, 60).map((l) => `${l.nama} ${fmtQty(l.jumlah)} ${l.satuan}`.trim()).join("; ");
+
+// The list (newest first) with how many of its items came in; plus the signers of the last one and, per kode, the
+// jenis / satuan / isi it was last asked in, for a new request.
+app.get("/api/koperasi/permintaan", async (_req, res) => {
+  const rows = await queryMany(
+    `SELECT p.id, p.nomor, p.tanggal, p.catatan, p.created_by, p.created_at,
+            COUNT(l.id)::int AS item, COUNT(l.id) FILTER (WHERE ${KOP_PMT_MASUK} IS NOT NULL)::int AS masuk
+       FROM koperasi_permintaan p LEFT JOIN koperasi_permintaan_line l ON l.permintaan_id = p.id
+      WHERE p.koperasi = @k GROUP BY p.id ORDER BY p.tanggal DESC, p.id DESC LIMIT 500`,
+    { k: KOPERASI }
+  );
+  const last = await queryOne<{ ttd: any }>("SELECT ttd FROM koperasi_permintaan WHERE koperasi = @k ORDER BY id DESC LIMIT 1", { k: KOPERASI });
+  const terakhir = await queryMany(
+    `SELECT DISTINCT ON (l.barang_kode) l.barang_kode AS kode, l.jenis, l.satuan, l.isi
+       FROM koperasi_permintaan_line l JOIN koperasi_permintaan p ON p.id = l.permintaan_id
+      WHERE p.koperasi = @k AND l.barang_kode IS NOT NULL ORDER BY l.barang_kode, p.tanggal DESC, p.id DESC`,
+    { k: KOPERASI }
+  );
+  res.json({ rows, ttd: last?.ttd ?? null, terakhir });
+});
+
+app.get("/api/koperasi/permintaan/:id", async (req, res) => {
+  const p = await queryOne<any>("SELECT * FROM koperasi_permintaan WHERE id = @id AND koperasi = @k", { id: Number(req.params.id) || 0, k: KOPERASI });
+  if (!p) return res.status(404).json({ error: "Permintaan tidak ditemukan" });
+  const lines = await queryMany(
+    `SELECT l.id, l.barang_kode, l.nama, l.jenis, l.jumlah, l.satuan, l.isi, l.tgl_masuk, ${KOP_PMT_MASUK} AS masuk
+       FROM koperasi_permintaan_line l JOIN koperasi_permintaan p ON p.id = l.permintaan_id
+      WHERE l.permintaan_id = @id ORDER BY l.urut, l.id`,
+    { id: p.id }
+  );
+  res.json({ ...p, lines });
+});
+
+app.post("/api/koperasi/permintaan", async (req, res) => {
+  const v = kopPermintaanBody(req);
+  if (v.error) return res.status(400).json({ error: v.error });
+  const u = req.user!;
+  const made = await withTransaction(async (c) => {
+    await c.query("SELECT pg_advisory_xact_lock(hashtext('koperasi_permintaan_nomor'))");
+    const tahun = v.tanggal!.slice(0, 4);
+    const urut = ((await queryOne<{ n: number }>("SELECT COALESCE(MAX(urut), 0)::int n FROM koperasi_permintaan WHERE koperasi = @k AND left(tanggal, 4) = @tahun", { k: KOPERASI, tahun }, c))?.n ?? 0) + 1;
+    const nomor = `${String(urut).padStart(3, "0")}/PMT-BRG/KOPERASI-AKSS/${v.tanggal!.slice(5, 7)}/${tahun}`;
+    const p = await queryOne<{ id: number; nomor: string }>(
+      `INSERT INTO koperasi_permintaan (koperasi, urut, nomor, tanggal, catatan, ttd, user_id, created_by)
+       VALUES (@k, @urut, @nomor, @tanggal, @catatan, @ttd::jsonb, @uid, @nama) RETURNING id, nomor`,
+      { k: KOPERASI, urut, nomor, tanggal: v.tanggal, catatan: v.catatan, ttd: JSON.stringify(v.ttd), uid: u.id, nama: u.nama },
+      c
+    );
+    await kopPermintaanLines(c, p!.id, v.lines!);
+    return p!;
+  });
+  await logActivity(req, { module: "KOPERASI", estate: KOPERASI, aksi: "Buat Permintaan Barang", objek: `${made.nomor} · ${v.lines!.length} item`, detail: kopPmtDetail(v.lines!) });
+  res.json({ success: true, id: made.id, nomor: made.nomor });
+});
+
+app.put("/api/koperasi/permintaan/:id", async (req, res) => {
+  const p = await queryOne<any>("SELECT * FROM koperasi_permintaan WHERE id = @id AND koperasi = @k", { id: Number(req.params.id) || 0, k: KOPERASI });
+  if (!p) return res.status(404).json({ error: "Permintaan tidak ditemukan" });
+  const v = kopPermintaanBody(req);
+  if (v.error) return res.status(400).json({ error: v.error });
+  await withTransaction(async (c) => {
+    await execute("UPDATE koperasi_permintaan SET tanggal = @tanggal, catatan = @catatan, ttd = @ttd::jsonb, updated_at = now() WHERE id = @id", { id: p.id, tanggal: v.tanggal, catatan: v.catatan, ttd: JSON.stringify(v.ttd) }, c);
+    await kopPermintaanLines(c, p.id, v.lines!);
+  });
+  await logActivity(req, { module: "KOPERASI", estate: KOPERASI, aksi: "Edit Permintaan Barang", objek: `${p.nomor} · ${v.lines!.length} item`, detail: kopPmtDetail(v.lines!) });
+  res.json({ success: true, id: p.id, nomor: p.nomor });
+});
+
+app.delete("/api/koperasi/permintaan/:id", async (req, res) => {
+  const p = await queryOne<any>("SELECT * FROM koperasi_permintaan WHERE id = @id AND koperasi = @k", { id: Number(req.params.id) || 0, k: KOPERASI });
+  if (!p) return res.status(404).json({ error: "Permintaan tidak ditemukan" });
+  await execute("DELETE FROM koperasi_permintaan WHERE id = @id", { id: p.id });
+  await logActivity(req, { module: "KOPERASI", estate: KOPERASI, aksi: "Hapus Permintaan Barang", objek: p.nomor });
+  res.json({ success: true });
 });
 
 app.get("/api/koperasi/periode", async (_req, res) => {

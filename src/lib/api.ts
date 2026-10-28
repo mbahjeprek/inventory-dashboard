@@ -717,6 +717,13 @@ export type KopBarang = {
   stok: number;
   terakhir: string | null;
 };
+// Permintaan Barang Koperasi: one request (the order list sent to purchasing) and its lines. masuk = Tgl Masuk: typed,
+// else the first Stock In of the kode on / after the request's tanggal (null = not in yet).
+export type KopPermintaanOrang = { nama: string; jabatan: string };
+export type KopPermintaanTtd = { dibuat: KopPermintaanOrang; diketahui: KopPermintaanOrang };
+export type KopPermintaanLine = { barang_kode: string | null; nama: string; jenis: string; jumlah: number; satuan: string; isi: number | null; tgl_masuk: string | null; masuk?: string | null };
+export type KopPermintaan = { id: number; nomor: string; tanggal: string; catatan: string; ttd: Partial<KopPermintaanTtd>; created_by: string; lines: KopPermintaanLine[] };
+export type KopPermintaanRow = { id: number; nomor: string; tanggal: string; catatan: string; created_by: string; item: number; masuk: number };
 export type KopAnggota = {
   kode: string;
   jenis: "KARYAWAN" | "INSTANSI";
@@ -1820,6 +1827,12 @@ export const api = {
     req<{ data: Pinjaman[]; total: number }>(`/api/pinjaman?${new URLSearchParams(params as any)}`),
   kopPeriode: () => req<string[]>("/api/koperasi/periode"),
   kopRingkasan: (periode: string) => req<KopRingkasan>(`/api/koperasi/ringkasan?periode=${periode}`),
+  kopPermintaanList: () =>
+    req<{ rows: KopPermintaanRow[]; ttd: Partial<KopPermintaanTtd> | null; terakhir: { kode: string; jenis: string; satuan: string; isi: number | null }[] }>("/api/koperasi/permintaan"),
+  kopPermintaanGet: (id: number) => req<KopPermintaan>(`/api/koperasi/permintaan/${id}`),
+  kopPermintaanSave: (id: number | null, body: { tanggal: string; catatan: string; ttd: KopPermintaanTtd; lines: KopPermintaanLine[] }) =>
+    req<{ success: boolean; id: number; nomor: string }>(id ? `/api/koperasi/permintaan/${id}` : "/api/koperasi/permintaan", { method: id ? "PUT" : "POST", body: JSON.stringify(body) }),
+  kopPermintaanDelete: (id: number) => req<{ success: boolean }>(`/api/koperasi/permintaan/${id}`, { method: "DELETE" }),
   kopBarang: (params: { search?: string; aktif?: string } = {}) => req<KopBarang[]>(`/api/koperasi/barang?${new URLSearchParams(params as any)}`),
   kopKedatangan: (kode: string) =>
     req<{ id: number; tanggal_iso: string; qty: number; exp_iso: string | null; no_po: string; keterangan: string }[]>(`/api/koperasi/barang/${encodeURIComponent(kode)}/kedatangan`),

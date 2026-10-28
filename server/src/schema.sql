@@ -1290,3 +1290,36 @@ ALTER TABLE opname ADD COLUMN IF NOT EXISTS pihak JSONB NOT NULL DEFAULT '{}'::j
 
 -- BBM: beban of a Stock Out - OPEX (operasional) or CAPEX (investasi / proyek); '' = not marked yet.
 ALTER TABLE bbm_log ADD COLUMN IF NOT EXISTS beban TEXT NOT NULL DEFAULT '';
+
+-- Permintaan Barang Koperasi: the koperasi's order list to the purchasing side (was an Excel sheet): per line the
+-- barang (kode of koperasi_barang when it is one, else free), jenis / type, jumlah in a satuan (DUS / PACK ...), isi per
+-- satuan; tgl_masuk typed when it came in another way - else it is the first Stock In of that kode on / after the
+-- request's tanggal. ttd = { dibuat: {nama, jabatan}, diketahui: {nama, jabatan} }.
+CREATE TABLE IF NOT EXISTS koperasi_permintaan (
+  id SERIAL PRIMARY KEY,
+  koperasi TEXT NOT NULL DEFAULT 'NILAM',
+  urut INTEGER NOT NULL,
+  nomor TEXT NOT NULL,
+  tanggal TEXT NOT NULL,
+  catatan TEXT NOT NULL DEFAULT '',
+  ttd JSONB NOT NULL DEFAULT '{}'::jsonb,
+  user_id INTEGER,
+  created_by TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_koperasi_permintaan ON koperasi_permintaan(koperasi, tanggal);
+CREATE TABLE IF NOT EXISTS koperasi_permintaan_line (
+  id SERIAL PRIMARY KEY,
+  permintaan_id INTEGER NOT NULL REFERENCES koperasi_permintaan(id) ON DELETE CASCADE,
+  urut INTEGER NOT NULL DEFAULT 0,
+  barang_kode TEXT,
+  nama TEXT NOT NULL,
+  jenis TEXT NOT NULL DEFAULT '',
+  jumlah DOUBLE PRECISION NOT NULL,
+  satuan TEXT NOT NULL DEFAULT '',
+  isi DOUBLE PRECISION,
+  tgl_masuk TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_koperasi_permintaan_line ON koperasi_permintaan_line(permintaan_id);
+CREATE INDEX IF NOT EXISTS idx_koperasi_permintaan_line_kode ON koperasi_permintaan_line(barang_kode);
