@@ -1329,3 +1329,13 @@ CREATE INDEX IF NOT EXISTS idx_koperasi_permintaan_line_kode ON koperasi_permint
 ALTER TABLE koperasi_permintaan ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'DRAFT';
 ALTER TABLE koperasi_permintaan ADD COLUMN IF NOT EXISTS approval JSONB NOT NULL DEFAULT '{}'::jsonb;
 ALTER TABLE koperasi_permintaan ADD COLUMN IF NOT EXISTS tolak JSONB;
+
+-- Wrong passwords at login (username in lower case, the address it came from), counted over 15 minutes to slow down
+-- password guessing; cleared by a right password, dropped after a day.
+CREATE TABLE IF NOT EXISTS login_gagal (
+  id SERIAL PRIMARY KEY,
+  username TEXT NOT NULL,
+  ip TEXT NOT NULL DEFAULT '',
+  at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_login_gagal ON login_gagal(ip, at);

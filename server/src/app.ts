@@ -107,17 +107,38 @@ async function sessionFromCookie(req: express.Request, res?: express.Response): 
   return renew(user);
 }
 
+// Wrong passwords are counted (login_gagal) over a quarter of an hour, in the database so every server instance sees
+// them: 5 for one username from one address, or 30 from one address in all (an estate office shares one), and the next
+// try is refused until the window passes - guessing passwords is too slow to work. A right password clears its count.
+const LOGIN_JENDELA = "15 minutes";
+const LOGIN_MAKS_AKUN = 5;
+const LOGIN_MAKS_IP = 30;
+// The client's address as Vercel's edge saw it (x-real-ip is set by the edge itself, not taken from the request).
+const alamatIp = (req: express.Request) => String(req.get("x-real-ip") ?? req.get("x-forwarded-for") ?? req.socket.remoteAddress ?? "").split(",")[0].trim().slice(0, 64);
+
 app.post("/api/auth/login", async (req, res) => {
   const { username, password } = req.body;
   if (!username || !password) return res.status(400).json({ error: "Username dan password wajib diisi" });
+  const nama = String(username).trim().toLowerCase().slice(0, 100);
+  const ip = alamatIp(req);
+  const gagal = await queryOne<{ akun: number; ip: number }>(
+    `SELECT COUNT(*) FILTER (WHERE username = @nama)::int akun, COUNT(*)::int ip FROM login_gagal WHERE ip = @ip AND at > now() - interval '${LOGIN_JENDELA}'`,
+    { nama, ip }
+  ).catch(() => null);
+  if (gagal && (gagal.akun >= LOGIN_MAKS_AKUN || gagal.ip >= LOGIN_MAKS_IP))
+    return res.status(429).json({ error: "Terlalu banyak percobaan login yang salah. Tunggu 15 menit lalu coba lagi, atau minta Super User mengatur ulang password." });
 
   // The username is matched case-insensitively (Admin1 = admin1 = ADMIN1); only the password is exact.
   const row = await queryOne<UserRow & { password_hash: string }>("SELECT * FROM users WHERE LOWER(username) = LOWER(@username) ORDER BY id LIMIT 1", {
     username: String(username).trim(),
   });
-  if (!row || !verifyPassword(password, row.password_hash)) {
+  if (!row || !verifyPassword(String(password), row.password_hash)) {
+    await execute("INSERT INTO login_gagal (username, ip) VALUES (@nama, @ip)", { nama, ip }).catch((e) => console.error("login_gagal failed", e));
+    // Old counts are not needed: dropped now and then.
+    if (Math.random() < 0.05) await execute("DELETE FROM login_gagal WHERE at < now() - interval '1 day'").catch(() => {});
     return res.status(401).json({ error: "Username atau password salah" });
   }
+  await execute("DELETE FROM login_gagal WHERE username = @nama AND ip = @ip", { nama, ip }).catch(() => {});
 
   const user = toSessionUser(row);
   setSessionCookie(res, signSession(user));
@@ -2127,6 +2148,7 @@ app.post("/api/users", requireSuperuser, async (req, res) => {
   if (!username || !String(username).trim() || !password || !nama || !String(nama).trim()) {
     return res.status(400).json({ error: "Username, password, dan nama wajib diisi" });
   }
+  if (String(password).length < 6) return res.status(400).json({ error: "Password minimal 6 karakter" });
   const access = userAccess(req.body);
   if (access.error) return res.status(400).json({ error: access.error });
   if (access.role === "superuser" && req.user!.role !== "superuser") return res.status(403).json({ error: "Hanya Super User yang bisa membuat Super User" });
@@ -2165,6 +2187,7 @@ app.put("/api/users/:id", requireSuperuser, async (req, res) => {
   if (!username || !String(username).trim() || !nama || !String(nama).trim()) {
     return res.status(400).json({ error: "Username dan nama wajib diisi" });
   }
+  if (password && String(password).length < 6) return res.status(400).json({ error: "Password minimal 6 karakter" });
   const access = userAccess(req.body);
   if (access.error) return res.status(400).json({ error: access.error });
   // A Pengguna admin who isn't a superuser can't make or change Super User accounts.
