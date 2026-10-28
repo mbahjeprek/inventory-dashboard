@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import { Menu } from "lucide-react";
 import { Sidebar } from "../components/Sidebar";
@@ -50,7 +50,9 @@ export function MainLayout() {
         <main className="flex-1 min-w-0 p-4 md:p-6">
           <StatusUpdateBanner />
           <PinjamanBanner />
-          <Outlet />
+          <Suspense fallback={<div className="py-10 text-center text-sm text-[var(--text-muted)]">Memuat...</div>}>
+            <Outlet />
+          </Suspense>
         </main>
         <PinjamanNotif />
         {/* Chat (its unread check every 20 s also keeps the account "online" while a tab is open). */}

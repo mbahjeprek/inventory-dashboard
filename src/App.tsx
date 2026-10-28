@@ -1,43 +1,76 @@
+import { Suspense, lazy, type ComponentType } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider } from "./context/AuthContext";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 import { HomeGate, RequireEstate, RequirePageAccess } from "./components/AccessGate";
 import { LoginPage } from "./pages/LoginPage";
 import { MainLayout } from "./layouts/MainLayout";
-import { InventoryPage } from "./pages/InventoryPage";
-import { InventoryGudangStockPage } from "./pages/InventoryGudangStockPage";
-import { ItemDetailPage } from "./pages/ItemDetailPage";
-import { KaryawanPage } from "./pages/KaryawanPage";
-import { InventoryBbmPage } from "./pages/InventoryBbmPage";
-import { AlatBeratPage } from "./pages/AlatBeratPage";
-import { MasterBlokPage } from "./pages/MasterBlokPage";
-import { PetaBlokPage } from "./pages/PetaBlokPage";
-import { MasterBarangPage } from "./pages/MasterBarangPage";
-import { KoperasiPage } from "./pages/KoperasiPage";
-import { KendaraanPage } from "./pages/KendaraanPage";
-import { UsersPage } from "./pages/UsersPage";
-import { DashboardPage } from "./pages/DashboardPage";
-import { InventoryPupukPage } from "./pages/InventoryPupukPage";
-import { InventoryKlinikPage } from "./pages/InventoryKlinikPage";
-import { InventoryOliPage } from "./pages/InventoryOliPage";
-import { MasterObatPage } from "./pages/MasterObatPage";
-import { MasterOliPage } from "./pages/MasterOliPage";
-import { MasterPupukPage } from "./pages/MasterPupukPage";
-import { DokumenPage } from "./pages/DokumenPage";
-import { SopPage } from "./pages/SopPage";
-import { SopDokumenPage } from "./pages/SopDokumenPage";
-import { PersetujuanPage } from "./pages/PersetujuanPage";
-import { SemuaEstatePage } from "./pages/SemuaEstatePage";
-import { UserActivityPage } from "./pages/UserActivityPage";
-import { StokOpnamePage } from "./pages/StokOpnamePage";
-import { PinjamanPage } from "./pages/PinjamanPage";
-import { MasterPasienPage } from "./pages/MasterPasienPage";
-import { StokOpnameDetailPage } from "./pages/StokOpnameDetailPage";
+
+// A tab opened before a deploy asks for page chunks that are gone: reload once to get the new build.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function page<M extends Record<string, any>, K extends keyof M & string>(load: () => Promise<M>, name: K) {
+  return lazy(() =>
+    load().then(
+      (m) => {
+        try {
+          sessionStorage.removeItem("chunk-reload");
+        } catch {
+          // ignore
+        }
+        return { default: m[name] as M[K] extends ComponentType<infer P> ? ComponentType<P> : never };
+      },
+      (e) => {
+        let again = false;
+        try {
+          again = !sessionStorage.getItem("chunk-reload");
+          if (again) sessionStorage.setItem("chunk-reload", "1");
+        } catch {
+          // ignore
+        }
+        if (!again) throw e;
+        location.reload();
+        return new Promise<never>(() => {});
+      }
+    )
+  );
+}
+// Every page is its own chunk, loaded when it is first opened (MainLayout shows "Memuat..." meanwhile), so the
+// first visit downloads only the shell instead of the whole app.
+const InventoryPage = page(() => import("./pages/InventoryPage"), "InventoryPage");
+const InventoryGudangStockPage = page(() => import("./pages/InventoryGudangStockPage"), "InventoryGudangStockPage");
+const ItemDetailPage = page(() => import("./pages/ItemDetailPage"), "ItemDetailPage");
+const KaryawanPage = page(() => import("./pages/KaryawanPage"), "KaryawanPage");
+const InventoryBbmPage = page(() => import("./pages/InventoryBbmPage"), "InventoryBbmPage");
+const AlatBeratPage = page(() => import("./pages/AlatBeratPage"), "AlatBeratPage");
+const MasterBlokPage = page(() => import("./pages/MasterBlokPage"), "MasterBlokPage");
+const PetaBlokPage = page(() => import("./pages/PetaBlokPage"), "PetaBlokPage");
+const MasterBarangPage = page(() => import("./pages/MasterBarangPage"), "MasterBarangPage");
+const KoperasiPage = page(() => import("./pages/KoperasiPage"), "KoperasiPage");
+const KendaraanPage = page(() => import("./pages/KendaraanPage"), "KendaraanPage");
+const UsersPage = page(() => import("./pages/UsersPage"), "UsersPage");
+const DashboardPage = page(() => import("./pages/DashboardPage"), "DashboardPage");
+const InventoryPupukPage = page(() => import("./pages/InventoryPupukPage"), "InventoryPupukPage");
+const InventoryKlinikPage = page(() => import("./pages/InventoryKlinikPage"), "InventoryKlinikPage");
+const InventoryOliPage = page(() => import("./pages/InventoryOliPage"), "InventoryOliPage");
+const MasterObatPage = page(() => import("./pages/MasterObatPage"), "MasterObatPage");
+const MasterOliPage = page(() => import("./pages/MasterOliPage"), "MasterOliPage");
+const MasterPupukPage = page(() => import("./pages/MasterPupukPage"), "MasterPupukPage");
+const DokumenPage = page(() => import("./pages/DokumenPage"), "DokumenPage");
+const SopPage = page(() => import("./pages/SopPage"), "SopPage");
+const SopDokumenPage = page(() => import("./pages/SopDokumenPage"), "SopDokumenPage");
+const PersetujuanPage = page(() => import("./pages/PersetujuanPage"), "PersetujuanPage");
+const SemuaEstatePage = page(() => import("./pages/SemuaEstatePage"), "SemuaEstatePage");
+const UserActivityPage = page(() => import("./pages/UserActivityPage"), "UserActivityPage");
+const StokOpnamePage = page(() => import("./pages/StokOpnamePage"), "StokOpnamePage");
+const PinjamanPage = page(() => import("./pages/PinjamanPage"), "PinjamanPage");
+const MasterPasienPage = page(() => import("./pages/MasterPasienPage"), "MasterPasienPage");
+const StokOpnameDetailPage = page(() => import("./pages/StokOpnameDetailPage"), "StokOpnameDetailPage");
 
 function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
+        <Suspense fallback={null}>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route element={<ProtectedRoute />}>
@@ -363,6 +396,7 @@ function App() {
             </Route>
           </Route>
         </Routes>
+        </Suspense>
       </AuthProvider>
     </BrowserRouter>
   );
