@@ -8828,21 +8828,30 @@ function pakaiQuery(req: express.Request, res: express.Response) {
   if (!estateAllowed(req.user!, estate)) return void res.status(403).json({ error: "Akses ditolak" });
   const alat = m === "BBM" && q.group === "alat";
   const { from, to } = laporanRange(q);
-  return { m, estate, alat, src: pakaiSource(m, estate, alat), params: { estate, from, to, kode: String(q.kode ?? "") } };
+  const per: keyof typeof PAKAI_PERIODE = q.per === "hari" || q.per === "minggu" ? q.per : "bulan";
+  return { m, estate, alat, per, src: pakaiSource(m, estate, alat), params: { estate, from, to, kode: String(q.kode ?? "") } };
 }
+// The period a Stok Keluar date (d, YYYY-MM-DD) falls in: its month (YYYY-MM), its week (the Monday, YYYY-MM-DD) or the day.
+const PAKAI_PERIODE = {
+  bulan: "left(d, 7)",
+  minggu: "to_char(date_trunc('week', d::date), 'YYYY-MM-DD')",
+  hari: "d",
+} as const;
 
 app.get("/api/pemakaian", async (req, res) => {
   const p = pakaiQuery(req, res);
   if (!p) return;
-  const { m, estate, alat, src, params } = p;
+  const { m, estate, alat, per, src, params } = p;
+  // bulan = the period's key (a month, a week's Monday or a day, see PAKAI_PERIODE).
   const rows = await queryMany(
     `WITH src AS (${src})
-     SELECT kode, nama, satuan, info, left(d, 7) bulan, SUM(qty)::float8 qty, COUNT(*)::int trx
+     SELECT kode, nama, satuan, info, ${PAKAI_PERIODE[per]} bulan, SUM(qty)::float8 qty, COUNT(*)::int trx
      FROM src WHERE d BETWEEN @from AND @to GROUP BY 1, 2, 3, 4, 5 ORDER BY 2, 5`,
     params
   );
-  // The first month with any pemakaian at this estate: months before it aren't 0, just no data yet.
-  const mulai = (await queryOne<{ b: string | null }>(`WITH src AS (${src}) SELECT left(MIN(d), 7) b FROM src`, params))?.b ?? null;
+  // The first day with any pemakaian at this estate: periods before it aren't 0, just no data yet.
+  const awal = (await queryOne<{ b: string | null }>(`WITH src AS (${src}) SELECT MIN(d) b FROM src`, params))?.b ?? null;
+  const mulai = awal?.slice(0, 7) ?? null;
   let stok: { kode: string; stok: number }[] = [];
   if (m === "GUDANG" && estate === "NILAM") stok = await queryMany("SELECT kode, stock_tersedia::float8 stok FROM items");
   else if (m === "GUDANG") stok = await queryMany("SELECT item_kode kode, stock_tersedia::float8 stok FROM gudang_stock WHERE gudang = @estate", { estate });
@@ -8855,19 +8864,21 @@ app.get("/api/pemakaian", async (req, res) => {
          FROM bbm_log WHERE lokasi = @estate AND saldo_stock IS NOT NULL) s WHERE rn = 1`,
       { estate }
     );
-  res.json({ rows, stok, mulai });
+  res.json({ rows, stok, mulai, awal });
 });
 
-// The Stok Keluar rows behind one figure: one kode in one month (YYYY-MM) or the whole period.
+// The Stok Keluar rows behind one figure: one kode in one period (a month YYYY-MM, or with per=minggu the
+// week from that Monday, per=hari that day, YYYY-MM-DD) or the whole range.
 app.get("/api/pemakaian/detail", async (req, res) => {
   const p = pakaiQuery(req, res);
   if (!p) return;
   if (!p.params.kode) return res.status(400).json({ error: "Pilih barang" });
-  const bulan = /^\d{4}-\d{2}$/.test(String(req.query.bulan ?? "")) ? String(req.query.bulan) : "";
+  const raw = String(req.query.bulan ?? "");
+  const bulan = (p.per === "bulan" ? /^\d{4}-\d{2}$/ : /^\d{4}-\d{2}-\d{2}$/).test(raw) ? raw : "";
   const data = await queryMany(
     `WITH src AS (${p.src})
      SELECT id, d tanggal_iso, ref, tujuan, penerima, ket, qty FROM src
-     WHERE kode = @kode AND d BETWEEN @from AND @to ${bulan ? "AND left(d, 7) = @bulan" : ""}
+     WHERE kode = @kode AND d BETWEEN @from AND @to ${bulan ? `AND ${PAKAI_PERIODE[p.per]} = @bulan` : ""}
      ORDER BY d, id LIMIT 2000`,
     { ...p.params, bulan }
   );

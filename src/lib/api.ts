@@ -655,6 +655,7 @@ export type TopKeluarRow = { kode: string; id: number | null; nama: string; satu
 // ---- Stok Opname (server/src/app.ts "Stok Opname") ----
 export type OpnameModule = "GUDANG" | "KLINIK" | "BBM" | "PUPUK" | "OLI";
 export type PakaiModule = "GUDANG" | "BBM" | "PUPUK" | "OLI";
+export type PakaiPer = "hari" | "minggu" | "bulan";
 // Status Update: the latest date with data per module + estate, days since then and the module's limit.
 export type StatusUpdate = {
   today: string;
@@ -1800,15 +1801,17 @@ export const api = {
   attachEvidence: (kind: string, id: number, evidence_id: string) =>
     req<{ success: boolean }>("/api/evidence/attach", { method: "PUT", body: JSON.stringify({ kind, id, evidence_id }) }),
   // Pemakaian per bulan of one estate: Stok Keluar per barang / jenis (BBM: or per alat) per month, and stock now.
-  pemakaian: (params: { module: PakaiModule; estate: string; dateFrom: string; dateTo: string; group?: string }) =>
+  // per: bulan (default) / minggu / hari - a row's bulan is then the period's key (YYYY-MM, a week's Monday or the day).
+  pemakaian: (params: { module: PakaiModule; estate: string; dateFrom: string; dateTo: string; group?: string; per?: PakaiPer }) =>
     req<{
       rows: { kode: string; nama: string; satuan: string; info: string; bulan: string; qty: number; trx: number }[];
       stok: { kode: string; stok: number }[];
       mulai: string | null;
-    }>(`/api/pemakaian?${new URLSearchParams({ ...params, group: params.group ?? "" })}`),
-  pemakaianDetail: (params: { module: PakaiModule; estate: string; dateFrom: string; dateTo: string; group?: string; kode: string; bulan?: string }) =>
+      awal?: string | null;
+    }>(`/api/pemakaian?${new URLSearchParams({ ...params, group: params.group ?? "", per: params.per ?? "bulan" })}`),
+  pemakaianDetail: (params: { module: PakaiModule; estate: string; dateFrom: string; dateTo: string; group?: string; per?: PakaiPer; kode: string; bulan?: string }) =>
     req<{ data: { id: number; tanggal_iso: string; ref: string; tujuan: string; penerima: string; ket: string; qty: number }[] }>(
-      `/api/pemakaian/detail?${new URLSearchParams({ ...params, group: params.group ?? "", bulan: params.bulan ?? "" })}`
+      `/api/pemakaian/detail?${new URLSearchParams({ ...params, group: params.group ?? "", per: params.per ?? "bulan", bulan: params.bulan ?? "" })}`
     ),
   perbandinganBarang: (module: OpnameModule, search: string) =>
     req<{ kode: string; nama: string; satuan: string }[]>(`/api/perbandingan/barang?${new URLSearchParams({ module, search })}`),
