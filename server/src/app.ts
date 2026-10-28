@@ -3521,7 +3521,8 @@ app.put("/api/bbm/:id/beban", async (req, res) => {
   const existing = await queryOne<any>("SELECT * FROM bbm_log WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Transaksi tidak ditemukan" });
   if (!estateAllowed(req.user!, existing.lokasi)) return res.status(403).json({ error: "Akses ditolak" });
-  if (!(Number(existing.pemakaian) > 0)) return res.status(400).json({ error: "Kategori OPEX / CAPEX hanya untuk Stock Out" });
+  if (!(Number(existing.pemakaian) > 0) || existing.pinjaman_id) return res.status(400).json({ error: "Kategori OPEX / CAPEX hanya untuk Stock Out" });
+  if (editTooLate(req, res, "bbm", existing)) return;
   const beban = bbmBeban(req.body?.beban);
   if (beban === (existing.beban ?? "")) return res.json({ success: true });
   await execute("UPDATE bbm_log SET beban = @beban WHERE id = @id", { beban, id: existing.id });
