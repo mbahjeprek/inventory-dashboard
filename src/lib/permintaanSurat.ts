@@ -9,13 +9,25 @@ export const URGENSI_LABEL: Record<PermintaanUrgensi, string> = { HIGH: "High", 
 export const kotaEstate = (k: string) => k.charAt(0) + k.slice(1).toLowerCase();
 export const estateLabel = (k: string) => (k === "KNS" || k === "WJA" ? k : kotaEstate(k));
 
+// The Manager Estate who signs Dibuat Oleh at each estate (changeable on the form).
+const MANAGER_ESTATE: Record<string, string> = { NILAM: "SIKAM", FIRUS: "PUJI HARTONO", ZAMRUD: "HERI DERMAWAN" };
 // The signatories of the paper form; a new request copies the klinik's last ones instead when it has any.
 export const TTD_DEFAULT = (klinik: string): PermintaanTtd => ({
-  dibuat: { nama: klinik === "FIRUS" ? "PUJI HARTONO" : "", jabatan: "Manager Estate" },
+  dibuat: { nama: MANAGER_ESTATE[klinik] ?? "", jabatan: "Manager Estate" },
   diketahui: { nama: "MOHD. NASRUL HAKIM BIN ANUYAR", jabatan: "GM Finance & Audit" },
   disetujui1: { nama: "FITRIONO EFENDI", jabatan: "Corporate GM Plantation" },
   disetujui2: { nama: "JOHAR LATIFAH", jabatan: "Head of Business Unit" },
 });
+// Saved / remembered signatories over the defaults: a box left without a name gets the default one.
+export const ttdLengkap = (klinik: string, ttd: Partial<PermintaanTtd> | null | undefined): PermintaanTtd => {
+  const d = TTD_DEFAULT(klinik);
+  return Object.fromEntries(
+    (Object.keys(d) as (keyof PermintaanTtd)[]).map((k) => {
+      const t = ttd?.[k];
+      return [k, t ? { nama: t.nama?.trim() ? t.nama : d[k].nama, jabatan: t.jabatan?.trim() ? t.jabatan : d[k].jabatan } : d[k]];
+    })
+  ) as PermintaanTtd;
+};
 // The order the boxes are signed in, with the name shown on screen.
 export const TTD_LEVEL_LABEL: Record<keyof PermintaanTtd, string> = { dibuat: "Dibuat oleh", diketahui: "Diketahui", disetujui1: "Disetujui 1", disetujui2: "Disetujui 2" };
 export const TTD_URUT: (keyof PermintaanTtd)[] = ["dibuat", "diketahui", "disetujui1", "disetujui2"];

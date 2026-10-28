@@ -17,7 +17,7 @@ import { can } from "../lib/access";
 import { localToday } from "../lib/opname";
 import { printDocument, type TableReport } from "../lib/printTable";
 import { ExportButtons } from "./ExportButtons";
-import { TTD_DEFAULT, TTD_LABEL, TTD_LEVEL_LABEL, TTD_URUT, URGENSI_LABEL, estateLabel, permintaanHtml, waktuTtd } from "../lib/permintaanSurat";
+import { TTD_DEFAULT, TTD_LABEL, ttdLengkap, TTD_LEVEL_LABEL, TTD_URUT, URGENSI_LABEL, estateLabel, permintaanHtml, waktuTtd } from "../lib/permintaanSurat";
 
 // Klinik > Permintaan Obat: the "Form Permintaan Obat, BMHP dan Alat Medis" of the klinik, drafted from its
 // stock (saran = enough for N months of use, at least the buffer, in kemasan), edited, printed with the
@@ -197,7 +197,7 @@ function Editor({ klinik, id, onDone, onBack }: { klinik: string; id: number | n
           setNomor(p.nomor);
           setTolak(p.tolak);
           setHead({ tanggal: p.tanggal, periode: p.periode, departemen: p.departemen, catatan: p.catatan });
-          setTtd({ ...TTD_DEFAULT(klinik), ...p.ttd });
+          setTtd(ttdLengkap(klinik, p.ttd));
           const pl: Record<string, Pilih> = {};
           const man: Manual[] = [];
           for (const l of p.lines) {
@@ -210,7 +210,7 @@ function Editor({ klinik, id, onDone, onBack }: { klinik: string; id: number | n
           setFilter("dipilih");
         } else {
           const list = await api.permintaanList(klinik);
-          if (list.ttd) setTtd({ ...TTD_DEFAULT(klinik), ...list.ttd });
+          if (list.ttd) setTtd(ttdLengkap(klinik, list.ttd));
           setPilih(Object.fromEntries(s.rows.filter((r) => r.saran > 0).map((r) => [r.kode, pilihDari(r)])));
         }
       } catch (e) {
