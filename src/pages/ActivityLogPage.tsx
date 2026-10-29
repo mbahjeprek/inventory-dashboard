@@ -18,9 +18,10 @@ const ESTATES_BY_MODULE = {
   KENDARAAN: ["NILAM", "FIRUS", "ZAMRUD"],
   PRUNING: ["NILAM", "FIRUS", "ZAMRUD"],
   SOP: [],
+  BUDGET: ["NILAM", "FIRUS", "ZAMRUD", "KNS", "WJA"],
 };
 // Module names in titles / text.
-const MODULE_NAME: Record<ActivityLog["module"], string> = { BARANG: "Gudang", BBM: "BBM", PUPUK: "Pupuk", KLINIK: "Klinik", OLI: "Oli", KOPERASI: "Koperasi", KENDARAAN: "Kendaraan & Alat Berat", PRUNING: "Pruning PT.AKSS", SOP: "Daftar SOP" };
+const MODULE_NAME: Record<ActivityLog["module"], string> = { BARANG: "Gudang", BBM: "BBM", PUPUK: "Pupuk", KLINIK: "Klinik", OLI: "Oli", KOPERASI: "Koperasi", KENDARAAN: "Kendaraan & Alat Berat", PRUNING: "Pruning PT.AKSS", SOP: "Daftar SOP", BUDGET: "Budgeting" };
 
 const formatWaktu = (iso: string) =>
   new Date(iso).toLocaleString("id-ID", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });

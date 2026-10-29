@@ -27,13 +27,14 @@ import {
   Check,
   ShoppingBasket,
   FolderOpen,
+  Calculator,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { useEstateFilter } from "../hooks/useEstateFilter";
 import { usePersetujuan } from "../hooks/usePersetujuan";
 import { useOpenPinjaman } from "../hooks/useOpenPinjaman";
 import { ChangePasswordModal } from "./ChangePasswordModal";
-import { canModule, hasDashboard, pageAllowed, userEstates, OPNAME_PATH, PINJAMAN_PATH, PASIEN_PATH, KOPERASI_PATH, KENDARAAN_PATH, DOKUMEN_PATH, SOP_PATH, PERSETUJUAN_PATH, type Module } from "../lib/access";
+import { canModule, hasDashboard, pageAllowed, userEstates, OPNAME_PATH, PINJAMAN_PATH, PASIEN_PATH, KOPERASI_PATH, KENDARAAN_PATH, BUDGET_PATH, DOKUMEN_PATH, SOP_PATH, PERSETUJUAN_PATH, type Module } from "../lib/access";
 
 // subtitle: shown only on the active menu, which grows into a gold card (see NavRow).
 type NavItem = { to: string; label: string; icon: typeof Package; subtitle?: string };
@@ -91,6 +92,7 @@ const navSections: NavSection[] = [
     ],
   },
   { title: "Koperasi", items: [{ to: KOPERASI_PATH, label: "Koperasi PT.AKSS", icon: ShoppingBasket, subtitle: "Stock Out & Potong Gaji" }] },
+  { title: "Budgeting", items: [{ to: BUDGET_PATH, label: "Budgeting", icon: Calculator, subtitle: "Budget tahunan estate" }] },
   { title: "Kendaraan", items: [{ to: KENDARAAN_PATH, label: "Kendaraan & Alat Berat", icon: Truck, subtitle: "Unit, kondisi & downtime PT.AKSS" }] },
   {
     title: "Master Data",

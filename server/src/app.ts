@@ -205,7 +205,7 @@ const TTD_ITEM_PERMS = ["klinik.ttd_diketahui", "klinik.ttd_disetujui1", "klinik
 const ITEM_RANK_LABEL = ["Approve Permintaan Obat", "Diketahui (Finance)", "Disetujui 1 (GM)", "Disetujui 2 (Head)", "Super User"];
 const itemRank = (u: SessionUser) =>
   u.role === "superuser" ? 4 : Math.max(0, ...TTD_ITEM_PERMS.map((x, i) => (u.perms.includes(x) ? i + 1 : 0)));
-const ACTIVITY_PERM: Record<string, string> = { BARANG: "gudang", BBM: "bbm", PUPUK: "pupuk", KLINIK: "klinik", OLI: "oli", KOPERASI: "koperasi", KENDARAAN: "kendaraan", PRUNING: "pruning" };
+const ACTIVITY_PERM: Record<string, string> = { BARANG: "gudang", BBM: "bbm", PUPUK: "pupuk", KLINIK: "klinik", OLI: "oli", KOPERASI: "koperasi", KENDARAAN: "kendaraan", PRUNING: "pruning", BUDGET: "budget" };
 function requiredPerms(req: express.Request): Need {
   // Inside app.use("/api") req.path is relative to the mount, inside a route it is the full path.
   const p = (req.baseUrl + req.path).replace(/^\/api/, "");
@@ -272,6 +272,8 @@ function requiredPerms(req: express.Request): Need {
   if (is(/^\/top-keluar$/)) return [q.source === "klinik" ? "klinik.view" : "gudang.view"];
   if (is(/^\/activity-log$/) && q.module === "SOP") return ["sop.view", "sop.edit", "sop.kunci"];
   if (is(/^\/activity-log$/)) return ACTIVITY_PERM[q.module] ? [`${ACTIVITY_PERM[q.module]}.view`] : "super";
+  // Budgeting: seen with Lihat or Ubah Budgeting (the estate checked in the route), changed with Ubah.
+  if (is(/^\/budget(\/|$)/)) return m === "GET" ? ["budget.view", "budget.edit"] : ["budget.edit"];
   if (is(/^\/obat(\/|$)/)) return ["master.obat"];
   if (is(/^\/master-oli(\/|$)/)) return ["master.oli"];
   if (is(/^\/master-pupuk(\/|$)/)) return ["master.pupuk"];
@@ -523,7 +525,7 @@ function requireEstate(estate: string) {
 }
 
 // ---- Activity log (audit trail), see schema.sql's activity_log ----
-type LogModule = "BARANG" | "BBM" | "PUPUK" | "KLINIK" | "OLI" | "KOPERASI" | "KENDARAAN" | "PRUNING" | "SOP";
+type LogModule = "BARANG" | "BBM" | "PUPUK" | "KLINIK" | "OLI" | "KOPERASI" | "KENDARAAN" | "PRUNING" | "SOP" | "BUDGET";
 
 // Records who changed what. Called after the change succeeded; a logging failure is reported but
 // never fails the user's action itself.
@@ -6074,7 +6076,7 @@ app.get("/api/user-activity", requireSuperuser, async (req, res) => {
 app.get("/api/activity-log", async (req, res) => {
   const { module = "", estate = "", estates = "", aksi = "", search = "", dateFrom = "", dateTo = "", tz = "", page = "1", pageSize = "50" } =
     req.query as Record<string, string>;
-  if (!["BARANG", "BBM", "PUPUK", "KLINIK", "OLI", "KOPERASI", "KENDARAAN", "PRUNING", "SOP"].includes(module)) return res.status(400).json({ error: "Modul tidak valid" });
+  if (!["BARANG", "BBM", "PUPUK", "KLINIK", "OLI", "KOPERASI", "KENDARAAN", "PRUNING", "SOP", "BUDGET"].includes(module)) return res.status(400).json({ error: "Modul tidak valid" });
 
   const conditions = ["module = @module"];
   const params: any = { module };
@@ -8928,6 +8930,85 @@ app.get("/api/pemakaian/detail", async (req, res) => {
     { ...p.params, bulan }
   );
   res.json({ data });
+});
+
+// ---- Budgeting (see schema.sql budget_workbook / budget_edit): an estate's budget workbook, imported from its Excel
+// file; the browser shows its sheets as they were and recalculates the formulas. Every change of a cell is kept (who,
+// when); the latest one per cell counts, an empty one puts the cell back as the file had it. ----
+async function budgetOf(req: express.Request, res: express.Response) {
+  const w = await queryOne<{ id: number; judul: string; estate: string; tahun: number }>("SELECT id, judul, estate, tahun FROM budget_workbook WHERE id = @id", {
+    id: Number(req.params.id) || 0,
+  });
+  if (!w) return void res.status(404).json({ error: "Budget tidak ditemukan" });
+  if (!estateAllowed(req.user!, w.estate)) return void res.status(403).json({ error: "Akses ditolak" });
+  return w;
+}
+app.get("/api/budget", async (req, res) => {
+  const rows = await queryMany<{ id: number; judul: string; estate: string; tahun: number }>(
+    "SELECT id, judul, estate, tahun, sumber, created_at FROM budget_workbook ORDER BY tahun DESC, estate, id"
+  );
+  res.json(rows.filter((r) => estateAllowed(req.user!, r.estate)));
+});
+// The workbook itself (sheets, cells, formulas, styles): kept gzipped and sent as it is, the browser unpacks it.
+app.get("/api/budget/:id/data", async (req, res) => {
+  const w = await budgetOf(req, res);
+  if (!w) return;
+  const r = await queryOne<{ data: Buffer }>("SELECT data FROM budget_workbook WHERE id = @id", { id: w.id });
+  res.set({ "Content-Type": "application/json; charset=utf-8", "Content-Encoding": "gzip", "Cache-Control": "private, no-cache" });
+  res.end(r!.data);
+});
+app.get("/api/budget/:id/edits", async (req, res) => {
+  const w = await budgetOf(req, res);
+  if (!w) return;
+  const rows = await queryMany(
+    `SELECT DISTINCT ON (sheet, addr) sheet, addr, isi, nama, at FROM budget_edit WHERE workbook_id = @id ORDER BY sheet, addr, id DESC`,
+    { id: w.id }
+  );
+  res.json(rows);
+});
+// The changes of one cell, newest first.
+app.get("/api/budget/:id/history", async (req, res) => {
+  const w = await budgetOf(req, res);
+  if (!w) return;
+  const rows = await queryMany("SELECT isi, nama, at FROM budget_edit WHERE workbook_id = @id AND sheet = @sheet AND addr = @addr ORDER BY id DESC LIMIT 50", {
+    id: w.id,
+    sheet: String(req.query.sheet ?? ""),
+    addr: String(req.query.addr ?? ""),
+  });
+  res.json(rows);
+});
+// Changes: [{ sheet, addr, isi }] - isi as typed (a number, text or =formula); null = back to the file's own content.
+// sheet "__LINK__" holds the values of the references to other Excel files (addr = the reference).
+app.post("/api/budget/:id/edits", async (req, res) => {
+  const w = await budgetOf(req, res);
+  if (!w) return;
+  const raw: any[] = Array.isArray(req.body?.changes) ? req.body.changes : [];
+  if (!raw.length) return res.status(400).json({ error: "Tidak ada perubahan" });
+  if (raw.length > 500) return res.status(400).json({ error: "Maksimal 500 perubahan sekali simpan" });
+  const rows = [];
+  for (const c of raw) {
+    const sheet = String(c?.sheet ?? "").slice(0, 120);
+    const addr = String(c?.addr ?? "").slice(0, 200);
+    const isi = c?.isi === null || c?.isi === undefined ? null : String(c.isi).slice(0, 5000);
+    if (!sheet || !addr || (sheet !== "__LINK__" && !/^[A-Z]{1,3}[1-9]\d{0,5}$/.test(addr))) return res.status(400).json({ error: `Sel tidak valid: ${sheet}!${addr}` });
+    rows.push({ sheet, addr, isi });
+  }
+  await execute(
+    `INSERT INTO budget_edit (workbook_id, sheet, addr, isi, user_id, nama)
+     SELECT @id, x.sheet, x.addr, x.isi, @uid, @nama FROM json_to_recordset(@rows::json) AS x(sheet text, addr text, isi text)`,
+    { id: w.id, rows: JSON.stringify(rows), uid: req.user!.id, nama: req.user!.nama || req.user!.username }
+  );
+  await logActivity(req, {
+    module: "BUDGET",
+    estate: w.estate,
+    aksi: "Ubah Budget",
+    objek: `${w.judul} · ${rows.length} sel`,
+    detail: rows
+      .slice(0, 40)
+      .map((r) => `${r.sheet === "__LINK__" ? "Data file lain" : r.sheet}!${r.addr}: ${r.isi === null ? "(dikembalikan ke isi file)" : r.isi}`)
+      .join("; "),
+  });
+  res.json({ success: true });
 });
 
 // ---- Chat (see schema.sql chat_*): DM, a room per estate, groups made by a Super User ----
