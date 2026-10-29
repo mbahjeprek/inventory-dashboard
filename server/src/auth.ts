@@ -68,9 +68,6 @@ export const ALL_PERMS: string[] = [
   "kendaraan.view",
   "kendaraan.input",
   "kendaraan.edit",
-  // Budgeting: Lihat (the estate's budget workbooks), Ubah (change numbers / formulas, fill the links to other files).
-  "budget.view",
-  "budget.edit",
   // Pruning PT.AKSS: Lihat (riwayat, rekap), Input (pruning baru), Edit (ubah / hapus, target blok).
   "pruning.view",
   "pruning.input",

@@ -47,7 +47,6 @@ const PetaBlokPage = page(() => import("./pages/PetaBlokPage"), "PetaBlokPage");
 const MasterBarangPage = page(() => import("./pages/MasterBarangPage"), "MasterBarangPage");
 const KoperasiPage = page(() => import("./pages/KoperasiPage"), "KoperasiPage");
 const KendaraanPage = page(() => import("./pages/KendaraanPage"), "KendaraanPage");
-const BudgetPage = page(() => import("./pages/BudgetPage"), "BudgetPage");
 const UsersPage = page(() => import("./pages/UsersPage"), "UsersPage");
 const DashboardPage = page(() => import("./pages/DashboardPage"), "DashboardPage");
 const InventoryPupukPage = page(() => import("./pages/InventoryPupukPage"), "InventoryPupukPage");
@@ -385,17 +384,6 @@ function App() {
                   </RequirePageAccess>
                 }
               />
-              {["/budgeting", "/budgeting/:id"].map((path) => (
-                <Route
-                  key={path}
-                  path={path}
-                  element={
-                    <RequirePageAccess>
-                      <BudgetPage />
-                    </RequirePageAccess>
-                  }
-                />
-              ))}
               <Route
                 path="/log-user"
                 element={

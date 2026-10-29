@@ -72,13 +72,6 @@ export const OTHER_PERMS: { group: string; items: { key: string; label: string }
     ],
   },
   {
-    group: "Budgeting",
-    items: [
-      { key: "budget.view", label: "Lihat Budgeting" },
-      { key: "budget.edit", label: "Ubah Budgeting (isi angka & rumus, data dari file lain)" },
-    ],
-  },
-  {
     group: "Kendaraan & Alat Berat",
     items: [
       { key: "kendaraan.view", label: "Lihat Kendaraan & Alat Berat" },
@@ -206,8 +199,6 @@ export const PASIEN_PATH = "/master-pasien";
 export const KOPERASI_PATH = "/koperasi";
 // Kendaraan & Alat Berat (PT.AKSS): seen with Lihat Kendaraan.
 export const KENDARAAN_PATH = "/kendaraan";
-// Budgeting: an estate's budget workbook (as its Excel), seen with Lihat or Ubah Budgeting.
-export const BUDGET_PATH = "/budgeting";
 
 // Pruning PT.AKSS: the menu was removed (its data stays in the database, its server routes Super User only);
 // nobody opens it, the Peta Blok has no Pruning tab and Pengguna no Pruning ticks.
@@ -231,7 +222,6 @@ const LANDING_PAGES = [
   "/persetujuan",
   KOPERASI_PATH,
   KENDARAAN_PATH,
-  BUDGET_PATH,
   "/log-user",
   "/users",
   "/karyawan",
@@ -266,7 +256,6 @@ export function pageAllowed(user: AuthUser | null, path: string): boolean {
   if (path === SOP_PATH || path.startsWith(`${SOP_PATH}/`)) return ["sop.view", "sop.edit", "sop.kunci"].some((p) => can(user, p));
   if (path === KOPERASI_PATH) return can(user, "koperasi.view") && userEstates(user).includes(KOPERASI_ESTATE);
   if (path === KENDARAAN_PATH) return can(user, "kendaraan.view");
-  if (path === BUDGET_PATH || path.startsWith(`${BUDGET_PATH}/`)) return can(user, "budget.view") || can(user, "budget.edit");
   if (path === PRUNING_PATH) return !KEBUN_HANYA_SUPER && ["pruning.view", "pruning.input", "pruning.edit"].some((p) => can(user, p));
   // Peta Blok: seen with Lihat Peta Blok, Ubah Peta Blok or Master Blok.
   if (path === "/peta-blok") return ["master.peta", "master.peta_edit", "master.blok"].some((p) => can(user, p));

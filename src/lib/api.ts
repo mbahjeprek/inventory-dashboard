@@ -616,31 +616,10 @@ export type PupukSummary = {
   saldoPerTanggal: PupukSaldo[];
 };
 
-// Budgeting workbook (see server budget_workbook and scratch extract.py): sheets with their cells as the Excel had them.
-export type BudgetWorkbook = { id: number; judul: string; estate: string; tahun: number; sumber: string };
-export type BudgetStyle = {
-  b?: 1; i?: 1; u?: 1; st?: 1; sz?: number; fn?: string; fc?: string; bg?: string;
-  bd?: Partial<Record<"l" | "r" | "t" | "b", [string, string]>>; h?: string; v?: string; w?: 1; ind?: number; rot?: number; nf?: string;
-};
-export type BudgetCell = { v?: number | string | boolean | null; f?: string; s?: number; l?: string };
-export type BudgetSheet = {
-  name: string; show: boolean; hidden: boolean; maxr: number; maxc: number; cols: number[]; rowh: Record<string, number>; defh: number;
-  hr: number[]; hc: number[]; freeze: string | null; merges: string[]; cells: Record<string, BudgetCell>; notes: Record<string, string>;
-  // a picture is in the data (src) or loaded on its own (n, see /api/budget/:id/img/:n)
-  imgs: { c: number; r: number; dx: number; dy: number; w: number; h: number; src?: string; n?: number }[]; tab: string | null;
-};
-export type BudgetData = {
-  sheets: BudgetSheet[]; styles: BudgetStyle[]; showOrder: string[];
-  fixes: { sheet: string; addr: string; dari: string; jadi: string; alasan: string }[];
-  refRusak: { sheet: string; addr: string; f: string }[];
-  // the other Excel files the links read from, by their number ([4] -> "FORMAT BUDGET GC 2027.xlsx")
-  extFiles?: Record<string, string>;
-};
-export type BudgetEdit = { sheet: string; addr: string; isi: string | null; nama: string; at: string };
 export type ActivityLog = {
   id: number;
   created_at: string;
-  module: "BARANG" | "BBM" | "PUPUK" | "KLINIK" | "OLI" | "KOPERASI" | "KENDARAAN" | "PRUNING" | "SOP" | "BUDGET";
+  module: "BARANG" | "BBM" | "PUPUK" | "KLINIK" | "OLI" | "KOPERASI" | "KENDARAAN" | "PRUNING" | "SOP";
   estate: string | null;
   aksi: string;
   objek: string | null;
@@ -1849,14 +1828,6 @@ export const api = {
     req<{ data: { id: number; tanggal_iso: string; ref: string; tujuan: string; penerima: string; ket: string; qty: number }[] }>(
       `/api/pemakaian/detail?${new URLSearchParams({ ...params, group: params.group ?? "", per: params.per ?? "bulan", bulan: params.bulan ?? "" })}`
     ),
-  // Budgeting: the workbooks of the account's estates, one's data (sheets as imported), its changes per cell.
-  budgetList: () => req<BudgetWorkbook[]>("/api/budget"),
-  budgetData: (id: number) => req<BudgetData>(`/api/budget/${id}/data`),
-  budgetEdits: (id: number) => req<BudgetEdit[]>(`/api/budget/${id}/edits`),
-  budgetSave: (id: number, changes: { sheet: string; addr: string; isi: string | null }[]) =>
-    req<{ success: boolean }>(`/api/budget/${id}/edits`, { method: "POST", body: JSON.stringify({ changes }) }),
-  budgetHistory: (id: number, sheet: string, addr: string) =>
-    req<{ isi: string | null; nama: string; at: string }[]>(`/api/budget/${id}/history?${new URLSearchParams({ sheet, addr })}`),
   perbandinganBarang: (module: OpnameModule, search: string) =>
     req<{ kode: string; nama: string; satuan: string }[]>(`/api/perbandingan/barang?${new URLSearchParams({ module, search })}`),
 
