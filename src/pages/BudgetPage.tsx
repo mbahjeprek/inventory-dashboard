@@ -119,6 +119,9 @@ function fmt(v: Val, nf: string | undefined): string {
 const rawOf = (d: CellDef | undefined): string => (!d ? "" : d.f !== undefined ? `=${d.f}` : d.v === null || d.v === undefined ? "" : typeof d.v === "boolean" ? (d.v ? "TRUE" : "FALSE") : String(d.v));
 const sameDef = (a: CellDef | undefined | null, b: CellDef | undefined | null) => rawOf(a ?? undefined) === rawOf(b ?? undefined);
 
+// A stored link value: numbers are kept in plain form (2.613 = two point six, never 2,613), other text as typed.
+const linkValue = (isi: string): Val => (/^-?\d+(\.\d+)?(e[+-]?\d+)?$/i.test(isi.trim()) ? Number(isi) : (parseInput(isi)?.v ?? null) as Val);
+
 // References to other Excel files in a formula, keyed as the engine reads them: "[4]GC0400!N26".
 const EXT_RE = /'?(\[\d+\][^'!]*)'?!(\$?[A-Z]{1,3}\$?\d+(?::\$?[A-Z]{1,3}\$?\d+)?)/g;
 const extKeys = (f: string) => [...f.matchAll(EXT_RE)].map((m) => `${m[1]}!${m[2].replace(/\$/g, "")}`);
@@ -174,8 +177,8 @@ export function BudgetViewer({ wbMeta }: { wbMeta: BudgetWorkbook }) {
         for (const x of e) {
           em.set(`${x.sheet}!${x.addr}`, x);
           if (x.sheet === LINK_SHEET) {
-            const v = x.isi === null ? null : parseInput(x.isi);
-            if (v && v.v !== undefined) w.links.set(x.addr, v.v ?? null);
+            const v = x.isi === null ? null : linkValue(x.isi);
+            if (v !== null) w.links.set(x.addr, v);
           } else if (w.sheets.has(x.sheet)) w.setCell(x.sheet, x.addr, x.isi === null ? (b.get(`${x.sheet}!${x.addr}`) ?? null) : parseInput(x.isi));
         }
         engine.current = w;
@@ -293,7 +296,7 @@ export function BudgetViewer({ wbMeta }: { wbMeta: BudgetWorkbook }) {
     if (!d || d.v === undefined) w.links.delete(key);
     else w.links.set(key, d.v);
     w.invalidate();
-    queue(LINK_SHEET, key, d && d.v !== undefined ? raw.trim() : null);
+    queue(LINK_SHEET, key, d && d.v !== undefined ? (typeof d.v === "number" ? String(d.v) : String(d.v)) : null);
     setVersion((n) => n + 1);
   };
 
@@ -511,6 +514,7 @@ export function BudgetViewer({ wbMeta }: { wbMeta: BudgetWorkbook }) {
                 {links.map((l) => (
                   <div key={l.key} className="rounded-md border border-[var(--border)] p-2 space-y-1">
                     <div className="font-mono text-xs break-all">{l.key}</div>
+                    <FileLabel n={/^\[(\d+)\]/.exec(l.key)?.[1] ?? ""} files={data.extFiles} />
                     <div className="text-[11px] text-[var(--text-muted)]">
                       Dipakai di{" "}
                       {l.uses.slice(0, 4).map((u, i) => (
@@ -613,6 +617,19 @@ export function BudgetViewer({ wbMeta }: { wbMeta: BudgetWorkbook }) {
           <ChevronDown size={12} className="pointer-events-none -ml-4 opacity-0" />
         </label>
       </div>
+    </div>
+  );
+}
+
+// Old / other estates' files a link still reads from: worth checking that the value is the right one for this budget.
+const FILE_CURIGA = /2018|2021|2026|ANGSANA|NILAM/i;
+function FileLabel({ n, files }: { n: string; files?: Record<string, string> }) {
+  const f = files?.[n]?.split(/[\\/]/).pop();
+  if (!f) return null;
+  return (
+    <div className={`text-[11px] ${FILE_CURIGA.test(f) ? "text-[var(--accent-red)]" : "text-[var(--text-secondary)]"}`}>
+      File [{n}]: <b>{f}</b>
+      {FILE_CURIGA.test(f) && " - file lama / estate lain, cek apakah angkanya benar untuk budget ini"}
     </div>
   );
 }

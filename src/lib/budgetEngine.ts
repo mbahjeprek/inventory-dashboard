@@ -245,7 +245,13 @@ function cmp(a: Val, b: Val): number {
   const ra = rank(a),
     rb = rank(b);
   if (ra !== rb) return ra - rb;
-  if (typeof a === "number" && typeof b === "number") return Math.abs(a - b) < 1e-12 * Math.max(1, Math.abs(a), Math.abs(b)) ? 0 : a < b ? -1 : 1;
+  // numbers compare at 15 significant digits, as Excel does (9277609.157380179 <> 9277609.157380186, but sums that
+  // differ only in the 16th digit are equal)
+  if (typeof a === "number" && typeof b === "number") {
+    const x = Number(a.toPrecision(15)),
+      y = Number(b.toPrecision(15));
+    return x === y ? 0 : x < y ? -1 : 1;
+  }
   if (typeof a === "string" && typeof b === "string") {
     const x = a.toLowerCase(),
       y = b.toLowerCase();
@@ -281,6 +287,8 @@ function matcher(crit: Val): (v: Val) => boolean {
   };
 }
 
+// Excel keeps 15 significant digits: a sum / difference that is 0 within them shows as 0 (not -0.0000076).
+const snap = (r: number, x: number, y: number) => (r !== 0 && Math.abs(r) < Math.max(Math.abs(x), Math.abs(y)) * 1e-14 ? 0 : r);
 const roundTo = (x: number, d: number, mode: "half" | "up" | "down") => {
   const f = Math.pow(10, d);
   const y = x * f;
@@ -438,9 +446,9 @@ export class Workbook {
         if (isErr(y)) return y;
         switch (n.op) {
           case "+":
-            return x + y;
+            return snap(x + y, x, y);
           case "-":
-            return x - y;
+            return snap(x - y, x, y);
           case "*":
             return x * y;
           case "/":

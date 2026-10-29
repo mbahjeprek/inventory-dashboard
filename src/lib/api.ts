@@ -632,6 +632,8 @@ export type BudgetData = {
   sheets: BudgetSheet[]; styles: BudgetStyle[]; showOrder: string[];
   fixes: { sheet: string; addr: string; dari: string; jadi: string; alasan: string }[];
   refRusak: { sheet: string; addr: string; f: string }[];
+  // the other Excel files the links read from, by their number ([4] -> "FORMAT BUDGET GC 2027.xlsx")
+  extFiles?: Record<string, string>;
 };
 export type BudgetEdit = { sheet: string; addr: string; isi: string | null; nama: string; at: string };
 export type ActivityLog = {
