@@ -8957,6 +8957,15 @@ app.get("/api/budget/:id/data", async (req, res) => {
   res.set({ "Content-Type": "application/json; charset=utf-8", "Content-Encoding": "gzip", "Cache-Control": "private, no-cache" });
   res.end(r!.data);
 });
+// A picture of a sheet (see budget_image): kept by the browser, it doesn't change.
+app.get("/api/budget/:id/img/:n", async (req, res) => {
+  const w = await budgetOf(req, res);
+  if (!w) return;
+  const im = await queryOne<{ mime: string; data: Buffer }>("SELECT mime, data FROM budget_image WHERE workbook_id = @id AND n = @n", { id: w.id, n: Number(req.params.n) || 0 });
+  if (!im) return res.status(404).send("Gambar tidak ditemukan");
+  res.set({ "Content-Type": im.mime, "Cache-Control": "private, max-age=86400" });
+  res.end(im.data);
+});
 app.get("/api/budget/:id/edits", async (req, res) => {
   const w = await budgetOf(req, res);
   if (!w) return;

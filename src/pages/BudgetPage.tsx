@@ -13,6 +13,9 @@ import { can } from "../lib/access";
 // when, and can be put back. References to other Excel files are filled in once in "Data dari file lain".
 
 const LINK_SHEET = "__LINK__";
+// The part of the grid on screen (scroll, size, zoom), for drawing only that part of a big sheet.
+type View = { top: number; left: number; w: number; h: number; zoom: number };
+const BESAR = 6000;
 const HEADER_H = 20;
 // The file's font is Aptos (Excel's own); where it isn't installed Arial, as Google Sheets shows it.
 const FONT = `Aptos, "Aptos Narrow", Arial, sans-serif`;
@@ -171,7 +174,7 @@ export function BudgetViewer({ wbMeta }: { wbMeta: BudgetWorkbook }) {
             const def = cells.get(a);
             if (def) b.set(`${s.name}!${a}`, def);
           }
-          w.addSheet({ name: s.name, maxr: s.maxr, maxc: s.maxc, cells });
+          w.addSheet({ name: s.name, maxr: s.maxr, maxc: s.maxc, cells, hiddenRows: new Set(s.hr) });
         }
         const em = new Map<string, BudgetEdit>();
         for (const x of e) {
@@ -362,13 +365,39 @@ export function BudgetViewer({ wbMeta }: { wbMeta: BudgetWorkbook }) {
     }
   };
 
+  // what is on screen, in steps so scrolling a little doesn't redraw
+  const [pos, setPos] = useState({ top: 0, left: 0, w: 1400, h: 800 });
+  useEffect(() => {
+    const el = gridRef.current;
+    if (!el) return;
+    let raf = 0;
+    const baca = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() =>
+        setPos((p) => {
+          const n = { top: Math.floor(el.scrollTop / 150) * 150, left: Math.floor(el.scrollLeft / 200) * 200, w: el.clientWidth, h: el.clientHeight };
+          return n.top === p.top && n.left === p.left && n.w === p.w && n.h === p.h ? p : n;
+        })
+      );
+    };
+    baca();
+    el.addEventListener("scroll", baca, { passive: true });
+    const ro = new ResizeObserver(baca);
+    ro.observe(el);
+    return () => {
+      el.removeEventListener("scroll", baca);
+      ro.disconnect();
+      cancelAnimationFrame(raf);
+    };
+  }, [data]);
+
   // selection outline over the grid (the table isn't re-rendered for it)
   const [outline, setOutline] = useState<CSSProperties | null>(null);
   useEffect(() => {
     const td = gridRef.current?.querySelector<HTMLElement>(`[data-k="${sel.r},${sel.c}"]`);
     if (!td) return setOutline(null);
     setOutline({ left: td.offsetLeft, top: td.offsetTop, width: td.offsetWidth, height: td.offsetHeight });
-  }, [sel, active, version, zoom, data]);
+  }, [sel, active, version, zoom, data, pos]);
   useEffect(() => {
     try {
       localStorage.setItem("budget-zoom", String(zoom));
@@ -493,7 +522,10 @@ export function BudgetViewer({ wbMeta }: { wbMeta: BudgetWorkbook }) {
       <div className="relative flex-1 min-h-0 flex gap-2">
         <div ref={gridRef} tabIndex={0} onKeyDown={onGridKey} className="relative flex-1 min-w-0 overflow-auto rounded-md border border-[var(--border)] bg-white outline-none">
           <div style={{ zoom, position: "relative", width: "max-content" }}>
-            <Grid sheet={sheet} styles={data.styles} engine={w} version={version} merges={merges} edits={edits} onSelect={go} onLink={followLink} />
+            <Grid
+              view={sheet.maxr * sheet.maxc > BESAR ? { ...pos, zoom } : null}
+              wbId={wbMeta.id}
+              sheet={sheet} styles={data.styles} engine={w} version={version} merges={merges} edits={edits} onSelect={go} onLink={followLink} />
             {outline && <div className="absolute pointer-events-none border-2 border-[#1a73e8] z-10" style={outline} />}
           </div>
         </div>
@@ -667,6 +699,7 @@ function mergeMap(sheet: BudgetSheet | undefined) {
 }
 
 const Grid = memo(function Grid({
+  wbId,
   sheet,
   styles,
   engine,
@@ -675,7 +708,10 @@ const Grid = memo(function Grid({
   edits,
   onSelect,
   onLink,
+  view,
 }: {
+  view: View | null;
+  wbId: number;
   sheet: BudgetSheet;
   styles: BudgetStyle[];
   engine: Workbook;
@@ -697,11 +733,39 @@ const Grid = memo(function Grid({
   // image positions: sum of the widths / heights before their anchor cell
   const xOf = (c0: number) => ROWNUM_W + cols.filter((c) => c <= c0).reduce((s, c) => s + sheet.cols[c - 1], 0);
   const yOf = (r0: number) => HEADER_H + rows.filter((r) => r <= r0).reduce((s, r) => s + heightOf(r), 0);
-  const visibleIn = (from: number, n: number, hidden: Set<number>) => {
+  // A big sheet shows only what is on screen (plus a margin), with spacers for the rest: rows r0..r1, columns c0..c1.
+  const rowTop: number[] = [];
+  rows.reduce((y, r, i) => ((rowTop[i] = y), y + heightOf(r)), 0);
+  const colLeft: number[] = [];
+  cols.reduce((x, c, i) => ((colLeft[i] = x), x + sheet.cols[c - 1]), 0);
+  let r0 = 0,
+    r1 = rows.length - 1,
+    c0 = 0,
+    c1 = cols.length - 1;
+  if (view) {
+    const y0 = view.top / view.zoom - HEADER_H - 300,
+      y1 = (view.top + view.h) / view.zoom + 300;
+    const x0 = view.left / view.zoom - ROWNUM_W - 400,
+      x1 = (view.left + view.w) / view.zoom + 400;
+    r0 = Math.max(0, rowTop.findIndex((y, i) => y + heightOf(rows[i]) >= y0));
+    const re = rowTop.findIndex((y) => y > y1);
+    r1 = re < 0 ? rows.length - 1 : re;
+    c0 = Math.max(0, colLeft.findIndex((x, i) => x + sheet.cols[cols[i] - 1] >= x0));
+    const ce = colLeft.findIndex((x) => x > x1);
+    c1 = ce < 0 ? cols.length - 1 : ce;
+  }
+  const rFirst = rows[r0],
+    rLast = rows[r1],
+    cFirst = cols[c0],
+    cLast = cols[c1];
+  // rows / columns of a merged cell that are shown (cut at the edge of what is drawn)
+  const visibleIn = (from: number, n: number, hidden: Set<number>, last: number) => {
     let k = 0;
-    for (let i = from; i < from + n; i++) if (!hidden.has(i)) k++;
+    for (let i = from; i < from + n && i <= last; i++) if (!hidden.has(i)) k++;
     return k;
   };
+  const shownRows = rows.slice(r0, r1 + 1);
+  const shownCols = cols.slice(c0, c1 + 1);
   const ext = /'?\[\d+\][^'!]*'?!/;
   return (
     <>
@@ -718,7 +782,8 @@ const Grid = memo(function Grid({
         <thead>
           <tr style={{ height: HEADER_H }}>
             <th className="sticky top-0 left-0 z-20 bg-[#f1f5f9] border border-[#d5dde6]" />
-            {cols.map((c) => (
+            {c0 > 0 && <th colSpan={c0} className="sticky top-0 z-10 bg-[#f1f5f9] border border-[#d5dde6]" />}
+            {shownCols.map((c) => (
               <th key={c} className="sticky top-0 z-10 bg-[#f1f5f9] border border-[#d5dde6] text-[10px] font-normal text-[#5b6b7c]">
                 {colLetter(c)}
               </th>
@@ -726,12 +791,20 @@ const Grid = memo(function Grid({
           </tr>
         </thead>
         <tbody>
-          {rows.map((r) => (
+          {r0 > 0 && (
+            <tr style={{ height: rowTop[r0] }}>
+              <td colSpan={cols.length + 1} />
+            </tr>
+          )}
+          {shownRows.map((r) => (
             <tr key={r} style={{ height: heightOf(r) }}>
               <td className="sticky left-0 z-10 bg-[#f1f5f9] border border-[#d5dde6] text-[10px] text-center text-[#5b6b7c]">{r}</td>
-              {cols.map((c) => {
+              {c0 > 0 && <td colSpan={c0} />}
+              {shownCols.map((c) => {
                 const k = `${r},${c}`;
-                if (merges.cover.has(k)) return null;
+                const top = merges.cover.get(k);
+                // covered by a merged cell that is drawn: nothing; by one outside what is drawn: an empty cell keeps the columns in place
+                if (top) return top[0] >= rFirst && top[1] >= cFirst ? null : <td key={c} />;
                 const a = addrOf(r, c);
                 const cell = sheet.cells[a];
                 const span = merges.span.get(k);
@@ -757,8 +830,8 @@ const Grid = memo(function Grid({
                   <td
                     key={c}
                     data-k={k}
-                    rowSpan={span ? visibleIn(r, span[0], hr) : undefined}
-                    colSpan={span ? visibleIn(c, span[1], hc) : undefined}
+                    rowSpan={span ? visibleIn(r, span[0], hr, rLast) : undefined}
+                    colSpan={span ? visibleIn(c, span[1], hc, cLast) : undefined}
                     style={style}
                     title={sheet.notes[a]}
                     className={`${edited ? "bg-edited" : ""} ${pakaiLink ? "bg-ext" : ""}`}
@@ -771,10 +844,15 @@ const Grid = memo(function Grid({
               })}
             </tr>
           ))}
+          {r1 < rows.length - 1 && (
+            <tr style={{ height: rowTop[rows.length - 1] + heightOf(rows[rows.length - 1]) - rowTop[r1] - heightOf(rows[r1]) }}>
+              <td colSpan={cols.length + 1} />
+            </tr>
+          )}
         </tbody>
       </table>
       {sheet.imgs.map((im, i) => (
-        <img key={i} src={im.src} alt="" className="absolute pointer-events-none" style={{ left: xOf(im.c) + im.dx, top: yOf(im.r) + im.dy, width: im.w, height: im.h }} />
+        <img key={i} src={im.src ?? `/api/budget/${wbId}/img/${im.n}`} alt="" loading="lazy" className="absolute pointer-events-none" style={{ left: xOf(im.c) + im.dx, top: yOf(im.r) + im.dy, width: im.w, height: im.h }} />
       ))}
     </>
   );

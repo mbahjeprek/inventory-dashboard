@@ -1364,6 +1364,15 @@ CREATE TABLE IF NOT EXISTS budget_edit (
   at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_budget_edit ON budget_edit(workbook_id, sheet, addr, id);
+-- The pictures of a budget's sheets (logos, organisation chart, documentation photos), loaded when their sheet is
+-- shown; the sheet's image list refers to them by n.
+CREATE TABLE IF NOT EXISTS budget_image (
+  workbook_id INTEGER NOT NULL REFERENCES budget_workbook(id) ON DELETE CASCADE,
+  n INTEGER NOT NULL,
+  mime TEXT NOT NULL,
+  data BYTEA NOT NULL,
+  PRIMARY KEY (workbook_id, n)
+);
 
 -- Lock the database to this app's server: Supabase also exposes every public table through its REST API to the anon /
 -- authenticated roles. The app never uses them (its server connects as postgres, which RLS doesn't apply to; photos use

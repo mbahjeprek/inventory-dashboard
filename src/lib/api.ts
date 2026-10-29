@@ -626,7 +626,8 @@ export type BudgetCell = { v?: number | string | boolean | null; f?: string; s?:
 export type BudgetSheet = {
   name: string; show: boolean; hidden: boolean; maxr: number; maxc: number; cols: number[]; rowh: Record<string, number>; defh: number;
   hr: number[]; hc: number[]; freeze: string | null; merges: string[]; cells: Record<string, BudgetCell>; notes: Record<string, string>;
-  imgs: { c: number; r: number; dx: number; dy: number; w: number; h: number; src: string }[]; tab: string | null;
+  // a picture is in the data (src) or loaded on its own (n, see /api/budget/:id/img/:n)
+  imgs: { c: number; r: number; dx: number; dy: number; w: number; h: number; src?: string; n?: number }[]; tab: string | null;
 };
 export type BudgetData = {
   sheets: BudgetSheet[]; styles: BudgetStyle[]; showOrder: string[];

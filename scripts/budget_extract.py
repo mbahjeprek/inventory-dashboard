@@ -1,4 +1,4 @@
-# Usage: python scripts/budget_extract.py <workbook.xlsx> <out.json>  (needs openpyxl and Pillow). The JSON is gzipped into budget_workbook.data.
+# Usage: python scripts/budget_extract.py <workbook.xlsx> <out.json> [--semua]  (needs openpyxl and Pillow). The JSON is gzipped into budget_workbook.data.
 # SHOW below = the sheets shown as tabs (the rest of what their formulas reach comes along as "sheet pendukung").
 # Converts the budget workbook into JSON for the web Budgeting viewer: per sheet the used cells (cached value, formula,
 # style id), merges, column widths / row heights, hidden rows / cols, freeze pane, hyperlinks, comments and images;
@@ -13,6 +13,9 @@ SHOW = ["COVER", "DAFTAR ISI", "AREASTA", "STRUKTUR ORGANISASI", "STO", "DETAILL
 
 wbf = openpyxl.load_workbook(SRC)
 wbv = openpyxl.load_workbook(SRC, data_only=True)
+# --semua: every sheet visible in Excel is a tab, in Excel's order (hidden ones come along only when a formula needs them)
+if "--semua" in sys.argv:
+    SHOW = [ws.title for ws in wbf.worksheets if ws.sheet_state == "visible"]
 
 # ---- theme colours ----
 z = zipfile.ZipFile(SRC)

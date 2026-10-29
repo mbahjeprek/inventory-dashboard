@@ -220,7 +220,7 @@ export function parseFormula(src: string): Node {
 
 // ---- workbook model ----
 export type CellDef = { v?: Val; f?: string };
-export type SheetModel = { name: string; maxr: number; maxc: number; cells: Map<string, CellDef> };
+export type SheetModel = { name: string; maxr: number; maxc: number; cells: Map<string, CellDef>; hiddenRows?: Set<number> };
 
 type Range = { range: true; sheet: string; r1: number; c1: number; r2: number; c2: number };
 type Arg = Val | Range;
@@ -555,6 +555,62 @@ export class Workbook {
         if (name === "AVERAGE") return nums.length ? nums.reduce((s, x) => s + x, 0) / nums.length : ERR("#DIV/0!");
         if (!nums.length) return 0;
         return name === "MIN" ? Math.min(...nums) : Math.max(...nums);
+      }
+      // SUBTOTAL(n, ranges): 1 AVERAGE, 2 COUNT, 3 COUNTA, 4 MAX, 5 MIN, 6 PRODUCT, 7 STDEV, 8 STDEVP, 9 SUM, 10 VAR,
+      // 11 VARP; 101-111 the same without hidden rows. Other SUBTOTALs inside the ranges are left out, as in Excel.
+      case "SUBTOTAL": {
+        const code = num(V(0));
+        if (isErr(code)) return code;
+        const fn = code > 100 ? code - 100 : code;
+        if (!(fn >= 1 && fn <= 11)) return ERR("#VALUE!");
+        const vals: Val[] = [];
+        for (const a of args.slice(1)) {
+          const rg = this.ev(a, sheet);
+          if (!isRange(rg)) return isErr(rg) ? rg : ERR("#VALUE!");
+          const sm = this.sheets.get(rg.sheet);
+          if (!sm) continue;
+          for (let i = rg.r1; i <= Math.min(rg.r2, sm.maxr); i++) {
+            if (code > 100 && sm.hiddenRows?.has(i)) continue;
+            for (let j = rg.c1; j <= Math.min(rg.c2, sm.maxc); j++) {
+              const d = sm.cells.get(addr(i, j));
+              if (d?.f !== undefined && /^\s*SUBTOTAL\s*\(/i.test(d.f)) continue;
+              vals.push(this.value(rg.sheet, i, j));
+            }
+          }
+        }
+        const err = vals.find(isErr);
+        if (err && fn !== 3) return err;
+        const nums = vals.filter((v): v is number => typeof v === "number");
+        const sum = nums.reduce((t, x) => t + x, 0);
+        const varOf = (pop: boolean) => {
+          const k = nums.length - (pop ? 0 : 1);
+          if (k <= 0) return ERR("#DIV/0!");
+          const m = sum / nums.length;
+          return nums.reduce((t, x) => t + (x - m) ** 2, 0) / k;
+        };
+        switch (fn) {
+          case 1:
+            return nums.length ? sum / nums.length : ERR("#DIV/0!");
+          case 2:
+            return nums.length;
+          case 3:
+            return vals.filter((v) => v !== null).length;
+          case 4:
+            return nums.length ? Math.max(...nums) : 0;
+          case 5:
+            return nums.length ? Math.min(...nums) : 0;
+          case 6:
+            return nums.length ? nums.reduce((t, x) => t * x, 1) : 0;
+          case 7:
+          case 8: {
+            const v = varOf(fn === 8);
+            return isErr(v) ? v : Math.sqrt(v);
+          }
+          case 9:
+            return sum;
+          default:
+            return varOf(fn === 11);
+        }
       }
       case "COUNTA": {
         let n = 0;
