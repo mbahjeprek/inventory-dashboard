@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { wrongJenis, type JenisBbm } from "../lib/bbmJenis";
+import { JENIS_BBM, jenisBbmLabel, jenisDiLokasi, wrongJenis, type JenisBbm } from "../lib/bbmJenis";
 import { api, type BbmSummary } from "../lib/api";
 import type { AlatOption } from "./AlatAutocomplete";
 import { PEMASOK, tujuanColumn } from "../lib/kirim";
@@ -147,9 +147,11 @@ export function BbmBatchModal({
         <>
           <HeaderField label="Jenis BBM">
             <select value={jenis} onChange={(e) => setJenis(e.target.value as JenisBbm)} className={headerInputCls}>
-              <option value="SOLAR">SOLAR</option>
-              <option value="BENSIN">BENSIN</option>
-              <option value="BENSIN_CAMPUR">BENSIN CAMPUR</option>
+              {JENIS_BBM.filter((j) => jenisDiLokasi(j, lokasiLock || lokasi)).map((j) => (
+                <option key={j} value={j}>
+                  {jenisBbmLabel(j).toUpperCase()}
+                </option>
+              ))}
             </select>
           </HeaderField>
           <HeaderField label="Lokasi">

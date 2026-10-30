@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import { useEffect, useState } from "react";
-import { Search, ChevronLeft, ChevronRight, Fuel, Droplet, PackagePlus, Pencil, Trash2, ListPlus, FileText, UserRound } from "lucide-react";
+import { Search, ChevronLeft, ChevronRight, Fuel, Droplet, PackagePlus, Pencil, Trash2, ListPlus, FileText, UserRound, Siren, Car } from "lucide-react";
 import { PinjamPribadiModal } from "../components/PinjamPribadiModal";
 import { useOpenPinjaman } from "../hooks/useOpenPinjaman";
 import { api, errorText, type BbmRecord, type BbmSummary } from "../lib/api";
@@ -13,7 +13,7 @@ import { DokumenButton } from "../components/DokumenButton";
 import { PemakaianButton } from "../components/PemakaianPanel";
 import { fetchAllRows, printDocument, type TableReport } from "../lib/printTable";
 import { formDoBbmHtml } from "../lib/formDoBbm";
-import { JENIS_BBM, LOKASI_BENSIN_CAMPUR, jenisBbmLabel, type JenisBbm } from "../lib/bbmJenis";
+import { JENIS_BBM, jenisBbmLabel, jenisDiLokasi, jenisTampil, type JenisBbm } from "../lib/bbmJenis";
 import { BbmTransactionModal } from "../components/BbmTransactionModal";
 import { BbmBatchModal } from "../components/BbmBatchModal";
 import { EditBbmModal } from "../components/EditBbmModal";
@@ -216,7 +216,7 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
   const adaData = (jenis: string, lok: string) => !!summary?.saldoTerakhir.some((s) => s.jenis_bbm === jenis && s.lokasi === lok);
   const saldoCards = JENIS_OPTIONS.flatMap((jenis) =>
     (lokasiLock
-      ? jenis !== "BENSIN_CAMPUR" || LOKASI_BENSIN_CAMPUR.includes(lokasiLock) || adaData(jenis, lokasiLock)
+      ? jenisTampil(jenis, lokasiLock) || adaData(jenis, lokasiLock)
         ? [lokasiLock]
         : []
       : summary
@@ -274,7 +274,7 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
         {saldoCards.map(({ jenis, lok, saldo }) => {
           const active = jenisBbm === jenis && (!!lokasiLock || lokasi === lok);
           return (
@@ -283,8 +283,8 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
               label={`Stok ${jenisBbmLabel(jenis)} - ${lok}${dateTo ? ` (per ${new Date(`${dateTo}T00:00:00`).toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" })})` : ""}`}
               value={(saldo ?? 0).toLocaleString("id-ID")}
               suffix="LTR"
-              icon={jenis === "SOLAR" ? Fuel : Droplet}
-              tone={jenis === "SOLAR" ? "blue" : jenis === "BENSIN" ? "amber" : "green"}
+              icon={jenis === "SOLAR" ? Fuel : jenis === "EMERGENCY" ? Siren : jenis === "JATAH_GM" ? Car : Droplet}
+              tone={jenis === "SOLAR" ? "blue" : jenis === "BENSIN" ? "amber" : jenis === "EMERGENCY" ? "red" : "green"}
               active={active}
               footer={
                 <div>
@@ -335,7 +335,7 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
           className="text-sm rounded-md border border-[var(--border)] px-3 py-2"
         >
           <option value="">Semua Jenis BBM</option>
-          {JENIS_OPTIONS.map((j) => (
+          {JENIS_OPTIONS.filter((j) => !lokasiLock || jenisDiLokasi(j, lokasiLock)).map((j) => (
             <option key={j} value={j}>
               {jenisBbmLabel(j).toUpperCase()}
             </option>

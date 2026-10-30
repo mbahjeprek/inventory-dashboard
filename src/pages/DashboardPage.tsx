@@ -123,8 +123,8 @@ function EstateRow({ e, d, monthLabel }: { e: EstateInfo; d: EstateData; monthLa
   const failed = (v: unknown) => v === null;
   const bbmSaldo = (jenis: string) => d.bbm?.saldoTerakhir.find((x) => x.jenis_bbm === jenis && x.lokasi === e.estate)?.saldo_stock ?? 0;
   const bbmFlow = (jenis: string) => d.bbm?.perLokasi.find((x) => x.jenis_bbm === jenis && x.lokasi === e.estate);
-  // Bensin Campur only where it has data.
-  const bbmJenis = (["SOLAR", "BENSIN", "BENSIN_CAMPUR"] as const).filter((j) => j !== "BENSIN_CAMPUR" || Number(bbmSaldo(j)) || bbmFlow(j));
+  // Bensin Campur, Emergency and Jatah GM only where they have data.
+  const bbmJenis = (["SOLAR", "BENSIN", "BENSIN_CAMPUR", "EMERGENCY", "JATAH_GM"] as const).filter((j) => j === "SOLAR" || j === "BENSIN" || Number(bbmSaldo(j)) || bbmFlow(j));
   const bbmEmpty = d.bbm && bbmJenis.every((j) => !Number(bbmSaldo(j)) && !bbmFlow(j));
   const pupukJenis = d.pupuk ? Array.from(new Set(d.pupuk.saldoTerakhir.map((x) => x.jenis_pupuk))) : [];
   const oliJenis = d.oli ? Array.from(new Set([...d.oli.saldoTerakhir.map((x) => x.jenis_oli), ...d.oli.perJenis.map((x) => x.jenis_oli)])).sort() : [];
@@ -304,7 +304,7 @@ function estateSection(e: EstateInfo, d: EstateData, user: User, heading: string
     const saldo = (j: string) => n(d.bbm?.saldoTerakhir.find((x) => x.jenis_bbm === j && x.lokasi === e.estate)?.saldo_stock);
     const flow = (j: string) => d.bbm?.perLokasi.find((x) => x.jenis_bbm === j && x.lokasi === e.estate);
     if (ready("BBM", d.bbm, () => ["SOLAR", "BENSIN"].every((j) => !saldo(j) && !flow(j)), "Belum ada data BBM"))
-      for (const j of ["SOLAR", "BENSIN", "BENSIN_CAMPUR"].filter((j) => j !== "BENSIN_CAMPUR" || saldo(j) || flow(j)))
+      for (const j of ["SOLAR", "BENSIN", "BENSIN_CAMPUR", "EMERGENCY", "JATAH_GM"].filter((j) => j === "SOLAR" || j === "BENSIN" || saldo(j) || flow(j)))
         rows.push(["BBM", jenisBbmLabel(j), saldo(j), "LTR", n(flow(j)?.diterima), n(flow(j)?.pemakaian), minus(saldo(j))]);
   }
   if (canModule(user, "PUPUK")) {

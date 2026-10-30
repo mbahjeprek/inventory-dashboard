@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { JENIS_BBM, jenisBbmLabel, wrongJenis, type JenisBbm } from "../lib/bbmJenis";
+import { JENIS_BBM, jenisBbmLabel, jenisDiLokasi, wrongJenis, type JenisBbm } from "../lib/bbmJenis";
 import { X } from "lucide-react";
 import { api, errorText, type BbmSummary } from "../lib/api";
 import { AlatAutocomplete, type AlatOption } from "./AlatAutocomplete";
@@ -14,6 +14,8 @@ const LOKASI_BY_JENIS: Record<string, string[]> = {
   SOLAR: ["NILAM", "FIRUS", "ZAMRUD", "KNS", "WJA"],
   BENSIN: ["NILAM", "FIRUS", "ZAMRUD", "KNS", "WJA"],
   BENSIN_CAMPUR: ["WJA", "NILAM", "FIRUS", "ZAMRUD", "KNS"],
+  EMERGENCY: ["KNS"],
+  JATAH_GM: ["KNS"],
 };
 
 // Local date (toISOString is UTC, which is still yesterday before 07:00 WIB).
@@ -174,7 +176,7 @@ export function BbmTransactionModal({
                 }}
                 className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-1.5"
               >
-                {JENIS_OPTIONS.map((j) => (
+                {JENIS_OPTIONS.filter((j) => !lokasiLock || jenisDiLokasi(j, lokasiLock)).map((j) => (
                   <option key={j} value={j}>
                     {jenisBbmLabel(j).toUpperCase()}
                   </option>

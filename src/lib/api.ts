@@ -528,7 +528,7 @@ export type BbmBatchRow = {
 
 export type BbmRecord = {
   id: number;
-  jenis_bbm: "SOLAR" | "BENSIN" | "BENSIN_CAMPUR";
+  jenis_bbm: "SOLAR" | "BENSIN" | "BENSIN_CAMPUR" | "EMERGENCY" | "JATAH_GM";
   lokasi: string;
   estate: string | null;
   periode: string;
@@ -1726,7 +1726,7 @@ export const api = {
   createBbmTransaction: (payload: {
     // Foto bukti (uploadEvidence) - required by the server.
     evidence_id: string;
-    jenis_bbm: "SOLAR" | "BENSIN" | "BENSIN_CAMPUR";
+    jenis_bbm: "SOLAR" | "BENSIN" | "BENSIN_CAMPUR" | "EMERGENCY" | "JATAH_GM";
     lokasi: string;
     tanggal_iso: string;
     tipe: "DITERIMA" | "PEMAKAIAN";
@@ -1770,7 +1770,7 @@ export const api = {
     tanggal_iso: string;
     rows: { jenis_oli: string; tipe: "MASUK" | "PEMAKAIAN"; jumlah: number; no_embrace: string; keterangan: string; ke?: string; evidence_id?: string }[];
   }) => req<{ success: boolean; count: number }>("/api/oli/batch", { method: "POST", body: JSON.stringify(payload) }),
-  createBbmBatch: (payload: { evidence_id: string; jenis_bbm: "SOLAR" | "BENSIN" | "BENSIN_CAMPUR"; lokasi: string; tanggal_iso: string; rows: BbmBatchRow[] }) =>
+  createBbmBatch: (payload: { evidence_id: string; jenis_bbm: "SOLAR" | "BENSIN" | "BENSIN_CAMPUR" | "EMERGENCY" | "JATAH_GM"; lokasi: string; tanggal_iso: string; rows: BbmBatchRow[] }) =>
     req<{ success: boolean; count: number; saldo_stock: number }>("/api/bbm/batch", { method: "POST", body: JSON.stringify(payload) }),
 
   updateBbm: (

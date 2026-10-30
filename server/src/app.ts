@@ -3293,10 +3293,14 @@ function isoToIndoDate(iso: string): { tanggal: string; periode: string } {
 // Bensin got typed into the Solar ledger while the form opened on SOLAR (src/lib/bbmJenis.ts). Bensin Campur
 // (bensin mixed with 2T oil, at WJA) is its own fuel: "bensin campur" names it, a plain "bensin" the other one.
 const BBM_DISEBUT: Record<string, RegExp> = { SOLAR: /\bsolar\b/i, BENSIN_CAMPUR: /\bbensin\s*campur(an)?\b/i, BENSIN: /\bbensin\b(?!\s*campur)/i };
-const BBM_LABEL: Record<string, string> = { SOLAR: "Solar", BENSIN: "Bensin", BENSIN_CAMPUR: "Bensin Campur" };
+const BBM_LABEL: Record<string, string> = { SOLAR: "Solar", BENSIN: "Bensin", BENSIN_CAMPUR: "Bensin Campur", EMERGENCY: "BBM Emergency", JATAH_GM: "Jatah GM" };
+// Stocks kept apart at one lokasi only: KNS's BBM Emergency and Jatah GM (src/lib/bbmJenis.ts LOKASI_KHUSUS).
+const BBM_LOKASI_KHUSUS: Record<string, string[]> = { EMERGENCY: ["KNS"], JATAH_GM: ["KNS"] };
+const bbmJenisDiLokasi = (jenis: string, lokasi: string) => !BBM_LOKASI_KHUSUS[jenis] || BBM_LOKASI_KHUSUS[jenis].includes(lokasi);
 function wrongJenisBbm(jenis: string, keterangan: unknown) {
   const t = String(keterangan ?? "");
-  if (BBM_DISEBUT[jenis]?.test(t)) return "";
+  // Emergency / Jatah GM name their fuel in the keterangan on purpose.
+  if (!BBM_DISEBUT[jenis] || BBM_DISEBUT[jenis].test(t)) return "";
   const other = Object.keys(BBM_DISEBUT).find((k) => k !== jenis && BBM_DISEBUT[k].test(t));
   return other ? `Keterangan menyebut ${BBM_LABEL[other]}, tapi Jenis BBM ${BBM_LABEL[jenis] ?? jenis}. Ganti Jenis BBM ke ${BBM_LABEL[other]}.` : "";
 }
@@ -3308,6 +3312,7 @@ app.post("/api/bbm", async (req, res) => {
 
   if (!BBM_JENIS.includes(jenis_bbm)) return res.status(400).json({ error: "Jenis BBM tidak valid" });
   if (!BBM_LOKASI_OPTIONS.includes(lokasi)) return res.status(400).json({ error: "Lokasi tidak valid" });
+  if (!bbmJenisDiLokasi(jenis_bbm, lokasi)) return res.status(400).json({ error: `${BBM_LABEL[jenis_bbm]} hanya untuk ${BBM_LOKASI_KHUSUS[jenis_bbm].join(", ")}` });
   if (!estateAllowed(req.user!, lokasi)) return res.status(403).json({ error: "Akses ditolak" });
   if (!["DITERIMA", "PEMAKAIAN"].includes(tipe)) return res.status(400).json({ error: "Tipe transaksi tidak valid" });
   if (!jumlah || jumlah <= 0) return res.status(400).json({ error: "Jumlah harus lebih dari 0" });
@@ -3379,6 +3384,7 @@ app.post("/api/bbm/batch", async (req, res) => {
   const rows: any[] = Array.isArray(req.body?.rows) ? req.body.rows : [];
   if (!BBM_JENIS.includes(jenis_bbm)) return res.status(400).json({ error: "Jenis BBM tidak valid" });
   if (!BBM_LOKASI_OPTIONS.includes(lokasi)) return res.status(400).json({ error: "Lokasi tidak valid" });
+  if (!bbmJenisDiLokasi(jenis_bbm, lokasi)) return res.status(400).json({ error: `${BBM_LABEL[jenis_bbm]} hanya untuk ${BBM_LOKASI_KHUSUS[jenis_bbm].join(", ")}` });
   if (!estateAllowed(req.user!, lokasi)) return res.status(403).json({ error: "Akses ditolak" });
   if (!ISO_DATE.test(tanggal_iso || "")) return res.status(400).json({ error: "Tanggal tidak valid" });
   if (!rows.length) return res.status(400).json({ error: "Belum ada baris yang diisi" });
@@ -6253,7 +6259,7 @@ const OPNAME_LOG_MODULE: Record<OpnameModule, LogModule> = { GUDANG: "BARANG", K
 // OPEX (operasional) / CAPEX (investasi / proyek) of a BBM Stock Out; anything else = not marked.
 const bbmBeban = (v: unknown) => (["OPEX", "CAPEX"].includes(String(v ?? "").toUpperCase()) ? String(v).toUpperCase() : "");
 // Bensin Campur: bensin mixed with 2T oil (bought as such at WJA), its own ledger; shown only where it is used.
-const BBM_JENIS = ["SOLAR", "BENSIN", "BENSIN_CAMPUR"];
+const BBM_JENIS = ["SOLAR", "BENSIN", "BENSIN_CAMPUR", "EMERGENCY", "JATAH_GM"];
 // Nilam items, klinik batches and BBM saldo (INTEGER) are whole numbers; other gudang and pupuk take decimals.
 const opnameWhole = (o: { module: string; estate: string }) => o.module === "KLINIK" || o.module === "BBM" || (o.module === "GUDANG" && o.estate === "NILAM");
 
@@ -6343,8 +6349,8 @@ async function opnameSnapshot(module: OpnameModule, estate: string, client?: Poo
          COALESCE((SELECT saldo_stock FROM bbm_log WHERE jenis_bbm = j AND lokasi = @estate AND saldo_stock IS NOT NULL
                    ORDER BY tanggal_iso DESC, id DESC LIMIT 1), 0)::float8 stok_sistem
        FROM unnest(@jenis::text[]) j
-       -- Bensin Campur only where it has been used.
-       WHERE j <> 'BENSIN_CAMPUR' OR EXISTS (SELECT 1 FROM bbm_log WHERE jenis_bbm = j AND lokasi = @estate)`,
+       -- Bensin Campur, Emergency and Jatah GM only where they have been used.
+       WHERE j IN ('SOLAR', 'BENSIN') OR EXISTS (SELECT 1 FROM bbm_log WHERE jenis_bbm = j AND lokasi = @estate)`,
       { estate, jenis: BBM_JENIS },
       client
     );
@@ -8478,7 +8484,7 @@ app.get("/api/pinjaman/barang", async (req, res) => {
   }
   const jenis =
     m === "BBM"
-      ? BBM_JENIS
+      ? BBM_JENIS.filter((j) => bbmJenisDiLokasi(j, estate))
       : m === "OLI"
         ? (await queryMany<{ v: string }>("SELECT nama v FROM master_oli ORDER BY nama")).map((r) => r.v)
         : (await queryMany<{ v: string }>(`SELECT nama v FROM master_pupuk WHERE ${OLI_AT_ESTATE} UNION SELECT DISTINCT jenis_pupuk FROM pupuk_log WHERE estate = @estate ORDER BY 1`, { estate })).map((r) => r.v);
@@ -8833,7 +8839,7 @@ app.get("/api/perbandingan", async (req, res) => {
   if (!CMP_MODULES.includes(m)) return res.status(400).json({ error: "Modul tidak valid" });
   if (!canLoan(req.user!, m, "view")) return res.status(403).json({ error: "Akses ditolak" });
   if (!ISO_DATE.test(dateFrom) || !ISO_DATE.test(dateTo) || dateFrom > dateTo) return res.status(400).json({ error: "Periode tidak valid" });
-  if (m === "BBM" && !BBM_JENIS.includes(kode)) return res.status(400).json({ error: "Pilih Solar, Bensin atau Bensin Campur" });
+  if (m === "BBM" && !BBM_JENIS.includes(kode)) return res.status(400).json({ error: "Pilih jenis BBM" });
   const wanted = (estates ? estates.split(",") : [...ESTATES]).filter((e) => (ESTATES as readonly string[]).includes(e) && estateAllowed(req.user!, e));
   if (!wanted.length) return res.json({ unit: "", metric: "qty", bucket: "month", perEstate: [], prev: [], series: [] });
 
