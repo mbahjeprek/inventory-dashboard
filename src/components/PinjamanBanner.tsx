@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { AlertTriangle, ArrowLeftRight, BellRing, ChevronRight, X } from "lucide-react";
 import { estateOfPath, moduleOfPath } from "../lib/access";
-import { LOAN_LATE_DAYS, loanDays, useOpenPinjaman } from "../hooks/useOpenPinjaman";
+import { LOAN_LATE_DAYS, asalPinjaman, loanDays, useOpenPinjaman } from "../hooks/useOpenPinjaman";
 import type { Pinjaman } from "../lib/api";
 import { StatCard } from "./StatCard";
 
@@ -18,7 +18,7 @@ function usePinjamanHere() {
   return { module, estate, here, late: here.filter((l) => loanDays(l.tanggal_iso) >= LOAN_LATE_DAYS) };
 }
 const loanText = (l: Pinjaman, estate: string) =>
-  `${l.dari_estate === estate ? `Dipinjamkan ke ${l.ke_estate}` : `Dipinjam dari ${l.dari_estate}`}: ${l.nama} ${fmt(l.qty - l.qty_kembali)} ${l.satuan} · sudah ${loanDays(l.tanggal_iso)} hari`;
+  `${l.dari_estate === estate ? `Dipinjamkan ke ${l.ke_estate}` : `Dipinjam dari ${asalPinjaman(l)}`}: ${l.nama} ${fmt(l.qty - l.qty_kembali)} ${l.satuan} · sudah ${loanDays(l.tanggal_iso)} hari`;
 
 // Gudang and Klinik show the loans as a card in their stock card row; the other modules (no such row) keep the banner.
 const HAS_CARD = ["GUDANG", "KLINIK"];

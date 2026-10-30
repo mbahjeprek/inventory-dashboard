@@ -23,3 +23,5 @@ export const loanDays = (iso: string) => {
 };
 // From this many days on an open loan is shown in red.
 export const LOAN_LATE_DAYS = 14;
+// Who lent: the estate, or for a Pinjaman Pribadi the karyawan.
+export const asalPinjaman = (l: { jenis?: string; dari_estate: string; pemberi?: string }) => (l.jenis === "PRIBADI" ? `${l.pemberi || "karyawan"} (pribadi)` : l.dari_estate);

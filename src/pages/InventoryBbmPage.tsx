@@ -1,6 +1,8 @@
 import { Link } from "react-router-dom";
 import { useEffect, useState } from "react";
-import { Search, ChevronLeft, ChevronRight, Fuel, Droplet, PackagePlus, Pencil, Trash2, ListPlus, FileText } from "lucide-react";
+import { Search, ChevronLeft, ChevronRight, Fuel, Droplet, PackagePlus, Pencil, Trash2, ListPlus, FileText, UserRound } from "lucide-react";
+import { PinjamPribadiModal } from "../components/PinjamPribadiModal";
+import { useOpenPinjaman } from "../hooks/useOpenPinjaman";
 import { api, errorText, type BbmRecord, type BbmSummary } from "../lib/api";
 import { StatCard } from "../components/StatCard";
 import { ExportButtons } from "../components/ExportButtons";
@@ -17,7 +19,7 @@ import { BbmBatchModal } from "../components/BbmBatchModal";
 import { EditBbmModal } from "../components/EditBbmModal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { useAuth } from "../context/AuthContext";
-import { can, canEditRow, canAttachEvidence } from "../lib/access";
+import { can, canEditRow, canAttachEvidence, userEstates } from "../lib/access";
 import { EvidenceLink, AttachEvidenceButton } from "../components/EvidenceInput";
 import { tanggalWaktu } from "../lib/datetime";
 import { loanTag } from "../lib/opname";
@@ -44,6 +46,9 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
   const [loading, setLoading] = useState(true);
   const [showTransaksi, setShowTransaksi] = useState(false);
   const [showBatch, setShowBatch] = useState(false);
+  // Pinjam BBM pribadi karyawan (given back in liters when the stock comes; see Pinjaman & Transfer)
+  const [showPribadi, setShowPribadi] = useState(false);
+  const refreshOpen = useOpenPinjaman((s) => s.refresh);
   const [notice, setNotice] = useState("");
   const { user } = useAuth();
   // Edit / delete buttons follow the account's ticked permissions (Pengguna); the Aksi column shows
@@ -251,6 +256,15 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
               <ListPlus size={16} /> Input Banyak
             </button>
           )}
+          {canInput && (
+            <button
+              onClick={() => setShowPribadi(true)}
+              title="Pinjam BBM pribadi karyawan saat stok habis; dikembalikan dalam liter yang sama saat stok datang"
+              className="inline-flex items-center gap-1.5 text-sm px-3.5 py-2 rounded-md border border-[var(--accent-blue-border)] text-[var(--accent-blue)] hover:bg-[var(--accent-blue-bg)]"
+            >
+              <UserRound size={16} /> Pinjam BBM Karyawan
+            </button>
+          )}
           {canTx && (<button
             onClick={() => setShowTransaksi(true)}
             className="inline-flex items-center gap-1.5 text-sm px-3.5 py-2 rounded-md border border-[var(--accent-blue-border)] text-[var(--accent-blue)] hover:bg-[var(--accent-blue-bg)]"
@@ -429,10 +443,10 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
                     <td className="px-4 py-2.5 whitespace-nowrap text-[var(--text-secondary)]">{tanggalWaktu(r.tanggal_iso, r.created_at, r.tanggal)}</td>
                     <td className="px-4 py-2.5 text-xs text-[var(--text-secondary)]">{r.no_spb || "-"}</td>
                     <td className="px-4 py-2.5 text-right font-medium text-[var(--accent-green)]">
-                      {r.diterima ? r.diterima.toLocaleString("id-ID") : (r.pinjam ?? 0) > 0 ? <>{r.pinjam!.toLocaleString("id-ID")}<span className="ml-1 text-[10px] font-normal text-[var(--text-muted)]">{r.pinjaman_jenis === "TRANSFER" ? "transfer" : "pinjam"}</span></> : "-"}
+                      {r.diterima ? r.diterima.toLocaleString("id-ID") : (r.pinjam ?? 0) > 0 ? <>{r.pinjam!.toLocaleString("id-ID")}<span className="ml-1 text-[10px] font-normal text-[var(--text-muted)]">{r.pinjaman_jenis === "TRANSFER" ? "transfer" : r.pinjaman_jenis === "PRIBADI" ? "pinjam pribadi" : "pinjam"}</span></> : "-"}
                     </td>
                     <td className="px-4 py-2.5 text-right font-medium text-[var(--accent-red)]">
-                      {r.pemakaian ? r.pemakaian.toLocaleString("id-ID") : (r.pinjam ?? 0) < 0 ? <>{(-r.pinjam!).toLocaleString("id-ID")}<span className="ml-1 text-[10px] font-normal text-[var(--text-muted)]">{r.pinjaman_jenis === "TRANSFER" ? "transfer" : "pinjam"}</span></> : "-"}
+                      {r.pemakaian ? r.pemakaian.toLocaleString("id-ID") : (r.pinjam ?? 0) < 0 ? <>{(-r.pinjam!).toLocaleString("id-ID")}<span className="ml-1 text-[10px] font-normal text-[var(--text-muted)]">{r.pinjaman_jenis === "TRANSFER" ? "transfer" : r.pinjaman_jenis === "PRIBADI" ? "pinjam pribadi" : "pinjam"}</span></> : "-"}
                     </td>
                     <td className="px-4 py-2.5 text-right text-[var(--text-primary)]">
                       {r.saldo_stock !== null ? r.saldo_stock.toLocaleString("id-ID") : "-"}
@@ -518,6 +532,21 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
         <div className="fixed bottom-4 right-4 z-50 text-sm rounded-md px-4 py-2.5 shadow-lg bg-[var(--accent-green)] text-white">{notice}</div>
       )}
 
+      {showPribadi && (
+        <PinjamPribadiModal
+          estates={lokasiLock ? [lokasiLock] : userEstates(user)}
+          estate={lokasiLock || lokasi}
+          onClose={() => setShowPribadi(false)}
+          onSuccess={() => {
+            setShowPribadi(false);
+            setNotice("Pinjaman BBM pribadi tersimpan; kembalikan lewat menu Pinjaman & Transfer saat stok datang");
+            setTimeout(() => setNotice(""), 4000);
+            refreshOpen();
+            loadSummary();
+            load();
+          }}
+        />
+      )}
       {showBatch && (
         <BbmBatchModal
           summary={summary}

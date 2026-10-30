@@ -407,6 +407,7 @@ async function stockLocations(req: express.Request): Promise<StockLocation[]> {
   const loanAt = (module: unknown, ...estates: unknown[]) =>
     OPNAME_MODULES_LIST.includes(module as OpnameModule) ? estates.flatMap(at(module as OpnameModule)) : [];
   if ((p === "/pinjaman" || p === "/pinjaman/batch") && m === "POST") return loanAt(b.module, b.dari, b.ke);
+  if (p === "/pinjaman/pribadi" && m === "POST") return loanAt(b.module, b.ke);
   if (/^\/pinjaman\/\d+\/(kembali|batal|delete)$/.test(p)) {
     const l = await queryOne<any>("SELECT module, dari_estate, ke_estate FROM pinjaman WHERE id = @id", { id: p.split("/")[2] });
     return l ? loanAt(l.module, l.dari_estate, l.ke_estate) : [];
@@ -1047,6 +1048,7 @@ const BACKDATE: Record<string, { module: OpnameModule | ((b: any) => string); es
   },
   "/api/klinik-stock/correction": { module: "KLINIK", estate: (b) => b.klinik },
   "/api/pinjaman": { module: (b) => b.module, estate: (b) => [b.dari, b.ke] },
+  "/api/pinjaman/pribadi": { module: (b) => b.module, estate: (b) => [b.ke] },
   "/api/pinjaman/batch": { module: (b) => b.module, estate: (b) => [b.dari, b.ke] },
 };
 app.use(async (req, res, next) => {
@@ -8104,11 +8106,14 @@ type LoanRow = {
   qty: number;
   qty_kembali: number;
   status: "DIPINJAM" | "LUNAS" | "BATAL" | "TRANSFER";
-  jenis: "PINJAM" | "TRANSFER";
+  jenis: "PINJAM" | "TRANSFER" | "PRIBADI";
   alasan: string;
   tanggal_iso: string;
+  pemberi?: string;
 };
-const loanLabel = (l: Pick<LoanRow, "id" | "jenis">) => `${l.jenis === "TRANSFER" ? "Transfer" : "Pinjaman"} #${l.id}`;
+const loanLabel = (l: Pick<LoanRow, "id" | "jenis">) => `${l.jenis === "TRANSFER" ? "Transfer" : l.jenis === "PRIBADI" ? "Pinjaman Pribadi" : "Pinjaman"} #${l.id}`;
+// Who lent: the estate, or for a Pinjaman Pribadi the person.
+const loanDari = (l: Pick<LoanRow, "jenis" | "dari_estate" | "pemberi">) => (l.jenis === "PRIBADI" ? `${l.pemberi} (pribadi)` : l.dari_estate);
 const loanPerm = (m: LoanModule, a: "view" | "input") => `${m.toLowerCase()}.${a}`;
 const canLoan = (user: SessionUser, m: LoanModule, a: "view" | "input") => user.role === "superuser" || user.perms.includes(loanPerm(m, a));
 // Nilam's gudang (items) and Klinik count whole units; the other gudang, BBM, pupuk and oli decimals.
@@ -8358,10 +8363,10 @@ const transferLogDetail = (l: LoanRow) => `${l.dari_estate} mengirim ${fmtLoanQt
 async function logLoan(req: express.Request, l: LoanRow, aksi: string, detail: string) {
   const objek = loanObjek(l);
   const module = OPNAME_LOG_MODULE[l.module];
-  await logActivities(req, [
-    { module, estate: l.dari_estate, aksi, objek, detail },
-    { module, estate: l.ke_estate, aksi, objek, detail },
-  ]);
+  await logActivities(
+    req,
+    [l.dari_estate, l.ke_estate].filter((e) => (ESTATES as readonly string[]).includes(e)).map((estate) => ({ module, estate, aksi, objek, detail }))
+  );
 }
 
 app.get("/api/pinjaman", async (req, res) => {
@@ -8402,7 +8407,7 @@ app.get("/api/pinjaman/log", async (req, res) => {
   if (!modules.length || !estates.length) return res.json(empty);
   const scope = "p.module = ANY(@modules::text[]) AND (p.dari_estate = ANY(@estates::text[]) OR p.ke_estate = ANY(@estates::text[]))";
   const events = `
-    SELECT p.id AS pinjaman_id, p.jenis AS aksi, p.qty, p.tanggal_iso, p.created_at, p.alasan AS note, p.evidence_id, p.user_id, 0 AS ord
+    SELECT p.id AS pinjaman_id, CASE WHEN p.jenis = 'PRIBADI' THEN 'PINJAM' ELSE p.jenis END AS aksi, p.qty, p.tanggal_iso, p.created_at, p.alasan AS note, p.evidence_id, p.user_id, 0 AS ord
       FROM pinjaman p WHERE ${scope}
     UNION ALL
     SELECT k.pinjaman_id, CASE WHEN k.batal THEN 'BATAL' WHEN k.kumulatif >= p.qty - 0.0005 THEN 'LUNAS' ELSE 'KEMBALI' END,
@@ -8416,7 +8421,7 @@ app.get("/api/pinjaman/log", async (req, res) => {
   const limit = Math.min(parseInt(pageSize) || 50, 200);
   const offset = (Math.max(parseInt(page) || 1, 1) - 1) * limit;
   const data = await queryMany(
-    `SELECT e.*, p.module, p.kode, p.nama, p.satuan, p.dari_estate, p.ke_estate, p.qty AS qty_pinjam, p.tanggal_iso AS tanggal_pinjam,
+    `SELECT e.*, p.module, p.kode, p.nama, p.satuan, p.dari_estate, p.ke_estate, p.jenis, p.pemberi, p.qty AS qty_pinjam, p.tanggal_iso AS tanggal_pinjam,
             COALESCE(us.nama, us.username, '') AS oleh
        FROM (${events}) e JOIN pinjaman p ON p.id = e.pinjaman_id LEFT JOIN users us ON us.id = e.user_id ${where}
       ORDER BY e.created_at DESC, e.pinjaman_id DESC, e.ord DESC LIMIT @limit OFFSET @offset`,
@@ -8529,6 +8534,60 @@ app.post("/api/pinjaman", async (req, res) => {
   res.json({ success: true, id: loan.id });
 });
 
+// Pinjaman Pribadi: an estate borrows BBM from a person (a karyawan's own), to give back in liters of the same jenis when
+// its stock comes. Only that estate's stock moves (in now, out at the return); recorded by the borrowing estate.
+app.post("/api/pinjaman/pribadi", async (req, res) => {
+  const { module, ke, kode } = req.body ?? {};
+  const u = req.user!;
+  const m = module as LoanModule;
+  const alasan = String(req.body.alasan ?? "").trim();
+  const nama = String(req.body.nama ?? "").trim().slice(0, 120);
+  const nik = String(req.body.nik ?? "").trim().toUpperCase().slice(0, 40);
+  const qty = Number(req.body.qty);
+  const tanggal = ISO_DATE.test(String(req.body.tanggal_iso ?? "")) ? String(req.body.tanggal_iso) : jakartaToday();
+  if (tanggal > jakartaToday()) return res.status(400).json({ error: "Tanggal tidak boleh di masa depan" });
+  if (m !== "BBM") return res.status(400).json({ error: "Pinjaman pribadi hanya untuk BBM" });
+  if (!(ESTATES as readonly string[]).includes(ke)) return res.status(400).json({ error: "Estate tidak valid" });
+  if (!canLoan(u, m, "input") || !estateAllowed(u, ke)) return res.status(403).json({ error: "Pinjaman pribadi dicatat oleh estate yang meminjam" });
+  if (!nama) return res.status(400).json({ error: "Isi nama karyawan pemilik BBM" });
+  if (!Number.isFinite(qty) || qty <= 0) return res.status(400).json({ error: "Jumlah harus lebih dari 0" });
+  if (!alasan) return res.status(400).json({ error: "Alasan wajib diisi" });
+  const item = await loanItem(m, ke, String(kode ?? ""));
+  if (!item) return res.status(404).json({ error: "Jenis BBM tidak ditemukan" });
+  const evidenceId = await claimEvidence(req, res);
+  if (evidenceId === undefined) return;
+  const pemberi = nik ? `${nama} (${nik})` : nama;
+  let loan: LoanRow;
+  try {
+    loan = await withTransaction(async (client) => {
+      const l = (await queryOne<LoanRow>(
+        `INSERT INTO pinjaman (module, kode, nama, satuan, dari_estate, ke_estate, qty, alasan, tanggal_iso, user_id, evidence_id, jenis, status, pemberi)
+         VALUES (@module, @kode, @nama, @satuan, 'PRIBADI', @ke, @qty, @alasan, @tanggal, @uid, @ev::uuid, 'PRIBADI', 'DIPINJAM', @pemberi) RETURNING *`,
+        { module: m, kode: item.kode, nama: item.nama, satuan: item.satuan, ke, qty: round3(qty), alasan, tanggal, uid: u.id, ev: evidenceId, pemberi },
+        client
+      ))!;
+      await loanMove(client, req, {
+        module: m,
+        kode: l.kode,
+        qty: l.qty,
+        pinjamanId: l.id,
+        evidenceId,
+        estate: ke,
+        type: "IN",
+        note: `Pinjam pribadi dari ${pemberi} (Pinjaman Pribadi #${l.id}): ${alasan}`,
+        iso: tanggal,
+      });
+      return l;
+    });
+  } catch (e) {
+    await releaseEvidence(evidenceId);
+    if (e instanceof StockError) return res.status(400).json({ error: e.message });
+    throw e;
+  }
+  await logLoan(req, loan, "Pinjaman Pribadi Baru", `${ke} meminjam ${fmtLoanQty(loan.qty, loan.satuan)} dari ${pemberi} (${tanggal}); Alasan: ${alasan}`);
+  res.json({ success: true, id: loan.id });
+});
+
 // Input Banyak Pinjaman: many barang lent by one estate to another at once, one foto bukti. Each row
 // is its own Pinjaman (returned on its own later), all saved or none - a row the stock can't cover
 // is refused with its number.
@@ -8579,6 +8638,7 @@ async function loanBack(req: express.Request, res: express.Response, batal: bool
   if (!l) return res.status(404).json({ error: "Pinjaman tidak ditemukan" });
   if (!canLoan(u, l.module, "input") || !(estateAllowed(u, l.dari_estate) || estateAllowed(u, l.ke_estate)))
     return res.status(403).json({ error: "Akses ditolak" });
+  const pribadi = l.jenis === "PRIBADI";
   if (l.jenis === "TRANSFER") return res.status(400).json({ error: "Transfer tidak dikembalikan. Kirim balik dengan transfer baru, atau minta Super User menghapusnya." });
   if (l.status !== "DIPINJAM") return res.status(400).json({ error: `Pinjaman ini sudah ${l.status === "LUNAS" ? "lunas" : "dibatalkan"}` });
   const sisa = round3(l.qty - l.qty_kembali);
@@ -8598,17 +8658,30 @@ async function loanBack(req: express.Request, res: express.Response, batal: bool
     await withTransaction(async (client) => {
       const cur = await queryOne<{ status: string; qty_kembali: number }>("SELECT status, qty_kembali FROM pinjaman WHERE id = @id FOR UPDATE", { id: l.id }, client);
       if (cur!.status !== "DIPINJAM" || cur!.qty_kembali !== l.qty_kembali) throw new StockError("Pinjaman ini baru saja berubah, muat ulang halaman");
-      await loanTransfer(
-        client,
-        req,
-        l,
-        l.ke_estate,
-        l.dari_estate,
-        qty,
-        batal ? `Batal pinjam dari ${l.dari_estate} (${tag})` : `Kembalikan pinjaman ke ${l.dari_estate} (${tag})`,
-        batal ? `Batal dipinjamkan ke ${l.ke_estate} (${tag})` : `Pengembalian pinjaman dari ${l.ke_estate} (${tag})`,
-        evidenceId
-      );
+      // A Pinjaman Pribadi goes back to the person: only the estate's stock moves (out).
+      if (pribadi)
+        await loanMove(client, req, {
+          module: l.module,
+          kode: l.kode,
+          qty,
+          pinjamanId: l.id,
+          evidenceId,
+          estate: l.ke_estate,
+          type: "OUT",
+          note: batal ? `Batal pinjam pribadi dari ${l.pemberi} (${tag})` : `Kembalikan pinjaman pribadi ke ${l.pemberi} (${tag})`,
+        });
+      else
+        await loanTransfer(
+          client,
+          req,
+          l,
+          l.ke_estate,
+          l.dari_estate,
+          qty,
+          batal ? `Batal pinjam dari ${l.dari_estate} (${tag})` : `Kembalikan pinjaman ke ${l.dari_estate} (${tag})`,
+          batal ? `Batal dipinjamkan ke ${l.ke_estate} (${tag})` : `Pengembalian pinjaman dari ${l.ke_estate} (${tag})`,
+          evidenceId
+        );
       await execute(
         `INSERT INTO pinjaman_kembali (pinjaman_id, qty, tanggal_iso, note, batal, user_id, evidence_id)
          VALUES (@id, @qty, @today, @note, @batal, @uid, @ev::uuid)`,
@@ -8631,8 +8704,8 @@ async function loanBack(req: express.Request, res: express.Response, batal: bool
     l,
     batal ? "Batal Pinjaman" : "Pengembalian Pinjaman",
     batal
-      ? `${fmtLoanQty(qty, l.satuan)} kembali ke ${l.dari_estate}; Alasan: ${note}`
-      : `${l.ke_estate} mengembalikan ${fmtLoanQty(qty, l.satuan)} ke ${l.dari_estate}; ${lunas ? "Lunas" : `sisa ${fmtLoanQty(sisa - qty, l.satuan)}`}${note ? `; Catatan: ${note}` : ""}`
+      ? `${fmtLoanQty(qty, l.satuan)} kembali ke ${loanDari(l)}; Alasan: ${note}`
+      : `${l.ke_estate} mengembalikan ${fmtLoanQty(qty, l.satuan)} ke ${loanDari(l)}; ${lunas ? "Lunas" : `sisa ${fmtLoanQty(sisa - qty, l.satuan)}`}${note ? `; Catatan: ${note}` : ""}`
   );
   res.json({ success: true });
 }

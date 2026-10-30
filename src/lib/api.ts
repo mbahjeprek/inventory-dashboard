@@ -688,7 +688,9 @@ export type Pinjaman = {
   qty: number;
   qty_kembali: number;
   status: PinjamanStatus;
-  jenis: "PINJAM" | "TRANSFER";
+  // PRIBADI = borrowed from a karyawan (their own BBM): dari_estate is "PRIBADI", pemberi says who
+  jenis: "PINJAM" | "TRANSFER" | "PRIBADI";
+  pemberi?: string;
   alasan: string;
   tanggal_iso: string;
   created_at: string;
@@ -992,6 +994,8 @@ export type KopLineInput = { barang_kode: string; qty: number; harga: number; ex
 export type PinjamanLogAksi = "PINJAM" | "TRANSFER" | "KEMBALI" | "LUNAS" | "BATAL";
 export type PinjamanLog = {
   pinjaman_id: number;
+  jenis?: "PINJAM" | "TRANSFER" | "PRIBADI";
+  pemberi?: string;
   aksi: PinjamanLogAksi;
   qty: number;
   tanggal_iso: string;
@@ -1972,6 +1976,9 @@ export const api = {
     tanggal_iso?: string;
   }) =>
     req<{ success: boolean; id: number }>("/api/pinjaman", { method: "POST", body: JSON.stringify(payload) }),
+  // Pinjaman Pribadi: the estate (ke) borrows BBM from a karyawan, given back in liters later.
+  createPinjamanPribadi: (payload: { module: "BBM"; ke: string; kode: string; qty: number; nama: string; nik: string; alasan: string; tanggal_iso: string; evidence_id: string }) =>
+    req<{ success: boolean; id: number }>("/api/pinjaman/pribadi", { method: "POST", body: JSON.stringify(payload) }),
   kembalikanPinjaman: (id: number, qty: number, note: string, evidence_id: string) =>
     req<{ success: boolean }>(`/api/pinjaman/${id}/kembali`, { method: "POST", body: JSON.stringify({ qty, note, evidence_id }) }),
 

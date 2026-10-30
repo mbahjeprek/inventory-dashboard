@@ -1,12 +1,13 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { ArrowLeftRight, ArrowRight, Plus, ListPlus, X } from "lucide-react";
+import { ArrowLeftRight, ArrowRight, Plus, ListPlus, UserRound, X } from "lucide-react";
 import { api, errorText, type OpnameModule, type Pinjaman, type PinjamanBarang, type PinjamanLog, type PinjamanLogAksi, type PinjamanRingkasan, type PinjamanStatus } from "../lib/api";
 import { useSearchParams } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { EvidenceInput, EvidenceLink, useEvidenceEnabled } from "../components/EvidenceInput";
 import { can, canModule, userEstates } from "../lib/access";
 import { useShownEstates } from "../hooks/useEstateFilter";
-import { LOAN_LATE_DAYS, loanDays, useOpenPinjaman } from "../hooks/useOpenPinjaman";
+import { LOAN_LATE_DAYS, asalPinjaman, loanDays, useOpenPinjaman } from "../hooks/useOpenPinjaman";
+import { PinjamPribadiModal } from "../components/PinjamPribadiModal";
 import { OPNAME_MODULES, OPNAME_MODULE_LABEL, fmtQty, localToday, opnameModule, round3 } from "../lib/opname";
 import { tanggalWaktu } from "../lib/datetime";
 import { PinjamanBatchModal } from "../components/PinjamanBatchModal";
@@ -60,7 +61,7 @@ export function PinjamanPage() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [reload, setReload] = useState(0);
-  const [creating, setCreating] = useState<"" | "PINJAM" | "TRANSFER" | "BATCH">("");
+  const [creating, setCreating] = useState<"" | "PINJAM" | "TRANSFER" | "BATCH" | "PRIBADI">("");
   const [returning, setReturning] = useState<{ loan: Pinjaman; batal: boolean } | null>(null);
   const [deleting, setDeleting] = useState<Pinjaman | null>(null);
   const refreshOpen = useOpenPinjaman((s) => s.refresh);
@@ -102,6 +103,15 @@ export function PinjamanPage() {
         </div>
         {inputModules.length > 0 && (
           <div className="flex flex-wrap gap-2">
+            {inputModules.includes("BBM") && (
+              <button
+                onClick={() => setCreating("PRIBADI")}
+                title="Estate meminjam BBM pribadi karyawan, dikembalikan dalam liter saat stok datang"
+                className="inline-flex items-center gap-1.5 text-sm px-3.5 py-2 rounded-md border border-[var(--accent-blue-border)] text-[var(--accent-blue)] hover:bg-[var(--accent-blue-bg)]"
+              >
+                <UserRound size={16} /> Pinjam BBM Karyawan
+              </button>
+            )}
             <button
               onClick={() => setCreating("TRANSFER")}
               className="inline-flex items-center gap-1.5 text-sm px-3.5 py-2 rounded-md border border-[var(--accent-blue-border)] text-[var(--accent-blue)] hover:bg-[var(--accent-blue-bg)]"
@@ -248,7 +258,7 @@ export function PinjamanPage() {
                       </div>
                     </td>
                     <td className="px-4 py-2.5 whitespace-nowrap font-medium">
-                      {l.dari_estate} <ArrowRight size={12} className="inline text-[var(--text-muted)]" /> {l.ke_estate}
+                      {asalPinjaman(l)} <ArrowRight size={12} className="inline text-[var(--text-muted)]" /> {l.ke_estate}
                     </td>
                     <td className="px-4 py-2.5 text-right whitespace-nowrap">
                       {fmtQty(l.qty)} {l.satuan}
@@ -309,7 +319,8 @@ export function PinjamanPage() {
       )}
 
       {creating === "BATCH" && <PinjamanBatchModal modules={inputModules} myEstates={myEstates} onClose={() => setCreating("")} onSuccess={done} />}
-      {creating && creating !== "BATCH" && <CreatePinjamanModal jenis={creating} modules={inputModules} myEstates={myEstates} onClose={() => setCreating("")} onSuccess={done} />}
+      {creating === "PRIBADI" && <PinjamPribadiModal estates={myEstates} onClose={() => setCreating("")} onSuccess={done} />}
+      {creating && creating !== "BATCH" && creating !== "PRIBADI" && <CreatePinjamanModal jenis={creating} modules={inputModules} myEstates={myEstates} onClose={() => setCreating("")} onSuccess={done} />}
       {returning && <KembaliModal loan={returning.loan} batal={returning.batal} onClose={() => setReturning(null)} onSuccess={done} />}
       {deleting && <HapusModal loan={deleting} onClose={() => setDeleting(null)} onSuccess={done} />}
     </div>
@@ -388,13 +399,13 @@ function PinjamanLogTable({ module, aksi, estates, reload }: { module: string; a
             ) : (
               rows.map((r, i) => {
                 // A return goes back the other way.
-                const [from, to] = isBack(r.aksi) ? [r.ke_estate, r.dari_estate] : [r.dari_estate, r.ke_estate];
+                const [from, to] = isBack(r.aksi) ? [r.ke_estate, asalPinjaman(r)] : [asalPinjaman(r), r.ke_estate];
                 return (
                   <tr key={`${r.pinjaman_id}-${r.aksi}-${r.created_at}-${i}`} className="align-top">
                     <td className="px-4 py-2.5 whitespace-nowrap">
                       <div>{tanggalWaktu(r.tanggal_iso, r.created_at)}</div>
                       <div className="text-[11px] text-[var(--text-muted)]">
-                        {r.aksi === "TRANSFER" ? "Transfer" : "Pinjaman"} #{r.pinjaman_id}
+                        {r.aksi === "TRANSFER" ? "Transfer" : r.jenis === "PRIBADI" ? "Pinjaman Pribadi" : "Pinjaman"} #{r.pinjaman_id}
                       </div>
                     </td>
                     <td className="px-4 py-2.5">
@@ -739,7 +750,7 @@ function KembaliModal({ loan, batal, onClose, onSuccess }: { loan: Pinjaman; bat
   return (
     <Modal
       title={batal ? "Batalkan Pinjaman" : "Kembalikan Pinjaman"}
-      subtitle={`#${loan.id} · ${loan.nama} · ${loan.dari_estate} → ${loan.ke_estate}`}
+      subtitle={`#${loan.id} · ${loan.nama} · ${asalPinjaman(loan)} → ${loan.ke_estate}`}
       onClose={onClose}
     >
       <div className="flex items-center justify-between text-sm">
@@ -751,14 +762,16 @@ function KembaliModal({ loan, batal, onClose, onSuccess }: { loan: Pinjaman; bat
 
       {batal ? (
         <p className="text-xs rounded-md px-3 py-2 bg-[var(--accent-amber-bg)] text-[var(--accent-amber)]">
-          Semua {fmtQty(sisa)} {loan.satuan} dikembalikan dari {loan.ke_estate} ke {loan.dari_estate} dan pinjaman ditandai dibatalkan. Pakai ini kalau pinjaman salah input.
+          Semua {fmtQty(sisa)} {loan.satuan} dikembalikan dari {loan.ke_estate} ke {asalPinjaman(loan)} dan pinjaman ditandai dibatalkan. Pakai ini kalau pinjaman salah input.
         </p>
       ) : (
         <div>
           <label className={labelCls}>Jumlah dikembalikan ({loan.satuan})</label>
           <input value={qty} onChange={(e) => setQty(e.target.value)} inputMode="decimal" className={inputCls} />
           <p className="text-[11px] text-[var(--text-muted)] mt-1">
-            Stok {loan.ke_estate} berkurang dan stok {loan.dari_estate} bertambah. Boleh sebagian; sisanya tetap tercatat.
+            {loan.jenis === "PRIBADI"
+              ? `Stok ${loan.ke_estate} berkurang (dikembalikan ke ${loan.pemberi}); tidak dihitung pemakaian. Boleh sebagian; sisanya tetap tercatat.`
+              : `Stok ${loan.ke_estate} berkurang dan stok ${loan.dari_estate} bertambah. Boleh sebagian; sisanya tetap tercatat.`}
           </p>
         </div>
       )}
@@ -806,9 +819,9 @@ function HapusModal({ loan, onClose, onSuccess }: { loan: Pinjaman; onClose: () 
 
   const transfer = loan.jenis === "TRANSFER";
   return (
-    <Modal title={transfer ? "Hapus Transfer" : "Hapus Pinjaman"} subtitle={`#${loan.id} · ${loan.nama} · ${loan.dari_estate} → ${loan.ke_estate}`} onClose={onClose}>
+    <Modal title={transfer ? "Hapus Transfer" : "Hapus Pinjaman"} subtitle={`#${loan.id} · ${loan.nama} · ${asalPinjaman(loan)} → ${loan.ke_estate}`} onClose={onClose}>
       <p className="text-xs rounded-md px-3 py-2 bg-[var(--accent-red-bg)] text-[var(--accent-red)]">
-        {transfer ? "Transfer" : "Pinjaman"} ini beserta semua transaksinya di riwayat {OPNAME_MODULE_LABEL[loan.module]} {loan.dari_estate} dan {loan.ke_estate} dihapus
+        {transfer ? "Transfer" : "Pinjaman"} ini beserta semua transaksinya di riwayat {OPNAME_MODULE_LABEL[loan.module]} {loan.jenis === "PRIBADI" ? loan.ke_estate : `${loan.dari_estate} dan ${loan.ke_estate}`} dihapus
         permanen.{" "}
         {transfer
           ? `Stok ${fmtQty(loan.qty)} ${loan.satuan} kembali ke ${loan.dari_estate} (ditolak kalau ${loan.ke_estate} sudah memakainya).`

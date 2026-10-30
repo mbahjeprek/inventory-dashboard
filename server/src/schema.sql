@@ -428,6 +428,10 @@ CREATE INDEX IF NOT EXISTS idx_pinjaman_estates ON pinjaman(dari_estate, ke_esta
 -- PINJAM = a loan, returned later (status DIPINJAM -> LUNAS / BATAL); TRANSFER = stock sent to another
 -- estate for good (status TRANSFER, nothing comes back): the same pair of movement rows, no return.
 ALTER TABLE pinjaman ADD COLUMN IF NOT EXISTS jenis TEXT NOT NULL DEFAULT 'PINJAM';
+-- PRIBADI = borrowed from a person (a karyawan's own BBM), not from an estate: dari_estate 'PRIBADI', pemberi = who
+-- ("Nama (NIK)"); only the borrowing estate's stock moves - in when borrowed, out when given back (status DIPINJAM ->
+-- LUNAS / BATAL), neither counted as Stock In nor as pemakaian.
+ALTER TABLE pinjaman ADD COLUMN IF NOT EXISTS pemberi TEXT NOT NULL DEFAULT '';
 CREATE TABLE IF NOT EXISTS pinjaman_kembali (
   id SERIAL PRIMARY KEY,
   pinjaman_id INTEGER NOT NULL REFERENCES pinjaman(id),
