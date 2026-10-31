@@ -356,7 +356,14 @@ export function KunjunganModal({ klinik, kunjungan, onClose, onSaved }: { klinik
                         className={inputCls}
                       />
                       {m?.bhp ? (
-                        <span className="text-[11px] text-[var(--text-muted)]">bahan habis pakai - stok dipotong per {(m.satuan || "kemasan").toLowerCase()} saat dibuka, qty boleh kosong</span>
+                        <label className="flex items-start gap-1.5 text-[11px] text-[var(--text-secondary)] mt-0.5 cursor-pointer">
+                          <input type="checkbox" checked={!!o.buka_baru} onChange={(e) => setObat(i, { buka_baru: e.target.checked })} className="mt-0.5" />
+                          <span>
+                            <b>Buka {(m.satuan || "kemasan").toLowerCase()} baru</b> untuk pasien ini - stok berkurang 1 {(m.satuan || "").toLowerCase()} (stok klinik{" "}
+                            {available.toLocaleString("id-ID")}). Tidak dicentang = pakai yang sudah terbuka, stok tetap.
+                            {o.buka_baru && available < 1 && <span className="text-[var(--accent-red)]"> Stok tidak cukup.</span>}
+                          </span>
+                        </label>
                       ) : m ? (
                         <span className={`text-[11px] ${short ? "text-[var(--accent-red)]" : "text-[var(--text-muted)]"}`}>
                           stok klinik {available.toLocaleString("id-ID")} {m.satuan} · {short ? "stok tidak cukup" : "otomatis jadi Stock Out"}

@@ -532,6 +532,9 @@ ALTER TABLE obat ADD COLUMN IF NOT EXISTS isi_kemasan INTEGER NOT NULL DEFAULT 0
 -- Bahan habis pakai dipakai sebagian per pasien (Hypafix, kasa gulung, perban): stock is cut one
 -- roll / pack when it is opened (a manual Stock Out), so a terapi of it never moves stock and needs no qty.
 ALTER TABLE obat ADD COLUMN IF NOT EXISTS bhp BOOLEAN NOT NULL DEFAULT false;
+-- A terapi line of a bahan habis pakai marked "buka baru": a new roll / pack was opened for this patient, so the
+-- visit cuts 1 (its satuan) from the clinic's stock; without it the BHP line is only a record of what was used.
+ALTER TABLE klinik_kunjungan_obat ADD COLUMN IF NOT EXISTS buka_baru BOOLEAN NOT NULL DEFAULT false;
 
 -- Laporan Harian Klinik (KPI): one row per patient visit, read from each clinic's Daily Report
 -- Google Sheet (server/src/klinikLaporan.ts). Report only - the obat given here do not move stock

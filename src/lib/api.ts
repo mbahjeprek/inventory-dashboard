@@ -1102,6 +1102,8 @@ export type KunjunganObat = {
   // List only: obat_kode is a master obat, and how much of it this visit took from the clinic's stock.
   master?: boolean;
   bhp?: boolean;
+  // A bahan habis pakai line for which a new roll / pack was opened: the visit cuts 1 from the stock.
+  buka_baru?: boolean;
   terpotong?: number | null;
 };
 export type KunjunganInput = {

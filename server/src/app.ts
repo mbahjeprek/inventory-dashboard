@@ -4246,7 +4246,7 @@ app.get("/api/klinik-laporan/kunjungan", async (req, res) => {
   const data = await queryMany(
     // No = the visit's number in its clinic and year, by date, as the sheet numbers its rows.
     `SELECT k.*, COALESCE((SELECT json_agg(json_build_object('obat_kode', o.obat_kode, 'nama_obat', o.nama_obat, 'qty', o.qty, 'satuan', o.satuan,
-                             'master', m.kode IS NOT NULL, 'bhp', COALESCE(m.bhp, false),
+                             'master', m.kode IS NOT NULL, 'bhp', COALESCE(m.bhp, false), 'buka_baru', o.buka_baru,
                              'terpotong', (SELECT SUM(CASE WHEN t.type = 'OUT' THEN t.qty ELSE -t.qty END) FROM klinik_stock_tx t WHERE t.kunjungan_id = k.id AND t.obat_kode = o.obat_kode)) ORDER BY o.urut, o.id)
                            FROM klinik_kunjungan_obat o LEFT JOIN obat m ON m.kode = o.obat_kode WHERE o.kunjungan_id = k.id), '[]') AS obat,
        k.tanggal_iso <= COALESCE((SELECT MAX(tanggal) FROM opname WHERE module = 'KLINIK' AND estate = k.klinik AND status = 'APPROVED'), '') AS sebelum_opname
@@ -4262,7 +4262,7 @@ app.get("/api/klinik-laporan/kunjungan", async (req, res) => {
 // and do not move stock.
 const JENIS_KUNJUNGAN = ["Rawat Jalan", "MCU", "Kontrol", "Rawat Inap"];
 const STATUS_PASIEN = ["Pekerja", "Istri", "Anak", "Lainnya"];
-function kunjunganPayload(b: any): { data?: Record<string, any>; obat?: { obat_kode: string; nama_obat: string; qty: number | null; satuan: string }[]; error?: string } {
+function kunjunganPayload(b: any): { data?: Record<string, any>; obat?: { obat_kode: string; nama_obat: string; qty: number | null; satuan: string; buka_baru: boolean }[]; error?: string } {
   const t = (v: unknown) => String(v ?? "").replace(/\s+/g, " ").trim();
   const tanggal_iso = t(b.tanggal_iso);
   if (!ISO_DATE.test(tanggal_iso)) return { error: "Tanggal tidak valid" };
@@ -4293,7 +4293,7 @@ function kunjunganPayload(b: any): { data?: Record<string, any>; obat?: { obat_k
     if (!nama_obat) return { error: "Nama terapi wajib diisi untuk setiap jumlah" };
     const qty = qtyRaw === "" ? null : Number(qtyRaw);
     if (qty !== null && !(qty > 0)) return { error: `Qty ${nama_obat} tidak valid` };
-    obat.push({ obat_kode: t(o?.obat_kode).toUpperCase(), nama_obat, qty, satuan: t(o?.satuan).toUpperCase() });
+    obat.push({ obat_kode: t(o?.obat_kode).toUpperCase(), nama_obat, qty, satuan: t(o?.satuan).toUpperCase(), buka_baru: o?.buka_baru === true });
   }
   return {
     data: {
@@ -4325,9 +4325,9 @@ async function saveKunjunganObat(c: PoolClient, id: number, obat: NonNullable<Re
   await execute("DELETE FROM klinik_kunjungan_obat WHERE kunjungan_id = @id", { id }, c);
   if (obat.length)
     await execute(
-      `INSERT INTO klinik_kunjungan_obat (kunjungan_id, urut, obat_kode, nama_obat, qty, satuan)
-       SELECT @id, x.urut, x.obat_kode, x.nama_obat, x.qty, x.satuan
-       FROM json_to_recordset(@rows::json) AS x(urut int, obat_kode text, nama_obat text, qty float8, satuan text)`,
+      `INSERT INTO klinik_kunjungan_obat (kunjungan_id, urut, obat_kode, nama_obat, qty, satuan, buka_baru)
+       SELECT @id, x.urut, x.obat_kode, x.nama_obat, x.qty, x.satuan, COALESCE(x.buka_baru, false)
+       FROM json_to_recordset(@rows::json) AS x(urut int, obat_kode text, nama_obat text, qty float8, satuan text, buka_baru boolean)`,
       { id, rows: JSON.stringify(obat.map((o, i) => ({ ...o, urut: i + 1 }))) },
       c
     );
@@ -4380,7 +4380,7 @@ async function applyObatAlias(c?: PoolClient, key?: string) {
 // of booked again, so nothing is cut twice; when its qty differs from the terapi it stays as typed
 // until the visit itself is edited. A visit on or before the day of the clinic's last approved stok
 // opname is left alone: the count (done that day) has it.
-type TerapiStok = { obat_kode: string; nama_obat: string; qty: number | null };
+type TerapiStok = { obat_kode: string; nama_obat: string; qty: number | null; buka_baru?: boolean };
 type KunjunganStokRef = { id: number; klinik: string; tanggal_iso: string; nama_pasien: string; diagnosis: string };
 async function klinikOpnameDay(klinik: string, c?: PoolClient) {
   return (
@@ -4457,10 +4457,10 @@ async function syncKunjunganStok(
   for (const o of obat) {
     const m = master.get(o.obat_kode);
     if (!m) continue;
-    // Bahan habis pakai: its stock is cut when a roll / pack is opened, the terapi is only a record.
-    // Rows the visit booked before it was marked stay as they are.
+    // Bahan habis pakai: the terapi only records what was used; a line marked "buka baru" (a new roll / pack opened for
+    // this patient) cuts 1 of its satuan. Unmarked again, or the visit deleted, that Stock Out goes back.
     if (m.bhp) {
-      skip.add(m.kode);
+      if (o.buka_baru) want.set(m.kode, (want.get(m.kode) ?? 0) + 1);
       continue;
     }
     const bad =
@@ -4573,14 +4573,14 @@ const stokSyncText = (d: StokSync[]) => {
 };
 
 const kunjunganObjek = (d: Record<string, any>) => `${d.nama_pasien} · ${d.tanggal_iso.split("-").reverse().join("/")}`;
-const kunjunganDetail = (d: Record<string, any>, obat: { nama_obat: string; qty: number | null; satuan: string }[]) =>
+const kunjunganDetail = (d: Record<string, any>, obat: { nama_obat: string; qty: number | null; satuan: string; buka_baru?: boolean }[]) =>
   [
     d.jenis_kunjungan,
     d.diagnosis && `Diagnosis: ${d.diagnosis}`,
     d.kecelakaan_kerja && "Kecelakaan kerja",
     d.istirahat && `Istirahat ${d.hari_istirahat} hari`,
     d.rujukan && `Rujukan${d.provider ? `: ${d.provider}` : ""}`,
-    obat.length && `Terapi: ${obat.map((o) => `${o.nama_obat} ${o.qty ?? ""} ${o.satuan}`.trim()).join(", ")}`,
+    obat.length && `Terapi: ${obat.map((o) => `${o.nama_obat} ${o.qty ?? ""} ${o.satuan}${o.buka_baru ? " (buka baru)" : ""}`.trim()).join(", ")}`,
   ]
     .filter(Boolean)
     .join("; ");
@@ -4948,7 +4948,7 @@ app.post("/api/klinik-laporan/sinkron-stok", async (req, res) => {
   );
   const out: { id: number; tanggal_iso: string; nama_pasien: string; stok?: StokSync[]; error?: string }[] = [];
   for (const v of visits) {
-    const obat = await queryMany<TerapiStok>("SELECT obat_kode, nama_obat, qty FROM klinik_kunjungan_obat WHERE kunjungan_id = @id ORDER BY urut, id", { id: v.id });
+    const obat = await queryMany<TerapiStok>("SELECT obat_kode, nama_obat, qty, buka_baru FROM klinik_kunjungan_obat WHERE kunjungan_id = @id ORDER BY urut, id", { id: v.id });
     let stok: StokSync[] = [];
     try {
       await atVisitDay(v.tanggal_iso, () =>
