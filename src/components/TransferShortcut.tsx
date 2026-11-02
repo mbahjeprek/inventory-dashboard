@@ -1,11 +1,12 @@
 import { useState } from "react";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, Plus } from "lucide-react";
 import type { OpnameModule } from "../lib/api";
 import { ESTATE_TUJUAN } from "../lib/kirim";
 import { CreatePinjamanModal } from "../pages/PinjamanPage";
 
-// Under Stock Out: when the goods go into another estate's stock (not used here), book a Transfer
-// instead - the receiving estate's stock goes up at once and it doesn't type a Stock In itself.
+// Under Stock Out: when the goods go to another estate (not used here), book it there instead - as a
+// Pinjaman (the same form as Catat Pinjaman: lent until given back) or a Transfer (the same form as
+// Catat Transfer: the receiving estate's stock goes up at once, no Stock In typed there).
 export function TransferShortcut({
   module,
   dari,
@@ -21,28 +22,31 @@ export function TransferShortcut({
   note?: string;
   onDone: () => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState<"PINJAM" | "TRANSFER" | null>(null);
+  const btnCls =
+    "inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-md border border-[var(--accent-blue-border)] bg-white text-[var(--accent-blue)] hover:opacity-90";
   return (
     <>
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-dashed border-[var(--accent-blue-border)] bg-[var(--accent-blue-bg)] px-3 py-2">
-        <span className="text-[11px] text-[var(--text-secondary)]">Dikirim ke stok estate lain (bukan dipakai di {dari})?</span>
-        <button
-          type="button"
-          onClick={() => setOpen(true)}
-          className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-md border border-[var(--accent-blue-border)] bg-white text-[var(--accent-blue)] hover:opacity-90"
-        >
-          <ArrowRight size={13} /> Kirim ke estate lain
-        </button>
+        <span className="text-[11px] text-[var(--text-secondary)]">Keluar ke estate lain (bukan dipakai di {dari})?</span>
+        <div className="flex flex-wrap gap-1.5">
+          <button type="button" onClick={() => setOpen("PINJAM")} className={btnCls}>
+            <Plus size={13} /> Catat Pinjaman
+          </button>
+          <button type="button" onClick={() => setOpen("TRANSFER")} className={btnCls}>
+            <ArrowRight size={13} /> Catat Transfer
+          </button>
+        </div>
       </div>
       {open && (
         <CreatePinjamanModal
-          jenis="TRANSFER"
+          jenis={open}
           modules={[module]}
           myEstates={[dari]}
           initial={{ module, dari, kode, qty: qty && qty > 0 ? qty : undefined, note }}
-          onClose={() => setOpen(false)}
+          onClose={() => setOpen(null)}
           onSuccess={() => {
-            setOpen(false);
+            setOpen(null);
             onDone();
           }}
         />

@@ -495,7 +495,7 @@ export function CreatePinjamanModal({
   modules: OpnameModule[];
   myEstates: string[];
   jenis?: "PINJAM" | "TRANSFER";
-  // Opened from a Stock Out form ("Kirim ke estate lain"): that module, estate and barang.
+  // Opened from a Stock Out form (Catat Pinjaman / Transfer there): that module, estate and barang.
   initial?: { module: OpnameModule; dari: string; kode: string; qty?: number; note?: string };
   onClose: () => void;
   onSuccess: () => void;
