@@ -478,7 +478,7 @@ function requireSuperuser(req: express.Request, res: express.Response, next: exp
 // change or delete a transaction only while its date is in the current month (Jakarta), and an edit
 // may not move it out of that month; an earlier month goes through a supervisor or Super User - or the
 // account itself while a Super User gave it "edit bulan lalu" for a while (users.edit_lampau_until):
-// edit only, never delete. Every change is still logged with its before / after.
+// edit and delete (as its Edit / Hapus perms allow), never approve. Every change is still logged.
 const jakartaDay = (v: unknown) =>
   v instanceof Date || (typeof v === "string" && v.includes("T"))
     ? new Date(new Date(v as string).getTime() + 7 * 3600_000).toISOString().slice(0, 10)
@@ -487,7 +487,7 @@ const rowDay = (row: Record<string, any>) => jakartaDay(row.tanggal_iso ?? row.t
 function editTooLate(req: express.Request, res: express.Response, module: string, row: Record<string, any>) {
   const u = req.user!;
   if (u.role === "superuser" || u.perms.includes(`${module}.approve`)) return false;
-  if (req.method === "PUT" && u.editLampauUntil && new Date(u.editLampauUntil) > new Date()) return false;
+  if (u.editLampauUntil && new Date(u.editLampauUntil) > new Date()) return false;
   const month = jakartaToday().slice(0, 7);
   const b = req.method === "PUT" ? req.body ?? {} : {};
   const moved = b.tanggal_iso ?? b.tanggal_keluar_iso ?? b.tanggal_terima_iso;
@@ -2299,7 +2299,7 @@ app.put("/api/users/:id", requireSuperuser, async (req, res) => {
           estate,
           aksi: lampauRaw ? "Buka Edit Bulan Lalu" : "Tutup Edit Bulan Lalu",
           objek: `${existing.username} - ${existing.nama}`,
-          detail: lampauRaw ? `sampai ${String(lampauRaw).split("-").reverse().join("/")} (edit saja, tanpa hapus)` : `sebelumnya sampai ${sebelum.split("-").reverse().join("/")}`,
+          detail: lampauRaw ? `sampai ${String(lampauRaw).split("-").reverse().join("/")} (edit & hapus)` : `sebelumnya sampai ${sebelum.split("-").reverse().join("/")}`,
         });
   }
   res.json({ success: true });

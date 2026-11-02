@@ -250,10 +250,10 @@ export function UserFormModal({
 
           {isEdit && meSuper && role === "estate" && (
             <div className="rounded-md border border-[var(--accent-amber-border)] bg-[var(--accent-amber-bg)] p-3 space-y-2">
-              <div className="text-sm font-medium text-[var(--accent-amber)]">Edit transaksi bulan lalu (sementara)</div>
+              <div className="text-sm font-medium text-[var(--accent-amber)]">Edit & hapus transaksi bulan lalu (sementara)</div>
               <p className="text-[11px] text-[var(--text-secondary)]">
-                Sampai tanggal ini akun boleh <b>mengedit</b> transaksi bulan-bulan sebelumnya di modul dan estate yang sudah dicentang di atas. Tidak termasuk hapus atau
-                approve. Tertutup sendiri setelah tanggal itu; setiap edit tetap tercatat di Log.
+                Sampai tanggal ini akun boleh <b>mengedit</b> dan <b>menghapus</b> transaksi bulan-bulan sebelumnya di modul dan estate yang sudah dicentang di atas
+                (sesuai hak Edit / Hapus-nya). Tidak termasuk approve. Tertutup sendiri setelah tanggal itu; setiap edit tetap tercatat di Log.
               </p>
               <div className="flex flex-wrap items-center gap-2">
                 <input type="date" value={lampau} min={today} onChange={(e) => setLampau(e.target.value)} className="text-sm rounded-md border border-[var(--border)] px-3 py-1.5 bg-white" />
