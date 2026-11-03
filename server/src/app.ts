@@ -1120,17 +1120,20 @@ app.use(async (req, res, next) => {
   const id = Number(req.path.match(lock.re)![1]);
   const row = await queryOne<{ d: string | null; e: string | null }>(`SELECT ${lock.date} d, ${lock.estate} e FROM ${lock.table} WHERE id = @id`, { id });
   if (!row?.e) return next();
-  const opname = await queryOne<{ tanggal: string }>(
-    "SELECT tanggal FROM opname WHERE module = @module AND estate = @estate AND status = 'APPROVED' ORDER BY tanggal DESC LIMIT 1",
-    { module: lock.module, estate: row.e }
+  // Also every other location the change reaches: a Nilam Stok Keluar to another gudang booked a Stok
+  // Masuk there, which that gudang's opname counted too (and an edit may send it to a new tujuan).
+  const estates = [...new Set([row.e, ...(await stockLocations(req)).filter((l) => l.module === lock.module).map((l) => l.estate)])];
+  const opnames = await queryMany<{ estate: string; tanggal: string }>(
+    `SELECT DISTINCT ON (estate) estate, tanggal FROM opname
+      WHERE module = @module AND estate = ANY(@estates::text[]) AND status = 'APPROVED' ORDER BY estate, tanggal DESC`,
+    { module: lock.module, estates }
   );
-  if (!opname) return next();
   const b = req.body ?? {};
   const moved = req.method === "PUT" ? String(b.tanggal_iso ?? b.tanggal_terima_iso ?? b.tanggal_keluar_iso ?? "") : "";
-  const before = (d: string | null | undefined) => !!d && ISO_DATE.test(d) && d < opname.tanggal;
-  if (before(row.d) || before(moved))
+  const opname = opnames.find((o) => [row.d, moved].some((d) => !!d && ISO_DATE.test(d) && d < o.tanggal));
+  if (opname)
     return res.status(400).json({
-      error: `Transaksi sebelum stok opname terakhir ${row.e} (${opname.tanggal.split("-").reverse().join("/")}) sudah tercakup hasil hitungnya, jadi tidak bisa diubah / dihapus. Minta Super User bila memang perlu dikoreksi.`,
+      error: `Transaksi sebelum stok opname terakhir ${opname.estate} (${opname.tanggal.split("-").reverse().join("/")}) sudah tercakup hasil hitungnya, jadi tidak bisa diubah / dihapus. Minta Super User bila memang perlu dikoreksi.`,
     });
   next();
 });
@@ -1915,6 +1918,14 @@ app.get("/api/stock-in/vendors", requireEstate("NILAM"), async (_req, res) => {
   res.json(rows.map((r) => r.nama_vendor));
 });
 
+// A Stock In / Out moved to another day: its transaction (the saldo order) and the Stok Masuk it booked
+// in another gudang follow, keeping their time of day.
+async function moveNilamTxDate(client: PoolClient, txId: number, tanggal: string) {
+  const shift = (col: string) => `((@d::date + (${col} AT TIME ZONE 'Asia/Jakarta')::time) AT TIME ZONE 'Asia/Jakarta')`;
+  await execute(`UPDATE transactions SET created_at = ${shift("created_at")} WHERE id = @id`, { d: tanggal, id: txId }, client);
+  await execute(`UPDATE gudang_stock_tx SET created_at = ${shift("created_at")} WHERE transfer_from_id = @id`, { d: tanggal, id: txId }, client);
+}
+
 app.put("/api/stock-in/:id", requireEstate("NILAM"), async (req, res) => {
   const existing = await queryOne("SELECT * FROM stock_in_log WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Not found" });
@@ -1923,33 +1934,39 @@ app.put("/api/stock-in/:id", requireEstate("NILAM"), async (req, res) => {
   if (newEvidence === undefined) return;
 
   const { nama_vendor, qty, satuan, tujuan, tanggal_terima_iso, keterangan } = req.body;
+  // Every row (also an imported one): a changed jumlah whole and > 0 (some imported rows hold 0), and a
+  // real date not after today, so the Summary / Top Keluar don't count a minus or a broken date.
+  if (Number(qty) !== Number(existing.qty) && !(Number.isInteger(Number(qty)) && Number(qty) > 0))
+    return res.status(400).json({ error: "Jumlah harus bilangan bulat lebih dari 0" });
+  if (badEditDate(tanggal_terima_iso)) return res.status(400).json({ error: "Tanggal tidak valid" });
   // Made by a manual transaction: Nilam's stock follows the new jumlah.
   const tx = await mirroredTx("stock_in_log", existing.id);
-  let sync: Awaited<ReturnType<typeof reviseNilamTx>> | null = null;
-  if (tx) {
-    if (!(Number(qty) > 0)) return res.status(400).json({ error: "Jumlah harus lebih dari 0" });
-    try {
-      sync = await withTransaction((client) =>
-        reviseNilamTx(client, req, tx, { type: "IN", qty: Number(qty), tujuan: tx.tujuan ?? "", penerima: tx.penerima ?? "", note: keterangan ?? "" })
+  // Stock, the transfer and the history row change together (one fails, none of them does).
+  let sync: Awaited<ReturnType<typeof reviseNilamTx>> | null;
+  try {
+    sync = await withTransaction(async (client) => {
+      const r = tx ? await reviseNilamTx(client, req, tx, { type: "IN", qty: Number(qty), tujuan: tx.tujuan ?? "", penerima: tx.penerima ?? "", note: keterangan ?? "" }) : null;
+      if (tx && tanggal_terima_iso && tanggal_terima_iso !== existing.tanggal_terima_iso) await moveNilamTxDate(client, tx.id, tanggal_terima_iso);
+      await execute(
+        `UPDATE stock_in_log SET nama_vendor = @nama_vendor, qty = @qty, satuan = @satuan, tujuan = @tujuan, tanggal_terima_iso = @tanggal_terima_iso, tanggal_terima = @tanggal_terima, keterangan = @keterangan WHERE id = @id`,
+        {
+          nama_vendor: nama_vendor ?? "",
+          qty: qty ?? 0,
+          satuan: satuan ?? "",
+          tujuan: tujuan && TUJUAN_OPTIONS.includes(tujuan) ? tujuan : null,
+          tanggal_terima_iso: tanggal_terima_iso || null,
+          tanggal_terima: tanggal_terima_iso ? isoToDisplay(tanggal_terima_iso) : "",
+          keterangan: keterangan ?? "",
+          id: req.params.id,
+        },
+        client
       );
-    } catch (e) {
-      if (e instanceof StockError) return res.status(400).json({ error: e.message });
-      throw e;
-    }
+      return r;
+    });
+  } catch (e) {
+    if (e instanceof StockError) return res.status(400).json({ error: e.message });
+    throw e;
   }
-  await execute(
-    `UPDATE stock_in_log SET nama_vendor = @nama_vendor, qty = @qty, satuan = @satuan, tujuan = @tujuan, tanggal_terima_iso = @tanggal_terima_iso, tanggal_terima = @tanggal_terima, keterangan = @keterangan WHERE id = @id`,
-    {
-      nama_vendor: nama_vendor ?? "",
-      qty: qty ?? 0,
-      satuan: satuan ?? "",
-      tujuan: tujuan && TUJUAN_OPTIONS.includes(tujuan) ? tujuan : null,
-      tanggal_terima_iso: tanggal_terima_iso || null,
-      tanggal_terima: tanggal_terima_iso ? isoToDisplay(tanggal_terima_iso) : "",
-      keterangan: keterangan ?? "",
-      id: req.params.id,
-    }
-  );
   await logActivity(req, {
     module: "BARANG",
     estate: "NILAM",
@@ -2045,39 +2062,45 @@ app.put("/api/stock-out/:id", requireEstate("NILAM"), async (req, res) => {
   if (newEvidence === undefined) return;
 
   const { penerima, qty, satuan, tujuan, tanggal_keluar_iso, keterangan } = req.body;
+  // Every row (also an imported one): a changed jumlah whole and > 0 (some imported rows hold 0), and a
+  // real date not after today, so the Summary / Top Keluar don't count a minus or a broken date.
+  if (Number(qty) !== Number(existing.qty) && !(Number.isInteger(Number(qty)) && Number(qty) > 0))
+    return res.status(400).json({ error: "Jumlah harus bilangan bulat lebih dari 0" });
+  if (badEditDate(tanggal_keluar_iso)) return res.status(400).json({ error: "Tanggal tidak valid" });
   // Made by a manual transaction: Nilam's stock and the transfer into another gudang follow.
   const tx = await mirroredTx("stock_out_log", existing.id);
-  let sync: Awaited<ReturnType<typeof reviseNilamTx>> | null = null;
-  if (tx) {
-    if (!(Number(qty) > 0)) return res.status(400).json({ error: "Jumlah harus lebih dari 0" });
-    try {
-      sync = await withTransaction((client) =>
-        reviseNilamTx(client, req, tx, {
+  // Stock, the transfer and the history row change together (one fails, none of them does).
+  let sync: Awaited<ReturnType<typeof reviseNilamTx>> | null;
+  try {
+    sync = await withTransaction(async (client) => {
+      const r = tx ? await reviseNilamTx(client, req, tx, {
           type: "OUT",
           qty: Number(qty),
           tujuan: tujuan && TUJUAN_OPTIONS.includes(tujuan) ? tujuan : "",
           penerima: penerima ?? "",
           note: keterangan ?? "",
-        })
+        }) : null;
+      if (tx && tanggal_keluar_iso && tanggal_keluar_iso !== existing.tanggal_keluar_iso) await moveNilamTxDate(client, tx.id, tanggal_keluar_iso);
+      await execute(
+        `UPDATE stock_out_log SET penerima = @penerima, qty = @qty, satuan = @satuan, tujuan = @tujuan, tanggal_keluar_iso = @tanggal_keluar_iso, tanggal_keluar = @tanggal_keluar, keterangan = @keterangan WHERE id = @id`,
+        {
+          penerima: penerima ?? "",
+          qty: qty ?? 0,
+          satuan: satuan ?? "",
+          tujuan: tujuan && TUJUAN_OPTIONS.includes(tujuan) ? tujuan : null,
+          tanggal_keluar_iso: tanggal_keluar_iso || null,
+          tanggal_keluar: tanggal_keluar_iso ? isoToDisplay(tanggal_keluar_iso) : "",
+          keterangan: keterangan ?? "",
+          id: req.params.id,
+        },
+        client
       );
-    } catch (e) {
-      if (e instanceof StockError) return res.status(400).json({ error: e.message });
-      throw e;
-    }
+      return r;
+    });
+  } catch (e) {
+    if (e instanceof StockError) return res.status(400).json({ error: e.message });
+    throw e;
   }
-  await execute(
-    `UPDATE stock_out_log SET penerima = @penerima, qty = @qty, satuan = @satuan, tujuan = @tujuan, tanggal_keluar_iso = @tanggal_keluar_iso, tanggal_keluar = @tanggal_keluar, keterangan = @keterangan WHERE id = @id`,
-    {
-      penerima: penerima ?? "",
-      qty: qty ?? 0,
-      satuan: satuan ?? "",
-      tujuan: tujuan && TUJUAN_OPTIONS.includes(tujuan) ? tujuan : null,
-      tanggal_keluar_iso: tanggal_keluar_iso || null,
-      tanggal_keluar: tanggal_keluar_iso ? isoToDisplay(tanggal_keluar_iso) : "",
-      keterangan: keterangan ?? "",
-      id: req.params.id,
-    }
-  );
   await logActivity(req, {
     module: "BARANG",
     estate: "NILAM",
@@ -5744,6 +5767,8 @@ app.put("/api/klinik-stock/tarik/:id/periksa", async (req, res) => {
 });
 
 // Fix a batch's expiry date (typo); a batch that ends up on an existing date is merged into it.
+const BATCH_BERUBAH = "Stok obat ini baru saja berubah (ada transaksi lain). Muat ulang lalu ulangi.";
+
 app.put("/api/klinik-stock/batch/:id", requireSuperuser, async (req, res) => {
   const batch = await queryOne<any>("SELECT * FROM klinik_batch WHERE id = @id", { id: req.params.id });
   if (!batch) return res.status(404).json({ error: "Not found" });
@@ -5756,12 +5781,20 @@ app.put("/api/klinik-stock/batch/:id", requireSuperuser, async (req, res) => {
   if (!Number.isInteger(qty) || qty <= 0 || qty > batch.qty) return res.status(400).json({ error: `Jumlah dipisah harus 1 - ${batch.qty}` });
   if (exp === batch.expired_date) return res.json({ success: true });
   const split = qty < batch.qty;
+  try {
   await withTransaction(async (client) => {
+    // Re-read and locked: a Stock Out since the form was read would else be undone by the move.
+    const cur = await queryOne<{ qty: number; expired_date: string }>("SELECT qty, expired_date FROM klinik_batch WHERE id = @id FOR UPDATE", { id: batch.id }, client);
+    if (!cur || cur.qty !== batch.qty || cur.expired_date !== batch.expired_date) throw new StockError(BATCH_BERUBAH);
     if (split) await execute("UPDATE klinik_batch SET qty = qty - @qty WHERE id = @id", { id: batch.id, qty }, client);
     else await execute("DELETE FROM klinik_batch WHERE id = @id", { id: batch.id }, client);
     await addToBatch(client, batch.klinik, batch.obat_kode, exp, qty);
     await syncKlinikStock(client, batch.klinik, batch.obat_kode);
   });
+  } catch (e) {
+    if (e instanceof StockError) return res.status(400).json({ error: e.message });
+    throw e;
+  }
   const obat = await queryOne<any>("SELECT nama FROM obat WHERE kode = @k", { k: batch.obat_kode });
   await logActivity(req, {
     module: "KLINIK",
@@ -5869,16 +5902,31 @@ app.put("/api/klinik-stock/:id/batches", requireSuperuser, async (req, res) => {
     [...m].sort(([a], [b]) => (a === "" ? 1 : b === "" ? -1 : a.localeCompare(b))).map(([e, q]) => `${expText(e)}: ${q}`).join(", ") || "kosong";
   const before = sum(have);
   const after = sum(want);
+  // The batches, re-read and locked inside the change: they must still be what `have` was read as.
+  const masihSama = async (client: PoolClient) => {
+    const cur = await queryMany<{ expired_date: string; qty: number }>(
+      "SELECT expired_date, qty FROM klinik_batch WHERE klinik = @k AND obat_kode = @o AND qty > 0 FOR UPDATE",
+      { k: row.klinik, o: row.obat_kode },
+      client
+    );
+    if (text(new Map(cur.map((b) => [b.expired_date, b.qty]))) !== text(have)) throw new StockError(BATCH_BERUBAH);
+  };
   const obat = await queryOne<any>("SELECT nama FROM obat WHERE kode = @k", { k: row.obat_kode });
   const objek = `${row.obat_kode} - ${obat?.nama ?? ""}`;
 
   if (after === before) {
     if (text(have) === text(want)) return res.json({ success: true });
-    await withTransaction(async (client) => {
-      await execute("DELETE FROM klinik_batch WHERE klinik = @k AND obat_kode = @o", { k: row.klinik, o: row.obat_kode }, client);
-      for (const [exp, qty] of want) await addToBatch(client, row.klinik, row.obat_kode, exp, qty);
-      await syncKlinikStock(client, row.klinik, row.obat_kode);
-    });
+    try {
+      await withTransaction(async (client) => {
+        await masihSama(client);
+        await execute("DELETE FROM klinik_batch WHERE klinik = @k AND obat_kode = @o", { k: row.klinik, o: row.obat_kode }, client);
+        for (const [exp, qty] of want) await addToBatch(client, row.klinik, row.obat_kode, exp, qty);
+        await syncKlinikStock(client, row.klinik, row.obat_kode);
+      });
+    } catch (e) {
+      if (e instanceof StockError) return res.status(400).json({ error: e.message });
+      throw e;
+    }
     await logActivity(req, { module: "KLINIK", estate: row.klinik, aksi: "Atur Batch", objek, detail: `${text(have)} → ${text(want)}` });
     return res.json({ success: true });
   }
@@ -5889,6 +5937,7 @@ app.put("/api/klinik-stock/:id/batches", requireSuperuser, async (req, res) => {
   const exps = [...new Set([...have.keys(), ...want.keys()])];
   try {
     await withTransaction(async (client) => {
+      await masihSama(client);
       for (const exp of exps) {
         const delta = (want.get(exp) ?? 0) - (have.get(exp) ?? 0);
         if (!delta) continue;
@@ -6045,12 +6094,13 @@ for (const lr of LEDGER_ROUTES) {
       }
     } else {
     const sign = existing.type === "IN" ? 1 : -1;
-    const delta = round3(sign * (qty - existing.qty));
+    const delta = round3(sign * (round3(qty) - existing.qty));
     try {
     await withTransaction(async (client) => {
       await lockMovement(client, l.tx, existing);
       await execute(`UPDATE ${l.tx} SET qty = @qty, tujuan = @tujuan, penerima = @penerima, note = @note WHERE id = @id`, {
-        qty,
+        // Rounded as the stock moves (round3 of the difference), so history and stock stay equal.
+        qty: round3(qty),
         tujuan: tujuan ?? "",
         penerima: penerima ?? "",
         note: note || null,
