@@ -139,6 +139,13 @@ export function KoperasiPage() {
   const [rusakAlasan, setRusakAlasan] = useState<"EXPIRED" | "RUSAK">("RUSAK");
   const [periodes, setPeriodes] = useState<string[]>([]);
   const [periode, setPeriode] = useState(localToday().slice(0, 7));
+  // Barang Rusak list narrowed by a click on a step of its alur ("" = all of the periode).
+  const [rusakStatus, setRusakStatus] = useState<KopRusakStatus>("");
+  const pilihAlurRusak = (langkah: number) => {
+    if (langkah === 3) return document.getElementById("ba-daftar")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    setRusakStatus((["", "MENUNGGU", "DISETUJUI"] as const)[langkah]);
+    setTimeout(() => document.getElementById("rusak-daftar")?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+  };
   const [ringkasan, setRingkasan] = useState<KopRingkasan | null>(null);
   const [reload, setReload] = useState(0);
   const [modal, setModal] = useState<"" | "jual" | "beli" | "rusak" | "jualBatch" | "beliBatch">("");
@@ -262,11 +269,13 @@ export function KoperasiPage() {
           <ExpiredPerluDitarik reload={reload} canInput={canInput} onChanged={done} />
           <TxTable jenis="BELI" periode={periode} reload={reload} canEdit={canEdit} onChanged={done} />
           <h2 className="text-sm font-semibold text-[var(--text-primary)] pt-2">Barang Rusak / Expired</h2>
-          <KopAlurRusak periode={periode} reload={reload} />
+          <KopAlurRusak periode={periode} reload={reload} onPilih={pilihAlurRusak} />
           <p className="text-xs text-[var(--text-muted)] -mt-2">
             Diinput dengan foto, lalu diperiksa orang kedua (hak Approve Koperasi) yang mencocokkan barang fisiknya. Yang disetujui masuk Berita Acara Pemusnahan; pemusnahan disaksikan minimal 2 orang.
           </p>
-          <TxTable jenis="RUSAK" periode={periode} reload={reload} canEdit={canEdit} onChanged={done} />
+          <div id="rusak-daftar" className="scroll-mt-4">
+            <TxTable jenis="RUSAK" periode={periode} reload={reload} canEdit={canEdit} onChanged={done} status={rusakStatus} onStatus={setRusakStatus} />
+          </div>
           <div id="ba-daftar">
             <BaDaftar jenis={jenisKoperasi()} items={itemsKoperasi} reload={reload} />
           </div>
@@ -290,6 +299,8 @@ export function KoperasiPage() {
   );
 }
 
+type KopRusakStatus = "" | "MENUNGGU" | "DISETUJUI";
+
 // ---- Transaksi (Pengambilan / Pembelian / Rusak), 100 per page ----
 function TxTable({
   jenis,
@@ -299,8 +310,13 @@ function TxTable({
   reload,
   canEdit,
   onChanged,
+  status = "",
+  onStatus,
 }: {
   jenis: "JUAL" | "BELI" | "RUSAK" | "KOREKSI" | "";
+  // Only rows of this pemeriksaan status (Barang Rusak, from its alur); onStatus("") clears it.
+  status?: KopRusakStatus;
+  onStatus?: (s: KopRusakStatus) => void;
   periode: string;
   anggota?: string;
   barang?: string;
@@ -333,8 +349,8 @@ function TxTable({
   const pageSize = 100;
   // Rusak / Koreksi: rows of an earlier month still waiting for their pemeriksaan are listed too.
   const params = useMemo(
-    () => ({ jenis, periode, anggota: anggota ?? "", barang: barang ?? "", search: q, menunggu: jenis === "RUSAK" || jenis === "KOREKSI" ? "1" : "" }),
-    [jenis, periode, anggota, barang, q]
+    () => ({ jenis, periode, anggota: anggota ?? "", barang: barang ?? "", search: q, status, menunggu: jenis === "RUSAK" || jenis === "KOREKSI" ? "1" : "" }),
+    [jenis, periode, anggota, barang, q, status]
   );
   useEffect(() => {
     const t = setTimeout(() => setQ(search.trim()), 300);
@@ -440,6 +456,15 @@ function TxTable({
         <span className="text-xs text-[var(--text-muted)]">
           {(res?.total ?? 0).toLocaleString("id-ID")} baris{!rusak && res ? ` · ${rp(res.sum_total)}` : ""}
         </span>
+        {status && (
+          <button
+            onClick={() => onStatus?.("")}
+            title="Tampilkan semua"
+            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border border-[var(--accent-blue-border)] bg-[var(--accent-blue-bg)] text-[var(--accent-blue)]"
+          >
+            {status === "MENUNGGU" ? "Menunggu pemeriksaan (semua bulan)" : `Disetujui ${periodeLabel(periode)}`} <X size={12} />
+          </button>
+        )}
         {error && <span className="text-xs text-[var(--accent-red)]">{error}</span>}
         <div className="ml-auto flex gap-2">
           {jual && multiBons.length > 0 && (
@@ -2752,7 +2777,7 @@ const jamKop = (iso: string) =>
 
 // The four steps of a Barang Rusak / Expired above its list, with how many wait for the check and how
 // many were approved this periode.
-function KopAlurRusak({ periode, reload }: { periode: string; reload: number }) {
+function KopAlurRusak({ periode, reload, onPilih }: { periode: string; reload: number; onPilih: (langkah: number) => void }) {
   const [n, setN] = useState<{ menunggu: number; disetujui: number; ditolak: number } | null>(null);
   const petugas = usePetugas("KOPERASI", "NILAM");
   useEffect(() => {
@@ -2770,14 +2795,20 @@ function KopAlurRusak({ periode, reload }: { periode: string; reload: number }) 
   return (
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 -mt-1">
       {langkah.map((l, i) => (
-        <div key={l.judul} className={`rounded-lg border px-3 py-2.5 ${i === 1 && n?.menunggu ? "border-[var(--accent-amber-border)] bg-[var(--accent-amber-bg)]" : "border-[var(--border)] bg-[var(--bg-card)]"}`}>
+        <button
+          type="button"
+          key={l.judul}
+          onClick={() => onPilih(i)}
+          title={["Lihat daftar barang rusak / expired", "Lihat yang menunggu pemeriksaan", "Lihat yang disetujui bulan ini", "Lihat Berita Acara Pemusnahan"][i]}
+          className={`text-left rounded-lg border px-3 py-2.5 cursor-pointer transition hover:shadow-sm hover:border-[var(--accent-blue-border)] ${i === 1 && n?.menunggu ? "border-[var(--accent-amber-border)] bg-[var(--accent-amber-bg)]" : "border-[var(--border)] bg-[var(--bg-card)]"}`}
+        >
           <div className="flex items-center gap-2 text-sm font-semibold text-[var(--text-primary)]">
             <l.icon size={16} className="text-[var(--accent-blue)]" /> {l.judul}
           </div>
           <div className="mt-0.5 text-[11px] text-[var(--text-secondary)]">{l.isi}</div>
           {l.angka && <div className={`mt-1 text-xs font-medium ${i === 1 ? "text-[var(--accent-amber)]" : "text-[var(--accent-green)]"}`}>{l.angka}</div>}
           {l.siapa && <PetugasBaris judul={l.siapa.judul} nama={l.siapa.nama} kosong={l.siapa.kosong} pengganti={petugas?.pengganti ?? []} />}
-        </div>
+        </button>
       ))}
     </div>
   );
