@@ -243,7 +243,7 @@ export function ItemDetailPage() {
                               {loanTag(m.pinjaman_id, m.note)}
                             </Link>
                           )}
-                          {!m.pinjaman_id && canDelete && (<button
+                          {!m.pinjaman_id && canDelete && (m.source !== "MANUAL" || user?.role === "superuser") && (<button
                             onClick={() => setConfirmDeleteMovement(m)}
                             title="Hapus riwayat"
                             className="p-1.5 rounded-md border border-[var(--accent-red-border)] text-[var(--accent-red)] hover:bg-[var(--accent-red-bg)]"

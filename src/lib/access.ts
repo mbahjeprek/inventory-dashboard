@@ -123,7 +123,11 @@ const rowDay = (row: Record<string, any>): string => {
 };
 export function canEditRow(user: AuthUser | null, m: Module, row: object, action: "edit" | "delete" = "edit"): boolean {
   if (!can(user, modulePerm(m, action))) return false;
-  if (user!.role === "superuser" || can(user, modulePerm(m, "approve"))) return true;
+  if (user!.role === "superuser") return true;
+  // A Koreksi Stok is made, changed and deleted by a Super User only (as on the server).
+  const r = row as { is_correction?: unknown; koreksi?: unknown };
+  if (r.is_correction || (r.koreksi !== undefined && r.koreksi !== null)) return false;
+  if (can(user, modulePerm(m, "approve"))) return true;
   // Edit bulan lalu, given for a while by a Super User: edit and delete (still per the Edit / Hapus perm).
   if (user!.editLampauUntil && new Date(user!.editLampauUntil) > new Date()) return true;
   const now = new Date();

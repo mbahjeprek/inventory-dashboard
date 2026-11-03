@@ -502,6 +502,15 @@ function editTooLate(req: express.Request, res: express.Response, module: string
   return true;
 }
 
+// A Koreksi Stok (one barang, or booked by an approved Stok Opname) is made by a Super User only, so
+// only a Super User may change or delete it too - else Hapus / Edit would undo a counted difference.
+// BBM / Pupuk / Oli: the row an approved opname booked carries its difference in `koreksi`.
+function koreksiTerkunci(req: express.Request, res: express.Response, row: { is_correction?: unknown; koreksi?: unknown }) {
+  if (!(row.is_correction || (row.koreksi !== undefined && row.koreksi !== null)) || req.user!.role === "superuser") return false;
+  res.status(403).json({ error: "Koreksi Stok hanya bisa diubah / dihapus Super User" });
+  return true;
+}
+
 function estateAllowed(user: SessionUser, estate: string | null | undefined) {
   return user.role === "superuser" || (!!estate && user.estates.includes(estate));
 }
@@ -1034,8 +1043,12 @@ app.get("/api/gudang-stock", async (req, res) => {
 // klinik - what the opname counted already includes it. A Pinjaman / Transfer checks the opname of
 // both estates in its module.
 const BACKDATE: Record<string, { module: OpnameModule | ((b: any) => string); estate: (b: any) => string | string[] }> = {
-  "/api/transactions": { module: "GUDANG", estate: () => "NILAM" },
-  "/api/transactions/batch": { module: "GUDANG", estate: () => "NILAM" },
+  // A Stok Keluar to another gudang lands there as a Stok Masuk: behind that gudang's opname too.
+  "/api/transactions": { module: "GUDANG", estate: (b) => ["NILAM", ...(b?.type === "OUT" ? [String(b?.tujuan ?? "")] : [])] },
+  "/api/transactions/batch": {
+    module: "GUDANG",
+    estate: (b) => ["NILAM", ...(Array.isArray(b?.rows) ? b.rows : []).filter((r: any) => r?.type === "OUT").map((r: any) => String(r?.tujuan ?? ""))],
+  },
   "/api/stock-correction": { module: "GUDANG", estate: () => "NILAM" },
   "/api/gudang-stock/transactions": { module: "GUDANG", estate: (b) => b.gudang },
   "/api/gudang-stock/transactions/batch": { module: "GUDANG", estate: (b) => b.gudang },
@@ -1050,13 +1063,26 @@ const BACKDATE: Record<string, { module: OpnameModule | ((b: any) => string); es
   "/api/pinjaman": { module: (b) => b.module, estate: (b) => [b.dari, b.ke] },
   "/api/pinjaman/pribadi": { module: (b) => b.module, estate: (b) => [b.ke] },
   "/api/pinjaman/batch": { module: (b) => b.module, estate: (b) => [b.dari, b.ke] },
+  // BBM / Pupuk / Oli: their saldo is a running chain, so a row behind an approved opname would quietly
+  // change the koreksi that opname booked. Rows of Input Banyak sent on to another estate (ke) land there too.
+  "/api/bbm": { module: "BBM", estate: (b) => b.lokasi },
+  "/api/bbm/batch": { module: "BBM", estate: (b) => [b.lokasi, ...keRows(b)] },
+  "/api/pupuk": { module: "PUPUK", estate: (b) => b.estate },
+  "/api/pupuk/batch": { module: "PUPUK", estate: (b) => [b.estate, ...keRows(b)] },
+  "/api/oli": { module: "OLI", estate: (b) => b.estate },
+  "/api/oli/batch": { module: "OLI", estate: (b) => [b.estate, ...keRows(b)] },
 };
+function keRows(b: any): string[] {
+  return (Array.isArray(b?.rows) ? b.rows : []).map((r: any) => String(r?.ke ?? "").trim()).filter(Boolean);
+}
+// A real calendar day (2026-02-30 / 2026-13-45 have the shape but are not).
+const isRealDate = (d: string) => ISO_DATE.test(d) && new Date(`${d}T00:00:00Z`).toISOString().slice(0, 10) === d;
 app.use(async (req, res, next) => {
   const route = req.method === "POST" ? BACKDATE[req.path] : undefined;
   const tanggal = route ? String(req.body?.tanggal_iso ?? "") : "";
   if (!route || !tanggal) return next();
   const today = jakartaToday();
-  if (!ISO_DATE.test(tanggal)) return res.status(400).json({ error: "Tanggal tidak valid" });
+  if (!isRealDate(tanggal)) return res.status(400).json({ error: "Tanggal tidak valid" });
   if (tanggal > today) return res.status(400).json({ error: "Tanggal tidak boleh lewat dari hari ini" });
   if (tanggal === today) return next();
   const module = typeof route.module === "function" ? String(route.module(req.body) ?? "") : route.module;
@@ -1109,8 +1135,12 @@ app.use(async (req, res, next) => {
   next();
 });
 
+// A barang added to a gudang starts at 0: its stock only comes through Stock In / Koreksi, so every
+// unit has a history row (a stock typed here had none).
 app.post("/api/gudang-stock", async (req, res) => {
-  const { gudang, item_kode, buffer_stock, stock_tersedia } = req.body;
+  const { gudang, item_kode } = req.body;
+  const buffer_stock = Number(req.body.buffer_stock) || 0;
+  const stock_tersedia = 0;
   if (!GUDANG_STOCK_OPTIONS.includes(gudang)) return res.status(400).json({ error: "Gudang tidak valid" });
   if (!estateAllowed(req.user!, gudang)) return res.status(403).json({ error: "Akses ditolak" });
   if (!item_kode || !String(item_kode).trim()) return res.status(400).json({ error: "Barang wajib dipilih" });
@@ -1177,6 +1207,9 @@ app.delete("/api/gudang-stock/:id", requireSuperuser, async (req, res) => {
   const existing = await queryOne<any>("SELECT * FROM gudang_stock WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Not found" });
   if (!estateAllowed(req.user!, existing.gudang)) return res.status(403).json({ error: "Akses ditolak" });
+  // Removing a barang that still has stock would drop it with no movement while its history stays.
+  if (round3(Number(existing.stock_tersedia)) !== 0)
+    return res.status(400).json({ error: `Stok barang ini masih ${existing.stock_tersedia}. Keluarkan / koreksi stoknya ke 0 dulu, baru bisa dihapus dari gudang.` });
 
   await execute("DELETE FROM gudang_stock WHERE id = @id", { id: req.params.id });
   const master = await queryOne<any>("SELECT nama FROM items WHERE kode = @kode", { kode: existing.item_kode });
@@ -1626,6 +1659,8 @@ app.post("/api/transactions", requireEstate("NILAM"), async (req, res) => {
   if (!item_id || !["IN", "OUT"].includes(type) || !qty || qty <= 0) {
     return res.status(400).json({ error: "Invalid payload" });
   }
+  // Gudang Nilam counts whole units (an INTEGER column: 2.5 would end in a server error).
+  if (!Number.isInteger(Number(qty))) return res.status(400).json({ error: "Jumlah harus bilangan bulat" });
 
   const item = await queryOne<any>("SELECT * FROM items WHERE id = @id", { id: item_id });
   if (!item) return res.status(404).json({ error: "Not found" });
@@ -1681,6 +1716,7 @@ app.post("/api/transactions", requireEstate("NILAM"), async (req, res) => {
 app.put("/api/transactions/:id", requireEstate("NILAM"), async (req, res) => {
   const existing = await queryOne<any>("SELECT * FROM transactions WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Not found" });
+  if (koreksiTerkunci(req, res, existing)) return;
   if (editTooLate(req, res, "gudang", existing)) return;
 
   const { tujuan, type, qty, note, penerima } = req.body;
@@ -1739,6 +1775,7 @@ app.put("/api/transactions/:id", requireEstate("NILAM"), async (req, res) => {
 app.delete("/api/transactions/:id", requireEstate("NILAM"), async (req, res) => {
   const existing = await queryOne<any>("SELECT * FROM transactions WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Not found" });
+  if (koreksiTerkunci(req, res, existing)) return;
   if (editTooLate(req, res, "gudang", existing)) return;
   let removed: TransferChange = null;
   try {
@@ -3323,11 +3360,21 @@ app.post("/api/bbm", async (req, res) => {
   const evidenceId = await claimEvidence(req, res);
   if (evidenceId === undefined) return;
 
-  const lastSaldo = await saldoAsOf("BBM", lokasi, jenis_bbm, tanggal_iso);
-  const saldoBaru = round3(tipe === "DITERIMA" ? lastSaldo + jumlah : lastSaldo - jumlah);
   const { tanggal, periode } = isoToIndoDate(tanggal_iso);
-
-  const result = await queryOne<{ id: number }>(
+  let lastSaldo = 0;
+  let saldoBaru = 0;
+  let result: { id: number } | null | undefined = null;
+  try {
+    await withTransaction(async (client) => {
+  // The ledger is locked (as Input Banyak) and a Stok Keluar can't take the saldo below 0 on its day or after.
+  await execute("SELECT pg_advisory_xact_lock(hashtext(@key))", { key: `bbm:${jenis_bbm}:${lokasi}` }, client);
+  lastSaldo = await saldoAsOf("BBM", lokasi, jenis_bbm, tanggal_iso, client);
+  if (tipe === "PEMAKAIAN") {
+    const bisa = await bbmBisaKeluar(client, lokasi, jenis_bbm, tanggal_iso);
+    if (jumlah > bisa) throw new StockError(`Stok ${BBM_LABEL[jenis_bbm] ?? jenis_bbm} tinggal ${bisa.toLocaleString("id-ID")} LTR${tanggal_iso < jakartaToday() ? " (pada tanggal itu / sesudahnya)" : ""}`);
+  }
+  saldoBaru = round3(tipe === "DITERIMA" ? lastSaldo + jumlah : lastSaldo - jumlah);
+  result = await queryOne<{ id: number }>(
     `INSERT INTO bbm_log
       (jenis_bbm, lokasi, estate, periode, tanggal, tanggal_iso, no_spb, stock_awal, diterima, pinjam, pemakaian, saldo_stock, keterangan, status_kepemilikan, kode_kendaraan, hm_terakhir, beban, evidence_id)
      VALUES
@@ -3349,9 +3396,16 @@ app.post("/api/bbm", async (req, res) => {
       kode_kendaraan: kode_kendaraan || "",
       hm_terakhir: hm_terakhir || "",
       beban,
-    }
+    },
+    client
   );
-  await rechainSaldo("BBM", lokasi, jenis_bbm, tanggal_iso);
+  await rechainSaldo("BBM", lokasi, jenis_bbm, tanggal_iso, client);
+    });
+  } catch (e) {
+    await releaseEvidence(evidenceId);
+    if (e instanceof StockError) return res.status(400).json({ error: e.message });
+    throw e;
+  }
 
   await logActivity(req, {
     module: "BBM",
@@ -3435,7 +3489,8 @@ app.post("/api/bbm/batch", async (req, res) => {
       await execute("SELECT pg_advisory_xact_lock(hashtext(@key))", { key: `bbm:${jenis_bbm}:${lokasi}` }, client);
       // The rows run on from the saldo of their date; what can go out is checked against the stock now.
       let saldo = await saldoAsOf("BBM", lokasi, jenis_bbm, tanggal_iso, client);
-      let stock = (await latestSaldoRow("BBM", lokasi, jenis_bbm, client))?.saldo_stock ?? 0;
+      // Back-dated: also every later row's saldo, which these rows lower too.
+      let stock = await bbmBisaKeluar(client, lokasi, jenis_bbm, tanggal_iso);
       const out = [];
       for (const [i, row] of clean.entries()) {
         const before = saldo;
@@ -3514,12 +3569,13 @@ app.put("/api/bbm/:id", requireSuperuser, async (req, res) => {
   const existing = await queryOne<any>("SELECT * FROM bbm_log WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Not found" });
   if (!estateAllowed(req.user!, existing.lokasi)) return res.status(403).json({ error: "Akses ditolak" });
+  if (koreksiTerkunci(req, res, existing)) return;
   if (editTooLate(req, res, "bbm", existing)) return;
   const newEvidence = await checkEditEvidence(req, res, existing.evidence_id);
   if (newEvidence === undefined) return;
 
   const { tanggal_iso, no_spb, diterima, pemakaian, saldo_stock, keterangan, estate, kode_kendaraan, hm_terakhir } = req.body;
-  if (tanggal_iso && !/^\d{4}-\d{2}-\d{2}$/.test(tanggal_iso)) return res.status(400).json({ error: "Tanggal tidak valid" });
+  if (badEditDate(tanggal_iso)) return res.status(400).json({ error: "Tanggal tidak valid" });
 
   const { tanggal, periode } = tanggal_iso ? isoToIndoDate(tanggal_iso) : { tanggal: existing.tanggal, periode: existing.periode };
 
@@ -3538,6 +3594,7 @@ app.put("/api/bbm/:id", requireSuperuser, async (req, res) => {
     hm_terakhir: hm_terakhir ?? existing.hm_terakhir ?? "",
     beban: req.body?.beban === undefined ? existing.beban ?? "" : bbmBeban(req.body.beban),
   };
+  if (badAmounts(existing, updated, ["diterima", "pemakaian"])) return res.status(400).json({ error: "Jumlah harus angka, tidak boleh minus" });
   if (!(Number(updated.pemakaian) > 0)) updated.beban = "";
   await execute(
     `UPDATE bbm_log SET
@@ -3575,6 +3632,7 @@ app.put("/api/bbm/:id/beban", async (req, res) => {
   if (!existing) return res.status(404).json({ error: "Transaksi tidak ditemukan" });
   if (!estateAllowed(req.user!, existing.lokasi)) return res.status(403).json({ error: "Akses ditolak" });
   if (!(Number(existing.pemakaian) > 0) || existing.pinjaman_id) return res.status(400).json({ error: "Kategori OPEX / CAPEX hanya untuk Stock Out" });
+  if (koreksiTerkunci(req, res, existing)) return;
   if (editTooLate(req, res, "bbm", existing)) return;
   const beban = bbmBeban(req.body?.beban);
   if (beban === (existing.beban ?? "")) return res.json({ success: true });
@@ -3593,6 +3651,7 @@ app.delete("/api/bbm/:id", requireSuperuser, async (req, res) => {
   const existing = await queryOne<any>("SELECT * FROM bbm_log WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Not found" });
   if (!estateAllowed(req.user!, existing.lokasi)) return res.status(403).json({ error: "Akses ditolak" });
+  if (koreksiTerkunci(req, res, existing)) return;
   if (editTooLate(req, res, "bbm", existing)) return;
 
   await execute("DELETE FROM bbm_log WHERE id = @id", { id: req.params.id });
@@ -3728,6 +3787,16 @@ const pupukObjek = (r: { jenis_pupuk: string; tanggal: string; blok?: string | n
   `${r.jenis_pupuk} · ${r.tanggal}${r.blok ? ` · Blok ${r.blok}` : ""}`;
 
 const optNum = (v: any) => (v === "" || v === undefined || v === null ? null : Number(v));
+// An edited Stok Masuk / Keluar: each amount empty or a finite number >= 0 (NaN would blank the saldo of
+// every later row at the rechain, a minus would turn a usage into stock).
+// Only the amounts the edit changes are checked, so an older row with a minus can still be edited.
+const badAmounts = (existing: Record<string, any>, updated: Record<string, any>, keys: string[]) =>
+  keys.some((k) => {
+    const x = updated[k];
+    return x != null && x !== existing[k] && !(Number.isFinite(x) && x >= 0);
+  });
+// An edited tanggal: a real day, not after today.
+const badEditDate = (d: unknown) => !!d && (!isRealDate(String(d)) || String(d) > jakartaToday());
 
 app.post("/api/pupuk", async (req, res) => {
   const { estate, jenis_pupuk, tanggal_iso, tipe, jumlah, divisi, no_embrace, kode_barang, keterangan, blok, ha, pokok } = req.body;
@@ -3788,11 +3857,12 @@ app.put("/api/pupuk/:id", requireSuperuser, async (req, res) => {
   const existing = await queryOne<any>("SELECT * FROM pupuk_log WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Not found" });
   if (!estateAllowed(req.user!, existing.estate)) return res.status(403).json({ error: "Akses ditolak" });
+  if (koreksiTerkunci(req, res, existing)) return;
   if (editTooLate(req, res, "pupuk", existing)) return;
   const newEvidence = await checkEditEvidence(req, res, existing.evidence_id);
   if (newEvidence === undefined) return;
   const b = req.body;
-  if (b.tanggal_iso && !/^\d{4}-\d{2}-\d{2}$/.test(b.tanggal_iso)) return res.status(400).json({ error: "Tanggal tidak valid" });
+  if (badEditDate(b.tanggal_iso)) return res.status(400).json({ error: "Tanggal tidak valid" });
 
   const iso = b.tanggal_iso || existing.tanggal_iso;
   const [y, m, d] = String(iso).split("-");
@@ -3811,6 +3881,7 @@ app.put("/api/pupuk/:id", requireSuperuser, async (req, res) => {
     ha: b.ha === undefined ? existing.ha : optNum(b.ha),
     pokok: b.pokok === undefined ? existing.pokok : optNum(b.pokok),
   };
+  if (badAmounts(existing, updated, ["keluar", "diterima", "ha", "pokok"])) return res.status(400).json({ error: "Jumlah harus angka, tidak boleh minus" });
   await execute(
     `UPDATE pupuk_log SET tanggal_iso = @tanggal_iso, tanggal = @tanggal, periode = @periode, divisi = @divisi, no_embrace = @no_embrace,
        kode_barang = @kode_barang, keluar = @keluar, diterima = @diterima, saldo_stock = @saldo_stock, keterangan = @keterangan,
@@ -3846,6 +3917,7 @@ app.delete("/api/pupuk/:id", requireSuperuser, async (req, res) => {
   const existing = await queryOne<any>("SELECT * FROM pupuk_log WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Not found" });
   if (!estateAllowed(req.user!, existing.estate)) return res.status(403).json({ error: "Akses ditolak" });
+  if (koreksiTerkunci(req, res, existing)) return;
   if (editTooLate(req, res, "pupuk", existing)) return;
   await execute("DELETE FROM pupuk_log WHERE id = @id", { id: req.params.id });
   if (existing.tanggal_iso) await rechainSaldo("PUPUK", existing.estate, existing.jenis_pupuk, existing.tanggal_iso);
@@ -3989,10 +4061,12 @@ class StockError extends Error {}
 
 // A movement is re-read and locked inside the transaction that reverses it: a double click or a retry of the
 // same delete / edit must not take the stock back twice (the row was read before the transaction began).
-async function lockMovement(client: PoolClient, table: string, old: { id: number; qty: unknown; type: unknown }) {
-  const cur = await queryOne<{ qty: number; type: string }>(`SELECT qty, type FROM ${table} WHERE id = @id FOR UPDATE`, { id: old.id }, client);
+async function lockMovement(client: PoolClient, table: string, old: { id: number; qty: unknown; type: unknown; status?: unknown }) {
+  const cur = await queryOne<{ qty: number; type: string; status?: string | null }>(`SELECT * FROM ${table} WHERE id = @id FOR UPDATE`, { id: old.id }, client);
   if (!cur) throw new StockError("Transaksi ini sudah dihapus. Muat ulang halaman.");
-  if (Number(cur.qty) !== Number(old.qty) || cur.type !== old.type) throw new StockError("Transaksi ini baru saja diubah. Muat ulang halaman lalu ulangi.");
+  // status: a Tarik / Rusak row checked (Tolak gives the stock back) since it was read.
+  if (Number(cur.qty) !== Number(old.qty) || cur.type !== old.type || (cur.status ?? null) !== (old.status ?? null))
+    throw new StockError("Transaksi ini baru saja diubah. Muat ulang halaman lalu ulangi.");
 }
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const expText = (exp: string) => (exp ? exp.split("-").reverse().join("/") : "tanpa tanggal");
@@ -4777,6 +4851,7 @@ app.put("/api/klinik-laporan/kunjungan/:id", async (req, res) => {
   let stok: StokSync[] = [];
   try {
     await atVisitDay(p.data!.tanggal_iso, () => withTransaction(async (c) => {
+    await lockKunjungan(c, existing);
     const pasienId = await resolvePasien(c, existing.klinik, p.data!, req.body?.pasien_id ?? existing.pasien_id);
     p.obat = await resolveTerapiKode(c, p.obat!);
     await execute(
@@ -4813,15 +4888,29 @@ app.put("/api/klinik-laporan/kunjungan/:id", async (req, res) => {
   res.json({ success: true });
 });
 
+// The visit row, locked for the transaction that changes its stock: a double click or retry of an edit /
+// delete waits here, then finds it gone / changed instead of giving its obat back a second time.
+async function lockKunjungan(c: PoolClient, old: { id: number; tanggal_iso: string }) {
+  const cur = await queryOne<{ tanggal_iso: string }>("SELECT tanggal_iso FROM klinik_kunjungan WHERE id = @id FOR UPDATE", { id: old.id }, c);
+  if (!cur) throw new StockError("Kunjungan ini sudah dihapus. Muat ulang halaman.");
+  if (cur.tanggal_iso !== old.tanggal_iso) throw new StockError("Kunjungan ini baru saja diubah. Muat ulang halaman lalu ulangi.");
+}
+
 app.delete("/api/klinik-laporan/kunjungan/:id", async (req, res) => {
   const existing = await queryOne<any>("SELECT * FROM klinik_kunjungan WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Kunjungan tidak ditemukan" });
   if (!estateAllowed(req.user!, existing.klinik)) return res.status(403).json({ error: "Akses ditolak" });
   if (editTooLate(req, res, "klinik", existing)) return;
-  await withTransaction(async (c) => {
-    await dropKunjunganStok(c, existing);
-    await execute("DELETE FROM klinik_kunjungan WHERE id = @id", { id: existing.id }, c);
-  });
+  try {
+    await withTransaction(async (c) => {
+      await lockKunjungan(c, existing);
+      await dropKunjunganStok(c, existing);
+      await execute("DELETE FROM klinik_kunjungan WHERE id = @id", { id: existing.id }, c);
+    });
+  } catch (e) {
+    if (e instanceof StockError) return res.status(400).json({ error: e.message });
+    throw e;
+  }
   await releaseEvidence(existing.evidence_id);
   await logActivity(req, { module: "KLINIK", estate: existing.klinik, aksi: "Hapus Kunjungan", objek: kunjunganObjek(existing), detail: existing.diagnosis || "" });
   res.json({ success: true });
@@ -5482,7 +5571,7 @@ app.post("/api/klinik-stock/transactions", async (req, res) => {
   const { klinik, obat_kode, type, qty, tujuan, penerima, note, expired_date } = req.body;
   if (!checkKlinik(req, res, klinik)) return;
   if (!["IN", "OUT"].includes(type) || !Number.isInteger(qty) || qty <= 0) return res.status(400).json({ error: "Invalid payload" });
-  if (expired_date && !ISO_DATE.test(expired_date)) return res.status(400).json({ error: "Tanggal expired tidak valid" });
+  if (expired_date && !isRealDate(expired_date)) return res.status(400).json({ error: "Tanggal expired tidak valid" });
   const obat = await queryOne<any>("SELECT kode, nama FROM obat WHERE kode = @obat_kode", { obat_kode });
   if (!obat) return res.status(404).json({ error: "Obat tidak ditemukan di master data" });
 
@@ -5579,7 +5668,7 @@ app.post("/api/klinik-stock/tarik", async (req, res) => {
   if (!note) return res.status(400).json({ error: "Isi keterangannya" });
   const exp = typeof b.expired_date === "string" ? b.expired_date : undefined;
   if (exp === undefined) return res.status(400).json({ error: "Pilih batch-nya" });
-  if (exp && !ISO_DATE.test(exp)) return res.status(400).json({ error: "Tanggal expired tidak valid" });
+  if (exp && !isRealDate(exp)) return res.status(400).json({ error: "Tanggal expired tidak valid" });
   const obat = await queryOne<any>("SELECT kode, nama, satuan FROM obat WHERE kode = @kode", { kode: String(b.obat_kode ?? "") });
   if (!obat) return res.status(404).json({ error: "Obat tidak ditemukan di master data" });
   // The photo (tanggal expired / kerusakan and the qty visible) is what the pemeriksa checks it against.
@@ -5660,7 +5749,7 @@ app.put("/api/klinik-stock/batch/:id", requireSuperuser, async (req, res) => {
   if (!batch) return res.status(404).json({ error: "Not found" });
   if (!estateAllowed(req.user!, batch.klinik)) return res.status(403).json({ error: "Akses ditolak" });
   const exp = String(req.body.expired_date ?? "");
-  if (exp && !ISO_DATE.test(exp)) return res.status(400).json({ error: "Tanggal expired tidak valid" });
+  if (exp && !isRealDate(exp)) return res.status(400).json({ error: "Tanggal expired tidak valid" });
   // `qty` (optional) moves only part of the batch to the other date ("Pisah batch": stock that turned
   // out to have several expiry dates); the total stays the same, so no stock transaction is booked.
   const qty = req.body.qty === undefined ? batch.qty : req.body.qty;
@@ -5694,7 +5783,7 @@ app.post("/api/klinik-stock/correction", requireSuperuser, async (req, res) => {
   if (!checkKlinik(req, res, klinik)) return;
   if (!Number.isInteger(actual_qty) || actual_qty < 0) return res.status(400).json({ error: "Invalid payload" });
   if (!String(note ?? "").trim()) return res.status(400).json({ error: "Isi alasan koreksinya" });
-  if (exp && !ISO_DATE.test(exp)) return res.status(400).json({ error: "Tanggal expired tidak valid" });
+  if (exp && !isRealDate(exp)) return res.status(400).json({ error: "Tanggal expired tidak valid" });
   const obat = await queryOne<any>("SELECT kode, nama FROM obat WHERE kode = @obat_kode", { obat_kode });
   if (!obat) return res.status(404).json({ error: "Obat tidak ditemukan di master data" });
 
@@ -5765,7 +5854,7 @@ app.put("/api/klinik-stock/:id/batches", requireSuperuser, async (req, res) => {
   const want = new Map<string, number>();
   for (const b of list) {
     const exp = String(b?.expired_date ?? "");
-    if (exp && !ISO_DATE.test(exp)) return res.status(400).json({ error: "Tanggal expired tidak valid" });
+    if (exp && !isRealDate(exp)) return res.status(400).json({ error: "Tanggal expired tidak valid" });
     if (!Number.isInteger(b?.qty) || b.qty < 0) return res.status(400).json({ error: "Jumlah harus bilangan bulat positif" });
     if (b.qty > 0) want.set(exp, (want.get(exp) ?? 0) + b.qty);
   }
@@ -5834,6 +5923,9 @@ app.delete("/api/klinik-stock/:id", requireSuperuser, async (req, res) => {
   const existing = await queryOne<any>("SELECT * FROM klinik_stock WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Not found" });
   if (!estateAllowed(req.user!, existing.klinik)) return res.status(403).json({ error: "Akses ditolak" });
+  // As the gudang: an obat still in stock goes out / is corrected to 0 first, so it leaves a history row.
+  if (Number(existing.stock_tersedia) !== 0)
+    return res.status(400).json({ error: `Stok obat ini masih ${existing.stock_tersedia}. Keluarkan / koreksi stoknya ke 0 dulu, baru bisa dihapus dari klinik.` });
   await withTransaction(async (client) => {
     await execute("DELETE FROM klinik_batch WHERE klinik = @k AND obat_kode = @o", { k: existing.klinik, o: existing.obat_kode }, client);
     await execute("DELETE FROM klinik_stock WHERE id = @id", { id: req.params.id }, client);
@@ -5909,8 +6001,13 @@ for (const lr of LEDGER_ROUTES) {
     if (!existing) return res.status(404).json({ error: "Not found" });
     // Only the estates the account has: a KNS admin can't change WJA's movements by id.
     if (!estateAllowed(req.user!, existing[l.scope])) return res.status(403).json({ error: "Akses ditolak" });
+    if (koreksiTerkunci(req, res, existing)) return;
     if (editTooLate(req, res, l === KLINIK_LEDGER ? "klinik" : "gudang", existing)) return;
     if (existing.transfer_from_id) return res.status(400).json({ error: TRANSFER_LOCKED });
+    // Obat ditarik (DIBUANG): once checked it is settled - Ditolak already gave the stock back, Disetujui
+    // was matched with its photo (and may be on a Berita Acara).
+    if (l === KLINIK_LEDGER && existing.tujuan === TUJUAN_DIBUANG && existing.status && existing.status !== "MENUNGGU")
+      return res.status(400).json({ error: `Obat ditarik ini sudah ${existing.status === "DITOLAK" ? "ditolak" : "disetujui"} pemeriksa, jadi tidak bisa diubah lagi` });
     const newEvidence = await checkEditEvidence(req, res, existing.evidence_id);
     if (newEvidence === undefined) return;
     const { qty, tujuan, penerima, note } = req.body;
@@ -5929,7 +6026,7 @@ for (const lr of LEDGER_ROUTES) {
             ? req.body.expired_date
             : existing.alloc?.[0]?.exp ?? ""
           : undefined;
-      if (exp && !ISO_DATE.test(exp)) return res.status(400).json({ error: "Tanggal expired tidak valid" });
+      if (exp && !isRealDate(exp)) return res.status(400).json({ error: "Tanggal expired tidak valid" });
       try {
         await withTransaction(async (client) => {
           await lockMovement(client, l.tx, existing);
@@ -5993,6 +6090,7 @@ for (const lr of LEDGER_ROUTES) {
     if (!existing) return res.status(404).json({ error: "Not found" });
     // Only the estates the account has: a KNS admin can't change WJA's movements by id.
     if (!estateAllowed(req.user!, existing[l.scope])) return res.status(403).json({ error: "Akses ditolak" });
+    if (koreksiTerkunci(req, res, existing)) return;
     if (editTooLate(req, res, l === KLINIK_LEDGER ? "klinik" : "gudang", existing)) return;
     if (existing.transfer_from_id) return res.status(400).json({ error: TRANSFER_LOCKED });
     const diBa = l === KLINIK_LEDGER && existing.tujuan === TUJUAN_DIBUANG ? await baAktifUntuk("KLINIK", existing.id) : null;
@@ -6000,7 +6098,8 @@ for (const lr of LEDGER_ROUTES) {
     try {
       await withTransaction(async (client) => {
         await lockMovement(client, l.tx, existing);
-        if (l === KLINIK_LEDGER) await klinikReverse(client, existing);
+        // Ditolak: the stock already went back to its batches at the Tolak.
+        if (l === KLINIK_LEDGER && existing.status !== "DITOLAK") await klinikReverse(client, existing);
         await execute(`DELETE FROM ${l.tx} WHERE id = @id`, { id: existing.id }, client);
         if (l === KLINIK_LEDGER) await syncKlinikStock(client, existing.klinik, existing.obat_kode);
         else
@@ -6407,6 +6506,18 @@ const saldoAsOf = async (module: SaldoModule, estate: string, jenis: string, iso
 // a fixed saldo (dari_sheet: the sheet's own saldo from the import, or one typed by hand in Edit)
 // keeps it, and a Stok Opname row (koreksi) keeps the counted saldo - its koreksi becomes the count
 // minus the saldo before it.
+// What can go out of a BBM ledger on `iso`: its saldo that day and on every later row (a Stok Keluar dated
+// back lowers them all), whichever is lowest.
+async function bbmBisaKeluar(client: PoolClient, lokasi: string, jenis: string, iso: string) {
+  const before = await saldoAsOf("BBM", lokasi, jenis, iso, client);
+  const later = await queryOne<{ m: number | null }>(
+    "SELECT MIN(saldo_stock)::float8 m FROM bbm_log WHERE jenis_bbm = @jenis AND lokasi = @lokasi AND tanggal_iso > @iso AND saldo_stock IS NOT NULL",
+    { jenis, lokasi, iso },
+    client
+  );
+  return round3(Math.min(before, later?.m ?? before));
+}
+
 async function rechainSaldo(module: SaldoModule, estate: string, jenis: string, fromIso: string, client?: PoolClient): Promise<number> {
   if (!client) return withTransaction((c) => rechainSaldo(module, estate, jenis, fromIso, c));
   const t = SALDO_LEDGER[module];
@@ -6808,6 +6919,9 @@ app.get("/api/stock-opname", async (req, res) => {
 
 app.post("/api/stock-opname", async (req, res) => {
   const { module, estate, tanggal, catatan } = req.body ?? {};
+  // A count is of today or earlier: a future date would hold the BBM / Pupuk / Oli saldo at the counted
+  // figure until then and lock every edit before it.
+  if (isRealDate(String(tanggal ?? "")) && tanggal > jakartaToday()) return res.status(400).json({ error: "Tanggal opname tidak boleh lewat dari hari ini" });
   if (!OPNAME_MODULES.includes(module)) return res.status(400).json({ error: "Modul tidak valid" });
   const ph = await opnamePihak(req.body, module, estate);
   if (typeof ph === "string") return res.status(400).json({ error: ph });
@@ -6917,7 +7031,7 @@ app.put("/api/stock-opname/:id", async (req, res) => {
       if (!l || !("exp_fisik" in l)) continue;
       const e = l.exp_fisik;
       if (o.module !== "KLINIK" || o.status === "APPROVED") return refuse(res, 400, "Tanggal expired tidak bisa diubah di opname ini");
-      if (e !== null && (typeof e !== "string" || (e !== "" && !ISO_DATE.test(e)))) return refuse(res, 400, "Tanggal expired tidak valid");
+      if (e !== null && (typeof e !== "string" || (e !== "" && !isRealDate(e)))) return refuse(res, 400, "Tanggal expired tidak valid");
       expRows.push({ id: Number(l.id), exp: e });
     }
     // Approved: the stock already carries the count, so a changed count moves it by the difference.
@@ -7090,7 +7204,7 @@ app.post("/api/stock-opname/:id/lines", async (req, res) => {
   if (o.module === "PUPUK" || o.module === "OLI") kode = kode.toUpperCase();
   const exp = o.module === "KLINIK" ? String(req.body?.exp ?? "") : "";
   if (!kode) return res.status(400).json({ error: "Barang wajib dipilih" });
-  if (exp && !ISO_DATE.test(exp)) return res.status(400).json({ error: "Tanggal expired tidak valid" });
+  if (exp && !isRealDate(exp)) return res.status(400).json({ error: "Tanggal expired tidak valid" });
   const cur = await opnameCurrent(o.module, o.estate, kode, exp);
   if (!cur) return res.status(404).json({ error: "Tidak ditemukan di master data" });
   if (
@@ -7104,7 +7218,8 @@ app.post("/api/stock-opname/:id/lines", async (req, res) => {
        VALUES (@oid, @kode, @nama, @satuan, @exp, @stok_sistem, true) RETURNING *`,
       { oid: o.id, kode: cur.kode, nama: cur.nama, satuan: cur.satuan, exp: cur.exp, stok_sistem: cur.stok_sistem }
     );
-    res.json(line);
+    // Hitung buta: the counter doesn't see the system stock (as GET /:id).
+    res.json(opnameHidden(req.user!, o) ? { ...line, stok_sistem: null } : line);
   } catch (e: any) {
     if (e.code === "23505") return res.status(409).json({ error: "Sudah ada di daftar opname" });
     throw e;
@@ -7470,11 +7585,12 @@ app.put("/api/oli/:id", requireSuperuser, async (req, res) => {
   const existing = await queryOne<any>("SELECT * FROM oli_log WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Not found" });
   if (!estateAllowed(req.user!, existing.estate)) return res.status(403).json({ error: "Akses ditolak" });
+  if (koreksiTerkunci(req, res, existing)) return;
   if (editTooLate(req, res, "oli", existing)) return;
   const newEvidence = await checkEditEvidence(req, res, existing.evidence_id);
   if (newEvidence === undefined) return;
   const b = req.body;
-  if (b.tanggal_iso && !ISO_DATE.test(b.tanggal_iso)) return res.status(400).json({ error: "Tanggal tidak valid" });
+  if (badEditDate(b.tanggal_iso)) return res.status(400).json({ error: "Tanggal tidak valid" });
   const iso = b.tanggal_iso || existing.tanggal_iso;
   const updated = {
     tanggal_iso: iso,
@@ -7485,6 +7601,7 @@ app.put("/api/oli/:id", requireSuperuser, async (req, res) => {
     saldo_stock: b.saldo_stock === undefined ? existing.saldo_stock : optNum(b.saldo_stock),
     keterangan: b.keterangan ?? existing.keterangan ?? "",
   };
+  if (badAmounts(existing, updated, ["diterima", "pemakaian"])) return res.status(400).json({ error: "Jumlah harus angka, tidak boleh minus" });
   await execute(
     `UPDATE oli_log SET tanggal_iso = @tanggal_iso, tanggal = @tanggal, periode = @periode, no_embrace = @no_embrace,
        diterima = @diterima, pemakaian = @pemakaian, saldo_stock = @saldo_stock, keterangan = @keterangan
@@ -7514,6 +7631,7 @@ app.delete("/api/oli/:id", requireSuperuser, async (req, res) => {
   const existing = await queryOne<any>("SELECT * FROM oli_log WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Not found" });
   if (!estateAllowed(req.user!, existing.estate)) return res.status(403).json({ error: "Akses ditolak" });
+  if (koreksiTerkunci(req, res, existing)) return;
   if (editTooLate(req, res, "oli", existing)) return;
   await execute("DELETE FROM oli_log WHERE id = @id", { id: req.params.id });
   if (existing.tanggal_iso) await rechainSaldo("OLI", existing.estate, existing.jenis_oli, existing.tanggal_iso);
@@ -7541,6 +7659,8 @@ async function renameSaldoJenis(module: "OLI" | "PUPUK", old: string, nama: stri
   const t = SALDO_LEDGER[module];
   if (await queryOne(`SELECT 1 FROM ${t.table} WHERE ${t.jenis} = @nama LIMIT 1`, { nama }, c))
     throw Object.assign(new Error("dup"), { code: "23505" });
+  // Checked before its own rows are renamed (else they would count as the duplicate).
+  await execute(`UPDATE ${t.table} SET ${t.jenis} = @nama WHERE ${t.jenis} = @old`, { nama, old }, c);
   await execute("UPDATE pinjaman SET kode = @nama, nama = @nama WHERE module = @module AND kode = @old", { module, old, nama }, c);
   await execute(
     "UPDATE opname_line l SET kode = @nama, nama = @nama FROM opname o WHERE o.id = l.opname_id AND o.module = @module AND l.kode = @old",
@@ -7598,7 +7718,6 @@ app.put("/api/master-oli/:id", async (req, res) => {
     await withTransaction(async (c) => {
       await execute("UPDATE master_oli SET kode = @kode, nama = @nama, satuan = @satuan, keterangan = @keterangan, estates = @estates WHERE id = @id", { ...o, id: existing.id }, c);
       if (o.nama !== existing.nama) {
-        await execute("UPDATE oli_log SET jenis_oli = @nama WHERE jenis_oli = @old", { nama: o.nama, old: existing.nama }, c);
         await renameSaldoJenis("OLI", existing.nama, o.nama, c);
       }
     });
@@ -7673,7 +7792,6 @@ app.put("/api/master-pupuk/:id", async (req, res) => {
     await withTransaction(async (c) => {
       await execute("UPDATE master_pupuk SET kode = @kode, nama = @nama, keterangan = @keterangan, estates = @estates WHERE id = @id", { ...o, id: existing.id }, c);
       if (o.nama !== existing.nama) {
-        await execute("UPDATE pupuk_log SET jenis_pupuk = @nama WHERE jenis_pupuk = @old", { nama: o.nama, old: existing.nama }, c);
         await renameSaldoJenis("PUPUK", existing.nama, o.nama, c);
       }
     });
@@ -7760,6 +7878,7 @@ app.post("/api/transactions/batch", requireEstate("NILAM"), async (req, res) => 
     if (!item) return refuseRow(res, i, "barang tidak ditemukan di master data");
     if (!["IN", "OUT"].includes(r?.type)) return refuseRow(res, i, "tipe transaksi tidak valid");
     if (!Number.isFinite(qty) || qty <= 0) return refuseRow(res, i, "jumlah harus lebih dari 0");
+    if (!Number.isInteger(qty)) return refuseRow(res, i, "jumlah harus bilangan bulat");
     if (r.type === "OUT" && !NILAM_TUJUAN.includes(tujuan)) return refuseRow(res, i, "tujuan wajib dipilih");
     clean.push({ item, type: r.type, qty, tujuan: r.type === "OUT" ? tujuan : "", penerima: String(r?.penerima ?? "").trim(), note: String(r?.note ?? "").trim() });
   }
@@ -7875,7 +7994,7 @@ app.post("/api/klinik-stock/transactions/batch", async (req, res) => {
     if (!o) return refuseRow(res, i, "obat tidak ditemukan di master data");
     if (!["IN", "OUT"].includes(r?.type)) return refuseRow(res, i, "tipe transaksi tidak valid");
     if (!Number.isInteger(r?.qty) || r.qty <= 0) return refuseRow(res, i, "jumlah harus bilangan bulat lebih dari 0");
-    if (exp && !ISO_DATE.test(exp)) return refuseRow(res, i, "tanggal expired tidak valid");
+    if (exp && !isRealDate(exp)) return refuseRow(res, i, "tanggal expired tidak valid");
     // Obat expired / rusak goes through Tarik (tab Expired & Rusak), with a second account's check.
     if (r.type === "OUT" && r.buang === true) return refuseRow(res, i, "obat expired / rusak dikeluarkan lewat tab Expired & Rusak (Tarik), bukan Input Banyak");
     const buang = false;
@@ -8320,6 +8439,11 @@ async function bookLoan(
   req: express.Request,
   b: { module: LoanModule; dari: string; ke: string; item: LoanItem; qty: number; alasan: string; tanggal: string; evidenceId: string | null; transfer: boolean }
 ): Promise<LoanRow> {
+  // A fuel kept at some lokasi only (KNS's BBM Emergency / Jatah GM) can't be lent / sent elsewhere.
+  if (b.module === "BBM")
+    for (const e of [b.dari, b.ke])
+      if ((ESTATES as readonly string[]).includes(e) && !bbmJenisDiLokasi(b.item.kode, e))
+        throw new StockError(`${BBM_LABEL[b.item.kode] ?? b.item.kode} hanya untuk ${BBM_LOKASI_KHUSUS[b.item.kode].join(", ")}, tidak bisa dipinjamkan / dikirim ke ${b.ke}`);
   const l = (await queryOne<LoanRow>(
     `INSERT INTO pinjaman (module, kode, nama, satuan, dari_estate, ke_estate, qty, alasan, tanggal_iso, user_id, evidence_id, jenis, status)
      VALUES (@module, @kode, @nama, @satuan, @dari, @ke, @qty, @alasan, @tanggal, @uid, @ev::uuid, @jenis, @status) RETURNING *`,
@@ -8727,7 +8851,9 @@ app.post("/api/pinjaman/:id/delete", async (req, res) => {
   if (req.user!.role !== "superuser") return res.status(403).json({ error: "Hanya Super User yang bisa menghapus pinjaman" });
   const alasan = String(req.body?.catatan ?? "").trim();
   if (!alasan) return res.status(400).json({ error: "Alasan penghapusan wajib diisi" });
-  const l = await withTransaction(async (client) => {
+  let l: LoanRow | null;
+  try {
+  l = await withTransaction(async (client) => {
     const l = await queryOne<LoanRow>("SELECT * FROM pinjaman WHERE id = @id FOR UPDATE", { id: Number(req.params.id) || 0 }, client);
     if (!l) return refuse(res, 404, "Pinjaman tidak ditemukan");
     if (l.status === "DIPINJAM") return refuse(res, 400, "Pinjaman ini belum kembali. Batalkan atau kembalikan dulu, baru bisa dihapus.");
@@ -8781,6 +8907,11 @@ app.post("/api/pinjaman/:id/delete", async (req, res) => {
     await execute("DELETE FROM pinjaman WHERE id = @pid", pid, client);
     return l;
   });
+  } catch (e) {
+    // e.g. the receiving estate already used a transfer's stock: say why (nothing was changed).
+    if (e instanceof StockError) return res.status(400).json({ error: e.message });
+    throw e;
+  }
   if (!l) return;
   await logLoan(
     req,
