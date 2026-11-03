@@ -11,3 +11,5 @@ server/data_*.csv
 
 .env
 .env.local
+
+.claude/settings.local.json
