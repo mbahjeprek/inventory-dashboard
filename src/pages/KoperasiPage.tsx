@@ -331,7 +331,11 @@ function TxTable({
   );
   const [error, setError] = useState("");
   const pageSize = 100;
-  const params = useMemo(() => ({ jenis, periode, anggota: anggota ?? "", barang: barang ?? "", search: q }), [jenis, periode, anggota, barang, q]);
+  // Rusak / Koreksi: rows of an earlier month still waiting for their pemeriksaan are listed too.
+  const params = useMemo(
+    () => ({ jenis, periode, anggota: anggota ?? "", barang: barang ?? "", search: q, menunggu: jenis === "RUSAK" || jenis === "KOREKSI" ? "1" : "" }),
+    [jenis, periode, anggota, barang, q]
+  );
   useEffect(() => {
     const t = setTimeout(() => setQ(search.trim()), 300);
     return () => clearTimeout(t);

@@ -10307,10 +10307,12 @@ app.get("/api/koperasi/limit/:kode", async (req, res) => {
 
 // ---- Transaksi ----
 app.get("/api/koperasi/tx", async (req, res) => {
-  const { jenis = "JUAL", periode = "", anggota = "", barang = "", status = "", search = "", page = "1", pageSize = "100" } = req.query as Record<string, string>;
+  const { jenis = "JUAL", periode = "", anggota = "", barang = "", status = "", search = "", menunggu = "", page = "1", pageSize = "100" } = req.query as Record<string, string>;
   const conditions = ["t.koperasi = @k"];
   if (["JUAL", "BELI", "RUSAK", "KOREKSI"].includes(jenis)) conditions.push("t.jenis = @jenis");
-  if (isPeriode(periode)) conditions.push("t.periode = @periode");
+  // menunggu=1: also rows of an earlier periode still waiting for their pemeriksaan, so they aren't lost
+  // once the month turns.
+  if (isPeriode(periode)) conditions.push(menunggu === "1" ? "(t.periode = @periode OR t.status = 'MENUNGGU')" : "t.periode = @periode");
   if (anggota) conditions.push("t.anggota_kode = @anggota");
   if (barang) conditions.push("t.barang_kode = @barang");
   if (["MENUNGGU", "DISETUJUI", "DITOLAK"].includes(status)) conditions.push(status === "DISETUJUI" ? "COALESCE(t.status, 'DISETUJUI') = @status" : "t.status = @status");
