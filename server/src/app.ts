@@ -5366,7 +5366,21 @@ app.put("/api/klinik-permintaan/:id", async (req, res) => {
   const v = permintaanBody(req);
   if (v.error) return res.status(400).json({ error: v.error });
   const ajukan = req.body?.ajukan === true;
+  let nomor: string = p.nomor;
   await withTransaction(async (c) => {
+    // The nomor carries the month / year of its tanggal (001/PMT-OBAT/KLINIK-NILAM/11/2026): a draft moved to
+    // another month gets that month; to another year, the next number of that year.
+    const bulan = v.head.tanggal.slice(5, 7);
+    const tahun = v.head.tanggal.slice(0, 4);
+    if (!p.nomor.endsWith(`/${bulan}/${tahun}`)) {
+      await c.query("SELECT pg_advisory_xact_lock(hashtext('klinik_permintaan_nomor'))");
+      const urut =
+        p.tanggal.slice(0, 4) === tahun
+          ? p.urut
+          : ((await queryOne<{ n: number }>("SELECT COALESCE(MAX(urut), 0)::int n FROM klinik_permintaan WHERE klinik = @klinik AND left(tanggal, 4) = @tahun", { klinik: p.klinik, tahun }, c))?.n ?? 0) + 1;
+      nomor = `${String(urut).padStart(3, "0")}/PMT-OBAT/KLINIK-${p.klinik}/${bulan}/${tahun}`;
+      await execute("UPDATE klinik_permintaan SET urut = @urut, nomor = @nomor WHERE id = @id", { urut, nomor, id: p.id }, c);
+    }
     await execute(
       `UPDATE klinik_permintaan SET tanggal = @tanggal, periode = @periode, departemen = @departemen, catatan = @catatan, ttd = @ttd::jsonb,
          status = @status, diajukan_at = ${ajukan ? "now()" : "NULL"}, approval = '{}'::jsonb${ajukan ? ", tolak = NULL" : ""}, updated_at = now() WHERE id = @id`,
@@ -5379,7 +5393,7 @@ app.put("/api/klinik-permintaan/:id", async (req, res) => {
     module: "KLINIK",
     estate: p.klinik,
     aksi: ajukan ? "Ajukan Permintaan Obat" : "Ubah Permintaan Obat",
-    objek: `${p.nomor} · ${v.lines!.length} item`,
+    objek: `${nomor} · ${v.lines!.length} item`,
     detail: v.lines!.slice(0, 60).map((l) => `${l.nama} ${fmtQty(l.jumlah)} ${l.satuan}`).join("; "),
   });
   res.json({ success: true });
