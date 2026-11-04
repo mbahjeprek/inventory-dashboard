@@ -3,6 +3,8 @@ import { Plus, Trash2, X } from "lucide-react";
 import { api, errorText, type KlinikStockItem } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { isiOf, kemasanName, kemasanText, split } from "../lib/kemasan";
+import { can } from "../lib/access";
+import { KoreksiDiajukan } from "./KoreksiPengajuan";
 
 // Buffer, note and the stock per expiry date of one clinic stock row. The rows are simply what is on
 // the shelf: fixing a wrong date, splitting a batch that turned out to have several dates or merging
@@ -37,8 +39,11 @@ export function EditKlinikStockModal({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const { user } = useAuth();
-  // A changed total is a Koreksi Stok: Super User only (other differences go through a Stok Opname).
-  const canKoreksi = user?.role === "superuser";
+  // A changed total is a Koreksi Stok: booked at once by a Super User; from an account with Edit Klinik it is sent
+  // for approval (Setujui Koreksi Stok, e.g. HR / akunting) and the stock moves only then.
+  const canKoreksi = can(user, "klinik.edit");
+  const koreksiDiajukan = user?.role !== "superuser";
+  const [diajukan, setDiajukan] = useState(false);
 
   const total = rows.reduce((n, r) => n + r.qty, 0);
   const selisih = total - item.stock_tersedia;
@@ -52,13 +57,14 @@ export function EditKlinikStockModal({
     setError("");
     if (bufferStock < 0) return setError("Buffer tidak boleh negatif");
     if (rows.some((r) => r.qty < 0 || !Number.isInteger(r.qty))) return setError("Jumlah harus bilangan bulat positif");
-    if (selisih !== 0 && !canKoreksi) return setError(`Total harus tetap ${item.stock_tersedia}. Koreksi stok hanya oleh Super User; selisih stok lewat Stok Opname.`);
+    if (selisih !== 0 && !canKoreksi) return setError(`Total harus tetap ${item.stock_tersedia}. Koreksi stok perlu hak Edit Klinik; selisih stok lewat Stok Opname.`);
     if (selisih !== 0 && !alasan.trim()) return setError("Isi alasan koreksi");
     setSubmitting(true);
     try {
       await api.updateKlinikStock(item.id, { buffer_stock: bufferStock, catatan });
-      if (batchesChanged) await api.setKlinikBatches(item.id, rows.map((r) => ({ expired_date: r.exp, qty: r.qty })), alasan.trim());
-      onSuccess();
+      const r = batchesChanged ? await api.setKlinikBatches(item.id, rows.map((r) => ({ expired_date: r.exp, qty: r.qty })), alasan.trim()) : null;
+      if (r?.pending) setDiajukan(true);
+      else onSuccess();
     } catch (e) {
       setError(errorText(e, "Gagal menyimpan perubahan"));
     } finally {
@@ -67,6 +73,8 @@ export function EditKlinikStockModal({
   };
 
   const inputCls = "w-full text-sm rounded-md border border-[var(--border)] px-3 py-2";
+
+  if (diajukan) return <KoreksiDiajukan onClose={onSuccess} />;
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
@@ -187,7 +195,8 @@ export function EditKlinikStockModal({
             <div className="rounded-md px-3 py-2 bg-[var(--accent-amber-bg)] border border-[var(--accent-amber-border)] space-y-2">
               <p className="text-xs text-[var(--accent-amber)]">
                 Total {total.toLocaleString("id-ID")}, tercatat {item.stock_tersedia.toLocaleString("id-ID")} (selisih {selisih > 0 ? "+" : ""}
-                {selisih.toLocaleString("id-ID")}). Disimpan sebagai <b>Koreksi Stok</b>.
+                {selisih.toLocaleString("id-ID")}). {koreksiDiajukan ? "Diajukan sebagai " : "Disimpan sebagai "}<b>Koreksi Stok</b>
+                {koreksiDiajukan ? ": stok baru berubah setelah disetujui orang yang punya hak Setujui Koreksi Stok (mis. HR / akunting)." : "."}
                 {selisih > 0 && " Kalau barang baru datang, pakai Stock In di tombol Transaksi."}
               </p>
               {canKoreksi && (
@@ -205,7 +214,7 @@ export function EditKlinikStockModal({
             disabled={submitting}
             className="w-full py-2.5 rounded-md text-sm font-medium bg-[var(--accent-blue)] text-white hover:opacity-90 disabled:opacity-50"
           >
-            {submitting ? "Menyimpan..." : "Simpan Perubahan"}
+            {submitting ? "Menyimpan..." : selisih !== 0 && koreksiDiajukan ? "Simpan & Ajukan Koreksi" : "Simpan Perubahan"}
           </button>
         </div>
       </div>

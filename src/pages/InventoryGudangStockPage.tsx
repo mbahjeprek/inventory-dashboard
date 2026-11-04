@@ -32,6 +32,7 @@ import { QuickInOut } from "../components/QuickInOut";
 import { TransactionModal, type TransactionPreset } from "../components/TransactionModal";
 import { useAuth } from "../context/AuthContext";
 import { can } from "../lib/access";
+import { KoreksiPengajuanList } from "../components/KoreksiPengajuan";
 import { InventoryTabs, useInventoryTab } from "../components/InventoryTabs";
 import { LedgerHistory } from "../components/LedgerHistory";
 import { ItemRiwayatButton } from "../components/ItemRiwayat";
@@ -266,6 +267,8 @@ export function InventoryGudangStockPage({ gudang }: { gudang: string }) {
           </button>)}
         </div>
       </div>
+
+      <KoreksiPengajuanList module="GUDANG" estate={gudang} sembunyiKosong reload={historyKey} onChanged={() => (load(), loadSummary(), setHistoryKey((k) => k + 1))} />
 
       <InventoryTabs value={tab} onChange={setTab} />
 

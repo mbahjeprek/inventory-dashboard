@@ -5,6 +5,7 @@ import { PermintaanForm } from "../components/KopPermintaanTab";
 import { Detail } from "../components/KlinikPermintaanTab";
 import { BaPeriksaModal, jenisKlinik, jenisKoperasi } from "../components/BaPemusnahan";
 import { useAuth } from "../context/AuthContext";
+import { KoreksiPengajuanList } from "../components/KoreksiPengajuan";
 import { can, TTD_PERMS } from "../lib/access";
 import { TTD_LEVEL_LABEL, TTD_URUT, estateLabel, waktuTtd } from "../lib/permintaanSurat";
 
@@ -24,6 +25,7 @@ export function PersetujuanPage() {
   const [bas, setBas] = useState<BeritaAcara[] | null>(null);
   const [periksa, setPeriksa] = useState<BeritaAcara | null>(null);
   const bolehKop = can(user, "koperasi.pelunasan");
+  const bolehKoreksi = can(user, "koreksi.approve");
   const [kop, setKop] = useState<Awaited<ReturnType<typeof api.kopPermintaanList>> | null>(null);
   const [bukaKop, setBukaKop] = useState<number | null>(null);
   const kopMenunggu: KopPermintaanRow[] = (kop?.rows ?? []).filter(
@@ -59,6 +61,7 @@ export function PersetujuanPage() {
         <p className="text-sm text-[var(--text-secondary)]">Dokumen yang menunggu tanda tangan / persetujuan Anda.</p>
       </div>
       {error && <p className="text-sm text-[var(--accent-red)]">{error}</p>}
+      {bolehKoreksi && <KoreksiPengajuanList />}
       {bolehKop && (
         <section className="space-y-2">
           <h2 className="text-sm font-semibold text-[var(--text-primary)]">

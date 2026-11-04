@@ -34,6 +34,7 @@ import { TransactionModal, type TransactionPreset } from "../components/Transact
 import { kemasanText } from "../lib/kemasan";
 import { useAuth } from "../context/AuthContext";
 import { can } from "../lib/access";
+import { KoreksiPengajuanList } from "../components/KoreksiPengajuan";
 import { InventoryTabs, useInventoryTab } from "../components/InventoryTabs";
 import { KlinikLaporanTab } from "../components/KlinikLaporanTab";
 import { KlinikRusakTab, TarikModal } from "../components/KlinikRusakTab";
@@ -314,6 +315,8 @@ export function InventoryKlinikPage({ klinik }: { klinik: string }) {
           </button>)}
         </div>
       </div>
+
+      <KoreksiPengajuanList module="KLINIK" estate={klinik} sembunyiKosong reload={historyKey} onChanged={() => (load(), loadSummary(), setHistoryKey((k) => k + 1))} />
 
       <InventoryTabs value={tab} onChange={setTab} laporan />
 

@@ -77,7 +77,7 @@ export function EditGudangStockModal({
                 disabled={!bisaKoreksi}
                 className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-2 disabled:bg-[#f8fafc] disabled:text-[var(--text-muted)]"
               />
-              <p className="text-[11px] text-[var(--text-muted)] mt-0.5">{bisaKoreksi ? "Perubahan stok dicatat sebagai Koreksi Stok" : "Stok hanya bisa diubah Super User; selisih stok lewat Stok Opname"}</p>
+              <p className="text-[11px] text-[var(--text-muted)] mt-0.5">{bisaKoreksi ? "Perubahan stok dicatat sebagai Koreksi Stok" : "Selisih stok: tombol Transaksi > Koreksi (diajukan, berlaku setelah disetujui)"}</p>
             </div>
           </div>
 

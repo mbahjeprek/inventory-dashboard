@@ -64,6 +64,8 @@ export const ALL_PERMS: string[] = [
   "koperasi.pelunasan",
   // Approve: check (Setujui / Tolak) a Barang Rusak / Expired entered by someone else.
   "koperasi.approve",
+  // Setujui Koreksi Stok (Gudang / Klinik) asked by an admin of the account's estates - not one's own (HR, akunting...).
+  "koreksi.approve",
   // Kendaraan & Alat Berat: Lihat, Input (kondisi harian, rusak / selesai), Edit (tambah / ubah unit).
   "kendaraan.view",
   "kendaraan.input",

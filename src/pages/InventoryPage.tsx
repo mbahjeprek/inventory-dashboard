@@ -32,6 +32,7 @@ import { PemakaianButton } from "../components/PemakaianPanel";
 import { fetchAllRows, type TableReport } from "../lib/printTable";
 import { useAuth } from "../context/AuthContext";
 import { can } from "../lib/access";
+import { KoreksiPengajuanList } from "../components/KoreksiPengajuan";
 import { InventoryTabs, useInventoryTab } from "../components/InventoryTabs";
 import { StockInPage } from "./StockInPage";
 import { StockOutPage } from "./StockOutPage";
@@ -255,6 +256,8 @@ export function InventoryPage() {
           </button>)}
         </div>
       </div>
+
+      <KoreksiPengajuanList module="GUDANG" estate="NILAM" sembunyiKosong reload={historyKey} onChanged={() => (load(), setHistoryKey((k) => k + 1))} />
 
       <InventoryTabs value={tab} onChange={setTab} />
 

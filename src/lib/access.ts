@@ -60,6 +60,15 @@ export const OTHER_PERMS: { group: string; items: { key: string; label: string }
       { key: "klinik.permintaan_approve", label: "Approve Permintaan Obat per item tanpa tanda tangan (Diketahui / Disetujui otomatis boleh; sebagian & tolak wajib alasan)" },
     ],
   },
+  {
+    group: "Koreksi Stok",
+    items: [
+      {
+        key: "koreksi.approve",
+        label: "Setujui Koreksi Stok Gudang / Klinik yang diajukan admin estate-nya (mis. HR / akunting; bukan pengajuan sendiri)",
+      },
+    ],
+  },
   { group: "Monitoring", items: [{ key: "monitor.log_user", label: "Log Aktivitas User" }] },
   {
     group: "Koperasi PT.AKSS",
@@ -256,7 +265,7 @@ export function pageAllowed(user: AuthUser | null, path: string): boolean {
   if (path === PINJAMAN_PATH) return MODULES.some((m) => canModule(user, m));
   if (path === PASIEN_PATH) return canModule(user, "KLINIK");
   if (path === DOKUMEN_PATH) return true;
-  if (path === PERSETUJUAN_PATH) return [...TTD_PERMS, "ba.setujui", "koperasi.pelunasan"].some((p) => can(user, p));
+  if (path === PERSETUJUAN_PATH) return [...TTD_PERMS, "ba.setujui", "koperasi.pelunasan", "koreksi.approve"].some((p) => can(user, p));
   if (path === SOP_PATH || path.startsWith(`${SOP_PATH}/`)) return ["sop.view", "sop.edit", "sop.kunci"].some((p) => can(user, p));
   if (path === KOPERASI_PATH) return can(user, "koperasi.view") && userEstates(user).includes(KOPERASI_ESTATE);
   if (path === KENDARAAN_PATH) return can(user, "kendaraan.view");

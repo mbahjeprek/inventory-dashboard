@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { KoreksiDiajukan } from "./KoreksiPengajuan";
 import { X, ClipboardCheck } from "lucide-react";
 import { api, errorText, GUDANG_TUJUAN, type KlinikBatch, type PickerItem, type StockScope } from "../lib/api";
 import { KaryawanAutocomplete } from "./KaryawanAutocomplete";
@@ -43,11 +44,13 @@ export function TransactionModal({
 }) {
   const isKlinik = scope?.kind === "klinik";
   const { user } = useAuth();
-  // Stock In/Out need the module's Input permission; Koreksi of one item is Super User only (other
-  // differences go through a Stok Opname).
+  // Stock In/Out need the module's Input permission. Koreksi of one item: a Super User books it at once; an
+  // account with the module's Edit sends it for approval (Setujui Koreksi Stok, e.g. HR / akunting).
   const mod = isKlinik ? "klinik" : "gudang";
   const canInput = can(user, `${mod}.input`);
-  const canKoreksi = user?.role === "superuser";
+  const canKoreksi = can(user, `${mod}.edit`);
+  const koreksiDiajukan = user?.role !== "superuser";
+  const [diajukan, setDiajukan] = useState(false);
   const [item, setItem] = useState(initialItem);
   const [tujuan, setTujuan] = useState("");
   const [penerima, setPenerima] = useState("");
@@ -168,11 +171,15 @@ export function TransactionModal({
       }
       setSubmitting(true);
       try {
-        if (scope?.kind === "klinik")
-          await api.klinikStockCorrection({ klinik: scope.name, obat_kode: item.kode, actual_qty: actualQty, note, expired_date: korExp, tanggal_iso: tanggal });
-        else if (scope?.kind === "gudang") await api.gudangStockCorrection({ gudang: scope.name, item_kode: item.kode, actual_qty: actualQty, note, tanggal_iso: tanggal });
-        else await api.stockCorrection({ item_id: item.id, actual_qty: actualQty, note, tanggal_iso: tanggal });
-        onSuccess();
+        const r =
+          scope?.kind === "klinik"
+            ? await api.klinikStockCorrection({ klinik: scope.name, obat_kode: item.kode, actual_qty: actualQty, note, expired_date: korExp, tanggal_iso: tanggal })
+            : scope?.kind === "gudang"
+              ? await api.gudangStockCorrection({ gudang: scope.name, item_kode: item.kode, actual_qty: actualQty, note, tanggal_iso: tanggal })
+              : await api.stockCorrection({ item_id: item.id, actual_qty: actualQty, note, tanggal_iso: tanggal });
+        // Sent for approval: say so before closing (the stock hasn't moved yet).
+        if (r.pending) setDiajukan(true);
+        else onSuccess();
       } catch (e) {
         setError(errorText(e, "Gagal menyimpan koreksi stok"));
       } finally {
@@ -218,6 +225,7 @@ export function TransactionModal({
     }
   };
 
+  if (diajukan) return <KoreksiDiajukan onClose={onSuccess} />;
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-lg w-full max-w-md shadow-xl max-h-[calc(100vh-2rem)] overflow-y-auto">
@@ -494,6 +502,11 @@ export function TransactionModal({
           </div>
 
           {mode !== "KOREKSI" && <EvidenceInput value={evidenceId} onChange={setEvidenceId} />}
+          {mode === "KOREKSI" && koreksiDiajukan && (
+            <p className="text-[11px] text-[var(--accent-amber)]">
+              Koreksi diajukan dulu: stok baru berubah setelah disetujui orang yang punya hak Setujui Koreksi Stok (mis. HR / akunting).
+            </p>
+          )}
 
           {error && <p className="text-xs text-[var(--accent-red)]">{error}</p>}
 
@@ -502,7 +515,7 @@ export function TransactionModal({
             disabled={submitting}
             className="w-full py-2.5 rounded-md text-sm font-medium bg-[var(--accent-blue)] text-white hover:opacity-90 disabled:opacity-50"
           >
-            {submitting ? "Menyimpan..." : mode === "KOREKSI" ? "Simpan Koreksi Stok" : "Simpan Transaksi"}
+            {submitting ? "Menyimpan..." : mode === "KOREKSI" ? (koreksiDiajukan ? "Ajukan Koreksi Stok" : "Simpan Koreksi Stok") : "Simpan Transaksi"}
           </button>
         </div>
       </div>

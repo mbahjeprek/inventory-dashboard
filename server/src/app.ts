@@ -244,8 +244,12 @@ function requiredPerms(req: express.Request): Need {
   if (is(/^\/status-update$/)) return null;
   // Foto bukti: any logged-in account uploads for its own transactions (the transaction route checks).
   if (is(/^\/evidence(\/|$)/)) return null;
-  // Koreksi Stok of one item: Super User only (with a reason); other differences go through a Stok Opname.
-  if (is(/^\/(stock-correction|gudang-stock\/correction|klinik-stock\/correction)$/)) return "super";
+  // Koreksi Stok of one item: a Super User books it at once; an account with the module's Edit sends it as a
+  // Pengajuan Koreksi, booked only when someone with Setujui Koreksi Stok approves it (the route decides).
+  if (is(/^\/(stock-correction|gudang-stock\/correction)$/)) return ["gudang.edit"];
+  if (is(/^\/klinik-stock\/correction$/)) return ["klinik.edit"];
+  // Pengajuan Koreksi Stok: each route checks the estate, who asked and who may approve.
+  if (is(/^\/koreksi-pengajuan(\/|$)/)) return null;
   // items = the master barang list, which is also Nilam's gudang stock.
   if (is(/^\/items$/) && m === "GET") return ["gudang.view", "master.barang"];
   if (is(/^\/items(\/\d+)?$/) && m !== "GET") return ["master.barang", `gudang.${act}`];
@@ -360,6 +364,12 @@ async function stockLocations(req: express.Request): Promise<StockLocation[]> {
   const transferTo = (tujuan: unknown, type: unknown) => (type === "OUT" && GUDANG_STOCK_OPTIONS.includes(String(tujuan)) ? G(tujuan) : []);
 
   if (p === "/stock-correction") return G("NILAM");
+  // Approving a Pengajuan Koreksi Stok books it in its gudang / klinik.
+  const kp = p.match(/^\/koreksi-pengajuan\/(\d+)\/periksa$/);
+  if (kp) {
+    const r = await queryOne<{ module: OpnameModule; estate: string }>("SELECT module, estate FROM koreksi_pengajuan WHERE id = @id", { id: kp[1] });
+    return r ? [{ module: r.module, estate: r.estate }] : [];
+  }
   if (p === "/transactions" && m === "POST") return [...G("NILAM"), ...transferTo(b.tujuan, b.type)];
   // Input Banyak: the location(s) of every row.
   const batchRows: any[] = Array.isArray(b.rows) ? b.rows : [];
@@ -1413,8 +1423,22 @@ app.post("/api/gudang-stock/correction", requireSuperuser, async (req, res) => {
   if (!validQty(GUDANG_LEDGER, actual_qty) || actual_qty < 0) return res.status(400).json({ error: "Invalid payload" });
   if (!String(note ?? "").trim()) return res.status(400).json({ error: "Isi alasan koreksinya" });
 
-  const item = await queryOne<any>("SELECT kode, nama FROM items WHERE kode = @item_kode", { item_kode });
+  const item = await queryOne<any>("SELECT kode, nama, satuan FROM items WHERE kode = @item_kode", { item_kode });
   if (!item) return res.status(404).json({ error: "Barang tidak ditemukan di master data" });
+  // Not a Super User: a Pengajuan Koreksi, booked when someone with Setujui Koreksi Stok approves it.
+  if (req.user!.role !== "superuser") {
+    const cur = (await queryOne<{ s: number }>("SELECT stock_tersedia::float8 s FROM gudang_stock WHERE gudang = @gudang AND item_kode = @item_kode", { gudang, item_kode }))?.s ?? 0;
+    return ajukanKoreksi(req, res, {
+      module: "GUDANG",
+      estate: gudang,
+      kode: item.kode,
+      nama: item.nama,
+      satuan: item.satuan ?? "",
+      sebelum: [{ exp: "", qty: cur }],
+      sesudah: [{ exp: "", qty: actual_qty }],
+      alasan: String(note).trim(),
+    });
+  }
 
   const before = await recordCorrection(req, GUDANG_LEDGER, gudang, item_kode, actual_qty, note);
   const delta = actual_qty - before;
@@ -1813,6 +1837,19 @@ app.post("/api/stock-correction", requireEstate("NILAM"), async (req, res) => {
 
   const item = await queryOne<any>("SELECT * FROM items WHERE id = @id", { id: item_id });
   if (!item) return res.status(404).json({ error: "Not found" });
+  if (!Number.isInteger(actual_qty)) return res.status(400).json({ error: "Stok aktual harus bilangan bulat" });
+  // Not a Super User: a Pengajuan Koreksi, booked when someone with Setujui Koreksi Stok approves it.
+  if (req.user!.role !== "superuser")
+    return ajukanKoreksi(req, res, {
+      module: "GUDANG",
+      estate: "NILAM",
+      kode: item.kode,
+      nama: item.nama,
+      satuan: item.satuan ?? "",
+      sebelum: [{ exp: "", qty: item.stock_tersedia }],
+      sesudah: [{ exp: "", qty: actual_qty }],
+      alasan: String(note).trim(),
+    });
 
   const delta = actual_qty - item.stock_tersedia;
   await withTransaction((client) => nilamCorrection(client, item_id, actual_qty, `Koreksi Stok (Opname)${note ? `: ${note}` : ""}`));
@@ -5817,7 +5854,7 @@ app.post("/api/klinik-stock/correction", requireSuperuser, async (req, res) => {
   if (!Number.isInteger(actual_qty) || actual_qty < 0) return res.status(400).json({ error: "Invalid payload" });
   if (!String(note ?? "").trim()) return res.status(400).json({ error: "Isi alasan koreksinya" });
   if (exp && !isRealDate(exp)) return res.status(400).json({ error: "Tanggal expired tidak valid" });
-  const obat = await queryOne<any>("SELECT kode, nama FROM obat WHERE kode = @obat_kode", { obat_kode });
+  const obat = await queryOne<any>("SELECT kode, nama, satuan FROM obat WHERE kode = @obat_kode", { obat_kode });
   if (!obat) return res.status(404).json({ error: "Obat tidak ditemukan di master data" });
 
   const before =
@@ -5826,6 +5863,18 @@ app.post("/api/klinik-stock/correction", requireSuperuser, async (req, res) => {
       obat_kode,
       exp,
     }))?.q ?? 0;
+  // Not a Super User: a Pengajuan Koreksi, booked when someone with Setujui Koreksi Stok approves it.
+  if (req.user!.role !== "superuser")
+    return ajukanKoreksi(req, res, {
+      module: "KLINIK",
+      estate: klinik,
+      kode: obat.kode,
+      nama: obat.nama,
+      satuan: obat.satuan ?? "",
+      sebelum: [{ exp, qty: before }],
+      sesudah: [{ exp, qty: actual_qty }],
+      alasan: String(note).trim(),
+    });
   const delta = actual_qty - before;
   if (delta !== 0) {
     const err = await recordKlinikMove(req, {
@@ -5931,9 +5980,21 @@ app.put("/api/klinik-stock/:id/batches", requireSuperuser, async (req, res) => {
     return res.json({ success: true });
   }
 
-  if (req.user!.role !== "superuser")
-    return res.status(403).json({ error: `Total berubah (${before} → ${after}) dan itu Koreksi Stok, yang hanya bisa dilakukan Super User; selisih stok lewat Stok Opname` });
   if (!note) return res.status(400).json({ error: "Isi alasan koreksi" });
+  // Not a Super User: the new split is a Pengajuan Koreksi, booked when someone with Setujui Koreksi Stok approves it.
+  if (req.user!.role !== "superuser") {
+    const o = await queryOne<{ satuan: string }>("SELECT satuan FROM obat WHERE kode = @k", { k: row.obat_kode });
+    return ajukanKoreksi(req, res, {
+      module: "KLINIK",
+      estate: row.klinik,
+      kode: row.obat_kode,
+      nama: obat?.nama ?? "",
+      satuan: o?.satuan ?? "",
+      sebelum: [...have].map(([exp, qty]) => ({ exp, qty })),
+      sesudah: [...want].map(([exp, qty]) => ({ exp, qty })),
+      alasan: note,
+    });
+  }
   const exps = [...new Set([...have.keys(), ...want.keys()])];
   try {
     await withTransaction(async (client) => {
@@ -9545,6 +9606,162 @@ app.put("/api/berita-acara/:id/selesai", async (req, res) => {
 });
 
 // Persetujuan: how many documents wait for this account (the reminder at login and the menu's badge).
+// ---- Pengajuan Koreksi Stok (see schema.sql koreksi_pengajuan) ----
+// A Koreksi Stok from an account that isn't a Super User is only a request: the stock moves when someone else with
+// Setujui Koreksi Stok (in that estate) or a Super User approves it; then the difference sesudah - sebelum is booked.
+type KoreksiBaris = { exp: string; qty: number };
+type KoreksiModul = "GUDANG" | "KLINIK";
+const koreksiLog = (m: KoreksiModul): LogModule => (m === "KLINIK" ? "KLINIK" : "BARANG");
+const koreksiTeks = (m: KoreksiModul, rows: KoreksiBaris[]) =>
+  m === "KLINIK"
+    ? rows
+        .filter((r) => r.qty > 0)
+        .sort((a, b) => (a.exp === "" ? 1 : b.exp === "" ? -1 : a.exp.localeCompare(b.exp)))
+        .map((r) => `${expText(r.exp)}: ${r.qty}`)
+        .join(", ") || "kosong"
+    : String(round3(rows.reduce((n, r) => n + r.qty, 0)));
+const bolehSetujuiKoreksi = (u: SessionUser, estate: string) => u.role === "superuser" || (u.perms.includes("koreksi.approve") && estateAllowed(u, estate));
+
+// Records the request (one waiting per barang) and answers the client: { success, pending: true }.
+async function ajukanKoreksi(
+  req: express.Request,
+  res: express.Response,
+  p: { module: KoreksiModul; estate: string; kode: string; nama: string; satuan: string; sebelum: KoreksiBaris[]; sesudah: KoreksiBaris[]; alasan: string }
+) {
+  const u = req.user!;
+  const total = (rows: KoreksiBaris[]) => round3(rows.reduce((n, r) => n + r.qty, 0));
+  if (p.sesudah.some((r) => !(r.qty >= 0))) return res.status(400).json({ error: "Stok tidak boleh minus" });
+  if (koreksiTeks(p.module, p.sebelum) === koreksiTeks(p.module, p.sesudah)) return res.status(400).json({ error: "Tidak ada selisih stok" });
+  let id: number;
+  try {
+    id = (await queryOne<{ id: number }>(
+      `INSERT INTO koreksi_pengajuan (module, estate, kode, nama, satuan, sebelum, sesudah, alasan, diajukan_oleh, diajukan_nama)
+       VALUES (@module, @estate, @kode, @nama, @satuan, @sebelum::jsonb, @sesudah::jsonb, @alasan, @uid, @unama) RETURNING id`,
+      { ...p, sebelum: JSON.stringify(p.sebelum), sesudah: JSON.stringify(p.sesudah), uid: u.id, unama: u.nama || u.username }
+    ))!.id;
+  } catch (e: any) {
+    if (e.code === "23505") return res.status(409).json({ error: "Barang ini sudah punya pengajuan koreksi yang menunggu persetujuan. Tunggu diperiksa, atau batalkan dulu." });
+    throw e;
+  }
+  const selisih = round3(total(p.sesudah) - total(p.sebelum));
+  await logActivity(req, {
+    module: koreksiLog(p.module),
+    estate: p.estate,
+    aksi: "Ajukan Koreksi Stok",
+    objek: `${p.kode} - ${p.nama}`,
+    detail: `${koreksiTeks(p.module, p.sebelum)} → ${koreksiTeks(p.module, p.sesudah)} (selisih ${selisih > 0 ? "+" : ""}${selisih}); Alasan: ${p.alasan}; menunggu persetujuan`,
+  });
+  res.json({ success: true, pending: true, id });
+}
+
+// Books an approved request: the difference per expiry date (Klinik) or of the barang (Gudang), so movements booked
+// between the request and its approval stay counted.
+async function terapkanKoreksi(client: PoolClient, req: express.Request, k: any) {
+  const note = `Koreksi Stok: ${k.alasan} (diajukan ${k.diajukan_nama}, disetujui ${req.user!.nama || req.user!.username})`;
+  const map = (rows: KoreksiBaris[]) => new Map(rows.map((r) => [r.exp, r.qty]));
+  const sebelum = map(k.sebelum);
+  const sesudah = map(k.sesudah);
+  if (k.module === "KLINIK") {
+    for (const exp of new Set([...sebelum.keys(), ...sesudah.keys()])) {
+      const delta = (sesudah.get(exp) ?? 0) - (sebelum.get(exp) ?? 0);
+      if (!delta) continue;
+      await klinikMoveTx(client, req, { klinik: k.estate, obat: k.kode, type: delta > 0 ? "IN" : "OUT", qty: Math.abs(delta), exp, tujuan: "", penerima: "", note, is_correction: 1 });
+    }
+    return;
+  }
+  const delta = round3((sesudah.get("") ?? 0) - (sebelum.get("") ?? 0));
+  if (k.estate === "NILAM") {
+    const item = await queryOne<{ id: number; stock_tersedia: number }>("SELECT id, stock_tersedia FROM items WHERE kode = @kode FOR UPDATE", { kode: k.kode }, client);
+    if (!item) throw new StockError("Barang tidak ditemukan di master data");
+    const target = item.stock_tersedia + delta;
+    if (target < 0) throw new StockError(`Stok sekarang ${item.stock_tersedia}; selisih ${delta} membuatnya minus. Tolak lalu minta diajukan ulang.`);
+    await nilamCorrection(client, item.id, target, note);
+    return;
+  }
+  const cur =
+    (await queryOne<{ s: number }>("SELECT stock_tersedia::float8 s FROM gudang_stock WHERE gudang = @g AND item_kode = @kode FOR UPDATE", { g: k.estate, kode: k.kode }, client))?.s ?? 0;
+  const target = round3(cur + delta);
+  if (target < 0) throw new StockError(`Stok sekarang ${cur}; selisih ${delta} membuatnya minus. Tolak lalu minta diajukan ulang.`);
+  await ledgerCorrection(client, req, GUDANG_LEDGER, k.estate, k.kode, target, note);
+}
+
+// The requests of the account's estates that it may see (module Lihat) or approve. status: MENUNGGU (default) or
+// SEMUA (also those decided in the last 60 days).
+app.get("/api/koreksi-pengajuan", async (req, res) => {
+  const u = req.user!;
+  const { status = "MENUNGGU", module = "", estate = "" } = req.query as Record<string, string>;
+  const rows = await queryMany<any>(
+    `SELECT k.*, to_char(k.diajukan_at AT TIME ZONE 'Asia/Jakarta', 'DD/MM/YYYY HH24:MI') diajukan_waktu,
+            to_char(k.diperiksa_at AT TIME ZONE 'Asia/Jakarta', 'DD/MM/YYYY HH24:MI') diperiksa_waktu
+       FROM koreksi_pengajuan k
+      WHERE (@semua OR k.status = 'MENUNGGU') AND (k.status = 'MENUNGGU' OR k.diajukan_at > now() - interval '60 days')
+        AND (@module = '' OR k.module = @module) AND (@estate = '' OR k.estate = @estate)
+      ORDER BY k.status = 'MENUNGGU' DESC, k.diajukan_at DESC LIMIT 300`,
+    { semua: status === "SEMUA", module, estate }
+  );
+  const data = rows
+    .filter((k) => estateAllowed(u, k.estate) && (u.role === "superuser" || u.perms.includes(`${k.module.toLowerCase()}.view`) || u.perms.includes("koreksi.approve")))
+    .map((k) => ({
+      ...k,
+      bisa_setujui: k.status === "MENUNGGU" && bolehSetujuiKoreksi(u, k.estate) && (u.role === "superuser" || k.diajukan_oleh !== u.id),
+      bisa_batal: k.status === "MENUNGGU" && (k.diajukan_oleh === u.id || u.role === "superuser"),
+    }));
+  res.json({ data });
+});
+
+// Setujui (books the koreksi) or Tolak (with a reason; nothing moves) - by someone else than who asked.
+app.put("/api/koreksi-pengajuan/:id/periksa", async (req, res) => {
+  const u = req.user!;
+  const setuju = req.body?.setuju === true;
+  const catatan = String(req.body?.catatan ?? "").trim();
+  if (!setuju && !catatan) return res.status(400).json({ error: "Tulis alasan penolakannya" });
+  let k: any;
+  try {
+    await withTransaction(async (client) => {
+      k = await queryOne("SELECT * FROM koreksi_pengajuan WHERE id = @id FOR UPDATE", { id: Number(req.params.id) || 0 }, client);
+      if (!k) throw new StockError("Pengajuan tidak ditemukan");
+      if (!bolehSetujuiKoreksi(u, k.estate)) throw new StockError("Akun ini tidak punya hak Setujui Koreksi Stok untuk estate ini");
+      if (k.status !== "MENUNGGU") throw new StockError("Pengajuan ini sudah diperiksa / dibatalkan");
+      if (u.role !== "superuser" && k.diajukan_oleh === u.id) throw new StockError("Yang menyetujui harus orang lain, bukan yang mengajukan");
+      if (setuju) await terapkanKoreksi(client, req, k);
+      await execute(
+        `UPDATE koreksi_pengajuan SET status = @status, diperiksa_oleh = @uid, diperiksa_nama = @unama, diperiksa_at = now(), diperiksa_catatan = @catatan WHERE id = @id`,
+        { status: setuju ? "DISETUJUI" : "DITOLAK", uid: u.id, unama: u.nama || u.username, catatan, id: k.id },
+        client
+      );
+    });
+  } catch (e) {
+    if (e instanceof StockError) return res.status(400).json({ error: e.message });
+    throw e;
+  }
+  await logActivity(req, {
+    module: koreksiLog(k.module),
+    estate: k.estate,
+    aksi: setuju ? "Setujui Koreksi Stok" : "Tolak Koreksi Stok",
+    objek: `${k.kode} - ${k.nama}`,
+    detail: `${koreksiTeks(k.module, k.sebelum)} → ${koreksiTeks(k.module, k.sesudah)}; diajukan ${k.diajukan_nama}; Alasan: ${k.alasan}${catatan ? `; Catatan: ${catatan}` : ""}`,
+  });
+  res.json({ success: true });
+});
+
+// Batal: who asked (or a Super User) takes back a request still waiting.
+app.put("/api/koreksi-pengajuan/:id/batal", async (req, res) => {
+  const u = req.user!;
+  const k = await queryOne<any>("SELECT * FROM koreksi_pengajuan WHERE id = @id", { id: Number(req.params.id) || 0 });
+  if (!k || !estateAllowed(u, k.estate)) return res.status(404).json({ error: "Pengajuan tidak ditemukan" });
+  if (k.diajukan_oleh !== u.id && u.role !== "superuser") return res.status(403).json({ error: "Hanya yang mengajukan yang bisa membatalkan" });
+  const done = await queryOne("UPDATE koreksi_pengajuan SET status = 'BATAL', diperiksa_at = now() WHERE id = @id AND status = 'MENUNGGU' RETURNING id", { id: k.id });
+  if (!done) return res.status(409).json({ error: "Pengajuan ini sudah diperiksa / dibatalkan" });
+  await logActivity(req, {
+    module: koreksiLog(k.module),
+    estate: k.estate,
+    aksi: "Batal Koreksi Stok",
+    objek: `${k.kode} - ${k.nama}`,
+    detail: `${koreksiTeks(k.module, k.sebelum)} → ${koreksiTeks(k.module, k.sesudah)}`,
+  });
+  res.json({ success: true });
+});
+
 app.get("/api/persetujuan/jumlah", async (req, res) => {
   const u = req.user!;
   let permintaan = 0;
@@ -9575,7 +9792,18 @@ app.get("/api/persetujuan/jumlah", async (req, res) => {
           )
         )!.n
       : 0;
-  res.json({ permintaan, ba, kop, total: permintaan + ba + kop });
+  // Koreksi Stok asked by an admin of the account's estates (not its own) for whoever has Setujui Koreksi Stok.
+  const korEstates = ESTATES.filter((e) => bolehSetujuiKoreksi(u, e));
+  const koreksi =
+    u.role === "superuser" || (u.perms.includes("koreksi.approve") && korEstates.length)
+      ? (
+          await queryOne<{ n: number }>(
+            "SELECT COUNT(*)::int n FROM koreksi_pengajuan WHERE status = 'MENUNGGU' AND estate = ANY(@e::text[]) AND (@su OR diajukan_oleh IS DISTINCT FROM @uid)",
+            { e: korEstates, su: u.role === "superuser", uid: u.id }
+          )
+        )!.n
+      : 0;
+  res.json({ permintaan, ba, kop, koreksi, total: permintaan + ba + kop + koreksi });
 });
 
 // Who does each step of a Barang Rusak / Expired flow of a unit (Koperasi at Nilam, or a Klinik): the accounts with

@@ -1347,6 +1347,33 @@ CREATE TABLE IF NOT EXISTS login_gagal (
 );
 CREATE INDEX IF NOT EXISTS idx_login_gagal ON login_gagal(ip, at);
 
+-- Pengajuan Koreksi Stok: an admin with Edit of Gudang / Klinik (not a Super User) asks for a Koreksi Stok of one
+-- barang / obat; the stock moves only once someone else with "Setujui Koreksi Stok" (HR, akunting...) or a Super User
+-- approves it. sebelum / sesudah = the stock per expiry date ([{exp, qty}], exp '' for a gudang barang) as counted;
+-- the approval books the difference (sesudah - sebelum) as a Koreksi Stok, so movements in between stay counted.
+-- One waiting request per barang at a time.
+CREATE TABLE IF NOT EXISTS koreksi_pengajuan (
+  id SERIAL PRIMARY KEY,
+  module TEXT NOT NULL CHECK (module IN ('GUDANG', 'KLINIK')),
+  estate TEXT NOT NULL,
+  kode TEXT NOT NULL,
+  nama TEXT NOT NULL DEFAULT '',
+  satuan TEXT NOT NULL DEFAULT '',
+  sebelum JSONB NOT NULL,
+  sesudah JSONB NOT NULL,
+  alasan TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'MENUNGGU' CHECK (status IN ('MENUNGGU', 'DISETUJUI', 'DITOLAK', 'BATAL')),
+  diajukan_oleh INTEGER,
+  diajukan_nama TEXT NOT NULL DEFAULT '',
+  diajukan_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  diperiksa_oleh INTEGER,
+  diperiksa_nama TEXT NOT NULL DEFAULT '',
+  diperiksa_at TIMESTAMPTZ,
+  diperiksa_catatan TEXT NOT NULL DEFAULT ''
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_koreksi_menunggu ON koreksi_pengajuan(module, estate, kode) WHERE status = 'MENUNGGU';
+CREATE INDEX IF NOT EXISTS idx_koreksi_status ON koreksi_pengajuan(status, estate);
+
 -- Lock the database to this app's server: Supabase also exposes every public table through its REST API to the anon /
 -- authenticated roles. The app never uses them (its server connects as postgres, which RLS doesn't apply to; photos use
 -- the service key), so: RLS on for every table (no policies = nothing for those roles), their rights taken back, and the

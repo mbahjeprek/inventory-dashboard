@@ -1222,6 +1222,29 @@ async function req<T>(url: string, opts?: RequestInit): Promise<T> {
   return res.json();
 }
 
+// A Koreksi Stok asked by an admin, booked once someone with Setujui Koreksi Stok approves it. sebelum / sesudah:
+// the stock per expiry date (exp '' for a gudang barang).
+export type KoreksiPengajuan = {
+  id: number;
+  module: "GUDANG" | "KLINIK";
+  estate: string;
+  kode: string;
+  nama: string;
+  satuan: string;
+  sebelum: { exp: string; qty: number }[];
+  sesudah: { exp: string; qty: number }[];
+  alasan: string;
+  status: "MENUNGGU" | "DISETUJUI" | "DITOLAK" | "BATAL";
+  diajukan_oleh: number | null;
+  diajukan_nama: string;
+  diajukan_waktu: string;
+  diperiksa_nama: string;
+  diperiksa_waktu: string | null;
+  diperiksa_catatan: string;
+  bisa_setujui: boolean;
+  bisa_batal: boolean;
+};
+
 export const api = {
   login: (username: string, password: string) =>
     req<{ user: AuthUser }>("/api/auth/login", { method: "POST", body: JSON.stringify({ username, password }) }),
@@ -1288,7 +1311,7 @@ export const api = {
     }),
 
   stockCorrection: (payload: { tanggal_iso?: string; item_id: number; actual_qty: number; note?: string }) =>
-    req<{ success: boolean; delta: number }>("/api/stock-correction", {
+    req<{ success: boolean; delta?: number; pending?: boolean }>("/api/stock-correction", {
       method: "POST",
       body: JSON.stringify(payload),
     }),
@@ -1313,7 +1336,7 @@ export const api = {
   }) => req<{ success: boolean }>("/api/gudang-stock/transactions", { method: "POST", body: JSON.stringify(payload) }),
 
   gudangStockCorrection: (payload: { tanggal_iso?: string; gudang: string; item_kode: string; actual_qty: number; note?: string }) =>
-    req<{ success: boolean; delta: number }>("/api/gudang-stock/correction", { method: "POST", body: JSON.stringify(payload) }),
+    req<{ success: boolean; delta?: number; pending?: boolean }>("/api/gudang-stock/correction", { method: "POST", body: JSON.stringify(payload) }),
 
   obatOptions: () => req<{ kategori: string[]; satuan: string[]; jenis: { kategori: string; jenis: string }[] }>("/api/obat/options"),
 
@@ -1440,11 +1463,11 @@ export const api = {
     req<{ success: boolean }>(`/api/klinik-stock/batch/${id}`, { method: "PUT", body: JSON.stringify({ expired_date, qty }) }),
 
   klinikStockCorrection: (payload: { tanggal_iso?: string; klinik: string; obat_kode: string; actual_qty: number; note?: string; expired_date?: string }) =>
-    req<{ success: boolean; delta: number }>("/api/klinik-stock/correction", { method: "POST", body: JSON.stringify(payload) }),
+    req<{ success: boolean; delta?: number; pending?: boolean }>("/api/klinik-stock/correction", { method: "POST", body: JSON.stringify(payload) }),
 
   // The full expiry breakdown of a clinic stock row; a changed total is booked as Koreksi (needs note).
   setKlinikBatches: (id: number, batches: { expired_date: string; qty: number }[], note: string) =>
-    req<{ success: boolean }>(`/api/klinik-stock/${id}/batches`, { method: "PUT", body: JSON.stringify({ batches, note }) }),
+    req<{ success: boolean; pending?: boolean }>(`/api/klinik-stock/${id}/batches`, { method: "PUT", body: JSON.stringify({ batches, note }) }),
 
   updateKlinikStock: (id: number, payload: { buffer_stock: number; catatan: string }) =>
     req<{ success: boolean }>(`/api/klinik-stock/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
@@ -1868,7 +1891,13 @@ export const api = {
   // Who does each step of a Barang Rusak / Expired flow of a unit (from the accounts' ticks), see PetugasAlur.
   petugas: (modul: "KOPERASI" | "KLINIK", unit: string) =>
     req<{ input: string[]; approve: string[]; ba: string[]; pengganti: string[] }>(`/api/petugas?${new URLSearchParams({ modul, unit })}`),
-  persetujuanJumlah: () => req<{ permintaan: number; ba: number; kop?: number; total: number }>("/api/persetujuan/jumlah"),
+  persetujuanJumlah: () => req<{ permintaan: number; ba: number; kop?: number; koreksi?: number; total: number }>("/api/persetujuan/jumlah"),
+  // Pengajuan Koreksi Stok (Gudang / Klinik) of the account's estates; status MENUNGGU (default) or SEMUA.
+  koreksiList: (params: { status?: "MENUNGGU" | "SEMUA"; module?: "GUDANG" | "KLINIK"; estate?: string } = {}) =>
+    req<{ data: KoreksiPengajuan[] }>(`/api/koreksi-pengajuan?${new URLSearchParams(params as Record<string, string>)}`),
+  koreksiPeriksa: (id: number, body: { setuju: boolean; catatan?: string }) =>
+    req<{ success: boolean }>(`/api/koreksi-pengajuan/${id}/periksa`, { method: "PUT", body: JSON.stringify(body) }),
+  koreksiBatal: (id: number) => req<{ success: boolean }>(`/api/koreksi-pengajuan/${id}/batal`, { method: "PUT" }),
   // The manager's WhatsApp answer: YA (setuju) or TIDAK (tolak: true, with the alasan), its capture the proof.
   baSetuju: (id: number, body: { nama: string; jabatan: string; tanggal: string; evidence_id: string | null; tolak?: boolean; alasan?: string }) =>
     req<{ success: boolean }>(`/api/berita-acara/${id}/setuju`, { method: "PUT", body: JSON.stringify(body) }),
