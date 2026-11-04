@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { ArrowLeftRight, ArrowRight, Plus, ListPlus, UserRound, X } from "lucide-react";
+import { ArrowLeftRight, ArrowRight, Plus, ListPlus, Search, UserRound, X } from "lucide-react";
 import { api, errorText, type OpnameModule, type Pinjaman, type PinjamanBarang, type PinjamanLog, type PinjamanLogAksi, type PinjamanRingkasan, type PinjamanStatus } from "../lib/api";
 import { useSearchParams } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
@@ -65,17 +65,24 @@ export function PinjamanPage() {
   const [returning, setReturning] = useState<{ loan: Pinjaman; batal: boolean } | null>(null);
   const [deleting, setDeleting] = useState<Pinjaman | null>(null);
   const refreshOpen = useOpenPinjaman((s) => s.refresh);
+  // Cari (both tabs): sent 300 ms after the last key.
+  const [cariKetik, setCariKetik] = useState("");
+  const [cari, setCari] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => setCari(cariKetik.trim()), 300);
+    return () => clearTimeout(t);
+  }, [cariKetik]);
 
   useEffect(() => {
     setLoading(true);
     api
-      .pinjamanList({ module, status, estates: pickedEstates, pageSize: 200 })
+      .pinjamanList({ module, status, estates: pickedEstates, q: cari, pageSize: 200 })
       .then((res) => {
         setRows(res.data);
         setTotal(res.total);
       })
       .finally(() => setLoading(false));
-  }, [module, status, pickedEstates, reload]);
+  }, [module, status, pickedEstates, reload, cari]);
   useEffect(() => {
     api
       .pinjamanLog({ module, estates: pickedEstates, pageSize: 1 })
@@ -192,11 +199,20 @@ export function PinjamanPage() {
             <option value="BATAL">Dibatalkan</option>
           </select>
         )}
+        <div className="relative flex-1 min-w-[200px] max-w-xs">
+          <Search size={15} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
+          <input
+            value={cariKetik}
+            onChange={(e) => setCariKetik(e.target.value)}
+            placeholder="Cari barang, estate, alasan, no. pinjaman..."
+            className="w-full text-sm rounded-md border border-[var(--border)] pl-8 pr-3 py-2 bg-white"
+          />
+        </div>
         {view === "daftar" && <span className="text-xs text-[var(--text-muted)] ml-auto">{total.toLocaleString("id-ID")} catatan</span>}
       </div>
 
       {view === "log" ? (
-        <PinjamanLogTable module={module} aksi={aksi} estates={pickedEstates} reload={reload} />
+        <PinjamanLogTable module={module} aksi={aksi} estates={pickedEstates} cari={cari} reload={reload} />
       ) : (
 
       <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg table-scroll">
@@ -351,21 +367,21 @@ function Kartu({ label, value, sub, tone, onClick }: { label: string; value: num
 const isBack = (a: PinjamanLogAksi) => a === "KEMBALI" || a === "LUNAS" || a === "BATAL";
 
 // Log Aktivitas: one row per event (made, returned, cleared, cancelled), newest first, 50 per page.
-function PinjamanLogTable({ module, aksi, estates, reload }: { module: string; aksi: string; estates: string; reload: number }) {
+function PinjamanLogTable({ module, aksi, estates, cari, reload }: { module: string; aksi: string; estates: string; cari: string; reload: number }) {
   const [rows, setRows] = useState<PinjamanLog[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const pageSize = 50;
-  useEffect(() => setPage(1), [module, aksi, estates]);
+  useEffect(() => setPage(1), [module, aksi, estates, cari]);
   useEffect(() => {
     setLoading(true);
     api
-      .pinjamanLog({ module, aksi, estates, page, pageSize })
+      .pinjamanLog({ module, aksi, estates, q: cari, page, pageSize })
       .then((res) => (setRows(res.data), setTotal(res.total)))
       .catch(() => (setRows([]), setTotal(0)))
       .finally(() => setLoading(false));
-  }, [module, aksi, estates, page, reload]);
+  }, [module, aksi, estates, cari, page, reload]);
   const pages = Math.max(1, Math.ceil(total / pageSize));
   const lama = (r: PinjamanLog) => Math.round((Date.parse(r.tanggal_iso) - Date.parse(r.tanggal_pinjam)) / 86400000);
 

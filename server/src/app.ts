@@ -8624,8 +8624,20 @@ async function logLoan(req: express.Request, l: LoanRow, aksi: string, detail: s
   );
 }
 
+// Cari on the Pinjaman page: every word (up to 5) must match the barang (kode / nama), an estate, the pemberi
+// (karyawan), the alasan or the loan's number (#135 or 135).
+function pinjamanCari(q: string, params: Record<string, unknown>, extra = ""): string[] {
+  const words = q.replace(/#/g, " ").trim().split(/\s+/).filter(Boolean).slice(0, 5);
+  return words.map((w, i) => {
+    params[`cari${i}`] = `%${w}%`;
+    params[`cariId${i}`] = /^\d+$/.test(w) ? Number(w) : -1;
+    return `(p.kode ILIKE @cari${i} OR p.nama ILIKE @cari${i} OR p.dari_estate ILIKE @cari${i} OR p.ke_estate ILIKE @cari${i}
+      OR COALESCE(p.pemberi, '') ILIKE @cari${i} OR COALESCE(p.alasan, '') ILIKE @cari${i} OR p.id = @cariId${i}${extra.replace(/@cari/g, `@cari${i}`)})`;
+  });
+}
+
 app.get("/api/pinjaman", async (req, res) => {
-  const { module = "", estate = "", estates: picked = "", status = "", page = "1", pageSize = "50" } = req.query as Record<string, string>;
+  const { module = "", estate = "", estates: picked = "", status = "", q = "", page = "1", pageSize = "50" } = req.query as Record<string, string>;
   const u = req.user!;
   const modules = OPNAME_MODULES_LIST.filter((m) => canLoan(u, m, "view") && (!module || m === module));
   const estates = listEstates(u, estate, picked);
@@ -8633,8 +8645,9 @@ app.get("/api/pinjaman", async (req, res) => {
   const conditions = ["p.module = ANY(@modules::text[])", "(p.dari_estate = ANY(@estates::text[]) OR p.ke_estate = ANY(@estates::text[]))"];
   if (status === "OPEN") conditions.push("p.status = 'DIPINJAM'");
   else if (["LUNAS", "BATAL", "TRANSFER"].includes(status)) conditions.push("p.status = @status");
+  const params: Record<string, unknown> = { modules, estates, status };
+  conditions.push(...pinjamanCari(q, params));
   const where = `WHERE ${conditions.join(" AND ")}`;
-  const params = { modules, estates, status };
   const total = (await queryOne<{ c: number }>(`SELECT COUNT(*)::int c FROM pinjaman p ${where}`, params))!.c;
   const limit = Math.min(parseInt(pageSize) || 50, 200);
   const offset = (Math.max(parseInt(page) || 1, 1) - 1) * limit;
@@ -8654,7 +8667,7 @@ app.get("/api/pinjaman", async (req, res) => {
 // or LUNAS when it brings the loan's returns up to its qty) and a cancellation - so what got cleared
 // and when shows without opening each loan. `ringkasan` = the monitoring counts over the same filter.
 app.get("/api/pinjaman/log", async (req, res) => {
-  const { module = "", estates: picked = "", aksi = "", page = "1", pageSize = "50" } = req.query as Record<string, string>;
+  const { module = "", estates: picked = "", aksi = "", q = "", page = "1", pageSize = "50" } = req.query as Record<string, string>;
   const u = req.user!;
   const modules = OPNAME_MODULES_LIST.filter((m) => canLoan(u, m, "view") && (!module || m === module));
   const estates = listEstates(u, "", picked);
@@ -8670,9 +8683,11 @@ app.get("/api/pinjaman/log", async (req, res) => {
       FROM (SELECT k.*, SUM(CASE WHEN k.batal THEN 0 ELSE k.qty END) OVER (PARTITION BY k.pinjaman_id ORDER BY k.id) AS kumulatif
               FROM pinjaman_kembali k) k
       JOIN pinjaman p ON p.id = k.pinjaman_id WHERE ${scope}`;
-  const where = ["PINJAM", "TRANSFER", "KEMBALI", "LUNAS", "BATAL"].includes(aksi) ? "WHERE e.aksi = @aksi" : "";
-  const params = { modules, estates, aksi };
-  const total = (await queryOne<{ c: number }>(`SELECT COUNT(*)::int c FROM (${events}) e ${where}`, params))!.c;
+  const params: Record<string, unknown> = { modules, estates, aksi };
+  // Cari: also the event's own note (the return's keterangan).
+  const cond = [...(["PINJAM", "TRANSFER", "KEMBALI", "LUNAS", "BATAL"].includes(aksi) ? ["e.aksi = @aksi"] : []), ...pinjamanCari(q, params, " OR COALESCE(e.note, '') ILIKE @cari")];
+  const where = cond.length ? `WHERE ${cond.join(" AND ")}` : "";
+  const total = (await queryOne<{ c: number }>(`SELECT COUNT(*)::int c FROM (${events}) e JOIN pinjaman p ON p.id = e.pinjaman_id ${where}`, params))!.c;
   const limit = Math.min(parseInt(pageSize) || 50, 200);
   const offset = (Math.max(parseInt(page) || 1, 1) - 1) * limit;
   const data = await queryMany(
