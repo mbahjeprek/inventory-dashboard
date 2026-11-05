@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Check, CheckCircle2, CircleDashed, FileText, MessageCircle, PenLine, Printer, ShieldCheck, UserCheck, X } from "lucide-react";
+import { Check, CheckCircle2, CircleDashed, Clock, FileText, MessageCircle, PenLine, Printer, ShieldCheck, UserCheck, X } from "lucide-react";
 import { api, errorText, type BaPeran, type BaTtd, type BeritaAcara, type KlinikTarik, type KopTx } from "../lib/api";
 import { SignaturePad } from "./SignaturePad";
 import { printDocument } from "../lib/printTable";
@@ -502,6 +502,101 @@ function SelesaiModal({ ba, onClose, onDone }: { ba: BeritaAcara; onClose: () =>
 }
 
 // The BAs of a unit with their steps: Cetak · Catat persetujuan (capture WA) · Tutup (dimusnahkan) · Batal.
+// Where a BA stands, step by step: made & signed by the penanggung jawab, approved (Mengetahui), the destruction signed
+// by pelaksana and both saksi, closed. Each step with who signed and when, or whom it waits for (the name planned in
+// the BA). The step it is on is marked; a BA from before the app signatures (WA only) has no signing step.
+function BaLangkah({ j, b }: { j: BaJenis; b: BeritaAcara }) {
+  const f = b.isian as Isian;
+  const dig = digital(b);
+  const setuju = b.status === "DISETUJUI" || b.status === "SELESAI";
+  const label = (k: BaPeran) => j.peran[k].label.replace(/ \(.*\)$/, "");
+  const siapa = (k: BaPeran) => {
+    const t = b.ttd?.[k];
+    if (t) return { sudah: true, teks: `${t.nama}${t.jabatan ? ` (${t.jabatan})` : ""} · ${t.cara === "WA" ? `lewat WA ${isoDisplay(t.tanggal ?? "")}` : waktuJam(t.at)}` };
+    const rencana = f?.[k]?.nama?.trim();
+    return { sudah: false, teks: rencana ? `menunggu ${rencana}${f[k]?.jabatan ? ` (${f[k].jabatan})` : ""}` : "belum" };
+  };
+  type Langkah = { judul: string; selesai: boolean; isi: { teks: string; sudah: boolean; label?: string }[] };
+  const mengetahui = f?.mengetahui;
+  const langkah: Langkah[] = [
+    {
+      judul: "Dibuat & ditandatangani",
+      selesai: true,
+      isi: [dig ? { label: label("pj"), ...siapa("pj") } : { teks: `${b.dibuat_nama || "-"} · ${waktu(b.created_at)}`, sudah: true }],
+    },
+    {
+      judul: `Disetujui ${mengetahui?.jabatan || "Estate Manager"}`,
+      selesai: setuju,
+      isi: [
+        setuju
+          ? {
+              sudah: true,
+              teks: `${b.disetujui_nama}${b.disetujui_jabatan ? ` (${b.disetujui_jabatan})` : ""} · ${
+                b.ttd?.mengetahui && b.ttd.mengetahui.cara !== "WA" ? `${waktuJam(b.ttd.mengetahui.at)} di aplikasi` : `${isoDisplay(b.disetujui_tgl ?? "")} lewat WA`
+              }`,
+            }
+          : {
+              sudah: false,
+              teks: `menunggu ${mengetahui?.nama?.trim() || mengetahui?.jabatan || "Estate Manager"}${dig ? " — di menu Persetujuan, atau kirim WA lalu catat jawabannya" : " — kirim WA lalu catat jawabannya"}`,
+            },
+      ],
+    },
+    ...(dig
+      ? [
+          {
+            judul: "Pemusnahan: tanda tangan pelaksana & saksi",
+            selesai: TTD_MUSNAH.every((k) => b.ttd?.[k]),
+            isi: TTD_MUSNAH.map((k) => ({ label: label(k), ...siapa(k) })),
+          },
+        ]
+      : []),
+    {
+      judul: "Ditutup: sudah dimusnahkan",
+      selesai: b.status === "SELESAI",
+      isi: [
+        b.status === "SELESAI"
+          ? { sudah: true, teks: `${isoDisplay(b.selesai_tgl ?? "")}${b.selesai_catatan ? ` · ${b.selesai_catatan}` : ""}` }
+          : { sudah: false, teks: "belum" },
+      ],
+    },
+  ];
+  const kini = langkah.findIndex((l) => !l.selesai);
+  return (
+    <div className="space-y-1.5 min-w-[260px]">
+      <div className="text-[11px] font-medium text-[var(--text-primary)]">
+        {kini === -1 ? `Semua ${langkah.length} langkah selesai` : `Langkah ${kini + 1} dari ${langkah.length}: ${langkah[kini].judul}`}
+      </div>
+      <ol className="space-y-1">
+        {langkah.map((l, i) => {
+          const aktif = i === kini;
+          return (
+            <li key={l.judul} className="flex gap-1.5">
+              <span className={`mt-0.5 shrink-0 ${l.selesai ? "text-[var(--accent-green)]" : aktif ? "text-[var(--accent-amber)]" : "text-[var(--text-muted)]"}`}>
+                {l.selesai ? <Check size={13} /> : aktif ? <Clock size={13} /> : <CircleDashed size={13} />}
+              </span>
+              <div className="min-w-0">
+                <div className={`${l.selesai ? "text-[var(--text-primary)]" : aktif ? "text-[var(--accent-amber)] font-medium" : "text-[var(--text-muted)]"}`}>
+                  {i + 1}. {l.judul}
+                </div>
+                {(l.selesai || aktif || l.isi.some((x) => x.sudah)) &&
+                  l.isi.map((x, n) => (
+                    <div key={n} className={`text-[11px] ${x.sudah ? "text-[var(--accent-green)]" : "text-[var(--text-muted)]"}`}>
+                      {x.sudah ? "✓ " : "○ "}
+                      {x.label ? `${x.label}: ` : ""}
+                      {x.teks}
+                      {i === 1 && x.sudah && !(b.ttd?.mengetahui && b.ttd.mengetahui.cara !== "WA") && <> <EvidenceLink id={b.evidence_id} label="capture WA" /></>}
+                      {i === langkah.length - 1 && x.sudah && <> <EvidenceLink id={b.foto_musnah} label="foto" /></>}
+                    </div>
+                  ))}
+              </div>
+            </li>
+          );
+        })}
+      </ol>
+    </div>
+  );
+}
+
 export function BaDaftar({ jenis: j, items, reload, onChanged }: { jenis: BaJenis; items: () => Promise<BaItem[]>; reload: number; onChanged?: () => void }) {
   const { user } = useAuth();
   const mod = j.modul.toLowerCase();
@@ -574,7 +669,7 @@ export function BaDaftar({ jenis: j, items, reload, onChanged }: { jenis: BaJeni
               <th className="px-3 py-2">Rencana tgl</th>
               <th className="px-3 py-2 text-right">Barang</th>
               <th className="px-3 py-2">Status</th>
-              <th className="px-3 py-2">Persetujuan / pemusnahan</th>
+              <th className="px-3 py-2">Tahapan & tanda tangan</th>
               <th className="px-3 py-2" />
             </tr>
           </thead>
@@ -606,46 +701,7 @@ export function BaDaftar({ jenis: j, items, reload, onChanged }: { jenis: BaJeni
                     <span className={`text-[11px] px-2 py-0.5 rounded-full border whitespace-nowrap ${STATUS[b.status].cls}`}>{STATUS[b.status].label}</span>
                   </td>
                   <td className="col-grow px-3 py-2 text-xs text-[var(--text-secondary)]">
-                    {b.status === "BATAL" ? (
-                      <span>Dibatalkan: {b.batal_alasan}</span>
-                    ) : b.status === "MENUNGGU" ? (
-                      <span className="text-[var(--text-muted)]">
-                        {digital(b)
-                          ? `Menunggu persetujuan ${(b.isian as Isian).mengetahui?.jabatan || "Estate Manager"} di menu Persetujuan, atau kirim WA lalu catat jawabannya.`
-                          : "Kirim BA ke manager / perwakilan lewat WA, lalu catat jawabannya dengan capture."}
-                      </span>
-                    ) : (
-                      <>
-                        <div>
-                          Disetujui <b>{b.disetujui_nama}</b>
-                          {b.disetujui_jabatan ? ` (${b.disetujui_jabatan})` : ""} ·{" "}
-                          {b.ttd?.mengetahui && b.ttd.mengetahui.cara !== "WA" ? (
-                            `${waktuJam(b.ttd.mengetahui.at)} di aplikasi`
-                          ) : (
-                            <>
-                              {isoDisplay(b.disetujui_tgl ?? "")} <EvidenceLink id={b.evidence_id} label="capture WA" />
-                            </>
-                          )}
-                        </div>
-                        {digital(b) && (
-                          <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-0.5">
-                            {TTD_MUSNAH.map((k) => (
-                              <span key={k} className={`inline-flex items-center gap-1 ${b.ttd?.[k] ? "text-[var(--accent-green)]" : "text-[var(--text-muted)]"}`}>
-                                {b.ttd?.[k] ? <Check size={12} /> : <CircleDashed size={12} />}
-                                {j.peran[k].label.replace(/ \(.*\)$/, "")}
-                                {b.ttd?.[k] ? `: ${b.ttd[k]!.nama}` : ""}
-                              </span>
-                            ))}
-                          </div>
-                        )}
-                        {b.status === "SELESAI" && (
-                          <div>
-                            Dimusnahkan {isoDisplay(b.selesai_tgl ?? "")}
-                            {b.selesai_catatan ? ` · ${b.selesai_catatan}` : ""} <EvidenceLink id={b.foto_musnah} label="foto" />
-                          </div>
-                        )}
-                      </>
-                    )}
+                    {b.status === "BATAL" ? <span>Dibatalkan: {b.batal_alasan}</span> : <BaLangkah j={j} b={b} />}
                   </td>
                   <td className="px-3 py-2 text-right whitespace-nowrap space-x-1">
                     <button onClick={() => cetakBa(j, b)} title="Cetak berita acara" className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded border border-[var(--border)] hover:bg-[#f1f5f9]">
