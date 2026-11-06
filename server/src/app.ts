@@ -9474,8 +9474,11 @@ const baLog = (req: express.Request, ba: { modul: string; unit: string; nomor: s
   logActivity(req, { module: ba.modul === "KLINIK" ? "KLINIK" : "KOPERASI", estate: ba.unit, aksi, objek: `BA ${ba.nomor}`, detail });
 const BA_COLS = `b.id, b.modul, b.unit, b.nomor, b.tanggal, b.isian, b.items, b.status, b.created_at, COALESCE(u.nama, u.username, '') AS dibuat_nama,
   b.disetujui_nama, b.disetujui_jabatan, b.disetujui_tgl, b.evidence_id, b.selesai_tgl, b.selesai_catatan, b.foto_musnah, b.batal_alasan, b.ttd`;
-// Tanda tangan BA: who signs at the destruction, and whether a BA is signed in the app (made after it was).
+// Tanda tangan BA: pelaksana and both saksi check the barang and sign before the manager approves (the manager
+// approves a BA already checked; nothing is destroyed before that). baDigital: signed in the app (made after it was).
 const BA_TTD_MUSNAH = ["pelaksana", "saksi1", "saksi2"];
+const baKurangTtd = (ba: { ttd: any }) => (baDigital(ba) ? BA_TTD_MUSNAH.filter((k) => !ba.ttd?.[k]) : []);
+const baKurangTeks = (kurang: string[]) => `${kurang.map((k) => BA_PERAN_LABEL[k]).join(", ")} belum tanda tangan; manager menyetujui setelah pelaksana dan kedua saksi tanda tangan`;
 const BA_PERAN_LABEL: Record<string, string> = { pj: "Yang menyerahkan", pelaksana: "Pelaksana", saksi1: "Saksi 1", saksi2: "Saksi 2", mengetahui: "Mengetahui / menyetujui" };
 const baDigital = (ba: { ttd: any }) => !!ba.ttd?.pj;
 // Units whose BAs an account with Setujui Berita Acara approves: its kliniks, and the koperasi with Nilam.
@@ -9582,6 +9585,7 @@ app.put("/api/berita-acara/:id/setuju", async (req, res) => {
   if (ba.status !== "MENUNGGU") return res.status(409).json({ error: "Berita acara ini tidak sedang menunggu persetujuan" });
   const b = req.body ?? {};
   const tolak = b.tolak === true;
+  if (!tolak && baKurangTtd(ba).length) return res.status(409).json({ error: baKurangTeks(baKurangTtd(ba)) });
   const nama = String(b.nama ?? "").trim();
   if (!nama) return res.status(400).json({ error: "Isi nama manager / perwakilan yang menjawab" });
   if (!isIsoDate(b.tanggal) || b.tanggal > jakartaToday()) return res.status(400).json({ error: "Tanggal jawaban tidak valid" });
@@ -9806,7 +9810,7 @@ app.get("/api/persetujuan/jumlah", async (req, res) => {
   const ba = units.length
     ? (
         await queryOne<{ n: number }>(
-          `SELECT COUNT(*)::int n FROM berita_acara WHERE status = 'MENUNGGU' AND ttd ? 'pj' AND (modul || ':' || unit) = ANY(@units::text[])
+          `SELECT COUNT(*)::int n FROM berita_acara WHERE status = 'MENUNGGU' AND ttd ? 'pj' AND ttd ? 'pelaksana' AND ttd ? 'saksi1' AND ttd ? 'saksi2' AND (modul || ':' || unit) = ANY(@units::text[])
              AND (@su OR (ttd->'pj'->>'user_id') IS DISTINCT FROM @uid::text)`,
           { units: units.map((x) => `${x.modul}:${x.unit}`), su: u.role === "superuser", uid: String(u.id) }
         )
@@ -9857,7 +9861,7 @@ app.get("/api/berita-acara/menunggu", async (req, res) => {
   if (!units.length) return res.json({ data: [] });
   const data = await queryMany(
     `SELECT ${BA_COLS} FROM berita_acara b LEFT JOIN users u ON u.id = b.dibuat_oleh
-      WHERE b.status = 'MENUNGGU' AND b.ttd ? 'pj' AND (b.modul || ':' || b.unit) = ANY(@units::text[]) ORDER BY b.created_at, b.id`,
+      WHERE b.status = 'MENUNGGU' AND b.ttd ? 'pj' AND b.ttd ? 'pelaksana' AND b.ttd ? 'saksi1' AND b.ttd ? 'saksi2' AND (b.modul || ':' || b.unit) = ANY(@units::text[]) ORDER BY b.created_at, b.id`,
     { units: units.map((x) => `${x.modul}:${x.unit}`) }
   );
   res.json({ data: data.filter((b: any) => req.user!.role === "superuser" || b.ttd?.pj?.user_id !== req.user!.id) });
@@ -9872,6 +9876,7 @@ app.put("/api/berita-acara/:id/persetujuan", async (req, res) => {
   if (!baUnitSetuju(u).some((x) => x.modul === ba.modul && x.unit === ba.unit)) return res.status(403).json({ error: "Akun ini tidak punya hak Setujui Berita Acara Pemusnahan untuk unit ini" });
   if (ba.status !== "MENUNGGU") return res.status(409).json({ error: "Berita acara ini tidak sedang menunggu persetujuan" });
   if (u.role !== "superuser" && ba.ttd?.pj?.user_id === u.id) return res.status(403).json({ error: "Pembuat berita acara tidak bisa menyetujuinya sendiri" });
+  if (req.body?.aksi !== "TOLAK" && baKurangTtd(ba).length) return res.status(409).json({ error: baKurangTeks(baKurangTtd(ba)) });
   const jabatan = String(ba.isian?.mengetahui?.jabatan ?? "");
   if (req.body?.aksi === "TOLAK") {
     const alasan = String(req.body?.alasan ?? "").trim().slice(0, 500);
@@ -9889,16 +9894,19 @@ app.put("/api/berita-acara/:id/persetujuan", async (req, res) => {
   res.json({ success: true });
 });
 
-// Tanda tangan at the destruction (DISETUJUI): pelaksana / saksi1 / saksi2, by the account signing (AKUN) or
-// drawn on the screen (LAYAR, with the name on the BA); signing again replaces it.
+// Tanda tangan pelaksana / saksi1 / saksi2 while the BA waits for approval (MENUNGGU), by the account signing (AKUN)
+// or drawn on the screen (LAYAR, with the name on the BA); signing again replaces it. A BA approved under the old
+// order (approval first) can still get its empty boxes signed.
 app.put("/api/berita-acara/:id/ttd", async (req, res) => {
   const u = req.user!;
   const ba = await queryOne<any>("SELECT * FROM berita_acara WHERE id = @id", { id: req.params.id });
   if (!ba) return res.status(404).json({ error: "Berita acara tidak ditemukan" });
   if (!baBoleh(req, res, ba.modul, ba.unit, "input")) return;
-  if (ba.status !== "DISETUJUI") return res.status(409).json({ error: ba.status === "MENUNGGU" ? "Tunggu persetujuan dulu; pelaksana dan saksi menandatangani saat pemusnahan" : "Berita acara ini sudah ditutup / dibatalkan" });
+  if (ba.status !== "MENUNGGU" && ba.status !== "DISETUJUI") return res.status(409).json({ error: "Berita acara ini sudah ditutup / dibatalkan" });
+  if (!baDigital(ba)) return res.status(400).json({ error: "Berita acara ini dibuat sebelum tanda tangan di aplikasi" });
   const peran = String(req.body?.peran ?? "");
   if (!BA_TTD_MUSNAH.includes(peran)) return res.status(400).json({ error: "Kotak tanda tangan tidak valid" });
+  if (ba.status === "DISETUJUI" && ba.ttd?.[peran]) return res.status(409).json({ error: "Berita acara ini sudah disetujui; tanda tangan yang ada tidak bisa diganti" });
   const cara = req.body?.cara === "AKUN" ? "AKUN" : "LAYAR";
   const jabatan = String(req.body?.jabatan ?? ba.isian?.[peran]?.jabatan ?? "").trim().slice(0, 100);
   let isi: any;

@@ -43,6 +43,8 @@ const waktuJam = (iso: string) =>
   new Date(iso).toLocaleString("id-ID", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Jakarta" }).replace(",", "");
 const TTD_MUSNAH: BaPeran[] = ["pelaksana", "saksi1", "saksi2"];
 const digital = (ba: Pick<BeritaAcara, "ttd">) => !!ba.ttd?.pj;
+// Pelaksana and both saksi have signed (a BA from before app signatures counts as complete): only then it goes to the manager.
+const ttdLengkap = (ba: Pick<BeritaAcara, "ttd">) => !digital(ba) || TTD_MUSNAH.every((k) => ba.ttd?.[k]);
 const waktu = (iso: string) => new Date(iso).toLocaleDateString("id-ID", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "Asia/Jakarta" });
 
 // The letter of a stored BA (also reprinted later, with its approval / closing when there is one).
@@ -366,7 +368,7 @@ export function BaForm({ jenis: j, items, onClose, onSaved }: { jenis: BaJenis; 
 }
 
 const STATUS: Record<BeritaAcara["status"], { label: string; cls: string }> = {
-  MENUNGGU: { label: "Menunggu persetujuan", cls: "bg-[var(--accent-amber-bg)] border-[var(--accent-amber-border)] text-[var(--accent-amber)]" },
+  MENUNGGU: { label: "Menunggu tanda tangan & persetujuan", cls: "bg-[var(--accent-amber-bg)] border-[var(--accent-amber-border)] text-[var(--accent-amber)]" },
   DISETUJUI: { label: "Disetujui, siap dimusnahkan", cls: "bg-[var(--accent-blue-bg)] border-[var(--accent-blue-border)] text-[var(--accent-blue)]" },
   SELESAI: { label: "Selesai, sudah dimusnahkan", cls: "bg-[var(--accent-green-bg)] border-[var(--accent-green-border)] text-[var(--accent-green)]" },
   BATAL: { label: "Batal", cls: "bg-[#f1f5f9] border-[var(--border)] text-[var(--text-muted)]" },
@@ -502,8 +504,8 @@ function SelesaiModal({ ba, onClose, onDone }: { ba: BeritaAcara; onClose: () =>
 }
 
 // The BAs of a unit with their steps: Cetak · Catat persetujuan (capture WA) · Tutup (dimusnahkan) · Batal.
-// Where a BA stands, step by step: made & signed by the penanggung jawab, approved (Mengetahui), the destruction signed
-// by pelaksana and both saksi, closed. Each step with who signed and when, or whom it waits for (the name planned in
+// Where a BA stands, step by step: made & signed by the penanggung jawab, the barang checked and signed by pelaksana
+// and both saksi, approved (Mengetahui) - the manager approves a BA already checked -, destroyed and closed. Each step with who signed and when, or whom it waits for (the name planned in
 // the BA). The step it is on is marked; a BA from before the app signatures (WA only) has no signing step.
 function BaLangkah({ j, b }: { j: BaJenis; b: BeritaAcara }) {
   const f = b.isian as Isian;
@@ -524,6 +526,15 @@ function BaLangkah({ j, b }: { j: BaJenis; b: BeritaAcara }) {
       selesai: true,
       isi: [dig ? { label: label("pj"), ...siapa("pj") } : { teks: `${b.dibuat_nama || "-"} · ${waktu(b.created_at)}`, sudah: true }],
     },
+    ...(dig
+      ? [
+          {
+            judul: "Diperiksa & ditandatangani pelaksana dan saksi",
+            selesai: TTD_MUSNAH.every((k) => b.ttd?.[k]),
+            isi: TTD_MUSNAH.map((k) => ({ label: label(k), ...siapa(k) })),
+          },
+        ]
+      : []),
     {
       judul: `Disetujui ${mengetahui?.jabatan || "Estate Manager"}`,
       selesai: setuju,
@@ -541,17 +552,8 @@ function BaLangkah({ j, b }: { j: BaJenis; b: BeritaAcara }) {
             },
       ],
     },
-    ...(dig
-      ? [
-          {
-            judul: "Pemusnahan: tanda tangan pelaksana & saksi",
-            selesai: TTD_MUSNAH.every((k) => b.ttd?.[k]),
-            isi: TTD_MUSNAH.map((k) => ({ label: label(k), ...siapa(k) })),
-          },
-        ]
-      : []),
     {
-      judul: "Ditutup: sudah dimusnahkan",
+      judul: "Dimusnahkan & ditutup",
       selesai: b.status === "SELESAI",
       isi: [
         b.status === "SELESAI"
@@ -707,12 +709,21 @@ export function BaDaftar({ jenis: j, items, reload, onChanged }: { jenis: BaJeni
                     <button onClick={() => cetakBa(j, b)} title="Cetak berita acara" className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded border border-[var(--border)] hover:bg-[#f1f5f9]">
                       <Printer size={13} /> Cetak
                     </button>
-                    {b.status === "MENUNGGU" && digital(b) && canSetujui && (user?.role === "superuser" || b.ttd?.pj?.user_id !== user?.id) && (
+                    {b.status === "MENUNGGU" && digital(b) && ttdLengkap(b) && canSetujui && (user?.role === "superuser" || b.ttd?.pj?.user_id !== user?.id) && (
                       <button onClick={() => setPeriksa(b)} className="text-xs px-2 py-1 rounded bg-[var(--accent-blue)] text-white hover:opacity-90">
                         Setujui / Tolak
                       </button>
                     )}
-                    {canInput && b.status === "MENUNGGU" && (
+                    {canInput && digital(b) && (b.status === "MENUNGGU" || (b.status === "DISETUJUI" && !ttdLengkap(b))) && (
+                      <button
+                        onClick={() => setTandaTangan(b)}
+                        title="Pelaksana dan kedua saksi memeriksa barang lalu tanda tangan, sebelum BA diajukan ke manager"
+                        className={`inline-flex items-center gap-1 text-xs px-2 py-1 rounded ${ttdLengkap(b) ? "border border-[var(--border)] hover:bg-[#f1f5f9]" : "bg-[var(--accent-blue)] text-white hover:opacity-90"}`}
+                      >
+                        <PenLine size={13} /> Tanda tangan{ttdLengkap(b) ? "" : ` (${TTD_MUSNAH.filter((k) => b.ttd?.[k]).length}/3)`}
+                      </button>
+                    )}
+                    {canInput && b.status === "MENUNGGU" && ttdLengkap(b) && (
                       <>
                         <a
                           href={waLink(j, b)}
@@ -727,11 +738,6 @@ export function BaDaftar({ jenis: j, items, reload, onChanged }: { jenis: BaJeni
                           Catat jawaban WA
                         </button>
                       </>
-                    )}
-                    {canInput && b.status === "DISETUJUI" && digital(b) && (
-                      <button onClick={() => setTandaTangan(b)} className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded bg-[var(--accent-blue)] text-white hover:opacity-90">
-                        <PenLine size={13} /> Tanda tangan
-                      </button>
                     )}
                     {canInput && b.status === "DISETUJUI" && (
                       <button
@@ -911,7 +917,7 @@ function BaTtdModal({ jenis: j, ba, onClose, onDone }: { jenis: BaJenis; ba: Ber
   const isian = ba.isian as Isian;
   const tutup = () => (diubah ? onDone() : onClose());
   return (
-    <Shell title={`Tanda tangan ${ba.nomor}`} subtitle="Pelaksana dan kedua saksi menandatangani saat pemusnahan" onClose={tutup} wide>
+    <Shell title={`Tanda tangan ${ba.nomor}`} subtitle="Pelaksana dan kedua saksi memeriksa barangnya lalu menandatangani, sebelum BA diajukan ke manager" onClose={tutup} wide>
       <div className="space-y-3">
         {TTD_MUSNAH.map((k) => (
           <TtdKotak
