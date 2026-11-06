@@ -6,6 +6,7 @@ import { Detail } from "../components/KlinikPermintaanTab";
 import { BaPeriksaModal, jenisKlinik, jenisKoperasi } from "../components/BaPemusnahan";
 import { useAuth } from "../context/AuthContext";
 import { KoreksiPengajuanList } from "../components/KoreksiPengajuan";
+import { BaTtdSaya } from "../components/BaTtdSaya";
 import { can, TTD_PERMS } from "../lib/access";
 import { TTD_LEVEL_LABEL, TTD_URUT, estateLabel, waktuTtd } from "../lib/permintaanSurat";
 
@@ -61,6 +62,7 @@ export function PersetujuanPage() {
         <p className="text-sm text-[var(--text-secondary)]">Dokumen yang menunggu tanda tangan / persetujuan Anda.</p>
       </div>
       {error && <p className="text-sm text-[var(--accent-red)]">{error}</p>}
+      <BaTtdSaya />
       {bolehKoreksi && <KoreksiPengajuanList />}
       {bolehKop && (
         <section className="space-y-2">

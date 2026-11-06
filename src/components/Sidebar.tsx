@@ -33,7 +33,7 @@ import { useEstateFilter } from "../hooks/useEstateFilter";
 import { usePersetujuan } from "../hooks/usePersetujuan";
 import { useOpenPinjaman } from "../hooks/useOpenPinjaman";
 import { ChangePasswordModal } from "./ChangePasswordModal";
-import { canModule, hasDashboard, pageAllowed, userEstates, OPNAME_PATH, PINJAMAN_PATH, PASIEN_PATH, KOPERASI_PATH, KENDARAAN_PATH, DOKUMEN_PATH, SOP_PATH, PERSETUJUAN_PATH, type Module } from "../lib/access";
+import { canModule, hasDashboard, pageAllowed, persetujuanMenu, userEstates, OPNAME_PATH, PINJAMAN_PATH, PASIEN_PATH, KOPERASI_PATH, KENDARAAN_PATH, DOKUMEN_PATH, SOP_PATH, PERSETUJUAN_PATH, type Module } from "../lib/access";
 
 // subtitle: shown only on the active menu, which grows into a gold card (see NavRow).
 type NavItem = { to: string; label: string; icon: typeof Package; subtitle?: string };
@@ -229,7 +229,10 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: { mobileOpen?: bo
 
   const visibleSections = navSections
     // An account without an inventory module has no main Dashboard: only the pages it can open show.
-    .map((s) => ({ ...s, items: s.items.filter((it) => (it.to === "/" ? hasDashboard(user) : pageAllowed(user, it.to))) }))
+    .map((s) => ({
+      ...s,
+      items: s.items.filter((it) => (it.to === "/" ? hasDashboard(user) : it.to === PERSETUJUAN_PATH ? persetujuanMenu(user) || menunggu > 0 : pageAllowed(user, it.to))),
+    }))
     .filter((s) => (s.title === "Inventory" ? moduleLinks.length > 0 || s.items.length > 0 : s.items.length > 0));
 
   // The estate the module links point at: the current page's estate, else the last one used (while

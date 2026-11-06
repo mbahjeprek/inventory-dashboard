@@ -655,7 +655,7 @@ export function BaDaftar({ jenis: j, items, reload, onChanged }: { jenis: BaJeni
       <div className="flex flex-wrap items-center gap-2 p-3 border-b border-[var(--border)]">
         <h2 className="text-sm font-semibold text-[var(--text-primary)]">Berita Acara Pemusnahan</h2>
         {aktif > 0 && <span className="text-xs text-[var(--accent-amber)]">{aktif} belum selesai</span>}
-        <span className="text-xs text-[var(--text-muted)]">Buat → disetujui Estate Manager di aplikasi → musnahkan, pelaksana & saksi tanda tangan → tutup</span>
+        <span className="text-xs text-[var(--text-muted)]">Buat → pelaksana & saksi periksa dan tanda tangan → disetujui Estate Manager → musnahkan → tutup</span>
         {error && <span className="text-xs text-[var(--accent-red)]">{error}</span>}
         {canInput && (
           <button onClick={bukaBuat} className={`${btnPrimary} ml-auto`}>

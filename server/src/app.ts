@@ -9836,7 +9836,9 @@ app.get("/api/persetujuan/jumlah", async (req, res) => {
           )
         )!.n
       : 0;
-  res.json({ permintaan, ba, kop, koreksi, total: permintaan + ba + kop + koreksi });
+  // Berita Acara boxes (pelaksana / saksi) this account is named for and hasn't signed.
+  const baTtd = (await baTtdSaya(u)).length;
+  res.json({ permintaan, ba, kop, koreksi, ba_ttd: baTtd, total: permintaan + ba + kop + koreksi + baTtd });
 });
 
 // Who does each step of a Barang Rusak / Expired flow of a unit (Koperasi at Nilam, or a Klinik): the accounts with
@@ -9856,6 +9858,51 @@ app.get("/api/petugas", async (req, res) => {
 });
 
 // The BAs waiting for this account's approval (Setujui Berita Acara, of its units).
+// Who a BA names for a box (pelaksana / saksi): the account of that estate whose name matches the name typed on the
+// BA - same words in any order, titles (Amd.Keb, S.Kep, ...) and punctuation left out, one name contained in the
+// other ("Randy" = "Randy Saifullah", "Jerry Eugenius" = "Eugenius Jerry") - when exactly one account matches.
+const GELAR = new Set(["amd", "keb", "kep", "skep", "ners", "ns", "s", "st", "se", "sh", "skm", "spd", "dr", "drg", "apt", "ama", "a", "md", "ak", "sos", "si"]);
+const namaKata = (s: string) => new Set(String(s ?? "").toLowerCase().split(/[^a-z]+/).filter((w) => w.length > 1 && !GELAR.has(w)));
+const namaCocok = (a: string, b: string) => {
+  const x = namaKata(a);
+  const y = namaKata(b);
+  if (!x.size || !y.size) return false;
+  const [kecil, besar] = x.size <= y.size ? [x, y] : [y, x];
+  return [...kecil].every((w) => besar.has(w));
+};
+type AkunNama = { id: number; nama: string; estates: string[] };
+async function akunEstate(): Promise<AkunNama[]> {
+  return (await queryMany<{ id: number; nama: string; estates: string | null }>("SELECT id, nama, estates FROM users WHERE role <> 'superuser'")).map((r) => ({
+    id: r.id,
+    nama: r.nama,
+    estates: parseList(r.estates, ESTATES),
+  }));
+}
+function baDitunjuk(ba: any, peran: string, akun: AkunNama[]): number | null {
+  const nama = String(ba.isian?.[peran]?.nama ?? "").trim();
+  if (!nama) return null;
+  const cocok = akun.filter((a) => a.estates.includes(ba.unit) && namaCocok(a.nama, nama));
+  return cocok.length === 1 ? cocok[0].id : null;
+}
+// The boxes (pelaksana / saksi) still to sign that BAs waiting for them name this account for.
+async function baTtdSaya(u: SessionUser) {
+  const rows = await queryMany<any>(
+    `SELECT ${BA_COLS} FROM berita_acara b LEFT JOIN users u ON u.id = b.dibuat_oleh
+      WHERE b.status IN ('MENUNGGU', 'DISETUJUI') AND b.ttd ? 'pj' AND NOT (b.ttd ? 'pelaksana' AND b.ttd ? 'saksi1' AND b.ttd ? 'saksi2')
+        AND b.unit = ANY(@units::text[]) ORDER BY b.created_at, b.id`,
+    { units: u.estates }
+  );
+  if (!rows.length) return [];
+  const akun = await akunEstate();
+  return rows
+    .map((ba) => ({ ba, peran: BA_TTD_MUSNAH.filter((k) => !ba.ttd?.[k] && baDitunjuk(ba, k, akun) === u.id) }))
+    .filter((r) => r.peran.length);
+}
+
+app.get("/api/berita-acara/ttd-saya", async (req, res) => {
+  res.json({ data: await baTtdSaya(req.user!) });
+});
+
 app.get("/api/berita-acara/menunggu", async (req, res) => {
   const units = baUnitSetuju(req.user!);
   if (!units.length) return res.json({ data: [] });
@@ -9901,17 +9948,21 @@ app.put("/api/berita-acara/:id/ttd", async (req, res) => {
   const u = req.user!;
   const ba = await queryOne<any>("SELECT * FROM berita_acara WHERE id = @id", { id: req.params.id });
   if (!ba) return res.status(404).json({ error: "Berita acara tidak ditemukan" });
-  if (!baBoleh(req, res, ba.modul, ba.unit, "input")) return;
-  if (ba.status !== "MENUNGGU" && ba.status !== "DISETUJUI") return res.status(409).json({ error: "Berita acara ini sudah ditutup / dibatalkan" });
-  if (!baDigital(ba)) return res.status(400).json({ error: "Berita acara ini dibuat sebelum tanda tangan di aplikasi" });
   const peran = String(req.body?.peran ?? "");
   if (!BA_TTD_MUSNAH.includes(peran)) return res.status(400).json({ error: "Kotak tanda tangan tidak valid" });
+  // The person the BA names for this box signs with its own account even without Input of the modul (HR, gudang...).
+  const ditunjuk = req.body?.cara === "AKUN" && estateAllowed(u, ba.unit) && baDitunjuk(ba, peran, await akunEstate()) === u.id;
+  if (!ditunjuk && !baBoleh(req, res, ba.modul, ba.unit, "input")) return;
+  if (ba.status !== "MENUNGGU" && ba.status !== "DISETUJUI") return res.status(409).json({ error: "Berita acara ini sudah ditutup / dibatalkan" });
+  if (!baDigital(ba)) return res.status(400).json({ error: "Berita acara ini dibuat sebelum tanda tangan di aplikasi" });
   if (ba.status === "DISETUJUI" && ba.ttd?.[peran]) return res.status(409).json({ error: "Berita acara ini sudah disetujui; tanda tangan yang ada tidak bisa diganti" });
   const cara = req.body?.cara === "AKUN" ? "AKUN" : "LAYAR";
   const jabatan = String(req.body?.jabatan ?? ba.isian?.[peran]?.jabatan ?? "").trim().slice(0, 100);
   let isi: any;
   if (cara === "AKUN") {
-    const lain = Object.entries(ba.ttd ?? {}).find(([k, v]: [string, any]) => k !== peran && v?.cara === "AKUN" && v?.user_id === u.id);
+    // One person one signature - except the one handing over who also carries out the destruction (pj = pelaksana).
+    const pasangan = (a: string, b: string) => [a, b].sort().join() === "pelaksana,pj";
+    const lain = Object.entries(ba.ttd ?? {}).find(([k, v]: [string, any]) => k !== peran && !pasangan(k, peran) && v?.cara === "AKUN" && v?.user_id === u.id);
     if (lain && u.role !== "superuser") return res.status(403).json({ error: `Akun ini sudah menandatangani sebagai ${BA_PERAN_LABEL[lain[0]]}; satu orang satu tanda tangan` });
     isi = { cara, nama: u.nama, jabatan, user_id: u.id, at: new Date().toISOString() };
   } else {

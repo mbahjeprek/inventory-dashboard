@@ -223,6 +223,8 @@ export const kebunTerlihat = (_user: AuthUser | null) => false;
 export const DOKUMEN_PATH = "/dokumen";
 // Persetujuan: what waits for the account's signature - a box of a Permintaan Obat, a Berita Acara Pemusnahan to approve.
 export const PERSETUJUAN_PATH = "/persetujuan";
+export const persetujuanMenu = (user: AuthUser | null) =>
+  !!user && (user.role === "superuser" || [...TTD_PERMS, "ba.setujui", "koperasi.pelunasan", "koreksi.approve"].some((p) => can(user, p)));
 export const TTD_PERMS = ["klinik.ttd_dibuat", "klinik.ttd_diketahui", "klinik.ttd_disetujui1", "klinik.ttd_disetujui2"];
 // Daftar SOP: seen with Lihat, Ubah or Kunci Daftar SOP.
 export const SOP_PATH = "/sop";
@@ -265,7 +267,9 @@ export function pageAllowed(user: AuthUser | null, path: string): boolean {
   if (path === PINJAMAN_PATH) return MODULES.some((m) => canModule(user, m));
   if (path === PASIEN_PATH) return canModule(user, "KLINIK");
   if (path === DOKUMEN_PATH) return true;
-  if (path === PERSETUJUAN_PATH) return [...TTD_PERMS, "ba.setujui", "koperasi.pelunasan", "koreksi.approve"].some((p) => can(user, p));
+  // Persetujuan opens for every account (a Berita Acara may name anyone as pelaksana / saksi); the sidebar shows it
+  // to the accounts with an approval tick, and to the others while something waits for them (persetujuanMenu).
+  if (path === PERSETUJUAN_PATH) return true;
   if (path === SOP_PATH || path.startsWith(`${SOP_PATH}/`)) return ["sop.view", "sop.edit", "sop.kunci"].some((p) => can(user, p));
   if (path === KOPERASI_PATH) return can(user, "koperasi.view") && userEstates(user).includes(KOPERASI_ESTATE);
   if (path === KENDARAAN_PATH) return can(user, "kendaraan.view");

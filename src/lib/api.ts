@@ -1891,7 +1891,7 @@ export const api = {
   // Who does each step of a Barang Rusak / Expired flow of a unit (from the accounts' ticks), see PetugasAlur.
   petugas: (modul: "KOPERASI" | "KLINIK", unit: string) =>
     req<{ input: string[]; approve: string[]; ba: string[]; pengganti: string[] }>(`/api/petugas?${new URLSearchParams({ modul, unit })}`),
-  persetujuanJumlah: () => req<{ permintaan: number; ba: number; kop?: number; koreksi?: number; total: number }>("/api/persetujuan/jumlah"),
+  persetujuanJumlah: () => req<{ permintaan: number; ba: number; kop?: number; koreksi?: number; ba_ttd?: number; total: number }>("/api/persetujuan/jumlah"),
   // Pengajuan Koreksi Stok (Gudang / Klinik) of the account's estates; status MENUNGGU (default) or SEMUA.
   koreksiList: (params: { status?: "MENUNGGU" | "SEMUA"; module?: "GUDANG" | "KLINIK"; estate?: string } = {}) =>
     req<{ data: KoreksiPengajuan[] }>(`/api/koreksi-pengajuan?${new URLSearchParams(params as Record<string, string>)}`),
@@ -1906,6 +1906,8 @@ export const api = {
   baMenunggu: () => req<{ data: BeritaAcara[] }>("/api/berita-acara/menunggu"),
   baPersetujuan: (id: number, body: { aksi: "SETUJU" | "TOLAK"; alasan?: string }) =>
     req<{ success: boolean }>(`/api/berita-acara/${id}/persetujuan`, { method: "PUT", body: JSON.stringify(body) }),
+  // The BAs waiting for this account's signature as pelaksana / saksi (matched by the name on the BA).
+  baTtdSaya: () => req<{ data: { ba: BeritaAcara; peran: BaPeran[] }[] }>("/api/berita-acara/ttd-saya"),
   baTtd: (id: number, body: { peran: BaPeran; cara: "AKUN" | "LAYAR"; nama?: string; jabatan?: string; gambar?: string }) =>
     req<{ success: boolean }>(`/api/berita-acara/${id}/ttd`, { method: "PUT", body: JSON.stringify(body) }),
   baBatal: (id: number, alasan: string) => req<{ success: boolean }>(`/api/berita-acara/${id}/batal`, { method: "PUT", body: JSON.stringify({ alasan }) }),
