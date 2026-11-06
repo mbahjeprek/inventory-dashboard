@@ -935,8 +935,8 @@ function StatusSurat({ p }: { p: Pick<Permintaan, "status" | "approval" | "tolak
   );
 }
 
-// ---- Tanda tangan: the four boxes, signed in any order; an account signs (Setujui) an unsigned box it has the tick for,
-// or refuses with an alasan ----
+// ---- Tanda tangan: the four boxes, signed in order; the next box is signed (Setujui) or refused with an alasan by the
+// person named in it (or, when that name has no account, whoever has the tick) - the server says who (bisa_ttd) ----
 function TtdPanel({ p, onDone }: { p: Permintaan; onDone: () => void }) {
   const { user } = useAuth();
   const [tolakMode, setTolakMode] = useState(false);
@@ -946,7 +946,8 @@ function TtdPanel({ p, onDone }: { p: Permintaan; onDone: () => void }) {
   if (p.status === "DRAFT") return null;
   const sudahTtd = user?.role !== "superuser" && TTD_URUT.some((k) => p.approval?.[k]?.user_id === user?.id);
   // The unsigned boxes this account may sign now.
-  const bisa = p.status === "DIAJUKAN" && !sudahTtd ? TTD_URUT.filter((k) => !p.approval?.[k] && can(user, `klinik.ttd_${k}`)) : [];
+  const bisa = p.status === "DIAJUKAN" && !sudahTtd ? ((p as Permintaan & { bisa_ttd?: string[] }).bisa_ttd ?? []).filter((k): k is (typeof TTD_URUT)[number] => (TTD_URUT as readonly string[]).includes(k)) : [];
+  const berikut = TTD_URUT.find((k) => !p.approval?.[k]);
   const kirim = async (aksi: "SETUJU" | "TOLAK", level = bisa[0]) => {
     if (!level) return;
     if (aksi === "TOLAK" && alasan.trim().length < 3) return setError("Isi alasan penolakan");
@@ -988,7 +989,7 @@ function TtdPanel({ p, onDone }: { p: Permintaan; onDone: () => void }) {
               <p className="text-sm font-medium text-[var(--text-primary)] leading-tight mt-0.5">{a?.nama || p.ttd?.[k]?.nama || "-"}</p>
               <p className="text-[11px] text-[var(--text-muted)]">{a?.jabatan || p.ttd?.[k]?.jabatan}</p>
               <p className={`text-[11px] mt-0.5 ${a ? "text-[var(--accent-green)]" : now ? "text-[var(--accent-amber)]" : "text-[var(--text-muted)]"}`}>
-                {a ? `Ditandatangani ${waktuTtd(a.at)}` : now ? "Bisa Anda tandatangani" : "Belum"}
+                {a ? `Ditandatangani ${waktuTtd(a.at)}` : now ? "Giliran Anda tanda tangan" : k === berikut && p.status === "DIAJUKAN" ? "Giliran tanda tangan" : "Menunggu kotak sebelumnya"}
               </p>
               {now && bisa.length > 1 && (
                 <button onClick={() => kirim("SETUJU", k)} disabled={busy} className="mt-1.5 inline-flex items-center gap-1 text-xs px-2 py-1 rounded bg-[var(--accent-blue)] text-white hover:opacity-90 disabled:opacity-50">
@@ -1046,7 +1047,7 @@ function TtdPanel({ p, onDone }: { p: Permintaan; onDone: () => void }) {
       {p.status === "DIAJUKAN" && sudahTtd && <p className="text-xs text-[var(--text-muted)]">Anda sudah menandatangani permintaan ini; kotak lain ditandatangani orang lain.</p>}
       {p.status === "DIAJUKAN" && (
         <p className="text-[11px] text-[var(--text-muted)]">
-          Tanda tangan boleh dalam urutan apa saja. Approval per item (Sebagian / Ditolak dengan alasan) bisa diisi Diketahui / Disetujui sekarang; jumlah & tanggal
+          Tanda tangan berurutan: Dibuat oleh → Diketahui → Disetujui 1 → Disetujui 2; notifikasi dikirim ke penandatangan berikutnya. Approval per item (Sebagian / Ditolak dengan alasan) bisa diisi Diketahui / Disetujui sekarang; jumlah & tanggal
           pemenuhan terbuka setelah keempat kotak ditandatangani.
         </p>
       )}

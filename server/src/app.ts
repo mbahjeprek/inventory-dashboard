@@ -5257,10 +5257,9 @@ app.get("/api/klinik-permintaan/menunggu", async (req, res) => {
      FROM klinik_permintaan p WHERE p.status = 'DIAJUKAN' AND p.klinik = ANY(@kliniks) ORDER BY p.diajukan_at, p.id`,
     { kliniks }
   );
+  const akun = await akunEstate();
   res.json({
-    rows: rows
-      .map((r) => ({ ...r, bisa: TTD_LEVELS.filter((k) => !r.approval?.[k] && bolehTtd(u, k)) }))
-      .filter((r) => r.bisa.length && !(u.role !== "superuser" && TTD_LEVELS.some((k) => r.approval?.[k]?.user_id === u.id))),
+    rows: rows.map((r) => ({ ...r, bisa: permintaanBisaTtd(u, r, akun) })).filter((r) => r.bisa.length),
   });
 });
 
@@ -5269,7 +5268,7 @@ app.get("/api/klinik-permintaan/:id", async (req, res) => {
   if (!p) return res.status(404).json({ error: "Permintaan tidak ditemukan" });
   if (!checkKlinik(req, res, p.klinik)) return;
   const lines = await queryMany("SELECT * FROM klinik_permintaan_line WHERE permintaan_id = @id ORDER BY urut, id", { id: p.id });
-  res.json({ ...p, lines });
+  res.json({ ...p, lines, bisa_ttd: permintaanBisaTtd(req.user!, p, await akunEstate()) });
 });
 
 type PLine = { obat_kode: string | null; nama: string; satuan: string; jumlah: number; urgensi: string; stok: number | null; stok_text: string; keterangan: string };
@@ -5467,9 +5466,20 @@ const TTD_LEVELS = ["dibuat", "diketahui", "disetujui1", "disetujui2"] as const;
 const TTD_LEVEL_LABEL: Record<string, string> = { dibuat: "Dibuat oleh", diketahui: "Diketahui", disetujui1: "Disetujui 1", disetujui2: "Disetujui 2" };
 const ttdBerikut = (approval: any) => TTD_LEVELS.find((k) => !approval?.[k]) ?? null;
 const bolehTtd = (u: SessionUser, level: string) => u.role === "superuser" || u.perms.includes(`klinik.ttd_${level}`);
+// The four boxes are signed in order (Dibuat oleh -> Diketahui -> Disetujui 1 -> Disetujui 2): only the next box can be
+// signed, and it is offered (and notified) to the person named in it when that name is an account of the klinik's
+// estate - else to every account with the tick for it. A Super User may stand in. Returns [] or [the next level].
+function permintaanBisaTtd(u: SessionUser, p: any, akun: AkunNama[]): string[] {
+  const level = ttdBerikut(p.approval);
+  if (!level || p.status !== "DIAJUKAN" || !bolehTtd(u, level)) return [];
+  if (u.role === "superuser") return [level];
+  if (TTD_LEVELS.some((k) => p.approval?.[k]?.user_id === u.id)) return [];
+  const ditunjuk = baDitunjuk({ unit: p.klinik, isian: p.ttd }, level, akun);
+  return ditunjuk === null || ditunjuk === u.id ? [level] : [];
+}
 
-// Sign (SETUJU) or refuse (TOLAK, with alasan) a box (body.level, else the first unsigned one the account may sign),
-// in any order. One account signs one box of a request (a Super User may sign any). The fourth signature makes it
+// Sign (SETUJU) or refuse (TOLAK, with alasan) the next box (Dibuat oleh, Diketahui, Disetujui 1, Disetujui 2 in this
+// order; see permintaanBisaTtd). One account signs one box of a request (a Super User may sign any). The fourth signature makes it
 // DISETUJUI; a refusal sends it back to the klinik as a draft.
 app.post("/api/klinik-permintaan/:id/ttd", async (req, res) => {
   const u = req.user!;
@@ -5477,12 +5487,16 @@ app.post("/api/klinik-permintaan/:id/ttd", async (req, res) => {
   if (!p) return res.status(404).json({ error: "Permintaan tidak ditemukan" });
   if (!checkKlinik(req, res, p.klinik)) return;
   if (p.status !== "DIAJUKAN") return res.status(400).json({ error: p.status === "DRAFT" ? "Permintaan belum diajukan" : "Permintaan sudah ditandatangani lengkap" });
-  const level = req.body?.level ? String(req.body.level) : TTD_LEVELS.find((k) => !p.approval?.[k] && bolehTtd(u, k));
+  const berikut = ttdBerikut(p.approval);
+  const level = req.body?.level ? String(req.body.level) : berikut;
   if (!level || !(TTD_LEVELS as readonly string[]).includes(level)) return res.status(403).json({ error: "Tidak ada kotak yang bisa ditandatangani akun ini" });
   if (p.approval?.[level]) return res.status(409).json({ error: `Kotak ${TTD_LEVEL_LABEL[level]} sudah ditandatangani ${p.approval[level].nama}` });
+  if (level !== berikut) return res.status(409).json({ error: `Tanda tangan berurutan: tunggu kotak ${TTD_LEVEL_LABEL[berikut!]} ditandatangani dulu` });
   if (!bolehTtd(u, level)) return res.status(403).json({ error: `Akun ini tidak punya hak Tanda tangan Permintaan Obat (${TTD_LEVEL_LABEL[level]})` });
   if (u.role !== "superuser" && TTD_LEVELS.some((k) => p.approval?.[k]?.user_id === u.id))
     return res.status(403).json({ error: "Akun ini sudah menandatangani permintaan ini di kotak lain; satu orang satu tanda tangan" });
+  if (!permintaanBisaTtd(u, p, await akunEstate()).length)
+    return res.status(403).json({ error: `Kotak ${TTD_LEVEL_LABEL[level]} untuk ${p.ttd?.[level]?.nama || "orang lain"}; ditandatangani dengan akunnya sendiri` });
   const jabatan = String(p.ttd?.[level]?.jabatan ?? "");
   if (req.body?.aksi === "TOLAK") {
     const alasan = String(req.body?.alasan ?? "").trim().slice(0, 500);
@@ -9799,12 +9813,11 @@ app.get("/api/persetujuan/jumlah", async (req, res) => {
   const u = req.user!;
   let permintaan = 0;
   if (u.role === "superuser" || TTD_PERMS.some((x) => u.perms.includes(x))) {
-    const rows = await queryMany<{ approval: any }>("SELECT approval FROM klinik_permintaan WHERE status = 'DIAJUKAN' AND klinik = ANY(@kliniks)", {
+    const rows = await queryMany<any>("SELECT klinik, status, approval, ttd FROM klinik_permintaan WHERE status = 'DIAJUKAN' AND klinik = ANY(@kliniks)", {
       kliniks: KLINIK_OPTIONS.filter((k) => estateAllowed(u, k)),
     });
-    permintaan = rows.filter(
-      (r) => TTD_LEVELS.some((k) => !r.approval?.[k] && bolehTtd(u, k)) && !(u.role !== "superuser" && TTD_LEVELS.some((k) => r.approval?.[k]?.user_id === u.id))
-    ).length;
+    const akun = rows.length ? await akunEstate() : [];
+    permintaan = rows.filter((r) => permintaanBisaTtd(u, r, akun).length).length;
   }
   const units = baUnitSetuju(u);
   const ba = units.length
