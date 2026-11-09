@@ -1,7 +1,7 @@
 import { useSearchParams } from "react-router-dom";
 import { Boxes, ArrowDownCircle, ArrowUpCircle, ClipboardList, HeartPulse, PackageX } from "lucide-react";
 
-// laporan = Laporan Harian pasien, rusak = obat expired / rusak / retur and permintaan = Permintaan Obat,
+// laporan = Laporan Harian pasien, rusak = obat expired / rusak / retur and permintaan = Permintaan Obat / Barang (non-obat),
 // only on the Klinik pages.
 export type InventoryTab = "stok" | "in" | "out" | "rusak" | "laporan" | "permintaan";
 
@@ -11,7 +11,7 @@ const TABS: { key: InventoryTab; label: string; icon: typeof Boxes }[] = [
   { key: "out", label: "Stock Out", icon: ArrowUpCircle },
   { key: "rusak", label: "Expired & Rusak", icon: PackageX },
   { key: "laporan", label: "Laporan Harian", icon: HeartPulse },
-  { key: "permintaan", label: "Permintaan Obat", icon: ClipboardList },
+  { key: "permintaan", label: "Permintaan Obat/Barang", icon: ClipboardList },
 ];
 
 // The active tab lives in the URL (?tab=in / ?tab=out) so a tab can be linked and survives a reload.
