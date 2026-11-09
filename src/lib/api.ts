@@ -824,6 +824,35 @@ export type ChatRoom = {
 export type ChatMessage = { id: number; user_id: number; nama: string; isi: string; evidence_id: string | null; link_url: string | null; link_label: string | null; created_at: string };
 
 // Berita Acara Pemusnahan (Klinik / Koperasi): the stored document and its approval (capture WA) and closing.
+// Permintaan Barang Klinik (non-obat): the klinik's letter; signed in the app Dimohon -> Diperiksa -> Disetujui Oleh,
+// or uploaded signed on paper (offline, with the photos).
+export type SbOrang = { nama: string; jabatan: string };
+export type SbItem = { nama: string; type: string; qty: number; satuan: string; keterangan: string };
+export type SbTtdOleh = { nama: string; user_id?: number; at: string; offline?: boolean; fotos?: string[]; upload_oleh?: string };
+export type SbBox = "dimohon" | "diperiksa" | "disetujui";
+export interface SuratBarang {
+  id: number;
+  klinik: string;
+  nomor: string;
+  tanggal: string;
+  perihal: string;
+  kepada: SbOrang;
+  cc: SbOrang[];
+  dari: SbOrang;
+  keperluan: string;
+  items: SbItem[];
+  ttd: Partial<Record<SbBox, { nama: string }>>;
+  status: "DRAFT" | "DIAJUKAN" | "DISETUJUI";
+  approval: Partial<Record<SbBox, SbTtdOleh>>;
+  tolak: { level: SbBox; nama: string; alasan: string; at: string } | null;
+  created_by: string;
+  created_at: string;
+  diajukan_at: string | null;
+  bisa_ttd?: SbBox[];
+}
+export type SuratBarangRow = Pick<SuratBarang, "id" | "klinik" | "nomor" | "tanggal" | "perihal" | "status" | "approval" | "tolak" | "created_by" | "created_at" | "diajukan_at"> & { items: number };
+export type SuratBarangInput = Pick<SuratBarang, "nomor" | "tanggal" | "perihal" | "kepada" | "cc" | "dari" | "keperluan" | "items" | "ttd"> & { klinik: string; ajukan?: boolean };
+
 // Approved Rusak / Tarik rows not yet on an active BA, per month (periode YYYY-MM).
 export interface BaBelum {
   n: number;
@@ -1897,13 +1926,24 @@ export const api = {
   kopAddAnggota: (body: Partial<KopAnggota>) => req<{ kode: string }>("/api/koperasi/anggota", { method: "POST", body: JSON.stringify(body) }),
   kopSaveAnggota: (kode: string, body: Partial<KopAnggota>) => req<{ success: boolean }>(`/api/koperasi/anggota/${encodeURIComponent(kode)}`, { method: "PUT", body: JSON.stringify(body) }),
   baList: (modul: string, unit: string) => req<{ data: BeritaAcara[]; terpakai: number[]; belum: BaBelum }>(`/api/berita-acara?${new URLSearchParams({ modul, unit })}`),
+  sbList: (klinik: string) =>
+    req<{ rows: SuratBarangRow[]; last: Pick<SuratBarang, "nomor" | "kepada" | "cc" | "dari" | "ttd"> | null }>(`/api/klinik-surat-barang?${new URLSearchParams({ klinik })}`),
+  sbGet: (id: number) => req<SuratBarang>(`/api/klinik-surat-barang/${id}`),
+  sbMenunggu: () => req<{ rows: (SuratBarang & { bisa: SbBox[] })[] }>("/api/klinik-surat-barang/menunggu"),
+  sbCreate: (body: SuratBarangInput) => req<{ success: boolean; id: number }>("/api/klinik-surat-barang", { method: "POST", body: JSON.stringify(body) }),
+  sbUpdate: (id: number, body: SuratBarangInput) => req<{ success: boolean }>(`/api/klinik-surat-barang/${id}`, { method: "PUT", body: JSON.stringify(body) }),
+  sbDelete: (id: number) => req<{ success: boolean }>(`/api/klinik-surat-barang/${id}`, { method: "DELETE" }),
+  sbTtd: (id: number, body: { level: SbBox; aksi: "SETUJU" | "TOLAK"; alasan?: string }) =>
+    req<{ success: boolean; status: SuratBarang["status"] }>(`/api/klinik-surat-barang/${id}/ttd`, { method: "POST", body: JSON.stringify(body) }),
+  sbSuratOffline: (id: number, body: { evidence_ids: string[]; ttd: Partial<Record<SbBox, { nama: string }>> }) =>
+    req<{ success: boolean; status: SuratBarang["status"] }>(`/api/klinik-surat-barang/${id}/surat-offline`, { method: "POST", body: JSON.stringify(body) }),
   baBelum: (modul: string, unit: string) => req<BaBelum>(`/api/berita-acara/belum?${new URLSearchParams({ modul, unit })}`),
   baBuat: (body: { modul: string; unit: string; tanggal: string; isian: Record<string, any>; ref_ids: number[] }) =>
     req<{ id: number; nomor: string }>("/api/berita-acara", { method: "POST", body: JSON.stringify(body) }),
   // Who does each step of a Barang Rusak / Expired flow of a unit (from the accounts' ticks), see PetugasAlur.
   petugas: (modul: "KOPERASI" | "KLINIK", unit: string) =>
     req<{ input: string[]; approve: string[]; ba: string[]; pengganti: string[] }>(`/api/petugas?${new URLSearchParams({ modul, unit })}`),
-  persetujuanJumlah: () => req<{ permintaan: number; ba: number; kop?: number; koreksi?: number; ba_ttd?: number; total: number }>("/api/persetujuan/jumlah"),
+  persetujuanJumlah: () => req<{ permintaan: number; ba: number; kop?: number; koreksi?: number; ba_ttd?: number; barang?: number; total: number }>("/api/persetujuan/jumlah"),
   // Pengajuan Koreksi Stok (Gudang / Klinik) of the account's estates; status MENUNGGU (default) or SEMUA.
   koreksiList: (params: { status?: "MENUNGGU" | "SEMUA"; module?: "GUDANG" | "KLINIK"; estate?: string } = {}) =>
     req<{ data: KoreksiPengajuan[] }>(`/api/koreksi-pengajuan?${new URLSearchParams(params as Record<string, string>)}`),

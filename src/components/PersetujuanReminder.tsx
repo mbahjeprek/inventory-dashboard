@@ -31,6 +31,7 @@ export function PersetujuanReminder() {
   const baris = [
     jumlah.ba > 0 && `${jumlah.ba} Berita Acara Pemusnahan menunggu persetujuan Anda`,
     jumlah.permintaan > 0 && `${jumlah.permintaan} Permintaan Obat menunggu tanda tangan Anda`,
+    !!jumlah.barang && `${jumlah.barang} Permintaan Barang Klinik menunggu tanda tangan Anda`,
     !!jumlah.kop && `${jumlah.kop} Permintaan Barang Koperasi menunggu persetujuan Anda`,
     !!jumlah.koreksi && `${jumlah.koreksi} Koreksi Stok menunggu persetujuan Anda`,
     !!jumlah.ba_ttd && `${jumlah.ba_ttd} Berita Acara Pemusnahan menunggu tanda tangan Anda (pelaksana / saksi)`,

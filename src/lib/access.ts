@@ -57,7 +57,9 @@ export const OTHER_PERMS: { group: string; items: { key: string; label: string }
       { key: "klinik.ttd_diketahui", label: "Tanda tangan Permintaan Obat: Diketahui (GM Finance & Audit)" },
       { key: "klinik.ttd_disetujui1", label: "Tanda tangan Permintaan Obat: Disetujui 1 (Corporate GM Plantation)" },
       { key: "klinik.ttd_disetujui2", label: "Tanda tangan Permintaan Obat: Disetujui 2 (Head of Business Unit)" },
-      { key: "klinik.ttd_offline", label: "Upload surat Permintaan Obat yang sudah ditandatangani lengkap di kertas (langsung Disetujui, approval item sesuai surat)" },
+      { key: "klinik.barang_ttd_diperiksa", label: "Tanda tangan Permintaan Barang Klinik (non-obat): Diperiksa Oleh" },
+      { key: "klinik.barang_ttd_disetujui", label: "Tanda tangan Permintaan Barang Klinik (non-obat): Disetujui Oleh" },
+      { key: "klinik.ttd_offline", label: "Upload surat Permintaan Obat / Barang Klinik yang sudah ditandatangani lengkap di kertas (langsung Disetujui; Permintaan Obat: approval item sesuai surat)" },
       { key: "klinik.permintaan_approve", label: "Approve Permintaan Obat per item tanpa tanda tangan (Diketahui / Disetujui otomatis boleh; sebagian & tolak wajib alasan)" },
     ],
   },
@@ -225,7 +227,7 @@ export const DOKUMEN_PATH = "/dokumen";
 // Persetujuan: what waits for the account's signature - a box of a Permintaan Obat, a Berita Acara Pemusnahan to approve.
 export const PERSETUJUAN_PATH = "/persetujuan";
 export const persetujuanMenu = (user: AuthUser | null) =>
-  !!user && (user.role === "superuser" || [...TTD_PERMS, "ba.setujui", "koperasi.pelunasan", "koreksi.approve"].some((p) => can(user, p)));
+  !!user && (user.role === "superuser" || [...TTD_PERMS, "klinik.barang_ttd_diperiksa", "klinik.barang_ttd_disetujui", "ba.setujui", "koperasi.pelunasan", "koreksi.approve"].some((p) => can(user, p)));
 export const TTD_PERMS = ["klinik.ttd_dibuat", "klinik.ttd_diketahui", "klinik.ttd_disetujui1", "klinik.ttd_disetujui2"];
 // Daftar SOP: seen with Lihat, Ubah or Kunci Daftar SOP.
 export const SOP_PATH = "/sop";

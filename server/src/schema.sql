@@ -1374,6 +1374,36 @@ CREATE TABLE IF NOT EXISTS koreksi_pengajuan (
 CREATE UNIQUE INDEX IF NOT EXISTS uq_koreksi_menunggu ON koreksi_pengajuan(module, estate, kode) WHERE status = 'MENUNGGU';
 CREATE INDEX IF NOT EXISTS idx_koreksi_status ON koreksi_pengajuan(status, estate);
 
+-- Permintaan Barang Klinik (non-obat, e.g. a printer): the klinik's letter as its template (kop, Nomor typed by hand,
+-- Perihal, Kepada Yth, cc, Dari, keperluan, the barang table, Dimohon / Diperiksa / Disetujui Oleh).
+-- kepada / dari = { nama, jabatan }, cc = [{ nama, jabatan }], items = [{ nama, type, qty, satuan, keterangan }],
+-- ttd = the names planned in the three boxes { dimohon, diperiksa, disetujui: { nama } }. Signed in the app in that
+-- order once sent (DRAFT -> DIAJUKAN -> DISETUJUI): approval = { box: { nama, user_id, at } } - or from the paper letter
+-- signed in full and uploaded (box { nama, at, offline, fotos, upload_oleh }). A refusal (with alasan) sends it back
+-- to DRAFT, clears the signatures and is kept in tolak { level, nama, alasan, at }.
+CREATE TABLE IF NOT EXISTS klinik_surat_barang (
+  id SERIAL PRIMARY KEY,
+  klinik TEXT NOT NULL,
+  nomor TEXT NOT NULL DEFAULT '',
+  tanggal TEXT NOT NULL,
+  perihal TEXT NOT NULL DEFAULT '',
+  kepada JSONB NOT NULL DEFAULT '{}'::jsonb,
+  cc JSONB NOT NULL DEFAULT '[]'::jsonb,
+  dari JSONB NOT NULL DEFAULT '{}'::jsonb,
+  keperluan TEXT NOT NULL DEFAULT '',
+  items JSONB NOT NULL DEFAULT '[]'::jsonb,
+  ttd JSONB NOT NULL DEFAULT '{}'::jsonb,
+  status TEXT NOT NULL DEFAULT 'DRAFT',
+  approval JSONB NOT NULL DEFAULT '{}'::jsonb,
+  tolak JSONB,
+  user_id INTEGER,
+  created_by TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  diajukan_at TIMESTAMPTZ,
+  updated_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_klinik_surat_barang ON klinik_surat_barang(klinik, tanggal);
+
 -- Lock the database to this app's server: Supabase also exposes every public table through its REST API to the anon /
 -- authenticated roles. The app never uses them (its server connects as postgres, which RLS doesn't apply to; photos use
 -- the service key), so: RLS on for every table (no policies = nothing for those roles), their rights taken back, and the

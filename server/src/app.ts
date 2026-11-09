@@ -200,6 +200,7 @@ type Need = string[] | "super" | null;
 const KEBUN_HANYA_SUPER = true;
 const TTD_PERMS = ["klinik.ttd_dibuat", "klinik.ttd_diketahui", "klinik.ttd_disetujui1", "klinik.ttd_disetujui2"];
 // The signers who may also approve / refuse single items (Sebagian / Ditolak with an alasan): Finance, GM, Head.
+const SB_TTD_PERMS_REQ = ["klinik.input", "klinik.barang_ttd_diperiksa", "klinik.barang_ttd_disetujui"];
 const TTD_ITEM_PERMS = ["klinik.ttd_diketahui", "klinik.ttd_disetujui1", "klinik.ttd_disetujui2"];
 // Their rank for an item's decision: a higher one may change a lower one's, not the other way round.
 const ITEM_RANK_LABEL = ["Approve Permintaan Obat", "Diketahui (Finance)", "Disetujui 1 (GM)", "Disetujui 2 (Head)", "Super User"];
@@ -272,6 +273,12 @@ function requiredPerms(req: express.Request): Need {
   if (is(/^\/klinik-permintaan\/\d+$/) && m === "GET") return ["klinik.view", ...TTD_PERMS];
   // Pemenuhan: dipenuhi / tanggal with Input Klinik, the status approval with Approve Permintaan Obat (checked in the route).
   if (is(/^\/klinik-permintaan\/\d+\/pemenuhan$/)) return ["klinik.input", "klinik.permintaan_approve", ...TTD_ITEM_PERMS];
+  // Permintaan Barang Klinik (non-obat): Lihat / Input / Hapus Klinik; the waiting list and signing with a box's tick
+  // (Dimohon = Input Klinik; the route checks which box is next); the uploaded paper letter with its own tick.
+  if (is(/^\/klinik-surat-barang\/(menunggu|\d+\/ttd)$/)) return SB_TTD_PERMS_REQ;
+  if (is(/^\/klinik-surat-barang\/\d+\/surat-offline$/)) return ["klinik.ttd_offline"];
+  if (is(/^\/klinik-surat-barang\/\d+$/) && m === "GET") return ["klinik.view", ...SB_TTD_PERMS_REQ];
+  if (is(/^\/klinik-surat-barang(\/|$)/)) return m === "GET" ? ["klinik.view"] : m === "DELETE" ? ["klinik.delete"] : ["klinik.input"];
   if (is(/^\/klinik-permintaan(-rekap)?(\/|$)/)) return m === "GET" ? ["klinik.view"] : m === "DELETE" ? ["klinik.delete"] : ["klinik.input"];
   // Master Pasien: the patients of the account's clinics (estate checked in the route).
   if (is(/^\/pasien(\/|$)/)) return [`klinik.${act}`];
@@ -332,7 +339,7 @@ const permLabel = (p: string) => {
   if (PERM_MODUL[m]) return `${PERM_AKSI[a] ?? a} ${PERM_MODUL[m]}`;
   const other: Record<string, string> = { "dokumen.edit": "Dokumen & Link", "dokumen.kelola": "Kelola semua Dokumen & Link", "klinik.permintaan_approve": "Approve Permintaan Obat", "ba.setujui": "Setujui Berita Acara Pemusnahan", "klinik.ttd_dibuat": "Tanda tangan Permintaan Obat (Dibuat oleh)",
     "klinik.ttd_diketahui": "Tanda tangan Permintaan Obat (Diketahui)", "klinik.ttd_disetujui1": "Tanda tangan Permintaan Obat (Disetujui 1)",
-    "klinik.ttd_disetujui2": "Tanda tangan Permintaan Obat (Disetujui 2)", "klinik.ttd_offline": "Upload surat Permintaan Obat bertanda tangan", "sop.view": "Lihat Daftar SOP", "sop.edit": "Ubah Daftar SOP", "sop.kunci": "Kunci Daftar SOP", "master.peta": "Lihat Peta Blok", "master.peta_edit": "Ubah Peta Blok", "master.alat": "Master Alat Berat", "master.users": "Pengguna", "monitor.log_user": "Log Aktivitas User" };
+    "klinik.ttd_disetujui2": "Tanda tangan Permintaan Obat (Disetujui 2)", "klinik.ttd_offline": "Upload surat Permintaan Obat / Barang bertanda tangan", "klinik.barang_ttd_diperiksa": "Tanda tangan Permintaan Barang Klinik (Diperiksa Oleh)", "klinik.barang_ttd_disetujui": "Tanda tangan Permintaan Barang Klinik (Disetujui Oleh)", "sop.view": "Lihat Daftar SOP", "sop.edit": "Ubah Daftar SOP", "sop.kunci": "Kunci Daftar SOP", "master.peta": "Lihat Peta Blok", "master.peta_edit": "Ubah Peta Blok", "master.alat": "Master Alat Berat", "master.users": "Pengguna", "monitor.log_user": "Log Aktivitas User" };
   return other[p] ?? (m === "master" ? `Master ${a.charAt(0).toUpperCase()}${a.slice(1)}` : p);
 };
 
@@ -5614,6 +5621,226 @@ app.delete("/api/klinik-permintaan/:id", async (req, res) => {
   res.json({ success: true });
 });
 
+// ---- Permintaan Barang Klinik (non-obat): the klinik's letter (see schema.sql klinik_surat_barang) ----
+// Three boxes signed in order: Dimohon Oleh (the klinik staff, Input Klinik), Diperiksa Oleh, Disetujui Oleh (each its
+// own tick). The next box is offered to the person named in it when that name is an account of the klinik's estate,
+// else to every account allowed to sign it; a Super User may stand in. One account signs one box.
+const SB_LEVELS = ["dimohon", "diperiksa", "disetujui"] as const;
+const SB_LABEL: Record<string, string> = { dimohon: "Dimohon Oleh", diperiksa: "Diperiksa Oleh", disetujui: "Disetujui Oleh" };
+const SB_PERM: Record<string, string> = { dimohon: "klinik.input", diperiksa: "klinik.barang_ttd_diperiksa", disetujui: "klinik.barang_ttd_disetujui" };
+const sbBerikut = (approval: any) => SB_LEVELS.find((k) => !approval?.[k]) ?? null;
+function sbBisaTtd(u: SessionUser, s: any, akun: AkunNama[]): string[] {
+  const level = sbBerikut(s.approval);
+  if (!level || s.status !== "DIAJUKAN" || !estateAllowed(u, s.klinik)) return [];
+  if (u.role === "superuser") return [level];
+  if (!u.perms.includes(SB_PERM[level])) return [];
+  if (SB_LEVELS.some((k) => s.approval?.[k]?.user_id === u.id)) return [];
+  const ditunjuk = baDitunjuk({ unit: s.klinik, isian: s.ttd }, level, akun);
+  return ditunjuk === null || ditunjuk === u.id ? [level] : [];
+}
+const sbItemsTeks = (items: any[]) => items.slice(0, 40).map((i) => `${i.nama}${i.type ? ` ${i.type}` : ""} ${fmtQty(i.qty)} ${i.satuan}`.trim()).join("; ");
+
+function suratBarangBody(req: express.Request): { error?: string; v?: any } {
+  const b = req.body ?? {};
+  const tanggal = String(b.tanggal ?? "");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(tanggal)) return { error: "Tanggal tidak valid" };
+  const teks = (x: unknown, n: number) => String(x ?? "").trim().slice(0, n);
+  const orang = (o: any) => ({ nama: teks(o?.nama, 100), jabatan: teks(o?.jabatan, 100) });
+  const items = (Array.isArray(b.items) ? b.items : []).slice(0, 100).map((i: any) => ({
+    nama: teks(i?.nama, 200),
+    type: teks(i?.type, 200),
+    qty: Number(i?.qty),
+    satuan: teks(i?.satuan, 30),
+    keterangan: teks(i?.keterangan, 300),
+  }));
+  if (!items.length) return { error: "Isi minimal satu barang" };
+  const bad = items.find((i: any) => !i.nama || !Number.isFinite(i.qty) || i.qty <= 0);
+  if (bad) return { error: bad.nama ? `${bad.nama}: qty harus lebih dari 0` : "Ada baris tanpa nama barang" };
+  const t = b.ttd ?? {};
+  return {
+    v: {
+      tanggal,
+      nomor: teks(b.nomor, 120),
+      perihal: teks(b.perihal, 300),
+      kepada: JSON.stringify(orang(b.kepada)),
+      cc: JSON.stringify((Array.isArray(b.cc) ? b.cc : []).slice(0, 6).map(orang).filter((o: any) => o.nama)),
+      dari: JSON.stringify(orang(b.dari)),
+      keperluan: teks(b.keperluan, 500),
+      items: JSON.stringify(items),
+      ttd: JSON.stringify(Object.fromEntries(SB_LEVELS.map((k) => [k, { nama: teks(t?.[k]?.nama, 100) }]))),
+      n: items.length,
+      teks: sbItemsTeks(items),
+    },
+  };
+}
+// Sending needs what the letter can't go without.
+const sbSiap = (v: any) => {
+  const kepada = JSON.parse(v.kepada);
+  const ttd = JSON.parse(v.ttd);
+  if (!v.nomor) return "Isi nomor surat";
+  if (!v.perihal) return "Isi perihal";
+  if (!kepada.nama) return "Isi Kepada Yth";
+  if (!JSON.parse(v.dari).nama) return "Isi Dari";
+  const kosong = SB_LEVELS.find((k) => !ttd[k]?.nama);
+  return kosong ? `Isi nama ${SB_LABEL[kosong]}` : null;
+};
+
+app.get("/api/klinik-surat-barang", async (req, res) => {
+  const klinik = String(req.query.klinik ?? "");
+  if (!checkKlinik(req, res, klinik)) return;
+  const rows = await queryMany(
+    `SELECT id, klinik, nomor, tanggal, perihal, status, approval, tolak, created_by, created_at, diajukan_at, jsonb_array_length(items)::int items
+       FROM klinik_surat_barang WHERE klinik = @klinik ORDER BY tanggal DESC, id DESC`,
+    { klinik }
+  );
+  // A new letter starts from the klinik's last one (addressees, signers, nomor format).
+  const last = await queryOne("SELECT nomor, kepada, cc, dari, ttd FROM klinik_surat_barang WHERE klinik = @klinik ORDER BY id DESC LIMIT 1", { klinik });
+  res.json({ rows, last: last ?? null });
+});
+
+app.get("/api/klinik-surat-barang/menunggu", async (req, res) => {
+  const u = req.user!;
+  const rows = await queryMany<any>("SELECT * FROM klinik_surat_barang WHERE status = 'DIAJUKAN' AND klinik = ANY(@kliniks) ORDER BY diajukan_at, id", {
+    kliniks: KLINIK_OPTIONS.filter((k) => estateAllowed(u, k)),
+  });
+  const akun = rows.length ? await akunEstate() : [];
+  res.json({ rows: rows.map((r) => ({ ...r, bisa: sbBisaTtd(u, r, akun) })).filter((r) => r.bisa.length) });
+});
+
+app.get("/api/klinik-surat-barang/:id", async (req, res) => {
+  const s = await queryOne<any>("SELECT * FROM klinik_surat_barang WHERE id = @id", { id: Number(req.params.id) || 0 });
+  if (!s) return res.status(404).json({ error: "Surat tidak ditemukan" });
+  if (!checkKlinik(req, res, s.klinik)) return;
+  res.json({ ...s, bisa_ttd: sbBisaTtd(req.user!, s, await akunEstate()) });
+});
+
+app.post("/api/klinik-surat-barang", async (req, res) => {
+  const klinik = String(req.body?.klinik ?? "");
+  if (!checkKlinik(req, res, klinik)) return;
+  const { error, v } = suratBarangBody(req);
+  if (error) return res.status(400).json({ error });
+  const ajukan = req.body?.ajukan === true;
+  if (ajukan && sbSiap(v)) return res.status(400).json({ error: sbSiap(v) });
+  const u = req.user!;
+  const s = await queryOne<{ id: number }>(
+    `INSERT INTO klinik_surat_barang (klinik, nomor, tanggal, perihal, kepada, cc, dari, keperluan, items, ttd, status, user_id, created_by, diajukan_at)
+     VALUES (@klinik, @nomor, @tanggal, @perihal, @kepada::jsonb, @cc::jsonb, @dari::jsonb, @keperluan, @items::jsonb, @ttd::jsonb, @status, @uid, @nama, ${ajukan ? "now()" : "NULL"}) RETURNING id`,
+    { klinik, ...v, status: ajukan ? "DIAJUKAN" : "DRAFT", uid: u.id, nama: u.nama }
+  );
+  await logActivity(req, { module: "KLINIK", estate: klinik, aksi: ajukan ? "Ajukan Permintaan Barang Klinik" : "Buat Permintaan Barang Klinik", objek: `${v.nomor || "(tanpa nomor)"} · ${v.perihal}`, detail: v.teks });
+  res.json({ success: true, id: s!.id });
+});
+
+// Edit a draft (or send it with ajukan); a letter already sent is only signed.
+app.put("/api/klinik-surat-barang/:id", async (req, res) => {
+  const s = await queryOne<any>("SELECT * FROM klinik_surat_barang WHERE id = @id", { id: Number(req.params.id) || 0 });
+  if (!s) return res.status(404).json({ error: "Surat tidak ditemukan" });
+  if (!checkKlinik(req, res, s.klinik)) return;
+  if (s.status !== "DRAFT") return res.status(400).json({ error: "Surat sudah diajukan; isinya tidak bisa diubah lagi" });
+  const { error, v } = suratBarangBody(req);
+  if (error) return res.status(400).json({ error });
+  const ajukan = req.body?.ajukan === true;
+  if (ajukan && sbSiap(v)) return res.status(400).json({ error: sbSiap(v) });
+  await execute(
+    `UPDATE klinik_surat_barang SET nomor = @nomor, tanggal = @tanggal, perihal = @perihal, kepada = @kepada::jsonb, cc = @cc::jsonb, dari = @dari::jsonb, keperluan = @keperluan,
+       items = @items::jsonb, ttd = @ttd::jsonb, status = @status, approval = '{}'::jsonb, diajukan_at = ${ajukan ? "now()" : "NULL"}${ajukan ? ", tolak = NULL" : ""}, updated_at = now()
+     WHERE id = @id AND status = 'DRAFT'`,
+    { ...v, status: ajukan ? "DIAJUKAN" : "DRAFT", id: s.id }
+  );
+  await logActivity(req, { module: "KLINIK", estate: s.klinik, aksi: ajukan ? "Ajukan Permintaan Barang Klinik" : "Ubah Permintaan Barang Klinik", objek: `${v.nomor || "(tanpa nomor)"} · ${v.perihal}`, detail: v.teks });
+  res.json({ success: true });
+});
+
+app.delete("/api/klinik-surat-barang/:id", async (req, res) => {
+  const s = await queryOne<any>("SELECT * FROM klinik_surat_barang WHERE id = @id", { id: Number(req.params.id) || 0 });
+  if (!s) return res.status(404).json({ error: "Surat tidak ditemukan" });
+  if (!checkKlinik(req, res, s.klinik)) return;
+  if (s.status !== "DRAFT" && req.user!.role !== "superuser") return res.status(400).json({ error: "Surat yang sudah diajukan hanya bisa dihapus Super User" });
+  await execute("DELETE FROM klinik_surat_barang WHERE id = @id", { id: s.id });
+  await logActivity(req, { module: "KLINIK", estate: s.klinik, aksi: "Hapus Permintaan Barang Klinik", objek: `${s.nomor} · ${s.perihal}`, detail: `Status ${s.status}` });
+  res.json({ success: true });
+});
+
+// Sign (SETUJU) or refuse (TOLAK, with alasan; back to the klinik as a draft) the next box.
+app.post("/api/klinik-surat-barang/:id/ttd", async (req, res) => {
+  const u = req.user!;
+  const s = await queryOne<any>("SELECT * FROM klinik_surat_barang WHERE id = @id", { id: Number(req.params.id) || 0 });
+  if (!s) return res.status(404).json({ error: "Surat tidak ditemukan" });
+  if (!checkKlinik(req, res, s.klinik)) return;
+  if (s.status !== "DIAJUKAN") return res.status(400).json({ error: s.status === "DRAFT" ? "Surat belum diajukan" : "Surat sudah ditandatangani lengkap" });
+  const level = sbBerikut(s.approval)!;
+  if (req.body?.level && req.body.level !== level) return res.status(409).json({ error: `Tanda tangan berurutan: sekarang giliran ${SB_LABEL[level]}` });
+  if (!sbBisaTtd(u, s, await akunEstate()).length)
+    return res.status(403).json({ error: `Kotak ${SB_LABEL[level]} untuk ${s.ttd?.[level]?.nama || "akun yang berhak"}; ditandatangani dengan akunnya sendiri` });
+  if (req.body?.aksi === "TOLAK") {
+    if (level === "dimohon") return res.status(400).json({ error: "Kotak Dimohon Oleh tidak bisa menolak; ubah lewat draft" });
+    const alasan = String(req.body?.alasan ?? "").trim().slice(0, 500);
+    if (alasan.length < 3) return res.status(400).json({ error: "Isi alasan penolakan" });
+    const tolak = { level, nama: u.nama, alasan, at: new Date().toISOString() };
+    await execute("UPDATE klinik_surat_barang SET status = 'DRAFT', diajukan_at = NULL, approval = '{}'::jsonb, tolak = @tolak::jsonb, updated_at = now() WHERE id = @id", { tolak: JSON.stringify(tolak), id: s.id });
+    await logActivity(req, { module: "KLINIK", estate: s.klinik, aksi: "Tolak Permintaan Barang Klinik", objek: `${s.nomor} · ${s.perihal}`, detail: `${SB_LABEL[level]} · alasan: ${alasan}` });
+    return res.json({ success: true, status: "DRAFT" });
+  }
+  const approval = { ...(s.approval ?? {}), [level]: { nama: u.nama, user_id: u.id, at: new Date().toISOString() } };
+  const lengkap = !sbBerikut(approval);
+  const ok = await queryOne(
+    "UPDATE klinik_surat_barang SET approval = @approval::jsonb, status = @status, updated_at = now() WHERE id = @id AND status = 'DIAJUKAN' AND approval = @lama::jsonb RETURNING id",
+    { approval: JSON.stringify(approval), lama: JSON.stringify(s.approval ?? {}), status: lengkap ? "DISETUJUI" : "DIAJUKAN", id: s.id }
+  );
+  if (!ok) return res.status(409).json({ error: "Surat ini baru saja berubah; muat ulang halamannya" });
+  await logActivity(req, {
+    module: "KLINIK",
+    estate: s.klinik,
+    aksi: "Tanda Tangan Permintaan Barang Klinik",
+    objek: `${s.nomor} · ${s.perihal}`,
+    detail: `${SB_LABEL[level]}${lengkap ? " · lengkap, disetujui" : ` · berikutnya ${SB_LABEL[sbBerikut(approval)!]}`}`,
+  });
+  res.json({ success: true, status: lengkap ? "DISETUJUI" : "DIAJUKAN" });
+});
+
+// The letter signed in full on paper, uploaded as photos (one per page) by an account with the tick for it: each
+// box not signed in the app takes the name as on the paper, marked offline with the photos; the letter is approved.
+app.post("/api/klinik-surat-barang/:id/surat-offline", async (req, res) => {
+  const u = req.user!;
+  const s = await queryOne<any>("SELECT * FROM klinik_surat_barang WHERE id = @id", { id: Number(req.params.id) || 0 });
+  if (!s) return res.status(404).json({ error: "Surat tidak ditemukan" });
+  if (!checkKlinik(req, res, s.klinik)) return;
+  if (s.status !== "DIAJUKAN") return res.status(409).json({ error: s.status === "DRAFT" ? "Ajukan surat dulu, lalu upload suratnya" : "Surat sudah disetujui" });
+  if (!evidenceEnabled()) return res.status(400).json({ error: "Penyimpanan foto belum aktif; surat tidak bisa diupload" });
+  const fotos = [...new Set((Array.isArray(req.body?.evidence_ids) ? req.body.evidence_ids : []).map(String).filter((x: string) => /^[0-9a-f-]{36}$/.test(x)))].slice(0, 10) as string[];
+  if (!fotos.length) return res.status(400).json({ error: "Upload foto surat yang sudah ditandatangani (semua halaman)" });
+  const at = new Date().toISOString();
+  const approval = { ...(s.approval ?? {}) };
+  for (const k of SB_LEVELS) {
+    if (approval[k]) continue;
+    const nama = String(req.body?.ttd?.[k]?.nama ?? s.ttd?.[k]?.nama ?? "").trim().slice(0, 100);
+    if (nama.length < 2) return res.status(400).json({ error: `Isi nama ${SB_LABEL[k]} sesuai surat` });
+    approval[k] = { nama, at, offline: true, fotos, upload_oleh: u.nama, upload_user_id: u.id };
+  }
+  try {
+    await withTransaction(async (c) => {
+      const ok = await queryMany("UPDATE evidence SET used = true WHERE id = ANY(@ids::uuid[]) AND used = false AND (user_id = @uid OR @su) RETURNING id", { ids: fotos, uid: u.id, su: u.role === "superuser" }, c);
+      if (ok.length !== fotos.length) throw new AksesError("Foto surat tidak valid, upload ulang fotonya");
+      const r = await queryOne(
+        "UPDATE klinik_surat_barang SET approval = @approval::jsonb, status = 'DISETUJUI', updated_at = now() WHERE id = @id AND status = 'DIAJUKAN' AND approval = @lama::jsonb RETURNING id",
+        { approval: JSON.stringify(approval), lama: JSON.stringify(s.approval ?? {}), id: s.id },
+        c
+      );
+      if (!r) throw new AksesError("Surat ini baru saja berubah (ditandatangani / ditolak); muat ulang halamannya");
+    });
+  } catch (e: any) {
+    return res.status(e instanceof AksesError ? 409 : 400).json({ error: e?.message ?? "Gagal menyimpan" });
+  }
+  await logActivity(req, {
+    module: "KLINIK",
+    estate: s.klinik,
+    aksi: "Upload Surat Bertanda Tangan Permintaan Barang Klinik",
+    objek: `${s.nomor} · ${s.perihal}`,
+    detail: `${fotos.length} foto · ${SB_LEVELS.filter((k) => approval[k]?.offline).map((k) => `${SB_LABEL[k]}: ${approval[k].nama}`).join(", ")}`,
+  });
+  res.json({ success: true, status: "DISETUJUI" });
+});
+
 // Rekap Permintaan: every requested item of the account's kliniks (or one), as the request spreadsheet.
 app.get("/api/klinik-permintaan-rekap", async (req, res) => {
   const klinik = String(req.query.klinik ?? "");
@@ -9943,7 +10170,16 @@ app.get("/api/persetujuan/jumlah", async (req, res) => {
       : 0;
   // Berita Acara boxes (pelaksana / saksi) this account is named for and hasn't signed.
   const baTtd = (await baTtdSaya(u)).length;
-  res.json({ permintaan, ba, kop, koreksi, ba_ttd: baTtd, total: permintaan + ba + kop + koreksi + baTtd });
+  // Permintaan Barang Klinik whose next box is this account's.
+  let barang = 0;
+  if (u.role === "superuser" || SB_TTD_PERMS_REQ.some((x) => u.perms.includes(x))) {
+    const rows = await queryMany<any>("SELECT klinik, status, approval, ttd FROM klinik_surat_barang WHERE status = 'DIAJUKAN' AND klinik = ANY(@kliniks)", {
+      kliniks: KLINIK_OPTIONS.filter((k) => estateAllowed(u, k)),
+    });
+    const akun = rows.length ? await akunEstate() : [];
+    barang = rows.filter((r) => sbBisaTtd(u, r, akun).length).length;
+  }
+  res.json({ permintaan, ba, kop, koreksi, ba_ttd: baTtd, barang, total: permintaan + ba + kop + koreksi + baTtd + barang });
 });
 
 // Who does each step of a Barang Rusak / Expired flow of a unit (Koperasi at Nilam, or a Klinik): the accounts with

@@ -18,6 +18,7 @@ import { localToday } from "../lib/opname";
 import { printDocument, type TableReport } from "../lib/printTable";
 import { ExportButtons } from "./ExportButtons";
 import { EvidenceInput, EvidenceLink, useEvidenceEnabled } from "./EvidenceInput";
+import { KlinikSuratBarang } from "./KlinikSuratBarang";
 import { TTD_DEFAULT, TTD_LABEL, ttdLengkap, TTD_LEVEL_LABEL, TTD_URUT, URGENSI_LABEL, estateLabel, permintaanHtml, waktuTtd } from "../lib/permintaanSurat";
 
 // Klinik > Permintaan Obat: the "Form Permintaan Obat, BMHP dan Alat Medis" of the klinik, drafted from its
@@ -46,7 +47,29 @@ const cetak = async (id: number) => printDocument(permintaanHtml(await api.permi
 
 type View = { kind: "list" } | { kind: "edit"; id: number | null } | { kind: "detail"; id: number } | { kind: "rekap" };
 
+// Permintaan Obat (the form above) or Permintaan Barang (non-obat, the klinik's letter: KlinikSuratBarang).
 export function KlinikPermintaanTab({ klinik }: { klinik: string }) {
+  const [jenis, setJenis] = useState<"obat" | "barang">("obat");
+  const pilih = (j: typeof jenis, label: string) => (
+    <button
+      onClick={() => setJenis(j)}
+      className={`px-3 py-1.5 text-sm border-b-2 -mb-px ${jenis === j ? "border-[var(--accent-blue)] text-[var(--accent-blue)] font-medium" : "border-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)]"}`}
+    >
+      {label}
+    </button>
+  );
+  return (
+    <div className="space-y-3">
+      <div className="flex gap-1 border-b border-[var(--border)]">
+        {pilih("obat", "Permintaan Obat")}
+        {pilih("barang", "Permintaan Barang (non-obat)")}
+      </div>
+      {jenis === "obat" ? <PermintaanObat klinik={klinik} /> : <KlinikSuratBarang klinik={klinik} />}
+    </div>
+  );
+}
+
+function PermintaanObat({ klinik }: { klinik: string }) {
   const [view, setView] = useState<View>({ kind: "list" });
   if (view.kind === "edit") return <Editor klinik={klinik} id={view.id} onDone={(id) => setView(id ? { kind: "detail", id } : { kind: "list" })} onBack={() => setView({ kind: "list" })} />;
   if (view.kind === "detail") return <Detail id={view.id} onBack={() => setView({ kind: "list" })} onEdit={(id) => setView({ kind: "edit", id })} />;

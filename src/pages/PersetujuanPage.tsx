@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
 import { Signature } from "lucide-react";
-import { api, errorText, type BeritaAcara, type KopPermintaanRow, type PermintaanMenunggu } from "../lib/api";
+import { api, errorText, type BeritaAcara, type KopPermintaanRow, type PermintaanMenunggu, type SbBox, type SuratBarang } from "../lib/api";
 import { PermintaanForm } from "../components/KopPermintaanTab";
 import { Detail } from "../components/KlinikPermintaanTab";
+import { SuratBarangDetail } from "../components/KlinikSuratBarang";
+import { SB_LABEL, SB_URUT } from "../lib/suratBarang";
 import { BaPeriksaModal, jenisKlinik, jenisKoperasi } from "../components/BaPemusnahan";
 import { useAuth } from "../context/AuthContext";
 import { KoreksiPengajuanList } from "../components/KoreksiPengajuan";
@@ -27,6 +29,10 @@ export function PersetujuanPage() {
   const [periksa, setPeriksa] = useState<BeritaAcara | null>(null);
   const bolehKop = can(user, "koperasi.pelunasan");
   const bolehKoreksi = can(user, "koreksi.approve");
+  // Permintaan Barang Klinik (non-obat): Dimohon Oleh is the klinik staff (Input Klinik), then its two ticks.
+  const bolehBarang = ["klinik.input", "klinik.barang_ttd_diperiksa", "klinik.barang_ttd_disetujui"].some((p) => can(user, p));
+  const [barang, setBarang] = useState<(SuratBarang & { bisa: SbBox[] })[] | null>(null);
+  const [openSb, setOpenSb] = useState<number | null>(null);
   const [kop, setKop] = useState<Awaited<ReturnType<typeof api.kopPermintaanList>> | null>(null);
   const [bukaKop, setBukaKop] = useState<number | null>(null);
   const kopMenunggu: KopPermintaanRow[] = (kop?.rows ?? []).filter(
@@ -38,6 +44,11 @@ export function PersetujuanPage() {
         .permintaanMenunggu()
         .then((r) => (setRows(r.rows), setError("")))
         .catch((e) => (setRows([]), setError(errorText(e, "Gagal memuat"))));
+    if (bolehBarang)
+      api
+        .sbMenunggu()
+        .then((r) => setBarang(r.rows))
+        .catch((e) => (setBarang([]), setError(errorText(e, "Gagal memuat permintaan barang klinik"))));
     if (bolehKop)
       api
         .kopPermintaanList()
@@ -50,11 +61,12 @@ export function PersetujuanPage() {
         .catch((e) => (setBas([]), setError(errorText(e, "Gagal memuat berita acara"))));
   };
   useEffect(() => {
-    if (open === null) load();
+    if (open === null && openSb === null) load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  }, [open, openSb]);
 
   if (open !== null) return <Detail id={open} onBack={() => setOpen(null)} />;
+  if (openSb !== null) return <SuratBarangDetail id={openSb} onBack={() => setOpenSb(null)} />;
   return (
     <div className="space-y-4">
       <div>
@@ -199,6 +211,58 @@ export function PersetujuanPage() {
           onClose={() => setPeriksa(null)}
           onDone={() => (setPeriksa(null), load())}
         />
+      )}
+      {bolehBarang && !!barang?.length && (
+        <section className="space-y-2">
+          <h2 className="text-sm font-semibold text-[var(--text-primary)]">
+            Permintaan Barang Klinik <span className="ml-1 text-xs font-normal text-[var(--text-muted)]">non-obat · Dimohon → Diperiksa → Disetujui</span>
+          </h2>
+          <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-[#f8fafc] text-xs text-[var(--text-secondary)]">
+                <tr className="text-left">
+                  <th className="px-3 py-2">Nomor</th>
+                  <th className="px-3 py-2">Klinik</th>
+                  <th className="px-3 py-2">Perihal</th>
+                  <th className="px-3 py-2">Sudah ditandatangani</th>
+                  <th className="px-3 py-2">Giliran Anda</th>
+                  <th className="px-3 py-2" />
+                </tr>
+              </thead>
+              <tbody>
+                {barang.map((r) => (
+                  <tr key={r.id} className="border-t border-[var(--border)] hover:bg-[#f8fafc] align-top">
+                    <td className="px-3 py-2 font-medium">
+                      <button onClick={() => setOpenSb(r.id)} className="text-[var(--accent-blue)] hover:underline text-left">
+                        {r.nomor}
+                      </button>
+                      <p className="text-[11px] text-[var(--text-muted)]">
+                        {tgl(r.tanggal)} · dibuat {r.created_by}
+                      </p>
+                    </td>
+                    <td className="px-3 py-2">Klinik {estateLabel(r.klinik)}</td>
+                    <td className="px-3 py-2">{r.perihal}</td>
+                    <td className="px-3 py-2 text-xs text-[var(--text-secondary)]">
+                      {SB_URUT.filter((k) => r.approval?.[k])
+                        .map((k) => `${SB_LABEL[k]}: ${r.approval[k]!.nama}`)
+                        .join(" · ") || "-"}
+                    </td>
+                    <td className="px-3 py-2">
+                      <span className="text-xs px-2 py-0.5 rounded-full border border-[var(--accent-amber-border)] text-[var(--accent-amber)] bg-[var(--accent-amber-bg)] whitespace-nowrap">
+                        {r.bisa.map((k) => SB_LABEL[k]).join(" / ")}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      <button onClick={() => setOpenSb(r.id)} className="inline-flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-md bg-[var(--accent-blue)] text-white hover:opacity-90">
+                        <Signature size={15} /> Periksa & tandatangani
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
       )}
       {bolehPermintaan && (
         <section className="space-y-2">
