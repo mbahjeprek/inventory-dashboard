@@ -38,6 +38,7 @@ import { KoreksiPengajuanList } from "../components/KoreksiPengajuan";
 import { InventoryTabs, useInventoryTab } from "../components/InventoryTabs";
 import { KlinikLaporanTab } from "../components/KlinikLaporanTab";
 import { KlinikRusakTab, TarikModal } from "../components/KlinikRusakTab";
+import { BaBelumBanner } from "../components/BaPemusnahan";
 import { KlinikPermintaanTab } from "../components/KlinikPermintaanTab";
 import { LedgerHistory } from "../components/LedgerHistory";
 import { ItemRiwayatButton } from "../components/ItemRiwayat";
@@ -317,6 +318,13 @@ export function InventoryKlinikPage({ klinik }: { klinik: string }) {
       </div>
 
       <KoreksiPengajuanList module="KLINIK" estate={klinik} sembunyiKosong reload={historyKey} onChanged={() => (load(), loadSummary(), setHistoryKey((k) => k + 1))} />
+
+      <BaBelumBanner
+        modul="KLINIK"
+        unit={klinik}
+        reload={historyKey}
+        onLihat={() => (setTab("rusak"), setTimeout(() => document.getElementById("ba-daftar")?.scrollIntoView({ behavior: "smooth", block: "start" }), 300))}
+      />
 
       <InventoryTabs value={tab} onChange={setTab} laporan />
 

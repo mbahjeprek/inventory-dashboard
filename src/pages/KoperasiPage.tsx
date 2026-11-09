@@ -22,7 +22,7 @@ import { ExportButtons } from "../components/ExportButtons";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { EvidenceInput, EvidenceLink, useEvidenceEnabled } from "../components/EvidenceInput";
 import { printTable } from "../lib/printTable";
-import { BaDaftar, itemsKoperasi, jenisKoperasi } from "../components/BaPemusnahan";
+import { BaBelumBanner, BaDaftar, itemsKoperasi, jenisKoperasi } from "../components/BaPemusnahan";
 import { DepoAirTab } from "../components/DepoAirTab";
 import { KopPermintaanTab } from "../components/KopPermintaanTab";
 import { fmtQty, isoDisplay, localToday } from "../lib/opname";
@@ -208,6 +208,7 @@ export function KoperasiPage() {
 
       <TunggakanBanner reload={reload} canBayar={canBayar} onChanged={done} />
       <RusakMenungguBanner reload={reload} canApprove={can(user, "koperasi.approve")} onLihat={() => setTab("beli")} />
+      <BaBelumBanner modul="KOPERASI" unit={jenisKoperasi().unit} reload={reload} onLihat={() => (setTab("beli"), keBaDaftar())} />
 
       {ringkasan && tab !== "dashboard" && (
         <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
@@ -2747,6 +2748,9 @@ async function cetakBeritaAcara(jenis: "RUSAK" | "KOREKSI", periode: string) {
 }
 
 // Reminder at the top of the Koperasi page: Barang Rusak / Expired still waiting for their pemeriksaan.
+// To the Berita Acara list once the tab that holds it has rendered.
+const keBaDaftar = () => setTimeout(() => document.getElementById("ba-daftar")?.scrollIntoView({ behavior: "smooth", block: "start" }), 300);
+
 function RusakMenungguBanner({ reload, canApprove, onLihat }: { reload: number; canApprove: boolean; onLihat: () => void }) {
   const [n, setN] = useState(0);
   useEffect(() => {

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { Check, CheckCircle2, CircleDashed, Clock, FileText, MessageCircle, PenLine, Printer, ShieldCheck, UserCheck, X } from "lucide-react";
-import { api, errorText, type BaPeran, type BaTtd, type BeritaAcara, type KlinikTarik, type KopTx } from "../lib/api";
+import { Check, CheckCircle2, CircleDashed, Clock, FileText, FileWarning, MessageCircle, PenLine, Printer, ShieldCheck, UserCheck, X } from "lucide-react";
+import { api, errorText, type BaBelum, type BaPeran, type BaTtd, type BeritaAcara, type KlinikTarik, type KopTx } from "../lib/api";
 import { SignaturePad } from "./SignaturePad";
 import { printDocument } from "../lib/printTable";
 import { isoDisplay, localToday } from "../lib/opname";
@@ -599,12 +599,47 @@ function BaLangkah({ j, b }: { j: BaJenis; b: BeritaAcara }) {
   );
 }
 
+const bulanLabel = (p: string) => `${BULAN[Number(p.slice(5, 7)) - 1] ?? ""} ${p.slice(0, 4)}`;
+const belumBulan = (b: BaBelum) => b.bulan.map((x) => `${bulanLabel(x.periode)}: ${x.n}`).join(" · ");
+
+// On the page whatever its month / tab: approved barang not yet on a BA (e.g. still from last month), with a
+// button to the BA list.
+export function BaBelumBanner({ modul, unit, reload, onLihat }: { modul: BaJenis["modul"]; unit: string; reload?: number; onLihat: () => void }) {
+  const { user } = useAuth();
+  const [b, setB] = useState<BaBelum | null>(null);
+  useEffect(() => {
+    api
+      .baBelum(modul, unit)
+      .then(setB)
+      .catch(() => setB(null));
+  }, [modul, unit, reload]);
+  if (!b?.n) return null;
+  const canInput = can(user, `${modul.toLowerCase()}.input`);
+  return (
+    <div className="flex flex-wrap items-center gap-3 w-full min-w-0 rounded-lg border border-[var(--accent-amber-border)] bg-[var(--accent-amber-bg)] px-4 py-3 text-sm text-[var(--accent-amber)]">
+      <FileWarning size={20} className="shrink-0" />
+      <p className="flex-1 min-w-[220px]">
+        <b>
+          {b.n} barang {modul === "KLINIK" ? "obat ditarik" : "rusak / expired"} sudah disetujui tapi belum dibuat Berita Acara Pemusnahan
+        </b>
+        <span className="block text-xs opacity-90">
+          {belumBulan(b)}
+          {b.nilai > 0 && ` · Rp ${Math.round(b.nilai).toLocaleString("id-ID")}`}. {canInput ? "Buat berita acaranya lalu musnahkan." : "Perlu dibuat orang yang punya hak Input."}
+        </span>
+      </p>
+      <button onClick={onLihat} className="px-3 py-1.5 rounded-md text-xs font-medium text-white bg-[var(--accent-amber)] hover:opacity-90">
+        {canInput ? "Buat Berita Acara" : "Lihat"}
+      </button>
+    </div>
+  );
+}
+
 export function BaDaftar({ jenis: j, items, reload, onChanged }: { jenis: BaJenis; items: () => Promise<BaItem[]>; reload: number; onChanged?: () => void }) {
   const { user } = useAuth();
   const mod = j.modul.toLowerCase();
   const canInput = can(user, `${mod}.input`);
   const canEdit = can(user, `${mod}.edit`);
-  const [list, setList] = useState<{ data: BeritaAcara[]; terpakai: number[] } | null>(null);
+  const [list, setList] = useState<{ data: BeritaAcara[]; terpakai: number[]; belum?: BaBelum } | null>(null);
   const [muat, setMuat] = useState(0);
   const [buat, setBuat] = useState<BaItem[] | null | false>(false);
   const [setuju, setSetuju] = useState<BeritaAcara | null>(null);
@@ -655,6 +690,11 @@ export function BaDaftar({ jenis: j, items, reload, onChanged }: { jenis: BaJeni
       <div className="flex flex-wrap items-center gap-2 p-3 border-b border-[var(--border)]">
         <h2 className="text-sm font-semibold text-[var(--text-primary)]">Berita Acara Pemusnahan</h2>
         {aktif > 0 && <span className="text-xs text-[var(--accent-amber)]">{aktif} belum selesai</span>}
+        {!!list?.belum?.n && (
+          <span className="text-xs font-medium text-[var(--accent-amber)]">
+            {list.belum.n} barang disetujui belum masuk berita acara ({belumBulan(list.belum)})
+          </span>
+        )}
         <span className="text-xs text-[var(--text-muted)]">Buat → pelaksana & saksi periksa dan tanda tangan → disetujui Estate Manager → musnahkan → tutup</span>
         {error && <span className="text-xs text-[var(--accent-red)]">{error}</span>}
         {canInput && (

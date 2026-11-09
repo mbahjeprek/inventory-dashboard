@@ -9509,7 +9509,31 @@ app.get("/api/berita-acara", async (req, res) => {
   const terpakai = (
     await queryMany<{ ref_id: number }>("SELECT i.ref_id FROM berita_acara_item i JOIN berita_acara b ON b.id = i.ba_id WHERE b.modul = @modul AND b.unit = @unit AND b.status <> 'BATAL'", { modul, unit })
   ).map((r) => r.ref_id);
-  res.json({ data, terpakai });
+  res.json({ data, terpakai, belum: await baBelum(modul, unit) });
+});
+
+// Approved rows (by a pemeriksa) of a unit not yet on an active BA, per month - a reminder that a BA still has
+// to be made, whatever month the page shows. Klinik Retur goes back to the supplier and is left out.
+async function baBelum(modul: string, unit: string) {
+  const bulan = await queryMany<{ periode: string; n: number; nilai: number }>(
+    modul === "KLINIK"
+      ? `SELECT to_char(t.created_at AT TIME ZONE 'Asia/Jakarta', 'YYYY-MM') AS periode, COUNT(*)::int n, 0::float8 nilai FROM klinik_stock_tx t
+          WHERE t.klinik = @unit AND t.type = 'OUT' AND t.tujuan = 'DIBUANG' AND t.status = 'DISETUJUI' AND t.alasan IS DISTINCT FROM 'RETUR'
+            AND NOT EXISTS (SELECT 1 FROM berita_acara_item i JOIN berita_acara b ON b.id = i.ba_id WHERE i.modul = 'KLINIK' AND i.ref_id = t.id AND b.status <> 'BATAL')
+          GROUP BY 1 ORDER BY 1`
+      : `SELECT t.periode, COUNT(*)::int n, COALESCE(SUM(t.total), 0)::float8 nilai FROM koperasi_tx t
+          WHERE t.koperasi = @unit AND t.jenis = 'RUSAK' AND t.status = 'DISETUJUI'
+            AND NOT EXISTS (SELECT 1 FROM berita_acara_item i JOIN berita_acara b ON b.id = i.ba_id WHERE i.modul = 'KOPERASI' AND i.ref_id = t.id AND b.status <> 'BATAL')
+          GROUP BY 1 ORDER BY 1`,
+    { unit }
+  );
+  return { n: bulan.reduce((s, b) => s + b.n, 0), nilai: bulan.reduce((s, b) => s + b.nilai, 0), bulan };
+}
+app.get("/api/berita-acara/belum", async (req, res) => {
+  const modul = String(req.query.modul ?? "");
+  const unit = String(req.query.unit ?? "");
+  if (!baBoleh(req, res, modul, unit, "view")) return;
+  res.json(await baBelum(modul, unit));
 });
 
 app.post("/api/berita-acara", async (req, res) => {

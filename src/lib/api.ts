@@ -823,6 +823,12 @@ export type ChatRoom = {
 export type ChatMessage = { id: number; user_id: number; nama: string; isi: string; evidence_id: string | null; link_url: string | null; link_label: string | null; created_at: string };
 
 // Berita Acara Pemusnahan (Klinik / Koperasi): the stored document and its approval (capture WA) and closing.
+// Approved Rusak / Tarik rows not yet on an active BA, per month (periode YYYY-MM).
+export interface BaBelum {
+  n: number;
+  nilai: number;
+  bulan: { periode: string; n: number; nilai: number }[];
+}
 export type BeritaAcara = {
   id: number;
   modul: "KLINIK" | "KOPERASI";
@@ -1885,7 +1891,8 @@ export const api = {
   kopPickAnggota: (search: string) => req<KopAnggota[]>(`/api/koperasi/anggota/pick?${new URLSearchParams({ search })}`),
   kopAddAnggota: (body: Partial<KopAnggota>) => req<{ kode: string }>("/api/koperasi/anggota", { method: "POST", body: JSON.stringify(body) }),
   kopSaveAnggota: (kode: string, body: Partial<KopAnggota>) => req<{ success: boolean }>(`/api/koperasi/anggota/${encodeURIComponent(kode)}`, { method: "PUT", body: JSON.stringify(body) }),
-  baList: (modul: string, unit: string) => req<{ data: BeritaAcara[]; terpakai: number[] }>(`/api/berita-acara?${new URLSearchParams({ modul, unit })}`),
+  baList: (modul: string, unit: string) => req<{ data: BeritaAcara[]; terpakai: number[]; belum: BaBelum }>(`/api/berita-acara?${new URLSearchParams({ modul, unit })}`),
+  baBelum: (modul: string, unit: string) => req<BaBelum>(`/api/berita-acara/belum?${new URLSearchParams({ modul, unit })}`),
   baBuat: (body: { modul: string; unit: string; tanggal: string; isian: Record<string, any>; ref_ids: number[] }) =>
     req<{ id: number; nomor: string }>("/api/berita-acara", { method: "POST", body: JSON.stringify(body) }),
   // Who does each step of a Barang Rusak / Expired flow of a unit (from the accounts' ticks), see PetugasAlur.
