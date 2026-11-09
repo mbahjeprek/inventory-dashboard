@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, Check, CircleDashed, FilePlus2, Printer, Save, Search, Send, Trash2, Wand2, X } from "lucide-react";
+import { ArrowLeft, Check, CircleDashed, FilePlus2, FileUp, Printer, Save, Search, Send, Trash2, Wand2, X } from "lucide-react";
 import {
   api,
   errorText,
@@ -17,6 +17,7 @@ import { can } from "../lib/access";
 import { localToday } from "../lib/opname";
 import { printDocument, type TableReport } from "../lib/printTable";
 import { ExportButtons } from "./ExportButtons";
+import { EvidenceInput, EvidenceLink, useEvidenceEnabled } from "./EvidenceInput";
 import { TTD_DEFAULT, TTD_LABEL, ttdLengkap, TTD_LEVEL_LABEL, TTD_URUT, URGENSI_LABEL, estateLabel, permintaanHtml, waktuTtd } from "../lib/permintaanSurat";
 
 // Klinik > Permintaan Obat: the "Form Permintaan Obat, BMHP dan Alat Medis" of the klinik, drafted from its
@@ -943,7 +944,9 @@ function TtdPanel({ p, onDone }: { p: Permintaan; onDone: () => void }) {
   const [alasan, setAlasan] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [offline, setOffline] = useState(false);
   if (p.status === "DRAFT") return null;
+  const bisaOffline = p.status === "DIAJUKAN" && can(user, "klinik.ttd_offline");
   const sudahTtd = user?.role !== "superuser" && TTD_URUT.some((k) => p.approval?.[k]?.user_id === user?.id);
   // The unsigned boxes this account may sign now.
   const bisa = p.status === "DIAJUKAN" && !sudahTtd ? ((p as Permintaan & { bisa_ttd?: string[] }).bisa_ttd ?? []).filter((k): k is (typeof TTD_URUT)[number] => (TTD_URUT as readonly string[]).includes(k)) : [];
@@ -970,7 +973,13 @@ function TtdPanel({ p, onDone }: { p: Permintaan; onDone: () => void }) {
       <div className="flex flex-wrap items-center gap-2">
         <p className="text-sm font-semibold text-[var(--text-primary)]">Tanda Tangan</p>
         <StatusSurat p={p} />
+        {bisaOffline && !offline && (
+          <button onClick={() => setOffline(true)} className={`${btn} ml-auto`} title="Surat ini sudah ditandatangani lengkap di kertas: upload fotonya, permintaan langsung Disetujui">
+            <FileUp size={15} /> Upload surat bertanda tangan
+          </button>
+        )}
       </div>
+      {offline && <SuratOffline p={p} onClose={() => setOffline(false)} onDone={() => (setOffline(false), onDone())} />}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
         {TTD_URUT.map((k) => {
           const a = p.approval?.[k];
@@ -989,8 +998,16 @@ function TtdPanel({ p, onDone }: { p: Permintaan; onDone: () => void }) {
               <p className="text-sm font-medium text-[var(--text-primary)] leading-tight mt-0.5">{a?.nama || p.ttd?.[k]?.nama || "-"}</p>
               <p className="text-[11px] text-[var(--text-muted)]">{a?.jabatan || p.ttd?.[k]?.jabatan}</p>
               <p className={`text-[11px] mt-0.5 ${a ? "text-[var(--accent-green)]" : now ? "text-[var(--accent-amber)]" : "text-[var(--text-muted)]"}`}>
-                {a ? `Ditandatangani ${waktuTtd(a.at)}` : now ? "Giliran Anda tanda tangan" : k === berikut && p.status === "DIAJUKAN" ? "Giliran tanda tangan" : "Menunggu kotak sebelumnya"}
+                {a?.offline ? `Di surat asli · diupload ${waktuTtd(a.at)}` : a ? `Ditandatangani ${waktuTtd(a.at)}` : now ? "Giliran Anda tanda tangan" : k === berikut && p.status === "DIAJUKAN" ? "Giliran tanda tangan" : "Menunggu kotak sebelumnya"}
               </p>
+              {a?.offline && (
+                <p className="text-[11px] mt-0.5 flex flex-wrap gap-x-2">
+                  {(a.fotos ?? []).map((f, i) => (
+                    <EvidenceLink key={f} id={f} label={(a.fotos?.length ?? 0) > 1 ? `hal ${i + 1}` : "foto surat"} />
+                  ))}
+                  {a.upload_oleh && <span className="text-[var(--text-muted)]">oleh {a.upload_oleh}</span>}
+                </p>
+              )}
               {now && bisa.length > 1 && (
                 <button onClick={() => kirim("SETUJU", k)} disabled={busy} className="mt-1.5 inline-flex items-center gap-1 text-xs px-2 py-1 rounded bg-[var(--accent-blue)] text-white hover:opacity-90 disabled:opacity-50">
                   <Check size={12} /> Tandatangani
@@ -1051,6 +1068,188 @@ function TtdPanel({ p, onDone }: { p: Permintaan; onDone: () => void }) {
           pemenuhan terbuka setelah keempat kotak ditandatangani.
         </p>
       )}
+    </div>
+  );
+}
+
+// ---- Surat offline: the form signed in full on paper, uploaded as photos (one per page) with the names as written in
+// each box not signed in the app and the decision per item as on the paper; the request becomes final ----
+type KeputusanItem = { status: PermintaanLineStatus; disetujui: string; alasan: string };
+function SuratOffline({ p, onClose, onDone }: { p: Permintaan; onClose: () => void; onDone: () => void }) {
+  const fotoAktif = useEvidenceEnabled();
+  const [fotos, setFotos] = useState<string[]>([]);
+  const kosong = TTD_URUT.filter((k) => !p.approval?.[k]);
+  const [ttd, setTtd] = useState(
+    () => Object.fromEntries(kosong.map((k) => [k, { nama: p.ttd?.[k]?.nama ?? "", jabatan: p.ttd?.[k]?.jabatan ?? "" }])) as Record<string, { nama: string; jabatan: string }>
+  );
+  const [item, setItem] = useState<Record<number, KeputusanItem>>(() =>
+    Object.fromEntries(
+      p.lines.map((l) => {
+        const status: PermintaanLineStatus = !l.status || l.status === "MENUNGGU" ? "APPROVED" : l.status;
+        return [l.id!, { status, disetujui: status === "SEBAGIAN" && l.disetujui !== null && l.disetujui !== undefined ? String(l.disetujui) : "", alasan: l.alasan ?? "" }];
+      })
+    )
+  );
+  const [cek, setCek] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const set = (id: number, patch: Partial<KeputusanItem>) => setItem((x) => ({ ...x, [id]: { ...x[id], ...patch } }));
+  const jumlahSalah = (l: (typeof p.lines)[number]) => item[l.id!].status === "SEBAGIAN" && !(Number(item[l.id!].disetujui) > 0 && Number(item[l.id!].disetujui) < l.jumlah);
+  const alasanKurang = (l: (typeof p.lines)[number]) => perluAlasan(item[l.id!].status) && item[l.id!].alasan.trim().length < 3;
+  const n = (s: PermintaanLineStatus) => p.lines.filter((l) => item[l.id!].status === s).length;
+  const kirim = async () => {
+    setError("");
+    if (!fotos.length) return setError("Upload foto surat yang sudah ditandatangani (semua halaman)");
+    const tanpaNama = kosong.filter((k) => ttd[k].nama.trim().length < 2);
+    if (tanpaNama.length) return setCek(true), setError(`Isi nama penanda tangan sesuai surat: ${tanpaNama.map((k) => TTD_LEVEL_LABEL[k]).join(", ")}`);
+    const salah = p.lines.filter((l) => jumlahSalah(l) || alasanKurang(l));
+    if (salah.length) return setCek(true), setError(`Lengkapi item Sebagian (jumlah disetujui) / Ditolak (alasan): ${salah.map((l) => l.nama).join(", ")}`);
+    if (!window.confirm(`Simpan ${p.nomor} sebagai Disetujui dari surat bertanda tangan?\n${n("APPROVED")} approved, ${n("SEBAGIAN")} sebagian, ${n("DITOLAK")} ditolak. Setelah ini dokumen final.`)) return;
+    setBusy(true);
+    try {
+      await api.permintaanSuratOffline(p.id, {
+        evidence_ids: fotos,
+        ttd: Object.fromEntries(kosong.map((k) => [k, { nama: ttd[k].nama.trim(), jabatan: ttd[k].jabatan.trim() }])),
+        lines: p.lines.map((l) => ({ id: l.id!, status: item[l.id!].status, disetujui: item[l.id!].disetujui === "" ? null : Number(item[l.id!].disetujui), alasan: item[l.id!].alasan.trim() })),
+      });
+      onDone();
+    } catch (e) {
+      setError(errorText(e, "Gagal menyimpan"));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const merah = "!border-[var(--accent-red)] bg-[var(--accent-red-bg)]";
+  return (
+    <div className="rounded-md border border-[var(--accent-blue-border)] bg-[var(--accent-blue-bg)] p-3 space-y-3">
+      <div>
+        <p className="text-sm font-semibold text-[var(--text-primary)]">Upload surat yang sudah ditandatangani</p>
+        <p className="text-xs text-[var(--text-secondary)]">
+          Untuk surat yang ditandatangani lengkap di kertas. Kotak yang belum ditandatangani di aplikasi diisi nama sesuai surat dan ditandai &quot;di surat asli&quot;; approval item
+          sesuai coretan di surat. Setelah disimpan permintaan langsung Disetujui (final).
+        </p>
+      </div>
+      <div>
+        <p className="text-xs font-medium text-[var(--text-secondary)] mb-1">1. Foto surat ({fotos.length} halaman)</p>
+        {!fotoAktif ? (
+          <p className="text-xs text-[var(--accent-red)]">Penyimpanan foto belum aktif, surat belum bisa diupload.</p>
+        ) : (
+          <div className="flex flex-wrap items-start gap-3">
+            {fotos.map((f, i) => (
+              <span key={f} className="inline-flex items-center gap-1 text-xs rounded border border-[var(--border)] bg-white px-2 py-1">
+                <EvidenceLink id={f} label={`Halaman ${i + 1}`} />
+                <button onClick={() => setFotos((x) => x.filter((y) => y !== f))} title="Hapus halaman ini" className="text-[var(--text-muted)] hover:text-[var(--accent-red)]">
+                  <X size={12} />
+                </button>
+              </span>
+            ))}
+            {fotos.length < 10 && (
+              <div className="min-w-[220px]">
+                <EvidenceInput key={fotos.length} value={null} onChange={(id) => id && setFotos((x) => (x.includes(id) ? x : [...x, id]))} label={fotos.length ? "Tambah halaman" : "Foto halaman 1"} />
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+      {kosong.length > 0 && (
+        <div>
+          <p className="text-xs font-medium text-[var(--text-secondary)] mb-1">2. Penanda tangan di surat</p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
+            {kosong.map((k) => (
+              <div key={k} className="space-y-1">
+                <p className="text-[11px] text-[var(--text-secondary)]">{TTD_LEVEL_LABEL[k]}</p>
+                <input
+                  value={ttd[k].nama}
+                  onChange={(e) => setTtd({ ...ttd, [k]: { ...ttd[k], nama: e.target.value } })}
+                  placeholder="Nama"
+                  maxLength={100}
+                  className={`${inputCls} w-full ${cek && ttd[k].nama.trim().length < 2 ? merah : ""}`}
+                />
+                <input value={ttd[k].jabatan} onChange={(e) => setTtd({ ...ttd, [k]: { ...ttd[k], jabatan: e.target.value } })} placeholder="Jabatan" maxLength={100} className={`${inputCls} w-full`} />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      <div>
+        <p className="text-xs font-medium text-[var(--text-secondary)] mb-1">
+          {kosong.length ? 3 : 2}. Approval item sesuai surat{" "}
+          <span className="font-normal text-[var(--text-muted)]">
+            ({n("APPROVED")} approved · {n("SEBAGIAN")} sebagian · {n("DITOLAK")} ditolak)
+          </span>
+        </p>
+        <div className="bg-white border border-[var(--border)] rounded-md overflow-auto max-h-[360px]">
+          <table className="w-full text-sm">
+            <thead className="bg-[#f8fafc] text-xs text-[var(--text-secondary)] sticky top-0">
+              <tr className="text-left">
+                <th className="px-2 py-1.5">No</th>
+                <th className="px-2 py-1.5">Uraian</th>
+                <th className="px-2 py-1.5 text-right">Diminta</th>
+                <th className="px-2 py-1.5 w-36">Di surat</th>
+                <th className="px-2 py-1.5 w-24">Disetujui</th>
+                <th className="px-2 py-1.5">Alasan</th>
+              </tr>
+            </thead>
+            <tbody>
+              {p.lines.map((l, i) => {
+                const e = item[l.id!];
+                return (
+                  <tr key={l.id} className="border-t border-[var(--border)] align-top">
+                    <td className="px-2 py-1 text-[var(--text-muted)]">{i + 1}</td>
+                    <td className="px-2 py-1">{l.nama}</td>
+                    <td className="px-2 py-1 text-right whitespace-nowrap">
+                      {fmt(l.jumlah, 2)} {l.satuan}
+                    </td>
+                    <td className="px-2 py-1">
+                      <select value={e.status} onChange={(ev) => set(l.id!, { status: ev.target.value as PermintaanLineStatus, disetujui: "" })} className={cellIn}>
+                        <option value="APPROVED">Approved</option>
+                        <option value="SEBAGIAN">Sebagian</option>
+                        <option value="DITOLAK">Ditolak</option>
+                      </select>
+                    </td>
+                    <td className="px-2 py-1">
+                      {e.status === "SEBAGIAN" ? (
+                        <input
+                          type="number"
+                          min={0}
+                          max={l.jumlah}
+                          value={e.disetujui}
+                          onChange={(ev) => set(l.id!, { disetujui: ev.target.value })}
+                          placeholder="berapa?"
+                          className={`${cellIn} ${cek && jumlahSalah(l) ? merah : ""}`}
+                        />
+                      ) : (
+                        <span className="text-xs text-[var(--text-muted)]">{e.status === "APPROVED" ? fmt(l.jumlah, 2) : "0"}</span>
+                      )}
+                    </td>
+                    <td className="px-2 py-1">
+                      {perluAlasan(e.status) && (
+                        <input
+                          value={e.alasan}
+                          onChange={(ev) => set(l.id!, { alasan: ev.target.value })}
+                          placeholder="Alasan sesuai surat (wajib)"
+                          maxLength={300}
+                          className={`${cellIn} ${cek && alasanKurang(l) ? merah : ""}`}
+                        />
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        {error && <span className="text-sm text-[var(--accent-red)]">{error}</span>}
+        <span className="ml-auto" />
+        <button onClick={onClose} disabled={busy} className={btn}>
+          Batal
+        </button>
+        <button onClick={kirim} disabled={busy || !fotoAktif} className={btnBlue}>
+          <Check size={15} /> {busy ? "Menyimpan..." : "Simpan & setujui"}
+        </button>
+      </div>
     </div>
   );
 }

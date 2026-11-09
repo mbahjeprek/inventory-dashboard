@@ -391,7 +391,8 @@ export type PermintaanSaran = {
 export type PermintaanUrgensi = "HIGH" | "MEDIUM" | "LOW";
 export type PermintaanLineStatus = "MENUNGGU" | "APPROVED" | "SEBAGIAN" | "DITOLAK";
 export type PermintaanOrang = { nama: string; jabatan: string };
-export type PermintaanTtdOleh = { nama: string; jabatan: string; user_id?: number; at: string };
+// offline: signed on the paper form, uploaded as photos (fotos, one per page) by upload_oleh.
+export type PermintaanTtdOleh = { nama: string; jabatan: string; user_id?: number; at: string; offline?: boolean; fotos?: string[]; upload_oleh?: string };
 export type PermintaanMenunggu = Pick<Permintaan, "id" | "klinik" | "nomor" | "tanggal" | "periode" | "departemen" | "created_by" | "diajukan_at" | "approval" | "ttd"> & {
   items: number;
   high: number;
@@ -1715,6 +1716,10 @@ export const api = {
   permintaanMenunggu: () => req<{ rows: PermintaanMenunggu[] }>("/api/klinik-permintaan/menunggu"),
   permintaanTtd: (id: number, body: { level: string; aksi: "SETUJU" | "TOLAK"; alasan?: string }) =>
     req<{ success: boolean; status: Permintaan["status"] }>(`/api/klinik-permintaan/${id}/ttd`, { method: "POST", body: JSON.stringify(body) }),
+  permintaanSuratOffline: (
+    id: number,
+    body: { evidence_ids: string[]; ttd: Partial<Record<keyof PermintaanTtd, { nama: string; jabatan: string }>>; lines: { id: number; status: PermintaanLineStatus; disetujui: number | null; alasan: string }[] }
+  ) => req<{ success: boolean; status: Permintaan["status"] }>(`/api/klinik-permintaan/${id}/surat-offline`, { method: "POST", body: JSON.stringify(body) }),
   permintaanDelete: (id: number) => req<{ success: boolean }>(`/api/klinik-permintaan/${id}`, { method: "DELETE" }),
   permintaanRekap: (params: Record<string, string>) => req<{ rows: PermintaanRekapRow[] }>(`/api/klinik-permintaan-rekap?${new URLSearchParams(params)}`),
   lengkapiList: (kind: LengkapiKind, estate: string, bulan: string) => req<LengkapiList>(`/api/lengkapi/${kind}?${new URLSearchParams({ estate, bulan })}`),

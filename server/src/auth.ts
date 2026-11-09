@@ -53,6 +53,8 @@ export const ALL_PERMS: string[] = [
   "klinik.ttd_diketahui",
   "klinik.ttd_disetujui1",
   "klinik.ttd_disetujui2",
+  // Upload the Permintaan Obat signed on paper (all four boxes): the request is final with the photos as proof.
+  "klinik.ttd_offline",
   "sop.view",
   "sop.edit",
   "sop.kunci",

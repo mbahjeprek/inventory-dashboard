@@ -66,10 +66,13 @@ export function permintaanHtml(p: Permintaan): string {
       </tr>`
     )
     .join("");
-  // A box signed in the app: the signer's name and an electronic stamp with the time instead of the blank space.
+  // A box signed in the app: the signer's name and an electronic stamp with the time instead of the blank space (signed
+  // on the paper form and uploaded: a stamp saying so).
   const ttd = TTD_LABEL.map(([k, judul]) => {
     const a = p.approval?.[k];
-    const ruang = a ? `<div class="ruang el"><div class="cap">DISETUJUI SECARA ELEKTRONIK<br>${esc(waktuTtd(a.at))}</div></div>` : `<div class="ruang"></div>`;
+    const ruang = a
+      ? `<div class="ruang el"><div class="cap">${a.offline ? "DITANDATANGANI DI SURAT ASLI<br>diupload " : "DISETUJUI SECARA ELEKTRONIK<br>"}${esc(waktuTtd(a.at))}</div></div>`
+      : `<div class="ruang"></div>`;
     return `<div class="ttd"><div>${esc(judul)}</div>${ruang}<div class="nama">${esc(a?.nama || p.ttd?.[k]?.nama || "(................................)")}</div><div class="jab">${esc(a?.jabatan || p.ttd?.[k]?.jabatan || "")}</div></div>`;
   }).join("");
   return `<!doctype html><html><head><meta charset="utf-8"><title>${esc(p.nomor)}</title><style>

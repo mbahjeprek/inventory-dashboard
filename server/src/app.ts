@@ -267,6 +267,8 @@ function requiredPerms(req: express.Request): Need {
   // Tanda tangan Permintaan Obat: the waiting list and signing with a level's tick (the route checks which level
   // is next); the signers may open a request without Lihat Klinik.
   if (is(/^\/klinik-permintaan\/(menunggu|\d+\/ttd)$/)) return TTD_PERMS;
+  // Surat offline: the paper form signed in full, uploaded by an account with the tick for it (it makes the request final).
+  if (is(/^\/klinik-permintaan\/\d+\/surat-offline$/)) return ["klinik.ttd_offline"];
   if (is(/^\/klinik-permintaan\/\d+$/) && m === "GET") return ["klinik.view", ...TTD_PERMS];
   // Pemenuhan: dipenuhi / tanggal with Input Klinik, the status approval with Approve Permintaan Obat (checked in the route).
   if (is(/^\/klinik-permintaan\/\d+\/pemenuhan$/)) return ["klinik.input", "klinik.permintaan_approve", ...TTD_ITEM_PERMS];
@@ -330,7 +332,7 @@ const permLabel = (p: string) => {
   if (PERM_MODUL[m]) return `${PERM_AKSI[a] ?? a} ${PERM_MODUL[m]}`;
   const other: Record<string, string> = { "dokumen.edit": "Dokumen & Link", "dokumen.kelola": "Kelola semua Dokumen & Link", "klinik.permintaan_approve": "Approve Permintaan Obat", "ba.setujui": "Setujui Berita Acara Pemusnahan", "klinik.ttd_dibuat": "Tanda tangan Permintaan Obat (Dibuat oleh)",
     "klinik.ttd_diketahui": "Tanda tangan Permintaan Obat (Diketahui)", "klinik.ttd_disetujui1": "Tanda tangan Permintaan Obat (Disetujui 1)",
-    "klinik.ttd_disetujui2": "Tanda tangan Permintaan Obat (Disetujui 2)", "sop.view": "Lihat Daftar SOP", "sop.edit": "Ubah Daftar SOP", "sop.kunci": "Kunci Daftar SOP", "master.peta": "Lihat Peta Blok", "master.peta_edit": "Ubah Peta Blok", "master.alat": "Master Alat Berat", "master.users": "Pengguna", "monitor.log_user": "Log Aktivitas User" };
+    "klinik.ttd_disetujui2": "Tanda tangan Permintaan Obat (Disetujui 2)", "klinik.ttd_offline": "Upload surat Permintaan Obat bertanda tangan", "sop.view": "Lihat Daftar SOP", "sop.edit": "Ubah Daftar SOP", "sop.kunci": "Kunci Daftar SOP", "master.peta": "Lihat Peta Blok", "master.peta_edit": "Ubah Peta Blok", "master.alat": "Master Alat Berat", "master.users": "Pengguna", "monitor.log_user": "Log Aktivitas User" };
   return other[p] ?? (m === "master" ? `Master ${a.charAt(0).toUpperCase()}${a.slice(1)}` : p);
 };
 
@@ -5534,6 +5536,72 @@ app.post("/api/klinik-permintaan/:id/ttd", async (req, res) => {
     detail: `${TTD_LEVEL_LABEL[level]}${jabatan ? ` (${jabatan})` : ""}${lengkap ? ` · lengkap, final${otomatis.length ? ` · ${otomatis.length} item yang masih menunggu otomatis Approved` : ""}` : ` · belum: ${TTD_LEVELS.filter((k) => !approval[k]).map((k) => TTD_LEVEL_LABEL[k]).join(", ")}`}`,
   });
   res.json({ success: true, status: lengkap ? "DISETUJUI" : "DIAJUKAN" });
+});
+
+// Surat offline: the form signed on paper, uploaded as photos (one per page) by an account with the tick for it. Each
+// box not signed in the app takes the name / jabatan as written on the paper, marked offline with the photos; the
+// items take the decisions on the paper (Sebagian / Ditolak with alasan, the rest Approved) and the request is final.
+app.post("/api/klinik-permintaan/:id/surat-offline", async (req, res) => {
+  const u = req.user!;
+  const p = await queryOne<any>("SELECT * FROM klinik_permintaan WHERE id = @id", { id: Number(req.params.id) || 0 });
+  if (!p) return res.status(404).json({ error: "Permintaan tidak ditemukan" });
+  if (!checkKlinik(req, res, p.klinik)) return;
+  if (p.status !== "DIAJUKAN") return res.status(409).json({ error: p.status === "DRAFT" ? "Ajukan permintaan dulu, lalu upload suratnya" : "Permintaan sudah disetujui lengkap" });
+  if (!evidenceEnabled()) return res.status(400).json({ error: "Penyimpanan foto belum aktif; surat tidak bisa diupload" });
+  const fotos = [...new Set((Array.isArray(req.body?.evidence_ids) ? req.body.evidence_ids : []).map(String).filter((x: string) => /^[0-9a-f-]{36}$/.test(x)))].slice(0, 10) as string[];
+  if (!fotos.length) return res.status(400).json({ error: "Upload foto surat yang sudah ditandatangani (semua halaman)" });
+  const at = new Date().toISOString();
+  const approval = { ...(p.approval ?? {}) };
+  for (const k of TTD_LEVELS) {
+    if (approval[k]) continue;
+    const nama = String(req.body?.ttd?.[k]?.nama ?? p.ttd?.[k]?.nama ?? "").trim().slice(0, 100);
+    const jabatan = String(req.body?.ttd?.[k]?.jabatan ?? p.ttd?.[k]?.jabatan ?? "").trim().slice(0, 100);
+    if (nama.length < 2) return res.status(400).json({ error: `Isi nama penanda tangan ${TTD_LEVEL_LABEL[k]} sesuai surat` });
+    approval[k] = { nama, jabatan, at, offline: true, fotos, upload_oleh: u.nama, upload_user_id: u.id };
+  }
+  const lines = await queryMany<any>("SELECT * FROM klinik_permintaan_line WHERE permintaan_id = @id ORDER BY id", { id: p.id });
+  const input = new Map<number, any>((Array.isArray(req.body?.lines) ? req.body.lines : []).map((x: any) => [Number(x?.id), x]));
+  const keputusan = [] as { id: number; nama: string; status: string; disetujui: number; alasan: string; satuan: string; jumlah: number }[];
+  for (const l of lines) {
+    const it = input.get(l.id);
+    const status = ["APPROVED", "SEBAGIAN", "DITOLAK"].includes(it?.status) ? it.status : l.status === "MENUNGGU" ? "APPROVED" : l.status;
+    const alasan = status === "SEBAGIAN" || status === "DITOLAK" ? String(it?.alasan ?? l.alasan ?? "").trim().slice(0, 300) : "";
+    const disetujui = status === "APPROVED" ? Number(l.jumlah) : status === "DITOLAK" ? 0 : Number(it?.disetujui ?? l.disetujui);
+    if (status === "SEBAGIAN" && !(disetujui > 0 && disetujui < Number(l.jumlah)))
+      return res.status(400).json({ error: `${l.nama}: isi jumlah yang disetujui di surat (lebih dari 0 dan kurang dari ${fmtQty(l.jumlah)} ${l.satuan})` });
+    if ((status === "SEBAGIAN" || status === "DITOLAK") && alasan.length < 3) return res.status(400).json({ error: `${l.nama}: isi alasan ${status === "DITOLAK" ? "ditolak" : "disetujui sebagian"} sesuai surat` });
+    keputusan.push({ id: l.id, nama: l.nama, status, disetujui, alasan, satuan: l.satuan, jumlah: Number(l.jumlah) });
+  }
+  const oleh = `Surat bertanda tangan (upload ${u.nama})`;
+  try {
+    await withTransaction(async (c) => {
+      // The photos: uploaded by this account (a Super User may use any), not used by another form.
+      const ok = await queryMany("UPDATE evidence SET used = true WHERE id = ANY(@ids::uuid[]) AND used = false AND (user_id = @uid OR @su) RETURNING id", { ids: fotos, uid: u.id, su: u.role === "superuser" }, c);
+      if (ok.length !== fotos.length) throw new AksesError("Foto surat tidak valid, upload ulang fotonya");
+      const r = await queryOne("UPDATE klinik_permintaan SET approval = @approval::jsonb, status = 'DISETUJUI', updated_at = now() WHERE id = @id AND status = 'DIAJUKAN' AND COALESCE(approval, '{}'::jsonb) = @lama::jsonb RETURNING id", { approval: JSON.stringify(approval), lama: JSON.stringify(p.approval ?? {}), id: p.id }, c);
+      if (!r) throw new AksesError("Permintaan ini baru saja berubah (disetujui / ditolak); muat ulang halamannya");
+      for (const k of keputusan)
+        await execute(
+          "UPDATE klinik_permintaan_line SET status = @status, disetujui = @disetujui, alasan = @alasan, approval_oleh = @oleh, approval_at = now(), approval_level = 4 WHERE id = @id",
+          { ...k, oleh },
+          c
+        );
+    });
+  } catch (e: any) {
+    return res.status(e instanceof AksesError ? 409 : 400).json({ error: e?.message ?? "Gagal menyimpan" });
+  }
+  const n = (s: string) => keputusan.filter((k) => k.status === s).length;
+  await logActivity(req, {
+    module: "KLINIK",
+    estate: p.klinik,
+    aksi: "Upload Surat Bertanda Tangan Permintaan Obat",
+    objek: p.nomor,
+    detail: `${fotos.length} foto · ${TTD_LEVELS.filter((k) => approval[k]?.offline).map((k) => `${TTD_LEVEL_LABEL[k]}: ${approval[k].nama}`).join(", ")} · ${n("APPROVED")} approved, ${n("SEBAGIAN")} sebagian, ${n("DITOLAK")} ditolak${keputusan
+      .filter((k) => k.status !== "APPROVED")
+      .map((k) => `; ${k.nama}: ${k.status}${k.status === "SEBAGIAN" ? ` ${fmtQty(k.disetujui)}/${fmtQty(k.jumlah)} ${k.satuan}` : ""} (${k.alasan})`)
+      .join("")}`,
+  });
+  res.json({ success: true, status: "DISETUJUI" });
 });
 
 app.delete("/api/klinik-permintaan/:id", async (req, res) => {

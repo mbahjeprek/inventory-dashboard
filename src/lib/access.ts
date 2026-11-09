@@ -57,6 +57,7 @@ export const OTHER_PERMS: { group: string; items: { key: string; label: string }
       { key: "klinik.ttd_diketahui", label: "Tanda tangan Permintaan Obat: Diketahui (GM Finance & Audit)" },
       { key: "klinik.ttd_disetujui1", label: "Tanda tangan Permintaan Obat: Disetujui 1 (Corporate GM Plantation)" },
       { key: "klinik.ttd_disetujui2", label: "Tanda tangan Permintaan Obat: Disetujui 2 (Head of Business Unit)" },
+      { key: "klinik.ttd_offline", label: "Upload surat Permintaan Obat yang sudah ditandatangani lengkap di kertas (langsung Disetujui, approval item sesuai surat)" },
       { key: "klinik.permintaan_approve", label: "Approve Permintaan Obat per item tanpa tanda tangan (Diketahui / Disetujui otomatis boleh; sebagian & tolak wajib alasan)" },
     ],
   },
