@@ -9526,20 +9526,20 @@ app.post("/api/berita-acara", async (req, res) => {
   try {
     const ba = await withTransaction(async (client) => {
       await client.query("SELECT pg_advisory_xact_lock(hashtext('berita_acara'))");
-      // The rows: approved, of this unit, not on another active BA. Snapshot for the letter.
+      // The rows: approved by a pemeriksa (rows from before the Periksa step have no status and stay out), of this unit, not on another active BA. Snapshot for the letter.
       const rows =
         modul === "KLINIK"
           ? await queryMany(
               `SELECT t.id, t.obat_kode AS kode, o.nama, o.satuan, t.qty, t.alloc, t.note, t.alasan, t.created_at, COALESCE(p.nama, p.username) AS diperiksa_nama
                  FROM klinik_stock_tx t JOIN obat o ON o.kode = t.obat_kode LEFT JOIN users p ON p.id = t.diperiksa_oleh
-                WHERE t.id = ANY(@ids::int[]) AND t.klinik = @unit AND t.type = 'OUT' AND t.tujuan = 'DIBUANG' AND COALESCE(t.status, 'DISETUJUI') = 'DISETUJUI' ORDER BY t.created_at, t.id`,
+                WHERE t.id = ANY(@ids::int[]) AND t.klinik = @unit AND t.type = 'OUT' AND t.tujuan = 'DIBUANG' AND t.status = 'DISETUJUI' ORDER BY t.created_at, t.id`,
               { ids, unit },
               client
             )
           : await queryMany(
               `SELECT t.id, t.barang_kode AS kode, b.nama, b.satuan, t.qty, t.total, t.tanggal_iso, t.keterangan, t.alasan, COALESCE(u.nama, u.username, '') AS oleh, COALESCE(p.nama, p.username) AS diperiksa_nama
                  FROM koperasi_tx t JOIN koperasi_barang b ON b.kode = t.barang_kode LEFT JOIN users u ON u.id = t.user_id LEFT JOIN users p ON p.id = t.diperiksa_oleh
-                WHERE t.id = ANY(@ids::int[]) AND t.koperasi = @unit AND t.jenis = 'RUSAK' AND COALESCE(t.status, 'DISETUJUI') = 'DISETUJUI' ORDER BY t.tanggal_iso, t.id`,
+                WHERE t.id = ANY(@ids::int[]) AND t.koperasi = @unit AND t.jenis = 'RUSAK' AND t.status = 'DISETUJUI' ORDER BY t.tanggal_iso, t.id`,
               { ids, unit },
               client
             );

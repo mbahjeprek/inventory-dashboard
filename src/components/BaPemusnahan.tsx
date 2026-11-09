@@ -816,9 +816,10 @@ export const jenisKoperasi = (): BaJenis => ({
 });
 
 const ALASAN_KLINIK: Record<string, string> = { EXPIRED: "Kedaluwarsa", RUSAK: "Rusak", RETUR: "Retur ke supplier" };
-// The approved rows a new BA can take (all months: what was approved and not yet on a BA).
+// The approved rows a new BA can take (all months: what a pemeriksa approved and not yet on a BA). Rows from
+// before the Periksa step (no status) are counted as approved for the stock, but they never go on a BA.
 export const itemsKlinik = (klinik: string) => async (): Promise<BaItem[]> =>
-  (await api.klinikTarikList({ klinik, status: "DISETUJUI" })).map((t: KlinikTarik) => ({
+  (await api.klinikTarikList({ klinik, status: "DISETUJUI" })).filter((t) => t.status === "DISETUJUI").map((t: KlinikTarik) => ({
     id: t.id,
     nama: t.nama,
     kode: t.kode,
@@ -834,7 +835,7 @@ export const itemsKoperasi = async (): Promise<BaItem[]> => {
   const first = await api.kopTx({ jenis: "RUSAK", status: "DISETUJUI", page: 1, pageSize: 500 });
   let rows: KopTx[] = first.data;
   for (let p = 2; rows.length < first.total && p <= 40; p++) rows = rows.concat((await api.kopTx({ jenis: "RUSAK", status: "DISETUJUI", page: p, pageSize: 500 })).data);
-  return rows.map((t) => ({
+  return rows.filter((t) => t.status === "DISETUJUI").map((t) => ({
     id: t.id,
     nama: t.barang_nama,
     kode: t.barang_kode,
