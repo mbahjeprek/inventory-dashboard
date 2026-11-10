@@ -1,5 +1,7 @@
 # Inventory Dashboard
 
+> **Usang sebagian** (masih menyebut SQLite): untuk arsitektur, setup, deploy dan serah terima yang berlaku, baca [HANDOVER.md](HANDOVER.md).
+
 Dashboard monitoring & inventory barang. Ada **satu gudang fisik** (lokasi utama di Nilam) yang melayani
 tiga tujuan/konsumen: Nilam, Zamrud, dan Firus. Stock adalah satu pool bersama — Nilam/Zamrud/Firus hanya
 label tujuan barang keluar untuk keperluan laporan, bukan stok terpisah.
