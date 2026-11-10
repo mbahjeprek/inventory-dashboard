@@ -11,6 +11,7 @@ import { PerbandinganPanel } from "../components/PerbandinganPanel";
 import { ExportButtons } from "../components/ExportButtons";
 import { StatusUpdatePanel } from "../components/StatusUpdate";
 import type { ReportPart, ReportSection, SectionReport } from "../lib/printTable";
+import { useRefreshTick } from "../hooks/useAutoRefresh";
 
 type ExportBuild = (() => ReportPart) | null;
 type User = ReturnType<typeof useAuth>["user"];
@@ -380,6 +381,7 @@ function AttentionPanel({ e, d, onExport }: { e: EstateInfo; d: EstateData; onEx
   const { user } = useAuth();
   const [groups, setGroups] = useState<AttentionGroup[] | null>(null);
   const buildRef = useExport(onExport);
+  const tick = useRefreshTick();
 
   useEffect(() => {
     let stale = false;
@@ -423,7 +425,7 @@ function AttentionPanel({ e, d, onExport }: { e: EstateInfo; d: EstateData; onEx
       stale = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [e.estate, e.gudang, e.klinik, user?.id]);
+  }, [e.estate, e.gudang, e.klinik, user?.id, tick]);
 
   const negativePupuk = canModule(user, "PUPUK") ? (d.pupuk?.saldoTerakhir ?? []).filter((x) => Number(x.saldo_stock) < 0) : [];
   const negativeOli = canModule(user, "OLI") ? (d.oli?.saldoTerakhir ?? []).filter((x) => Number(x.saldo_stock) < 0) : [];
@@ -508,6 +510,7 @@ function RecentActivity({ estate, onExport }: { estate: string; onExport?: (b: E
   const { user } = useAuth();
   const [rows, setRows] = useState<ActivityLog[] | null>(null);
   const buildRef = useExport(onExport);
+  const tick = useRefreshTick();
 
   useEffect(() => {
     let stale = false;
@@ -525,7 +528,7 @@ function RecentActivity({ estate, onExport }: { estate: string; onExport?: (b: E
       stale = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [estate, user?.id]);
+  }, [estate, user?.id, tick]);
 
   buildRef.current = () => ({
     sections: [
@@ -618,7 +621,14 @@ export function DashboardPage() {
 
   // Load the summaries of the estates on screen; ones already loaded are kept.
   const loaded = useRef(new Set<string>());
+  // The clock (useRefreshTick) loads every card again (the old figures stay until the new ones arrive).
+  const tickKartu = useRefreshTick();
+  const tickLalu = useRef(tickKartu);
   useEffect(() => {
+    if (tickKartu !== tickLalu.current) {
+      tickLalu.current = tickKartu;
+      loaded.current.clear();
+    }
     const put = (estate: string, key: keyof EstateData, v: unknown) =>
       setData((cur) => ({ ...cur, [estate]: { ...cur[estate], [key]: v } }));
     for (const { estate } of shown) {
@@ -636,7 +646,7 @@ export function DashboardPage() {
       if (canModule(user, "OLI")) api.oliSummary(estate, monthRange).then((s) => put(estate, "oli", s)).catch(() => put(estate, "oli", null));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id, shownKey]);
+  }, [user?.id, shownKey, tickKartu]);
 
   // Cetak / Excel of the tab on screen. The panels with their own data (Top Barang Keluar,
   // Perbandingan, Perlu Perhatian, Aktivitas Terbaru) register a builder here.

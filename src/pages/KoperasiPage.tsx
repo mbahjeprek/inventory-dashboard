@@ -36,6 +36,7 @@ import { printKopSlips } from "../lib/kopSlip";
 import { parseNum } from "../components/BatchGrid";
 import { ActivityLogButton } from "../components/ActivityLogButton";
 import { DokumenButton } from "../components/DokumenButton";
+import { useRefreshTick, useTickDiam } from "../hooks/useAutoRefresh";
 
 // Koperasi karyawan Nilam: anggota (karyawan) take goods, deducted from the salary of the month taken
 // (periode = calendar month), up to Rp 1,5 juta a month, no cicilan; Kantor / Mess Tamu are billed to the company. The koperasi
@@ -149,7 +150,10 @@ export function KoperasiPage() {
     setTimeout(() => document.getElementById("rusak-daftar")?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
   };
   const [ringkasan, setRingkasan] = useState<KopRingkasan | null>(null);
-  const [reload, setReload] = useState(0);
+  // reload: bumped after a save, plus the clock's tick (useRefreshTick) so every part keeps current without F5.
+  const [reloadSimpan, setReload] = useState(0);
+  const tick = useRefreshTick();
+  const reload = reloadSimpan + tick;
   const [modal, setModal] = useState<"" | "jual" | "beli" | "rusak" | "jualBatch" | "beliBatch">("");
 
   useEffect(() => {
@@ -354,13 +358,16 @@ function TxTable({
     return () => clearTimeout(t);
   }, [search]);
   useEffect(() => setPage(1), [params]);
+  const cekDiamTx = useTickDiam(useRefreshTick());
   useEffect(() => {
-    setLoading(true);
+    // The clock's refresh keeps the rows on screen.
+    if (!cekDiamTx()) setLoading(true);
     api
       .kopTx({ ...params, page, pageSize })
       .then(setRes)
       .catch(() => setRes(null))
       .finally(() => setLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params, page, reload]);
 
   const doHapus = async () => {
@@ -777,13 +784,18 @@ function RekapTab({ periode, reload, canBayar, onChanged }: { periode: string; r
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [confirmLunas, setConfirmLunas] = useState(false);
   const [msg, setMsg] = useState("");
+  const cekDiamRekap = useTickDiam(useRefreshTick());
   useEffect(() => {
-    setRows(null);
-    setPicked(new Set());
+    // The clock's refresh keeps the rows and what is ticked.
+    if (!cekDiamRekap()) {
+      setRows(null);
+      setPicked(new Set());
+    }
     api
       .kopRekap(periode)
       .then((r) => (setRows(r.data), setLimit(r.limit), setJatuhTempo(r.jatuh_tempo), setToday(r.today)))
       .catch(() => setRows([]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [periode, reload]);
   const [sort, setSort] = useState<Sort>({ key: "", dir: "asc" });
   const st = (r: KopRekap) => statusBayar(r, jatuhTempo, today);
@@ -1352,12 +1364,14 @@ function StokTab({ reload, canEdit, canInput, onChanged }: { reload: number; can
   // An expired barang on hand: its row offers Catat expired (the Barang Rusak / Expired form, filled in).
   const [catatExp, setCatatExp] = useState<KopBarang | null>(null);
   const [koreksi, setKoreksi] = useState<KopBarang | null>(null);
+  const cekDiamBarang = useTickDiam(useRefreshTick());
   useEffect(() => {
-    setRows(null);
+    if (!cekDiamBarang()) setRows(null);
     api
       .kopBarang({ aktif })
       .then(setRows)
       .catch(() => setRows([]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [aktif, reload]);
   const q = search.trim().toLowerCase();
   const menipis = (b: KopBarang) => b.lacak_stok && b.stok <= b.stok_min;
@@ -1853,12 +1867,14 @@ function AnggotaTab({ reload, canEdit, onChanged }: { reload: number; canEdit: b
   const [status, setStatus] = useState("aktif");
   const [editing, setEditing] = useState<KopAnggota | "new" | null>(null);
   const [riwayat, setRiwayat] = useState<KopAnggota | null>(null);
+  const cekDiamAnggota = useTickDiam(useRefreshTick());
   useEffect(() => {
-    setRows(null);
+    if (!cekDiamAnggota()) setRows(null);
     api
       .kopAnggota({ status })
       .then(setRows)
       .catch(() => setRows([]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status, reload]);
   const q = search.trim().toLowerCase();
   const [sort, setSort] = useState<Sort>({ key: "", dir: "asc" });

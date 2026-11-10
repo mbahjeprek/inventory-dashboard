@@ -7,6 +7,7 @@ import { can } from "../lib/access";
 import { EvidenceInput, EvidenceLink, useEvidenceEnabled } from "./EvidenceInput";
 import { BaDaftar, itemsKlinik, jenisKlinik } from "./BaPemusnahan";
 import { isoDisplay, localToday } from "../lib/opname";
+import { useRefreshTick, useTickDiam } from "../hooks/useAutoRefresh";
 
 // Klinik > Expired & Rusak: obat / BHP past its expiry shows up here by itself (per batch); Tarik takes it
 // out of its batch with a photo (quarantined, it can't go to a patient), a second account with Approve
@@ -429,19 +430,22 @@ export function KlinikRusakTab({ klinik, refreshKey, onChanged }: { klinik: stri
     setReload((n) => n + 1);
     onChanged();
   };
+  const tick = useRefreshTick();
+  const cekDiam = useTickDiam(tick);
   useEffect(() => {
     api
       .klinikExpired(klinik)
       .then(setExpired)
       .catch(() => setExpired([]));
-  }, [klinik, reload, refreshKey]);
+  }, [klinik, reload, refreshKey, tick]);
   useEffect(() => {
-    setRows(null);
+    if (!cekDiam()) setRows(null);
     api
       .klinikTarikList({ klinik, status, periode: status === "MENUNGGU" ? "" : periode })
       .then(setRows)
       .catch(() => setRows([]));
-  }, [klinik, status, periode, reload, refreshKey]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [klinik, status, periode, reload, refreshKey, tick]);
 
   const n = (st: string) => (rows ?? []).filter((t) => (t.status ?? "DISETUJUI") === st).length;
   return (

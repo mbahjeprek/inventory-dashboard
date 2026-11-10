@@ -17,6 +17,7 @@ import { KonsumsiObatPanel } from "./KonsumsiObatPanel";
 import { fetchAllRows, type ReportSection, type SectionReport, type TableReport } from "../lib/printTable";
 import { MAX_TERAPI, hariOf, kodeTglOf, periodeOf, tglSheet, yaTidak } from "../lib/kunjungan";
 import { tanggalWaktu } from "../lib/datetime";
+import { useRefreshTick } from "../hooks/useAutoRefresh";
 
 const PAGE_SIZE = 50;
 const BULAN = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
@@ -131,6 +132,8 @@ export function KlinikLaporanTab({ klinik }: { klinik: string }) {
   const [deleting, setDeleting] = useState<Kunjungan | null>(null);
   const [actionError, setActionError] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
+  // The clock (useRefreshTick) reloads the open view without F5.
+  const tick = useRefreshTick();
 
   const range = { klinik, dateFrom, dateTo };
   useEffect(() => {
@@ -144,7 +147,7 @@ export function KlinikLaporanTab({ klinik }: { klinik: string }) {
         setLoadError(errorText(e, "Gagal memuat ringkasan"));
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, klinik, dateFrom, dateTo, reloadKey]);
+  }, [view, klinik, dateFrom, dateTo, reloadKey, tick]);
 
   // Data Kunjungan: how many visits of each kind in the chosen period (beside the filter and in its options).
   const [jumlah, setJumlah] = useState<LaporanKlinikSummary["totals"] | null>(null);
@@ -155,7 +158,7 @@ export function KlinikLaporanTab({ klinik }: { klinik: string }) {
       .then((r) => setJumlah(r.totals))
       .catch(() => setJumlah(null));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, klinik, dateFrom, dateTo, reloadKey]);
+  }, [view, klinik, dateFrom, dateTo, reloadKey, tick]);
   const jumlahFlag = (f: Flag) => (!jumlah ? null : f === "" ? jumlah.total : jumlah[f]);
 
   const listQuery = (p: number, ps: number) => ({ ...range, search, flag, page: p, pageSize: ps });
@@ -175,7 +178,7 @@ export function KlinikLaporanTab({ klinik }: { klinik: string }) {
     }, 250);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, klinik, dateFrom, dateTo, search, flag, page, reloadKey]);
+  }, [view, klinik, dateFrom, dateTo, search, flag, page, reloadKey, tick]);
   useEffect(() => setPage(1), [klinik, dateFrom, dateTo, search, flag]);
 
   const pickPreset = (key: string) => {

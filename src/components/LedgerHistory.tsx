@@ -11,6 +11,7 @@ import { useAuth } from "../context/AuthContext";
 import { can, canEditRow, canAttachEvidence } from "../lib/access";
 import { EvidenceLink, AttachEvidenceButton } from "./EvidenceInput";
 import { loanTag } from "../lib/opname";
+import { useAutoRefresh } from "../hooks/useAutoRefresh";
 
 const formatWaktu = (iso: string) =>
   new Date(iso).toLocaleString("id-ID", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
@@ -48,8 +49,9 @@ export function LedgerHistory({ scope, type, refreshKey }: { scope: StockScope; 
 
   const query = () => ({ type, search, dateFrom, dateTo });
 
-  const load = () => {
-    setLoading(true);
+  // diam: the background refresh (useAutoRefresh) keeps the rows on screen.
+  const load = (diam = false) => {
+    if (!diam) setLoading(true);
     api.ledgerHistory(scope, { ...query(), page, pageSize }).then((res) => {
       setRows(res.data);
       setTotal(res.total);
@@ -57,6 +59,7 @@ export function LedgerHistory({ scope, type, refreshKey }: { scope: StockScope; 
       setLoading(false);
     });
   };
+  useAutoRefresh(() => load(true));
 
   useEffect(() => {
     load();

@@ -20,6 +20,7 @@ import { ExportButtons } from "./ExportButtons";
 import { EvidenceInput, EvidenceLink, useEvidenceEnabled } from "./EvidenceInput";
 import { KlinikSuratBarang } from "./KlinikSuratBarang";
 import { TTD_DEFAULT, TTD_LABEL, ttdLengkap, TTD_LEVEL_LABEL, TTD_URUT, URGENSI_LABEL, estateLabel, permintaanHtml, waktuTtd } from "../lib/permintaanSurat";
+import { useAutoRefresh } from "../hooks/useAutoRefresh";
 
 // Klinik > Permintaan Obat: the "Form Permintaan Obat, BMHP dan Alat Medis" of the klinik, drafted from its
 // stock (saran = enough for N months of use, at least the buffer, in kemasan), edited, printed with the
@@ -90,6 +91,7 @@ function Daftar({ klinik, rekap, setView }: { klinik: string; rekap: boolean; se
     if (!rekap) load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [klinik, rekap]);
+  useAutoRefresh(() => !rekap && load());
   const hapus = async (p: PermintaanRingkas) => {
     if (!window.confirm(`Hapus permintaan ${p.nomor}?`)) return;
     try {

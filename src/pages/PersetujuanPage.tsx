@@ -11,6 +11,7 @@ import { KoreksiPengajuanList } from "../components/KoreksiPengajuan";
 import { BaTtdSaya } from "../components/BaTtdSaya";
 import { can, TTD_PERMS } from "../lib/access";
 import { TTD_LEVEL_LABEL, TTD_URUT, estateLabel, waktuTtd } from "../lib/permintaanSurat";
+import { useAutoRefresh } from "../hooks/useAutoRefresh";
 
 // Persetujuan: what waits for this account's signature - the Permintaan Obat of its kliniks whose next box it has
 // the tick for (and hasn't signed another box of), opened with their Tanda Tangan panel; and the Berita Acara
@@ -60,6 +61,7 @@ export function PersetujuanPage() {
         .then((r) => setBas(r.data))
         .catch((e) => (setBas([]), setError(errorText(e, "Gagal memuat berita acara"))));
   };
+  useAutoRefresh(() => open === null && openSb === null && load());
   useEffect(() => {
     if (open === null && openSb === null) load();
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -10,6 +10,7 @@ import { PeriodeFilter, bulanIni } from "../components/PeriodeFilter";
 import { fetchAllRows, type TableReport } from "../lib/printTable";
 import { EvidenceLink } from "../components/EvidenceInput";
 import { tanggalWaktu } from "../lib/datetime";
+import { useAutoRefresh } from "../hooks/useAutoRefresh";
 
 const TUJUAN_OPTIONS = ["NILAM", "FIRUS", "ZAMRUD", "KNS", "WJA"];
 
@@ -36,8 +37,9 @@ export function StockOutPage({ embedded = false }: { embedded?: boolean }) {
   const [confirmDelete, setConfirmDelete] = useState<StockOutRecord | null>(null);
   const pageSize = 25;
 
-  const load = () => {
-    setLoading(true);
+  // diam: the background refresh (useAutoRefresh) keeps the rows on screen.
+  const load = (diam = false) => {
+    if (!diam) setLoading(true);
     api.stockOut({ search, tujuan, dateFrom, dateTo, page, pageSize }).then((res) => {
       setItems(res.data);
       setTotal(res.total);
@@ -45,6 +47,7 @@ export function StockOutPage({ embedded = false }: { embedded?: boolean }) {
       setLoading(false);
     });
   };
+  useAutoRefresh(() => load(true));
 
   useEffect(() => {
     load();

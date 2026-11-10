@@ -11,6 +11,7 @@ import { canOpname } from "../lib/access";
 import { useShownEstates } from "../hooks/useEstateFilter";
 import { OPNAME_MODULES, OPNAME_MODULE_LABEL, localToday, opnameModule } from "../lib/opname";
 import { tanggalWaktu } from "../lib/datetime";
+import { useRefreshTick, useTickDiam } from "../hooks/useAutoRefresh";
 
 const PAGE_SIZE = 25;
 
@@ -34,14 +35,17 @@ export function StokOpnamePage() {
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
 
+  const tick = useRefreshTick();
+  const cekDiam = useTickDiam(tick);
   useEffect(() => {
-    setLoading(true);
+    if (!cekDiam()) setLoading(true);
     api.opnameList({ module, estate, estates: pickedEstates, status, page, pageSize: PAGE_SIZE }).then((res) => {
       setRows(res.data);
       setTotal(res.total);
       setLoading(false);
     });
-  }, [module, estate, pickedEstates, status, page]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [module, estate, pickedEstates, status, page, tick]);
 
   const totalPages = Math.max(Math.ceil(total / PAGE_SIZE), 1);
   const selectCls = "text-sm rounded-md border border-[var(--border)] px-3 py-2 bg-white";

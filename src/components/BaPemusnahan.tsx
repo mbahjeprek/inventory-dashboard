@@ -8,6 +8,7 @@ import { BULAN, HARI, KOP_CSS, escHtml, jabatanDariGelar, kopHtml, namaLama, per
 import { useAuth } from "../context/AuthContext";
 import { can } from "../lib/access";
 import { EvidenceInput, EvidenceLink, useEvidenceEnabled } from "./EvidenceInput";
+import { useRefreshTick } from "../hooks/useAutoRefresh";
 
 // Berita Acara Pemusnahan (Klinik obat / BHP, Koperasi barang rusak): a stored document with an automatic
 // nomor. Made from the approved rows (each row on one active BA only) and printed as a formal letter, signed
@@ -607,12 +608,13 @@ const belumBulan = (b: BaBelum) => b.bulan.map((x) => `${bulanLabel(x.periode)}:
 export function BaBelumBanner({ modul, unit, reload, onLihat }: { modul: BaJenis["modul"]; unit: string; reload?: number; onLihat: () => void }) {
   const { user } = useAuth();
   const [b, setB] = useState<BaBelum | null>(null);
+  const tick = useRefreshTick();
   useEffect(() => {
     api
       .baBelum(modul, unit)
       .then(setB)
       .catch(() => setB(null));
-  }, [modul, unit, reload]);
+  }, [modul, unit, reload, tick]);
   if (!b?.n) return null;
   const canInput = can(user, `${modul.toLowerCase()}.input`);
   return (
@@ -641,6 +643,8 @@ export function BaDaftar({ jenis: j, items, reload, onChanged }: { jenis: BaJeni
   const canEdit = can(user, `${mod}.edit`);
   const [list, setList] = useState<{ data: BeritaAcara[]; terpakai: number[]; belum?: BaBelum } | null>(null);
   const [muat, setMuat] = useState(0);
+  // The clock (useRefreshTick) reloads the list without F5; the rows stay on screen meanwhile.
+  const tick = useRefreshTick();
   const [buat, setBuat] = useState<BaItem[] | null | false>(false);
   const [setuju, setSetuju] = useState<BeritaAcara | null>(null);
   const [selesai, setSelesai] = useState<BeritaAcara | null>(null);
@@ -653,7 +657,7 @@ export function BaDaftar({ jenis: j, items, reload, onChanged }: { jenis: BaJeni
       .baList(j.modul, j.unit)
       .then(setList)
       .catch(() => setList({ data: [], terpakai: [] }));
-  }, [j.modul, j.unit, reload, muat]);
+  }, [j.modul, j.unit, reload, muat, tick]);
   const done = () => {
     setBuat(false);
     setSetuju(null);

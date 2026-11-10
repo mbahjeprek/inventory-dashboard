@@ -12,7 +12,7 @@ import { OPNAME_MODULES, OPNAME_MODULE_LABEL, fmtQty, localToday, opnameModule, 
 import { tanggalWaktu } from "../lib/datetime";
 import { PinjamanBatchModal } from "../components/PinjamanBatchModal";
 import { parseNum } from "../components/BatchGrid";
-import { useAutoRefresh } from "../hooks/useAutoRefresh";
+import { useRefreshTick } from "../hooks/useAutoRefresh";
 
 const ESTATES = ["NILAM", "FIRUS", "ZAMRUD", "KNS", "WJA"];
 const inputCls = "w-full text-sm rounded-md border border-[var(--border)] px-3 py-2";
@@ -75,8 +75,7 @@ export function PinjamanPage() {
   }, [cariKetik]);
 
   // tick: the background refresh (useAutoRefresh) - reloads the list, the cards and the log without "Memuat...".
-  const [tick, setTick] = useState(0);
-  useAutoRefresh(() => setTick((n) => n + 1));
+  const tick = useRefreshTick();
   const tickList = useRef(0);
   useEffect(() => {
     const diam = tick !== tickList.current;

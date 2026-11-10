@@ -8,6 +8,7 @@ import { printDocument } from "../lib/printTable";
 import { waktuTtd } from "../lib/permintaanSurat";
 import { SB_LABEL, SB_URUT, formatNomor, gabungNomor, pisahNomor, suratBarangHtml } from "../lib/suratBarang";
 import { EvidenceInput, EvidenceLink, useEvidenceEnabled } from "./EvidenceInput";
+import { useAutoRefresh } from "../hooks/useAutoRefresh";
 
 // Klinik > Permintaan > Permintaan Barang (non-obat): the klinik's letter asking for a barang that isn't an obat (a
 // printer...), made on its template (see lib/suratBarang), sent, then signed in the app in order - Dimohon Oleh (the
@@ -70,6 +71,7 @@ function Daftar({ klinik, setView }: { klinik: string; setView: (v: View) => voi
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [klinik]);
+  useAutoRefresh(load);
   const hapus = async (s: SuratBarangRow) => {
     if (!window.confirm(`Hapus surat ${s.nomor || s.perihal}?`)) return;
     try {

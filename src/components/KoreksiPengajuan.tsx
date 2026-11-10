@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { ClipboardCheck, X } from "lucide-react";
 import { api, errorText, type KoreksiPengajuan } from "../lib/api";
 import { usePersetujuan } from "../hooks/usePersetujuan";
+import { useAutoRefresh } from "../hooks/useAutoRefresh";
 
 // Pengajuan Koreksi Stok: a Koreksi Stok from an admin (not a Super User) waits here until someone else with
 // Setujui Koreksi Stok (HR / akunting / above) or a Super User approves it; only then the difference is booked.
@@ -69,6 +70,7 @@ export function KoreksiPengajuanList({
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [module, estate, reload]);
+  useAutoRefresh(load);
 
   const selesai = () => {
     setPeriksa(null);
