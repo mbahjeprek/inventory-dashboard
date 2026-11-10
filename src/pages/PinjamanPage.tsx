@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ArrowLeftRight, ArrowRight, Plus, ListPlus, Search, UserRound, X } from "lucide-react";
 import { api, errorText, type OpnameModule, type Pinjaman, type PinjamanBarang, type PinjamanLog, type PinjamanLogAksi, type PinjamanRingkasan, type PinjamanStatus } from "../lib/api";
 import { useSearchParams } from "react-router-dom";
@@ -12,6 +12,7 @@ import { OPNAME_MODULES, OPNAME_MODULE_LABEL, fmtQty, localToday, opnameModule, 
 import { tanggalWaktu } from "../lib/datetime";
 import { PinjamanBatchModal } from "../components/PinjamanBatchModal";
 import { parseNum } from "../components/BatchGrid";
+import { useAutoRefresh } from "../hooks/useAutoRefresh";
 
 const ESTATES = ["NILAM", "FIRUS", "ZAMRUD", "KNS", "WJA"];
 const inputCls = "w-full text-sm rounded-md border border-[var(--border)] px-3 py-2";
@@ -73,8 +74,14 @@ export function PinjamanPage() {
     return () => clearTimeout(t);
   }, [cariKetik]);
 
+  // tick: the background refresh (useAutoRefresh) - reloads the list, the cards and the log without "Memuat...".
+  const [tick, setTick] = useState(0);
+  useAutoRefresh(() => setTick((n) => n + 1));
+  const tickList = useRef(0);
   useEffect(() => {
-    setLoading(true);
+    const diam = tick !== tickList.current;
+    tickList.current = tick;
+    if (!diam) setLoading(true);
     api
       .pinjamanList({ module, status, estates: pickedEstates, q: cari, pageSize: 200 })
       .then((res) => {
@@ -82,13 +89,14 @@ export function PinjamanPage() {
         setTotal(res.total);
       })
       .finally(() => setLoading(false));
-  }, [module, status, pickedEstates, reload, cari]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [module, status, pickedEstates, reload, cari, tick]);
   useEffect(() => {
     api
       .pinjamanLog({ module, estates: pickedEstates, pageSize: 1 })
       .then((res) => setRingkasan(res.ringkasan))
       .catch(() => setRingkasan(null));
-  }, [module, pickedEstates, reload]);
+  }, [module, pickedEstates, reload, tick]);
 
   const canAct = (l: Pinjaman) => l.status === "DIPINJAM" && can(user, inputPerm(l.module)) && (myEstates.includes(l.dari_estate) || myEstates.includes(l.ke_estate));
   const done = () => {
@@ -212,7 +220,7 @@ export function PinjamanPage() {
       </div>
 
       {view === "log" ? (
-        <PinjamanLogTable module={module} aksi={aksi} estates={pickedEstates} cari={cari} reload={reload} />
+        <PinjamanLogTable module={module} aksi={aksi} estates={pickedEstates} cari={cari} reload={reload} tick={tick} />
       ) : (
 
       <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg table-scroll">
@@ -367,21 +375,26 @@ function Kartu({ label, value, sub, tone, onClick }: { label: string; value: num
 const isBack = (a: PinjamanLogAksi) => a === "KEMBALI" || a === "LUNAS" || a === "BATAL";
 
 // Log Aktivitas: one row per event (made, returned, cleared, cancelled), newest first, 50 per page.
-function PinjamanLogTable({ module, aksi, estates, cari, reload }: { module: string; aksi: string; estates: string; cari: string; reload: number }) {
+function PinjamanLogTable({ module, aksi, estates, cari, reload, tick = 0 }: { module: string; aksi: string; estates: string; cari: string; reload: number; tick?: number }) {
   const [rows, setRows] = useState<PinjamanLog[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const pageSize = 50;
   useEffect(() => setPage(1), [module, aksi, estates, cari]);
+  const tickDone = useRef(tick);
   useEffect(() => {
-    setLoading(true);
+    // A background refresh (tick) keeps the rows on screen.
+    const diam = tick !== tickDone.current;
+    tickDone.current = tick;
+    if (!diam) setLoading(true);
     api
       .pinjamanLog({ module, aksi, estates, q: cari, page, pageSize })
       .then((res) => (setRows(res.data), setTotal(res.total)))
       .catch(() => (setRows([]), setTotal(0)))
       .finally(() => setLoading(false));
-  }, [module, aksi, estates, cari, page, reload]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [module, aksi, estates, cari, page, reload, tick]);
   const pages = Math.max(1, Math.ceil(total / pageSize));
   const lama = (r: PinjamanLog) => Math.round((Date.parse(r.tanggal_iso) - Date.parse(r.tanggal_pinjam)) / 86400000);
 

@@ -43,6 +43,7 @@ import { KlinikPermintaanTab } from "../components/KlinikPermintaanTab";
 import { LedgerHistory } from "../components/LedgerHistory";
 import { ItemRiwayatButton } from "../components/ItemRiwayat";
 import { StockBatchModal } from "../components/StockBatchModal";
+import { useAutoRefresh } from "../hooks/useAutoRefresh";
 
 // Matches EXPIRY_WARNING_DAYS in server/src/app.ts.
 const EXPIRY_WARNING_DAYS = 30;
@@ -174,8 +175,9 @@ export function InventoryKlinikPage({ klinik }: { klinik: string }) {
 
   const query = () => ({ klinik, search, kategori, stock: stockFilter, sortBy, sortDir });
 
-  const load = () => {
-    setLoading(true);
+  // diam: a background refresh (useAutoRefresh) keeps the rows on screen instead of "Memuat...".
+  const load = (diam = false) => {
+    if (!diam) setLoading(true);
     api.klinikStock({ ...query(), page, pageSize }).then((res) => {
       setItems(res.data);
       setTotal(res.total);
@@ -183,6 +185,7 @@ export function InventoryKlinikPage({ klinik }: { klinik: string }) {
       setLoading(false);
     });
   };
+  useAutoRefresh(() => (load(true), loadSummary()));
 
   const loadSummary = () => api.klinikSummary(klinik).then(setSummary);
 

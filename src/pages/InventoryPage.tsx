@@ -37,6 +37,7 @@ import { InventoryTabs, useInventoryTab } from "../components/InventoryTabs";
 import { StockInPage } from "./StockInPage";
 import { StockOutPage } from "./StockOutPage";
 import { StockBatchModal } from "../components/StockBatchModal";
+import { useAutoRefresh } from "../hooks/useAutoRefresh";
 
 const STATUSES = ["AMAN", "BUFFER STOCK"];
 
@@ -152,8 +153,9 @@ export function InventoryPage() {
   const [batchNotice, setBatchNotice] = useState("");
   const pageSize = 25;
 
-  const load = () => {
-    setLoading(true);
+  // diam: a background refresh (useAutoRefresh) keeps the rows on screen instead of "Memuat...".
+  const load = (diam = false) => {
+    if (!diam) setLoading(true);
     api
       .items({ search, status, satuan, stock: stockFilter, sortBy, sortDir, page, pageSize })
       .then((res) => {
@@ -162,6 +164,7 @@ export function InventoryPage() {
         setLoading(false);
       });
   };
+  useAutoRefresh(() => load(true));
 
   useEffect(() => {
     api.satuanOptions().then(setSatuanOptions);

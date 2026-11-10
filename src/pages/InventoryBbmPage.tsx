@@ -23,6 +23,7 @@ import { can, canEditRow, canAttachEvidence, userEstates } from "../lib/access";
 import { EvidenceLink, AttachEvidenceButton } from "../components/EvidenceInput";
 import { tanggalWaktu } from "../lib/datetime";
 import { loanTag } from "../lib/opname";
+import { useAutoRefresh } from "../hooks/useAutoRefresh";
 
 const JENIS_OPTIONS = JENIS_BBM;
 
@@ -77,8 +78,9 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
   })();
   const loadSummary = () => api.bbmSummary(lokasiLock, { ...flowRange, asOf: dateTo }).then(setSummary);
 
-  const load = () => {
-    setLoading(true);
+  // diam: a background refresh (useAutoRefresh) keeps the rows on screen instead of "Memuat...".
+  const load = (diam = false) => {
+    if (!diam) setLoading(true);
     api.bbm({ search, jenis_bbm: jenisBbm, lokasi, kode_kendaraan: alat, dateFrom, dateTo, page, pageSize }).then((res) => {
       setRows(res.data);
       setTotal(res.total);
@@ -88,6 +90,7 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
       setLoading(false);
     });
   };
+  useAutoRefresh(() => (load(true), loadSummary()));
 
   useEffect(() => {
     api.bbmLokasiOptions().then(setLokasiOptions);

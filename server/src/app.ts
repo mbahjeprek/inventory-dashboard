@@ -8966,7 +8966,7 @@ app.get("/api/pinjaman", async (req, res) => {
                    'oleh', COALESCE(ku.nama, ku.username, ''), 'evidence_id', k.evidence_id, 'created_at', k.created_at) ORDER BY k.id)
                  FROM pinjaman_kembali k LEFT JOIN users ku ON ku.id = k.user_id WHERE k.pinjaman_id = p.id), '[]') AS kembali
      FROM pinjaman p LEFT JOIN users u ON u.id = p.user_id ${where}
-     ORDER BY (p.status = 'DIPINJAM') DESC, p.id DESC LIMIT @limit OFFSET @offset`,
+     ORDER BY p.tanggal_iso DESC, p.created_at DESC, p.id DESC LIMIT @limit OFFSET @offset`,
     { ...params, limit, offset }
   );
   res.json({ data, total });

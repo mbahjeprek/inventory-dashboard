@@ -19,6 +19,7 @@ import { EvidenceLink, AttachEvidenceButton } from "../components/EvidenceInput"
 import { tanggalWaktu } from "../lib/datetime";
 import { OliBatchModal } from "../components/SaldoBatchModal";
 import { loanTag } from "../lib/opname";
+import { useAutoRefresh } from "../hooks/useAutoRefresh";
 
 const localIso = (d: Date) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -71,8 +72,9 @@ export function InventoryOliPage({ estate }: { estate: string }) {
 
   const loadSummary = () => api.oliSummary(estate, { ...flowRange, asOf: dateTo }).then(setSummary);
 
-  const load = () => {
-    setLoading(true);
+  // diam: a background refresh (useAutoRefresh) keeps the rows on screen instead of "Memuat...".
+  const load = (diam = false) => {
+    if (!diam) setLoading(true);
     api.oli({ ...filters(), page, pageSize }).then((res) => {
       setRows(res.data);
       setTotal(res.total);
@@ -81,6 +83,7 @@ export function InventoryOliPage({ estate }: { estate: string }) {
       setLoading(false);
     });
   };
+  useAutoRefresh(() => (load(true), loadSummary()));
 
   useEffect(() => {
     api.oliOptions(estate).then((r) => setJenisOptions(r.jenis));

@@ -37,6 +37,7 @@ import { InventoryTabs, useInventoryTab } from "../components/InventoryTabs";
 import { LedgerHistory } from "../components/LedgerHistory";
 import { ItemRiwayatButton } from "../components/ItemRiwayat";
 import { StockBatchModal } from "../components/StockBatchModal";
+import { useAutoRefresh } from "../hooks/useAutoRefresh";
 
 const STATUSES = ["AMAN", "BUFFER STOCK"];
 
@@ -153,14 +154,16 @@ export function InventoryGudangStockPage({ gudang }: { gudang: string }) {
   const [confirmDelete, setConfirmDelete] = useState<GudangStockItem | null>(null);
   const pageSize = 25;
 
-  const load = () => {
-    setLoading(true);
+  // diam: a background refresh (useAutoRefresh) keeps the rows on screen instead of "Memuat...".
+  const load = (diam = false) => {
+    if (!diam) setLoading(true);
     api.gudangStock({ gudang, search, status, stock: stockFilter, sortBy, sortDir, page, pageSize }).then((res) => {
       setItems(res.data);
       setTotal(res.total);
       setLoading(false);
     });
   };
+  useAutoRefresh(() => (load(true), loadSummary()));
 
   const loadSummary = () => api.gudangStockSummary(gudang).then(setSummary);
 
