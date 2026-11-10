@@ -10,8 +10,14 @@ const toneClasses: Record<Tone, string> = {
   red: "bg-[var(--accent-red-bg)] border-[var(--accent-red-border)] text-[var(--accent-red)]",
 };
 
+// A pill in the card's colour, for the word of a label that should stand out (e.g. the BBM jenis).
+export const StatSorot = ({ tone = "blue", children }: { tone?: Tone; children: ReactNode }) => (
+  <span className={`inline-block px-1.5 py-px rounded border font-semibold text-[13px] leading-tight ${toneClasses[tone]}`}>{children}</span>
+);
+
 export function StatCard({
   label,
+  labelNode,
   value,
   icon: Icon,
   tone = "blue",
@@ -22,6 +28,8 @@ export function StatCard({
   title,
 }: {
   label: string;
+  // Shown instead of label (which stays the tooltip text), e.g. with a StatSorot.
+  labelNode?: ReactNode;
   value: string | number;
   icon: LucideIcon;
   tone?: Tone;
@@ -49,7 +57,7 @@ export function StatCard({
             {value}
             {suffix && <span className="text-sm font-normal text-[var(--text-muted)] ml-1">{suffix}</span>}
           </div>
-          <div className="text-xs text-[var(--text-secondary)] mt-0.5">{label}</div>
+          <div className="text-xs text-[var(--text-secondary)] mt-0.5">{labelNode ?? label}</div>
         </div>
       </div>
       {footer && <div className="mt-3 pt-3 border-t border-[var(--border)]">{footer}</div>}

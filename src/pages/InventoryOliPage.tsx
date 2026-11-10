@@ -2,7 +2,7 @@ import { Link } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { Search, ChevronLeft, ChevronRight, Droplet, PackagePlus, ListPlus, Pencil, Trash2 } from "lucide-react";
 import { api, errorText, type OliRecord, type OliSummary } from "../lib/api";
-import { StatCard } from "../components/StatCard";
+import { StatCard, StatSorot } from "../components/StatCard";
 import { ExportButtons } from "../components/ExportButtons";
 import { PeriodeFilter, bulanIni } from "../components/PeriodeFilter";
 import { ActivityLogButton } from "../components/ActivityLogButton";
@@ -187,6 +187,12 @@ export function InventoryOliPage({ estate }: { estate: string }) {
             <StatCard
               key={j}
               label={`Stok ${j} - ${estate}${dateTo ? ` (per ${fmtDate(dateTo)})` : ""}`}
+              labelNode={
+                <>
+                  Stok <StatSorot tone={saldo < 0 ? "red" : "amber"}>{j}</StatSorot> - {estate}
+                  {dateTo ? ` (per ${fmtDate(dateTo)})` : ""}
+                </>
+              }
               value={fmt(saldo)}
               suffix="LTR"
               icon={Droplet}

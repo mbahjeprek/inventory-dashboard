@@ -4,7 +4,7 @@ import { Search, ChevronLeft, ChevronRight, Fuel, Droplet, PackagePlus, Pencil, 
 import { PinjamPribadiModal } from "../components/PinjamPribadiModal";
 import { useOpenPinjaman } from "../hooks/useOpenPinjaman";
 import { api, errorText, type BbmRecord, type BbmSummary } from "../lib/api";
-import { StatCard } from "../components/StatCard";
+import { StatCard, StatSorot } from "../components/StatCard";
 import { ExportButtons } from "../components/ExportButtons";
 import { PeriodeFilter, bulanIni } from "../components/PeriodeFilter";
 import { ActivityLogButton } from "../components/ActivityLogButton";
@@ -277,14 +277,22 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
       <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
         {saldoCards.map(({ jenis, lok, saldo }) => {
           const active = jenisBbm === jenis && (!!lokasiLock || lokasi === lok);
+          const tone = jenis === "SOLAR" ? "blue" : jenis === "BENSIN" ? "amber" : jenis === "EMERGENCY" ? "red" : "green";
+          const per = dateTo ? ` (per ${new Date(`${dateTo}T00:00:00`).toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" })})` : "";
           return (
             <StatCard
               key={`${jenis}-${lok}`}
-              label={`Stok ${jenisBbmLabel(jenis)} - ${lok}${dateTo ? ` (per ${new Date(`${dateTo}T00:00:00`).toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" })})` : ""}`}
+              label={`Stok ${jenisBbmLabel(jenis)} - ${lok}${per}`}
+              labelNode={
+                <>
+                  Stok <StatSorot tone={tone}>{jenisBbmLabel(jenis)}</StatSorot> - {lok}
+                  {per}
+                </>
+              }
               value={(saldo ?? 0).toLocaleString("id-ID")}
               suffix="LTR"
               icon={jenis === "SOLAR" ? Fuel : jenis === "EMERGENCY" ? Siren : jenis === "JATAH_GM" ? Car : Droplet}
-              tone={jenis === "SOLAR" ? "blue" : jenis === "BENSIN" ? "amber" : jenis === "EMERGENCY" ? "red" : "green"}
+              tone={tone}
               active={active}
               footer={
                 <div>

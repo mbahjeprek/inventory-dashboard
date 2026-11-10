@@ -2,7 +2,7 @@ import { Link } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { Search, ChevronLeft, ChevronRight, Sprout, PackagePlus, ListPlus, Pencil, Trash2 } from "lucide-react";
 import { api, errorText, type PupukRecord, type PupukSummary } from "../lib/api";
-import { StatCard } from "../components/StatCard";
+import { StatCard, StatSorot } from "../components/StatCard";
 import { ExportButtons } from "../components/ExportButtons";
 import { PeriodeFilter, bulanIni } from "../components/PeriodeFilter";
 import { ActivityLogButton } from "../components/ActivityLogButton";
@@ -211,6 +211,12 @@ export function InventoryPupukPage({ estate }: { estate: string }) {
             <StatCard
               key={j}
               label={`Stok ${j} - ${estate}${dateTo ? ` (per ${fmtDate(dateTo)})` : ""}`}
+              labelNode={
+                <>
+                  Stok <StatSorot tone={saldo < 0 ? "red" : "green"}>{j}</StatSorot> - {estate}
+                  {dateTo ? ` (per ${fmtDate(dateTo)})` : ""}
+                </>
+              }
               value={saldo.toLocaleString("id-ID", { maximumFractionDigits: 2 })}
               suffix="KG"
               icon={Sprout}
