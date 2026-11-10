@@ -6,6 +6,9 @@ export type JenisBbm = "SOLAR" | "BENSIN" | "BENSIN_CAMPUR" | "EMERGENCY" | "JAT
 export const JENIS_BBM: JenisBbm[] = ["SOLAR", "BENSIN", "BENSIN_CAMPUR", "EMERGENCY", "JATAH_GM"];
 export const JENIS_BBM_LABEL: Record<JenisBbm, string> = { SOLAR: "Solar", BENSIN: "Bensin", BENSIN_CAMPUR: "Bensin Campur", EMERGENCY: "BBM Emergency", JATAH_GM: "Jatah GM" };
 export const jenisBbmLabel = (j: string) => JENIS_BBM_LABEL[j as JenisBbm] ?? j;
+// Each jenis its own colour, on the stock cards and on every row of the list (so Solar and Bensin aren't mixed up).
+export const jenisBbmTone = (j: string): "blue" | "amber" | "red" | "green" => (j === "SOLAR" ? "blue" : j === "BENSIN" ? "amber" : j === "EMERGENCY" ? "red" : "green");
+export const JENIS_TONE_WARNA = { blue: "var(--accent-blue)", amber: "var(--accent-amber)", red: "var(--accent-red)", green: "var(--accent-green)" } as const;
 // Where Bensin Campur is offered before it has any data.
 export const LOKASI_BENSIN_CAMPUR = ["WJA"];
 // Stocks kept only at one lokasi (the server refuses them elsewhere).

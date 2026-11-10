@@ -13,7 +13,7 @@ import { DokumenButton } from "../components/DokumenButton";
 import { PemakaianButton } from "../components/PemakaianPanel";
 import { fetchAllRows, printDocument, type TableReport } from "../lib/printTable";
 import { formDoBbmHtml } from "../lib/formDoBbm";
-import { JENIS_BBM, jenisBbmLabel, jenisDiLokasi, jenisTampil, type JenisBbm } from "../lib/bbmJenis";
+import { JENIS_BBM, JENIS_TONE_WARNA, jenisBbmLabel, jenisBbmTone, jenisDiLokasi, jenisTampil, type JenisBbm } from "../lib/bbmJenis";
 import { BbmTransactionModal } from "../components/BbmTransactionModal";
 import { BbmBatchModal } from "../components/BbmBatchModal";
 import { EditBbmModal } from "../components/EditBbmModal";
@@ -144,6 +144,7 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
       columns: [
         { label: "Periode", nowrap: true },
         { label: "Tanggal", nowrap: true },
+        { label: "Jenis BBM", nowrap: true },
         { label: "No. SPB" },
         { label: "Stock In", align: "right" },
         { label: "Stock Out", align: "right" },
@@ -161,6 +162,7 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
       rows: [...all].reverse().map((r) => [
         r.periode,
         tanggalWaktu(r.tanggal_iso, r.created_at, r.tanggal),
+        jenisBbmLabel(r.jenis_bbm),
         r.no_spb,
         r.diterima || ((r.pinjam ?? 0) > 0 ? r.pinjam : null),
         r.pemakaian || ((r.pinjam ?? 0) < 0 ? -r.pinjam! : null),
@@ -280,7 +282,7 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
       <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
         {saldoCards.map(({ jenis, lok, saldo }) => {
           const active = jenisBbm === jenis && (!!lokasiLock || lokasi === lok);
-          const tone = jenis === "SOLAR" ? "blue" : jenis === "BENSIN" ? "amber" : jenis === "EMERGENCY" ? "red" : "green";
+          const tone = jenisBbmTone(jenis);
           const per = dateTo ? ` (per ${new Date(`${dateTo}T00:00:00`).toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" })})` : "";
           return (
             <StatCard
@@ -420,6 +422,7 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
               <tr className="bg-[#f8fafc] text-left text-[var(--text-secondary)] text-xs uppercase">
                 <th className="px-4 py-2.5 whitespace-nowrap">Periode</th>
                 <th className="px-4 py-2.5 whitespace-nowrap">Tanggal</th>
+                <th className="px-4 py-2.5 whitespace-nowrap">Jenis BBM</th>
                 <th className="px-4 py-2.5 whitespace-nowrap">No. SPB</th>
                 <th className="px-4 py-2.5 text-right whitespace-nowrap">Stock In</th>
                 <th className="px-4 py-2.5 text-right whitespace-nowrap">Stock Out</th>
@@ -437,21 +440,27 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={showActions ? 14 : 13} className="px-4 py-8 text-center text-[var(--text-muted)]">
+                  <td colSpan={showActions ? 15 : 14} className="px-4 py-8 text-center text-[var(--text-muted)]">
                     Memuat...
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={showActions ? 14 : 13} className="px-4 py-8 text-center text-[var(--text-muted)]">
+                  <td colSpan={showActions ? 15 : 14} className="px-4 py-8 text-center text-[var(--text-muted)]">
                     Tidak ada data
                   </td>
                 </tr>
               ) : (
                 rows.map((r) => (
                   <tr key={r.id} className="border-t border-[var(--border)] hover:bg-[#f8fafc]">
-                    <td className="px-4 py-2.5 whitespace-nowrap text-[var(--text-secondary)] text-xs">{r.periode || "-"}</td>
+                    {/* The jenis's colour down the row's left edge, and its name as a pill. */}
+                    <td className="px-4 py-2.5 whitespace-nowrap text-[var(--text-secondary)] text-xs" style={{ boxShadow: `inset 4px 0 0 ${JENIS_TONE_WARNA[jenisBbmTone(r.jenis_bbm)]}` }}>
+                      {r.periode || "-"}
+                    </td>
                     <td className="px-4 py-2.5 whitespace-nowrap text-[var(--text-secondary)]">{tanggalWaktu(r.tanggal_iso, r.created_at, r.tanggal)}</td>
+                    <td className="px-4 py-2.5 whitespace-nowrap">
+                      <StatSorot tone={jenisBbmTone(r.jenis_bbm)}>{jenisBbmLabel(r.jenis_bbm).toUpperCase()}</StatSorot>
+                    </td>
                     <td className="px-4 py-2.5 text-xs text-[var(--text-secondary)]">{r.no_spb || "-"}</td>
                     <td className="px-4 py-2.5 text-right font-medium text-[var(--accent-green)]">
                       {r.diterima ? r.diterima.toLocaleString("id-ID") : (r.pinjam ?? 0) > 0 ? <>{r.pinjam!.toLocaleString("id-ID")}<span className="ml-1 text-[10px] font-normal text-[var(--text-muted)]">{r.pinjaman_jenis === "TRANSFER" ? "transfer" : r.pinjaman_jenis === "PRIBADI" ? "pinjam pribadi" : "pinjam"}</span></> : "-"}
