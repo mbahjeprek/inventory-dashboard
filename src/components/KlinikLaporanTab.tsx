@@ -5,6 +5,7 @@ import { api, errorText, type Kunjungan, type LaporanCount, type LaporanKlinikSu
 import { useAuth } from "../context/AuthContext";
 import { can, canEditRow } from "../lib/access";
 import { StatCard } from "./StatCard";
+import { TAB_BAR, tabCls } from "./InventoryTabs";
 import { ExportButtons } from "./ExportButtons";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { EvidenceLink } from "./EvidenceInput";
@@ -451,6 +452,7 @@ export function KlinikLaporanTab({ klinik }: { klinik: string }) {
   );
 
   const totalPages = Math.max(Math.ceil(total / PAGE_SIZE), 1);
+  const WARNA_VIEW: Record<View, string> = { data: "var(--accent-blue)", ringkasan: "var(--accent-green)", konsumsi: "#7c3aed" };
   const tab = (v: View, label: string, Icon: typeof Table2) => (
     <button
       onClick={() => {
@@ -458,9 +460,9 @@ export function KlinikLaporanTab({ klinik }: { klinik: string }) {
         // Konsumsi Obat reads per month: a day / week / this month alone says little.
         if (v === "konsumsi" && ["hari", "7", "bulan"].includes(preset)) pickPreset("tahun");
       }}
-      className={`inline-flex items-center gap-1.5 text-sm px-3.5 py-2 ${view === v ? "bg-[var(--accent-blue)] text-white" : "text-[var(--text-secondary)] hover:bg-[#f1f5f9]"}`}
+      className={tabCls(view === v)}
     >
-      <Icon size={15} /> {label}
+      <Icon size={16} style={view === v ? undefined : { color: WARNA_VIEW[v] }} /> {label}
     </button>
   );
 
@@ -468,7 +470,7 @@ export function KlinikLaporanTab({ klinik }: { klinik: string }) {
     <div className="space-y-4">
       {/* One row: what to see, which period, and the actions. */}
       <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg p-3 flex flex-wrap items-center gap-2">
-        <div className="inline-flex rounded-md border border-[var(--border)] overflow-hidden" role="tablist">
+        <div className={`${TAB_BAR} !inline-flex`} role="tablist">
           {tab("data", "Data Kunjungan", Table2)}
           {tab("ringkasan", "Ringkasan KPI", LayoutDashboard)}
           {tab("konsumsi", "Konsumsi Obat", Pill)}
@@ -478,7 +480,7 @@ export function KlinikLaporanTab({ klinik }: { klinik: string }) {
             <button
               key={p.key}
               onClick={() => pickPreset(p.key)}
-              className={`text-xs px-3 py-2 border-r last:border-r-0 border-[var(--border)] ${preset === p.key ? "bg-[var(--accent-blue-bg)] text-[var(--accent-blue)] font-medium" : "text-[var(--text-secondary)] hover:bg-[#f1f5f9]"}`}
+              className={`text-xs px-3 py-2 border-r last:border-r-0 border-[var(--border)] font-medium ${preset === p.key ? "bg-[var(--accent-blue)] text-white" : "text-[var(--text-primary)] hover:bg-[var(--accent-blue-bg)]"}`}
             >
               {p.label}
             </button>

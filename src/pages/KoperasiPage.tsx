@@ -22,6 +22,7 @@ import { ExportButtons } from "../components/ExportButtons";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { EvidenceInput, EvidenceLink, useEvidenceEnabled } from "../components/EvidenceInput";
 import { printTable } from "../lib/printTable";
+import { TAB_BAR, tabCls } from "../components/InventoryTabs";
 import { BaBelumBanner, BaDaftar, itemsKoperasi, jenisKoperasi } from "../components/BaPemusnahan";
 import { DepoAirTab } from "../components/DepoAirTab";
 import { KopPermintaanTab } from "../components/KopPermintaanTab";
@@ -65,16 +66,17 @@ const BAYAR_CLS: Record<KopBayar, string> = {
 };
 
 type Tab = "dashboard" | "jual" | "rekap" | "stok" | "opname" | "beli" | "permintaan" | "depo" | "anggota";
-const TABS: { key: Tab; label: string; icon: typeof Package }[] = [
-  { key: "dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { key: "jual", label: "Stock Out", icon: ShoppingBasket },
-  { key: "rekap", label: "Rekap Potong Gaji", icon: HandCoins },
-  { key: "stok", label: "Stok Barang", icon: Boxes },
-  { key: "opname", label: "Stok Opname", icon: ClipboardCheck },
-  { key: "beli", label: "Stock In, Rusak & Koreksi", icon: Truck },
-  { key: "permintaan", label: "Permintaan Barang", icon: ClipboardList },
-  { key: "depo", label: "Depo Air", icon: Droplets },
-  { key: "anggota", label: "Anggota", icon: Users },
+// warna: the icon's colour while the tab isn't open.
+const TABS: { key: Tab; label: string; icon: typeof Package; warna: string }[] = [
+  { key: "dashboard", label: "Dashboard", icon: LayoutDashboard, warna: "var(--accent-blue)" },
+  { key: "jual", label: "Stock Out", icon: ShoppingBasket, warna: "var(--accent-red)" },
+  { key: "rekap", label: "Rekap Potong Gaji", icon: HandCoins, warna: "var(--accent-amber)" },
+  { key: "stok", label: "Stok Barang", icon: Boxes, warna: "var(--accent-blue)" },
+  { key: "opname", label: "Stok Opname", icon: ClipboardCheck, warna: "#0891b2" },
+  { key: "beli", label: "Stock In, Rusak & Koreksi", icon: Truck, warna: "var(--accent-green)" },
+  { key: "permintaan", label: "Permintaan Barang", icon: ClipboardList, warna: "#7c3aed" },
+  { key: "depo", label: "Depo Air", icon: Droplets, warna: "#0284c7" },
+  { key: "anggota", label: "Anggota", icon: Users, warna: "#db2777" },
 ];
 
 // Sortable columns (as in the other menus): click a title to sort by it, again for the other way. A
@@ -246,16 +248,10 @@ export function KoperasiPage() {
         </div>
       )}
 
-      <div className="flex flex-wrap gap-1 border-b border-[var(--border)]">
+      <div className={TAB_BAR} role="tablist">
         {TABS.map((t) => (
-          <button
-            key={t.key}
-            onClick={() => setTab(t.key)}
-            className={`inline-flex items-center gap-1.5 px-3.5 py-2 text-sm -mb-px border-b-2 ${
-              tab === t.key ? "border-[var(--accent-blue)] text-[var(--accent-blue)] font-medium" : "border-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
-            }`}
-          >
-            <t.icon size={15} /> {t.label}
+          <button key={t.key} role="tab" aria-selected={tab === t.key} onClick={() => setTab(t.key)} className={tabCls(tab === t.key)}>
+            <t.icon size={16} style={tab === t.key ? undefined : { color: t.warna }} /> {t.label}
           </button>
         ))}
       </div>

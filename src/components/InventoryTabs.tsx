@@ -5,14 +5,22 @@ import { Boxes, ArrowDownCircle, ArrowUpCircle, ClipboardList, HeartPulse, Packa
 // only on the Klinik pages.
 export type InventoryTab = "stok" | "in" | "out" | "rusak" | "laporan" | "permintaan";
 
-const TABS: { key: InventoryTab; label: string; icon: typeof Boxes }[] = [
-  { key: "stok", label: "Stok", icon: Boxes },
-  { key: "in", label: "Stock In", icon: ArrowDownCircle },
-  { key: "out", label: "Stock Out", icon: ArrowUpCircle },
-  { key: "rusak", label: "Expired & Rusak", icon: PackageX },
-  { key: "laporan", label: "Laporan Harian", icon: HeartPulse },
-  { key: "permintaan", label: "Permintaan Obat/Barang", icon: ClipboardList },
+// warna: the icon's colour while the tab isn't open (white on blue when it is), so each tab is easy to spot.
+const TABS: { key: InventoryTab; label: string; icon: typeof Boxes; warna: string }[] = [
+  { key: "stok", label: "Stok", icon: Boxes, warna: "var(--accent-blue)" },
+  { key: "in", label: "Stock In", icon: ArrowDownCircle, warna: "var(--accent-green)" },
+  { key: "out", label: "Stock Out", icon: ArrowUpCircle, warna: "var(--accent-red)" },
+  { key: "rusak", label: "Expired & Rusak", icon: PackageX, warna: "var(--accent-amber)" },
+  { key: "laporan", label: "Laporan Harian", icon: HeartPulse, warna: "#db2777" },
+  { key: "permintaan", label: "Permintaan Obat/Barang", icon: ClipboardList, warna: "#7c3aed" },
 ];
+
+// The look of a page's main tabs (here and Koperasi): a bar of pills, the open one solid blue.
+export const TAB_BAR = "flex flex-wrap gap-1 p-1 rounded-lg border border-[var(--accent-blue-border)] bg-[var(--accent-blue-bg)] shadow-sm";
+export const tabCls = (active: boolean) =>
+  `inline-flex items-center gap-1.5 px-4 py-2 text-sm font-semibold rounded-md transition ${
+    active ? "bg-[var(--accent-blue)] text-white shadow" : "bg-[var(--bg-card)] text-[var(--text-primary)] hover:ring-1 hover:ring-[var(--accent-blue)]"
+  }`;
 
 // The active tab lives in the URL (?tab=in / ?tab=out) so a tab can be linked and survives a reload.
 export function useInventoryTab(): [InventoryTab, (t: InventoryTab) => void] {
@@ -35,22 +43,12 @@ export function useInventoryTab(): [InventoryTab, (t: InventoryTab) => void] {
 // Stok · Stock In · Stock Out switcher shown under an inventory page's title.
 export function InventoryTabs({ value, onChange, laporan = false }: { value: InventoryTab; onChange: (t: InventoryTab) => void; laporan?: boolean }) {
   return (
-    <div className="flex gap-1 border-b border-[var(--border)]" role="tablist">
-      {TABS.filter((t) => laporan || (t.key !== "laporan" && t.key !== "rusak" && t.key !== "permintaan")).map(({ key, label, icon: Icon }) => {
+    <div className={TAB_BAR} role="tablist">
+      {TABS.filter((t) => laporan || (t.key !== "laporan" && t.key !== "rusak" && t.key !== "permintaan")).map(({ key, label, icon: Icon, warna }) => {
         const active = value === key;
         return (
-          <button
-            key={key}
-            role="tab"
-            aria-selected={active}
-            onClick={() => onChange(key)}
-            className={`inline-flex items-center gap-1.5 px-4 py-2 text-sm -mb-px border-b-2 ${
-              active
-                ? "border-[var(--accent-blue)] text-[var(--accent-blue)] font-medium"
-                : "border-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
-            }`}
-          >
-            <Icon size={15} /> {label}
+          <button key={key} role="tab" aria-selected={active} onClick={() => onChange(key)} className={tabCls(active)}>
+            <Icon size={16} style={active ? undefined : { color: warna }} /> {label}
           </button>
         );
       })}
