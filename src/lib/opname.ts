@@ -29,4 +29,7 @@ export const localToday = () =>
 
 // A history row booked by the Pinjaman page: a loan or a transfer, told apart by the note it was
 // booked with ("Transfer ke / dari X (Transfer #N): ...").
-export const loanTag = (id: number, note?: string | null) => `${/\(Transfer #\d+\)|^Hapus Transfer/.test(note ?? "") ? "Transfer" : "Pinjaman"} #${id}`;
+const isTransferNote = (note?: string | null) => /\(Transfer #\d+\)|^Hapus Transfer/.test(note ?? "");
+export const loanTag = (id: number, note?: string | null) => `${isTransferNote(note) ? "Transfer" : "Pinjaman"} #${id}`;
+// The Pinjaman page opened on that loan / transfer: its list (Daftar Pinjaman of every status, or Daftar Transfer) searched by its number.
+export const loanLink = (id: number, note?: string | null) => `/pinjaman?status=${isTransferNote(note) ? "TRANSFER" : ""}&q=${id}`;

@@ -18,7 +18,7 @@ import { can, canEditRow, canAttachEvidence } from "../lib/access";
 import { EvidenceLink, AttachEvidenceButton } from "../components/EvidenceInput";
 import { tanggalWaktu } from "../lib/datetime";
 import { PupukBatchModal } from "../components/SaldoBatchModal";
-import { loanTag } from "../lib/opname";
+import { loanLink, loanTag } from "../lib/opname";
 import { useAutoRefresh } from "../hooks/useAutoRefresh";
 
 const localIso = (d: Date) =>
@@ -378,7 +378,7 @@ export function InventoryPupukPage({ estate }: { estate: string }) {
                         <div className="inline-flex gap-1.5">
                           {r.pinjaman_id != null && (
                             // Booked by a Pinjaman: changed / removed only on the Pinjaman page.
-                            <Link to="/pinjaman?status=" title="Kelola lewat menu Pinjaman & Transfer" className="text-xs text-[var(--accent-blue)] hover:underline whitespace-nowrap">
+                            <Link to={loanLink(r.pinjaman_id, r.keterangan)} title="Kelola lewat menu Pinjaman & Transfer" className="text-xs text-[var(--accent-blue)] hover:underline whitespace-nowrap">
                               {loanTag(r.pinjaman_id, r.keterangan)}
                             </Link>
                           )}

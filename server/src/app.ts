@@ -8954,6 +8954,8 @@ app.get("/api/pinjaman", async (req, res) => {
   const conditions = ["p.module = ANY(@modules::text[])", "(p.dari_estate = ANY(@estates::text[]) OR p.ke_estate = ANY(@estates::text[]))"];
   if (status === "OPEN") conditions.push("p.status = 'DIPINJAM'");
   else if (["LUNAS", "BATAL", "TRANSFER"].includes(status)) conditions.push("p.status = @status");
+  // PINJAMAN: every loan whatever its status, without the transfers (they have their own list).
+  else if (status === "PINJAMAN") conditions.push("p.status <> 'TRANSFER'");
   const params: Record<string, unknown> = { modules, estates, status };
   conditions.push(...pinjamanCari(q, params));
   const where = `WHERE ${conditions.join(" AND ")}`;

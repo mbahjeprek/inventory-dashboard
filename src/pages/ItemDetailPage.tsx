@@ -9,7 +9,7 @@ import { useAuth } from "../context/AuthContext";
 import { can } from "../lib/access";
 import { EvidenceLink } from "../components/EvidenceInput";
 import { tanggalWaktu, waktu } from "../lib/datetime";
-import { loanTag } from "../lib/opname";
+import { loanLink, loanTag } from "../lib/opname";
 
 const TUJUAN_OPTIONS = ["NILAM", "FIRUS", "ZAMRUD", "KNS", "WJA"];
 
@@ -239,7 +239,7 @@ export function ItemDetailPage() {
                       {showActions && (
                         <td className="px-4 py-2.5 text-right">
                           {m.pinjaman_id != null && (
-                            <Link to="/pinjaman?status=" title="Kelola lewat menu Pinjaman & Transfer" className="text-xs text-[var(--accent-blue)] hover:underline whitespace-nowrap">
+                            <Link to={loanLink(m.pinjaman_id, m.note)} title="Kelola lewat menu Pinjaman & Transfer" className="text-xs text-[var(--accent-blue)] hover:underline whitespace-nowrap">
                               {loanTag(m.pinjaman_id, m.note)}
                             </Link>
                           )}

@@ -51,11 +51,17 @@ export function PinjamanPage() {
   const inputModules = OPNAME_MODULES.filter((m) => can(user, inputPerm(m)));
 
   const [module, setModule] = useState("");
-  // ?status= (from a "Pinjaman #N" link in a history table) opens every status, not only the open ones.
+  // ?status= (from a "Pinjaman #N" link in a history table) opens every status, not only the open ones; ?status=TRANSFER the Daftar Transfer.
   const [searchParams] = useSearchParams();
-  const [status, setStatus] = useState(searchParams.get("status") ?? "OPEN");
-  // Daftar = the loans (one row each, open ones first); Log = every event in time order.
-  const [view, setView] = useState<"daftar" | "log">(() => (searchParams.get("view") === "log" ? "log" : "daftar"));
+  const [status, setStatus] = useState(() => {
+    const st = searchParams.get("status");
+    return st === null || st === "TRANSFER" ? "OPEN" : st === "" ? "PINJAMAN" : st;
+  });
+  // Daftar Pinjaman = the loans (one row each, newest first); Daftar Transfer = the transfers; Log = every event in time order.
+  const [view, setView] = useState<"daftar" | "transfer" | "log">(() =>
+    searchParams.get("view") === "log" ? "log" : searchParams.get("status") === "TRANSFER" ? "transfer" : "daftar"
+  );
+  const transfer = view === "transfer";
   const [aksi, setAksi] = useState("");
   const [ringkasan, setRingkasan] = useState<PinjamanRingkasan | null>(null);
   const [rows, setRows] = useState<Pinjaman[]>([]);
@@ -67,8 +73,9 @@ export function PinjamanPage() {
   const [deleting, setDeleting] = useState<Pinjaman | null>(null);
   const refreshOpen = useOpenPinjaman((s) => s.refresh);
   // Cari (both tabs): sent 300 ms after the last key.
-  const [cariKetik, setCariKetik] = useState("");
-  const [cari, setCari] = useState("");
+  // ?q= (from a "Pinjaman #N" / "Transfer #N" link) starts the search with that number.
+  const [cariKetik, setCariKetik] = useState(() => searchParams.get("q") ?? "");
+  const [cari, setCari] = useState(() => searchParams.get("q") ?? "");
   useEffect(() => {
     const t = setTimeout(() => setCari(cariKetik.trim()), 300);
     return () => clearTimeout(t);
@@ -82,14 +89,14 @@ export function PinjamanPage() {
     tickList.current = tick;
     if (!diam) setLoading(true);
     api
-      .pinjamanList({ module, status, estates: pickedEstates, q: cari, pageSize: 200 })
+      .pinjamanList({ module, status: transfer ? "TRANSFER" : status, estates: pickedEstates, q: cari, pageSize: 200 })
       .then((res) => {
         setRows(res.data);
         setTotal(res.total);
       })
       .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [module, status, pickedEstates, reload, cari, tick]);
+  }, [module, status, transfer, pickedEstates, reload, cari, tick]);
   useEffect(() => {
     api
       .pinjamanLog({ module, estates: pickedEstates, pageSize: 1 })
@@ -164,19 +171,19 @@ export function PinjamanPage() {
             sub="sampai lunas (90 hari terakhir)"
             tone="blue"
           />
-          <Kartu label="Transfer (30 hari)" value={ringkasan.transfer30} sub="dikirim antar estate" tone="blue" onClick={() => (setView("log"), setAksi("TRANSFER"))} />
+          <Kartu label="Transfer (30 hari)" value={ringkasan.transfer30} sub="dikirim antar estate" tone="blue" onClick={() => setView("transfer")} />
         </div>
       )}
 
       <div className="flex flex-wrap items-center gap-3 bg-[var(--bg-card)] border border-[var(--border)] rounded-lg p-3">
         <div className="inline-flex rounded-md border border-[var(--border)] overflow-hidden text-sm">
-          {(["daftar", "log"] as const).map((v) => (
+          {(["daftar", "transfer", "log"] as const).map((v) => (
             <button
               key={v}
               onClick={() => setView(v)}
               className={`px-3.5 py-2 ${view === v ? "bg-[var(--accent-blue)] text-white" : "bg-white text-[var(--text-secondary)] hover:bg-[#f1f5f9]"}`}
             >
-              {v === "daftar" ? "Daftar Pinjaman" : "Log Aktivitas"}
+              {v === "daftar" ? "Daftar Pinjaman" : v === "transfer" ? "Daftar Transfer" : "Log Aktivitas"}
             </button>
           ))}
         </div>
@@ -188,13 +195,12 @@ export function PinjamanPage() {
             </option>
           ))}
         </select>
-        {view === "daftar" ? (
+        {view === "transfer" ? null : view === "daftar" ? (
           <select value={status} onChange={(e) => setStatus(e.target.value)} className={selectCls} aria-label="Status">
             <option value="OPEN">Belum kembali</option>
             <option value="LUNAS">Lunas</option>
             <option value="BATAL">Dibatalkan</option>
-            <option value="TRANSFER">Transfer</option>
-            <option value="">Semua status</option>
+            <option value="PINJAMAN">Semua pinjaman</option>
           </select>
         ) : (
           <select value={aksi} onChange={(e) => setAksi(e.target.value)} className={selectCls} aria-label="Kejadian">
@@ -211,11 +217,11 @@ export function PinjamanPage() {
           <input
             value={cariKetik}
             onChange={(e) => setCariKetik(e.target.value)}
-            placeholder="Cari barang, estate, alasan, no. pinjaman..."
+            placeholder={transfer ? "Cari barang, estate, keterangan, no. transfer..." : "Cari barang, estate, alasan, no. pinjaman..."}
             className="w-full text-sm rounded-md border border-[var(--border)] pl-8 pr-3 py-2 bg-white"
           />
         </div>
-        {view === "daftar" && <span className="text-xs text-[var(--text-muted)] ml-auto">{total.toLocaleString("id-ID")} catatan</span>}
+        {view !== "log" && <span className="text-xs text-[var(--text-muted)] ml-auto">{total.toLocaleString("id-ID")} {transfer ? "transfer" : "catatan"}</span>}
       </div>
 
       {view === "log" ? (
@@ -230,26 +236,26 @@ export function PinjamanPage() {
               <th className="px-4 py-2.5">Barang</th>
               <th className="px-4 py-2.5 whitespace-nowrap">Dari → Ke</th>
               <th className="px-4 py-2.5 text-right whitespace-nowrap">Jumlah</th>
-              <th className="px-4 py-2.5 text-right whitespace-nowrap">Sisa</th>
-              <th className="px-4 py-2.5">Status</th>
-              <th className="px-4 py-2.5">Alasan / Keterangan</th>
+              {!transfer && <th className="px-4 py-2.5 text-right whitespace-nowrap">Sisa</th>}
+              {!transfer && <th className="px-4 py-2.5">Status</th>}
+              <th className="px-4 py-2.5">{transfer ? "Keterangan" : "Alasan / Keterangan"}</th>
               <th className="px-4 py-2.5 text-right">Aksi</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-[var(--border)]">
             {loading ? (
               <tr>
-                <td colSpan={8} className="px-4 py-8 text-center text-[var(--text-muted)]">
+                <td colSpan={transfer ? 6 : 8} className="px-4 py-8 text-center text-[var(--text-muted)]">
                   Memuat...
                 </td>
               </tr>
             ) : rows.length === 0 ? (
               <tr>
-                <td colSpan={8} className="px-4 py-10 text-center text-[var(--text-muted)]">
+                <td colSpan={transfer ? 6 : 8} className="px-4 py-10 text-center text-[var(--text-muted)]">
                   <ArrowLeftRight size={20} className="inline mb-1" />
-                  <div>{status === "OPEN" ? "Tidak ada pinjaman yang belum kembali." : "Belum ada pinjaman."}</div>
-                  {status === "OPEN" && (
-                    <button onClick={() => setStatus("")} className="mt-1 text-xs text-[var(--accent-blue)] hover:underline">
+                  <div>{transfer ? "Belum ada transfer." : status === "OPEN" ? "Tidak ada pinjaman yang belum kembali." : "Belum ada pinjaman."}</div>
+                  {!transfer && status === "OPEN" && (
+                    <button onClick={() => setStatus("PINJAMAN")} className="mt-1 text-xs text-[var(--accent-blue)] hover:underline">
                       Lihat pinjaman yang sudah lunas / dibatalkan
                     </button>
                   )}
@@ -286,12 +292,16 @@ export function PinjamanPage() {
                     <td className="px-4 py-2.5 text-right whitespace-nowrap">
                       {fmtQty(l.qty)} {l.satuan}
                     </td>
-                    <td className={`px-4 py-2.5 text-right whitespace-nowrap font-semibold ${l.status === "DIPINJAM" ? "text-[var(--accent-amber)]" : "text-[var(--text-muted)]"}`}>
-                      {l.status === "DIPINJAM" ? `${fmtQty(sisa)} ${l.satuan}` : "-"}
-                    </td>
-                    <td className="px-4 py-2.5">
-                      <span className={`text-xs px-2 py-0.5 rounded-full border whitespace-nowrap ${STATUS[l.status].cls}`}>{STATUS[l.status].label}</span>
-                    </td>
+                    {!transfer && (
+                      <td className={`px-4 py-2.5 text-right whitespace-nowrap font-semibold ${l.status === "DIPINJAM" ? "text-[var(--accent-amber)]" : "text-[var(--text-muted)]"}`}>
+                        {l.status === "DIPINJAM" ? `${fmtQty(sisa)} ${l.satuan}` : "-"}
+                      </td>
+                    )}
+                    {!transfer && (
+                      <td className="px-4 py-2.5">
+                        <span className={`text-xs px-2 py-0.5 rounded-full border whitespace-nowrap ${STATUS[l.status].cls}`}>{STATUS[l.status].label}</span>
+                      </td>
+                    )}
                     <td className="col-grow px-4 py-2.5 text-xs text-[var(--text-secondary)]">
                       <div>
                         {l.alasan} <EvidenceLink id={l.evidence_id} label="foto" />
