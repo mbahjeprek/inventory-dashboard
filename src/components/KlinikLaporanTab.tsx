@@ -146,6 +146,18 @@ export function KlinikLaporanTab({ klinik }: { klinik: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, klinik, dateFrom, dateTo, reloadKey]);
 
+  // Data Kunjungan: how many visits of each kind in the chosen period (beside the filter and in its options).
+  const [jumlah, setJumlah] = useState<LaporanKlinikSummary["totals"] | null>(null);
+  useEffect(() => {
+    if (view !== "data") return;
+    api
+      .laporanKlinikTotals(range)
+      .then((r) => setJumlah(r.totals))
+      .catch(() => setJumlah(null));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, klinik, dateFrom, dateTo, reloadKey]);
+  const jumlahFlag = (f: Flag) => (!jumlah ? null : f === "" ? jumlah.total : jumlah[f]);
+
   const listQuery = (p: number, ps: number) => ({ ...range, search, flag, page: p, pageSize: ps });
   useEffect(() => {
     if (view !== "data") return;
@@ -709,13 +721,40 @@ export function KlinikLaporanTab({ klinik }: { klinik: string }) {
               />
             </div>
             <select value={flag} onChange={(e) => setFlag(e.target.value as Flag)} className="text-sm rounded-md border border-[var(--border)] px-2 py-1.5" aria-label="Filter">
-              <option value="">Semua kunjungan</option>
+              <option value="">Semua kunjungan{jumlah ? ` (${fmt(jumlah.total)})` : ""}</option>
               {(Object.keys(FLAG_LABEL) as Exclude<Flag, "">[]).map((k) => (
                 <option key={k} value={k}>
                   {FLAG_LABEL[k]}
+                  {jumlahFlag(k) !== null ? ` (${fmt(jumlahFlag(k)!)})` : ""}
                 </option>
               ))}
             </select>
+            {jumlah && (
+              <div className="flex flex-wrap items-center gap-1.5" title={`Jumlah per jenis, periode ${periodText}`}>
+                {(Object.keys(FLAG_LABEL) as Exclude<Flag, "">[]).map((k) => {
+                  const n = jumlah[k];
+                  const aktif = flag === k;
+                  return (
+                    <button
+                      key={k}
+                      onClick={() => setFlag(aktif ? "" : k)}
+                      title={aktif ? "Tampilkan semua kunjungan" : `Tampilkan ${FLAG_LABEL[k].toLowerCase()} saja`}
+                      className={`inline-flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-full border font-medium ${
+                        aktif
+                          ? "bg-[var(--accent-blue)] border-[var(--accent-blue)] text-white"
+                          : n > 0 && k === "kecelakaan"
+                            ? "bg-[var(--accent-red-bg)] border-[var(--accent-red-border)] text-[var(--accent-red)]"
+                            : "bg-[var(--bg-card)] border-[var(--border)] text-[var(--text-secondary)] hover:border-[var(--accent-blue)]"
+                      }`}
+                    >
+                      {FLAG_LABEL[k]}
+                      <span className={`min-w-[1.25rem] text-center rounded-full px-1.5 font-semibold ${aktif ? "bg-white/25" : "bg-[#f1f5f9] text-[var(--text-primary)]"}`}>{fmt(n)}</span>
+                      {k === "istirahat" && n > 0 && <span className="font-normal opacity-80">{fmt(jumlah.hari_istirahat)} hari</span>}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
             {user?.role === "superuser" && (
               <button
                 onClick={() => setCocokkan(true)}
