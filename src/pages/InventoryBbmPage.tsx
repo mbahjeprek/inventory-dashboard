@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { Search, ChevronLeft, ChevronRight, Fuel, Droplet, PackagePlus, Pencil, Trash2, ListPlus, FileText, UserRound, Siren, Car } from "lucide-react";
 import { PinjamPribadiModal } from "../components/PinjamPribadiModal";
 import { useOpenPinjaman } from "../hooks/useOpenPinjaman";
@@ -79,9 +79,13 @@ export function InventoryBbmPage({ lokasiLock }: { lokasiLock?: string } = {}) {
   const loadSummary = () => api.bbmSummary(lokasiLock, { ...flowRange, asOf: dateTo }).then(setSummary);
 
   // diam: a background refresh (useAutoRefresh) keeps the rows on screen instead of "Memuat...".
+  const urutLoad = useRef(0);
   const load = (diam = false) => {
     if (!diam) setLoading(true);
+    const n = ++urutLoad.current;
     api.bbm({ search, jenis_bbm: jenisBbm, lokasi, kode_kendaraan: alat, dateFrom, dateTo, page, pageSize }).then((res) => {
+      // An older request (e.g. a background refresh with the filters before) answering late is ignored.
+      if (n !== urutLoad.current) return;
       setRows(res.data);
       setTotal(res.total);
       setPemakaianSum(res.pemakaianSum);

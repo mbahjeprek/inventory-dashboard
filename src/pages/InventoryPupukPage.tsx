@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { Search, ChevronLeft, ChevronRight, Sprout, PackagePlus, ListPlus, Pencil, Trash2 } from "lucide-react";
 import { api, errorText, type PupukRecord, type PupukSummary } from "../lib/api";
 import { StatCard, StatSorot } from "../components/StatCard";
@@ -77,9 +77,13 @@ export function InventoryPupukPage({ estate }: { estate: string }) {
   const loadSummary = () => api.pupukSummary(estate, { ...flowRange, asOf: dateTo }).then(setSummary);
 
   // diam: a background refresh (useAutoRefresh) keeps the rows on screen instead of "Memuat...".
+  const urutLoad = useRef(0);
   const load = (diam = false) => {
     if (!diam) setLoading(true);
+    const n = ++urutLoad.current;
     api.pupuk({ ...filters(), page, pageSize }).then((res) => {
+      // An older request (e.g. a background refresh with the filters before) answering late is ignored.
+      if (n !== urutLoad.current) return;
       setRows(res.data);
       setTotal(res.total);
       setKeluarSum(res.keluarSum);

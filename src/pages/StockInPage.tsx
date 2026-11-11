@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { Search, ChevronLeft, ChevronRight, ArrowDownCircle, Pencil, Trash2 } from "lucide-react";
 import { api, errorText, type StockInRecord } from "../lib/api";
 import { EditStockInModal } from "../components/EditStockInModal";
@@ -40,9 +40,13 @@ export function StockInPage({ embedded = false }: { embedded?: boolean }) {
   const pageSize = 25;
 
   // diam: the background refresh (useAutoRefresh) keeps the rows on screen.
+  const urutLoad = useRef(0);
   const load = (diam = false) => {
     if (!diam) setLoading(true);
+    const n = ++urutLoad.current;
     api.stockIn({ search, tujuan, vendor, dateFrom, dateTo, page, pageSize }).then((res) => {
+      // An older request (e.g. a background refresh with the filters before) answering late is ignored.
+      if (n !== urutLoad.current) return;
       setItems(res.data);
       setTotal(res.total);
       setQtySum(res.qtySum);

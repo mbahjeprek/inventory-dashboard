@@ -5483,7 +5483,8 @@ function permintaanBisaTtd(u: SessionUser, p: any, akun: AkunNama[]): string[] {
   if (!level || p.status !== "DIAJUKAN" || !bolehTtd(u, level)) return [];
   if (u.role === "superuser") return [level];
   if (TTD_LEVELS.some((k) => p.approval?.[k]?.user_id === u.id)) return [];
-  const ditunjuk = baDitunjuk({ unit: p.klinik, isian: p.ttd }, level, akun);
+  // Reserved for the person named in the box only when that account may sign it (else it would wait for nobody).
+  const ditunjuk = baDitunjuk({ unit: p.klinik, isian: p.ttd }, level, akun.filter((a) => a.perms.includes(`klinik.ttd_${level}`)));
   return ditunjuk === null || ditunjuk === u.id ? [level] : [];
 }
 
@@ -5511,10 +5512,12 @@ app.post("/api/klinik-permintaan/:id/ttd", async (req, res) => {
     const alasan = String(req.body?.alasan ?? "").trim().slice(0, 500);
     if (alasan.length < 3) return res.status(400).json({ error: "Isi alasan penolakan" });
     const tolak = { level, nama: u.nama, jabatan, alasan, at: new Date().toISOString() };
-    await execute("UPDATE klinik_permintaan SET status = 'DRAFT', diajukan_at = NULL, approval = '{}'::jsonb, tolak = @tolak::jsonb, updated_at = now() WHERE id = @id", {
-      tolak: JSON.stringify(tolak),
-      id: p.id,
-    });
+    // Only while it still waits with the signatures read above (not after it was signed in full / uploaded meanwhile).
+    const ok = await queryOne(
+      "UPDATE klinik_permintaan SET status = 'DRAFT', diajukan_at = NULL, approval = '{}'::jsonb, tolak = @tolak::jsonb, updated_at = now() WHERE id = @id AND status = 'DIAJUKAN' AND COALESCE(approval, '{}'::jsonb) = @lama::jsonb RETURNING id",
+      { tolak: JSON.stringify(tolak), lama: JSON.stringify(p.approval ?? {}), id: p.id }
+    );
+    if (!ok) return res.status(409).json({ error: "Permintaan ini baru saja berubah (ditandatangani / disetujui); muat ulang halamannya" });
     await logActivity(req, { module: "KLINIK", estate: p.klinik, aksi: "Tolak Permintaan Obat", objek: p.nomor, detail: `${TTD_LEVEL_LABEL[level]} · alasan: ${alasan}` });
     return res.json({ success: true, status: "DRAFT" });
   }
@@ -5636,7 +5639,8 @@ function sbBisaTtd(u: SessionUser, s: any, akun: AkunNama[]): string[] {
   if (u.role === "superuser") return [level];
   if (!u.perms.includes(SB_PERM[level])) return [];
   if (SB_LEVELS.some((k) => s.approval?.[k]?.user_id === u.id)) return [];
-  const ditunjuk = baDitunjuk({ unit: s.klinik, isian: s.ttd }, level, akun);
+  // Reserved for the person named in the box only when that account may sign it (else it would wait for nobody).
+  const ditunjuk = baDitunjuk({ unit: s.klinik, isian: s.ttd }, level, akun.filter((a) => a.perms.includes(SB_PERM[level])));
   return ditunjuk === null || ditunjuk === u.id ? [level] : [];
 }
 const sbItemsTeks = (items: any[]) => items.slice(0, 40).map((i) => `${i.nama}${i.type ? ` ${i.type}` : ""} ${fmtQty(i.qty)} ${i.satuan}`.trim()).join("; ");
@@ -5778,7 +5782,12 @@ app.post("/api/klinik-surat-barang/:id/ttd", async (req, res) => {
     const alasan = String(req.body?.alasan ?? "").trim().slice(0, 500);
     if (alasan.length < 3) return res.status(400).json({ error: "Isi alasan penolakan" });
     const tolak = { level, nama: u.nama, alasan, at: new Date().toISOString() };
-    await execute("UPDATE klinik_surat_barang SET status = 'DRAFT', diajukan_at = NULL, approval = '{}'::jsonb, tolak = @tolak::jsonb, updated_at = now() WHERE id = @id", { tolak: JSON.stringify(tolak), id: s.id });
+    // Only while it still waits with the signatures read above (not after it was signed in full / uploaded meanwhile).
+    const ok = await queryOne(
+      "UPDATE klinik_surat_barang SET status = 'DRAFT', diajukan_at = NULL, approval = '{}'::jsonb, tolak = @tolak::jsonb, updated_at = now() WHERE id = @id AND status = 'DIAJUKAN' AND approval = @lama::jsonb RETURNING id",
+      { tolak: JSON.stringify(tolak), lama: JSON.stringify(s.approval ?? {}), id: s.id }
+    );
+    if (!ok) return res.status(409).json({ error: "Surat ini baru saja berubah (ditandatangani / disetujui); muat ulang halamannya" });
     await logActivity(req, { module: "KLINIK", estate: s.klinik, aksi: "Tolak Permintaan Barang Klinik", objek: `${s.nomor} · ${s.perihal}`, detail: `${SB_LABEL[level]} · alasan: ${alasan}` });
     return res.json({ success: true, status: "DRAFT" });
   }
@@ -10214,12 +10223,13 @@ const namaCocok = (a: string, b: string) => {
   const [kecil, besar] = x.size <= y.size ? [x, y] : [y, x];
   return [...kecil].every((w) => besar.has(w));
 };
-type AkunNama = { id: number; nama: string; estates: string[] };
+type AkunNama = { id: number; nama: string; estates: string[]; perms: string[] };
 async function akunEstate(): Promise<AkunNama[]> {
-  return (await queryMany<{ id: number; nama: string; estates: string | null }>("SELECT id, nama, estates FROM users WHERE role <> 'superuser'")).map((r) => ({
+  return (await queryMany<{ id: number; nama: string; estates: string | null; perms: string | null }>("SELECT id, nama, estates, perms FROM users WHERE role <> 'superuser'")).map((r) => ({
     id: r.id,
     nama: r.nama,
     estates: parseList(r.estates, ESTATES),
+    perms: parseList(r.perms, ALL_PERMS),
   }));
 }
 function baDitunjuk(ba: any, peran: string, akun: AkunNama[]): number | null {

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { Search, ChevronLeft, ChevronRight, ArrowUpCircle, Pencil, Trash2 } from "lucide-react";
 import { api, errorText, type StockOutRecord } from "../lib/api";
 import { EditStockOutModal } from "../components/EditStockOutModal";
@@ -38,9 +38,13 @@ export function StockOutPage({ embedded = false }: { embedded?: boolean }) {
   const pageSize = 25;
 
   // diam: the background refresh (useAutoRefresh) keeps the rows on screen.
+  const urutLoad = useRef(0);
   const load = (diam = false) => {
     if (!diam) setLoading(true);
+    const n = ++urutLoad.current;
     api.stockOut({ search, tujuan, dateFrom, dateTo, page, pageSize }).then((res) => {
+      // An older request (e.g. a background refresh with the filters before) answering late is ignored.
+      if (n !== urutLoad.current) return;
       setItems(res.data);
       setTotal(res.total);
       setQtySum(res.qtySum);

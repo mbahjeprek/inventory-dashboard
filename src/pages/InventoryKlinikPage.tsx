@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import {
   Search,
   ChevronLeft,
@@ -176,9 +176,13 @@ export function InventoryKlinikPage({ klinik }: { klinik: string }) {
   const query = () => ({ klinik, search, kategori, stock: stockFilter, sortBy, sortDir });
 
   // diam: a background refresh (useAutoRefresh) keeps the rows on screen instead of "Memuat...".
+  const urutLoad = useRef(0);
   const load = (diam = false) => {
     if (!diam) setLoading(true);
+    const n = ++urutLoad.current;
     api.klinikStock({ ...query(), page, pageSize }).then((res) => {
+      // An older request (e.g. a background refresh with the filters before) answering late is ignored.
+      if (n !== urutLoad.current) return;
       setItems(res.data);
       setTotal(res.total);
       setKategoriOptions(res.kategoriOptions);

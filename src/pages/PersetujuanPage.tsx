@@ -39,11 +39,13 @@ export function PersetujuanPage() {
   const kopMenunggu: KopPermintaanRow[] = (kop?.rows ?? []).filter(
     (r) => r.status === "DIAJUKAN" && (user?.role === "superuser" || r.approval?.dibuat?.user_id !== user?.id)
   );
+  // One error line for every list: cleared at each load, set again by whichever list fails.
   const load = () => {
+    setError("");
     if (bolehPermintaan)
       api
         .permintaanMenunggu()
-        .then((r) => (setRows(r.rows), setError("")))
+        .then((r) => setRows(r.rows))
         .catch((e) => (setRows([]), setError(errorText(e, "Gagal memuat"))));
     if (bolehBarang)
       api

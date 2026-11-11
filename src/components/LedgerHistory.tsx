@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { Search, ChevronLeft, ChevronRight, Pencil, Trash2 } from "lucide-react";
 import { api, errorText, type LedgerTx, type StockScope } from "../lib/api";
 import { ExportButtons } from "./ExportButtons";
@@ -50,9 +50,13 @@ export function LedgerHistory({ scope, type, refreshKey }: { scope: StockScope; 
   const query = () => ({ type, search, dateFrom, dateTo });
 
   // diam: the background refresh (useAutoRefresh) keeps the rows on screen.
+  const urutLoad = useRef(0);
   const load = (diam = false) => {
     if (!diam) setLoading(true);
+    const n = ++urutLoad.current;
     api.ledgerHistory(scope, { ...query(), page, pageSize }).then((res) => {
+      // An older request (e.g. a background refresh with the filters before) answering late is ignored.
+      if (n !== urutLoad.current) return;
       setRows(res.data);
       setTotal(res.total);
       setQtySum(res.qtySum);

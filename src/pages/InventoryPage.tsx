@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { Link } from "react-router-dom";
 import {
   Search,
@@ -154,11 +154,15 @@ export function InventoryPage() {
   const pageSize = 25;
 
   // diam: a background refresh (useAutoRefresh) keeps the rows on screen instead of "Memuat...".
+  const urutLoad = useRef(0);
   const load = (diam = false) => {
     if (!diam) setLoading(true);
+    const n = ++urutLoad.current;
     api
       .items({ search, status, satuan, stock: stockFilter, sortBy, sortDir, page, pageSize })
       .then((res) => {
+        // An older request (e.g. a background refresh with the filters before) answering late is ignored.
+        if (n !== urutLoad.current) return;
         setItems(res.data);
         setTotal(res.total);
         setLoading(false);

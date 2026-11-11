@@ -625,25 +625,28 @@ export function DashboardPage() {
   const tickKartu = useRefreshTick();
   const tickLalu = useRef(tickKartu);
   useEffect(() => {
-    if (tickKartu !== tickLalu.current) {
+    const diam = tickKartu !== tickLalu.current;
+    if (diam) {
       tickLalu.current = tickKartu;
       loaded.current.clear();
     }
     const put = (estate: string, key: keyof EstateData, v: unknown) =>
       setData((cur) => ({ ...cur, [estate]: { ...cur[estate], [key]: v } }));
+    // A failed background refresh keeps the figures already on screen.
+    const gagal = (estate: string, key: keyof EstateData) => !diam && put(estate, key, null);
     for (const { estate } of shown) {
       if (loaded.current.has(estate)) continue;
       loaded.current.add(estate);
       if (canModule(user, "GUDANG"))
         (estate === "NILAM" ? api.summary() : api.gudangStockSummary(estate))
           .then((s) => put(estate, "gudang", s))
-          .catch(() => put(estate, "gudang", null));
-      if (canModule(user, "BBM")) api.bbmSummary(estate, monthRange).then((s) => put(estate, "bbm", s)).catch(() => put(estate, "bbm", null));
-      if (canModule(user, "PUPUK")) api.pupukSummary(estate, monthRange).then((s) => put(estate, "pupuk", s)).catch(() => put(estate, "pupuk", null));
-      if (canModule(user, "KLINIK")) api.klinikSummary(estate).then((s) => put(estate, "klinik", s)).catch(() => put(estate, "klinik", null));
+          .catch(() => gagal(estate, "gudang"));
+      if (canModule(user, "BBM")) api.bbmSummary(estate, monthRange).then((s) => put(estate, "bbm", s)).catch(() => gagal(estate, "bbm"));
+      if (canModule(user, "PUPUK")) api.pupukSummary(estate, monthRange).then((s) => put(estate, "pupuk", s)).catch(() => gagal(estate, "pupuk"));
+      if (canModule(user, "KLINIK")) api.klinikSummary(estate).then((s) => put(estate, "klinik", s)).catch(() => gagal(estate, "klinik"));
       if (canModule(user, "KLINIK"))
-        api.laporanKlinikTotals({ klinik: estate, ...monthRange }).then((s) => put(estate, "pasien", s.totals)).catch(() => put(estate, "pasien", null));
-      if (canModule(user, "OLI")) api.oliSummary(estate, monthRange).then((s) => put(estate, "oli", s)).catch(() => put(estate, "oli", null));
+        api.laporanKlinikTotals({ klinik: estate, ...monthRange }).then((s) => put(estate, "pasien", s.totals)).catch(() => gagal(estate, "pasien"));
+      if (canModule(user, "OLI")) api.oliSummary(estate, monthRange).then((s) => put(estate, "oli", s)).catch(() => gagal(estate, "oli"));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id, shownKey, tickKartu]);

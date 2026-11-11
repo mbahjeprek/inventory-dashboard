@@ -85,7 +85,7 @@ function Daftar({ klinik, rekap, setView }: { klinik: string; rekap: boolean; se
   const load = () =>
     api
       .permintaanList(klinik)
-      .then((r) => setRows(r.rows))
+      .then((r) => (setRows(r.rows), setError("")))
       .catch((e) => setError(errorText(e, "Gagal memuat permintaan")));
   useEffect(() => {
     if (!rekap) load();

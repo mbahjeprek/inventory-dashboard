@@ -65,7 +65,7 @@ function Daftar({ klinik, setView }: { klinik: string; setView: (v: View) => voi
   const load = () =>
     api
       .sbList(klinik)
-      .then((r) => setRows(r.rows))
+      .then((r) => (setRows(r.rows), setError("")))
       .catch((e) => setError(errorText(e, "Gagal memuat surat")));
   useEffect(() => {
     load();

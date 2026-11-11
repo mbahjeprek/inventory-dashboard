@@ -11,6 +11,7 @@ import { KopJualBatchModal } from "./KoperasiBatchModal";
 import { printDocument } from "../lib/printTable";
 import { isoDisplay, localToday } from "../lib/opname";
 import { KOP_CSS, PERUSAHAAN, escHtml as esc, kopHtml } from "../lib/surat";
+import { useRefreshTick, useTickDiam } from "../hooks/useAutoRefresh";
 
 // Koperasi > Depo Air: the water depots at Nilam and Firus. Sales are the koperasi's Stock Out of the
 // depot barang (each row carries its depo, from the buyer's estate unless moved); running costs are
@@ -248,22 +249,29 @@ export function DepoAirTab({ periode, reload, canInput, canEdit }: { periode: st
       return { operator: "", petugas: "", mengetahui: "" };
     }
   });
+  const tick = useRefreshTick();
+  const cekDiamLaporan = useTickDiam(tick);
+  const cekDiamTx = useTickDiam(tick);
   useEffect(() => {
-    setD(null);
+    // The clock's refresh (useRefreshTick, part of reload) keeps the report on screen.
+    if (!cekDiamLaporan()) setD(null);
     setError("");
     if (dari > sampai) return setError("Bulan awal setelah bulan akhir");
     api
       .depoLaporan(depo, dari, sampai)
       .then(setD)
       .catch((e) => setError(errorText(e, "Gagal memuat laporan depo")));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [depo, dari, sampai, reload, muat]);
   useEffect(() => {
+    const diam = cekDiamTx();
     if (!lihatTx) return;
-    setTx(null);
+    if (!diam) setTx(null);
     api
       .depoTx(depo, dari, sampai)
       .then(setTx)
       .catch(() => setTx([]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lihatTx, depo, dari, sampai, reload, muat]);
 
   const biaya = d ? d.biaya.reduce((s, b) => s + b.jumlah, 0) : 0;
