@@ -22,6 +22,10 @@ export const formatNomor = (klinik: string, tanggal: string, dariNomor?: string 
   const lama = dariNomor?.match(/^\s*[^/]*?(\/.*)\/[IVXL]+\/\d{4}\s*$/)?.[1];
   return `${lama ?? `/BAP-${logoPerusahaan(perusahaanEstate(klinik)).alt}/Klinik-${singkatEstate(klinik)}`}/${bulan}/${tahun}`;
 };
+// The format after a new tanggal: one ending in /<bulan romawi>/<tahun> keeps its start and takes the new month / year;
+// an empty one starts from the klinik's last nomor; anything else typed by hand stays as it is.
+export const ikutTanggal = (klinik: string, tanggal: string, format: string, lastNomor?: string | null) =>
+  !format.trim() ? formatNomor(klinik, tanggal, lastNomor) : /\/[IVXL]+\/\d{4}\s*$/.test(format) ? formatNomor(klinik, tanggal, format) : format;
 // A stored nomor split back into the typed number and the format.
 export const pisahNomor = (nomor: string) => {
   const i = nomor.indexOf("/");

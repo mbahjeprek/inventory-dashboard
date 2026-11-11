@@ -5579,6 +5579,7 @@ app.post("/api/klinik-permintaan/:id/surat-offline", async (req, res) => {
     if ((status === "SEBAGIAN" || status === "DITOLAK") && alasan.length < 3) return res.status(400).json({ error: `${l.nama}: isi alasan ${status === "DITOLAK" ? "ditolak" : "disetujui sebagian"} sesuai surat` });
     keputusan.push({ id: l.id, nama: l.nama, status, disetujui, alasan, satuan: l.satuan, jumlah: Number(l.jumlah) });
   }
+  // Decided on the paper up to Disetujui 2, so rank 3 (Head) - not 4, which reads as Super User.
   const oleh = `Surat bertanda tangan (upload ${u.nama})`;
   try {
     await withTransaction(async (c) => {
@@ -5589,7 +5590,7 @@ app.post("/api/klinik-permintaan/:id/surat-offline", async (req, res) => {
       if (!r) throw new AksesError("Permintaan ini baru saja berubah (disetujui / ditolak); muat ulang halamannya");
       for (const k of keputusan)
         await execute(
-          "UPDATE klinik_permintaan_line SET status = @status, disetujui = @disetujui, alasan = @alasan, approval_oleh = @oleh, approval_at = now(), approval_level = 4 WHERE id = @id",
+          "UPDATE klinik_permintaan_line SET status = @status, disetujui = @disetujui, alasan = @alasan, approval_oleh = @oleh, approval_at = now(), approval_level = 3 WHERE id = @id",
           { ...k, oleh },
           c
         );

@@ -6,7 +6,7 @@ import { can } from "../lib/access";
 import { localToday } from "../lib/opname";
 import { printDocument } from "../lib/printTable";
 import { waktuTtd } from "../lib/permintaanSurat";
-import { SB_LABEL, SB_URUT, formatNomor, gabungNomor, pisahNomor, suratBarangHtml } from "../lib/suratBarang";
+import { SB_LABEL, SB_URUT, formatNomor, gabungNomor, ikutTanggal, pisahNomor, suratBarangHtml } from "../lib/suratBarang";
 import { EvidenceInput, EvidenceLink, useEvidenceEnabled } from "./EvidenceInput";
 import { useAutoRefresh } from "../hooks/useAutoRefresh";
 
@@ -170,8 +170,6 @@ function Editor({ klinik, id, onDone, onBack }: { klinik: string; id: number | n
   const [items, setItems] = useState<ItemIn[]>([itemKosong()]);
   const [ttd, setTtd] = useState<Record<SbBox, string>>({ dimohon: user?.nama ?? "", diperiksa: DEFAULT.diperiksa, disetujui: DEFAULT.disetujui });
   const [tolak, setTolak] = useState<SuratBarang["tolak"]>(null);
-  // The format follows the tanggal until it is typed over.
-  const [formatAuto, setFormatAuto] = useState(true);
   const [lastNomor, setLastNomor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -186,7 +184,6 @@ function Editor({ klinik, id, onDone, onBack }: { klinik: string; id: number | n
           setTanggal(s.tanggal);
           setUrut(n.urut);
           setFormat(n.format);
-          setFormatAuto(false);
           setPerihal(s.perihal);
           setKepada(s.kepada?.nama ? s.kepada : DEFAULT.kepada);
           setCc(s.cc ?? []);
@@ -287,7 +284,7 @@ function Editor({ klinik, id, onDone, onBack }: { klinik: string; id: number | n
             </div>
             <div>
               <span className={label}>Format nomor</span>
-              <input value={format} onChange={(e) => (setFormat(e.target.value), setFormatAuto(false))} maxLength={100} className={`${inputCls} w-full`} />
+              <input value={format} onChange={(e) => setFormat(e.target.value)} maxLength={100} className={`${inputCls} w-full`} />
             </div>
             <div>
               <span className={label}>Tanggal</span>
@@ -297,7 +294,8 @@ function Editor({ klinik, id, onDone, onBack }: { klinik: string; id: number | n
                 onChange={(e) => {
                   const t = e.target.value;
                   setTanggal(t);
-                  if (t && (formatAuto || !id)) setFormat(formatNomor(klinik, t, format || lastNomor));
+                  // The format's month / year follow the tanggal; what was typed before them stays.
+                  if (t) setFormat(ikutTanggal(klinik, t, format, lastNomor));
                 }}
                 className={`${inputCls} w-full`}
               />
