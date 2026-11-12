@@ -23,6 +23,22 @@ const PAGE_SIZE = 50;
 const BULAN = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
 type Flag = "" | "kecelakaan" | "istirahat" | "rujukan" | "mcu";
 const FLAG_LABEL: Record<Exclude<Flag, "">, string> = { kecelakaan: "Kecelakaan kerja", istirahat: "Surat sakit", rujukan: "Rujukan", mcu: "MCU" };
+// Each kind its own colour on the counters beside the filter (solid while it filters the list).
+const WARNA_FLAG: Record<Exclude<Flag, "">, { biasa: string; aktif: string }> = {
+  kecelakaan: {
+    biasa: "bg-[var(--accent-red-bg)] border-[var(--accent-red-border)] text-[var(--accent-red)] hover:border-[var(--accent-red)]",
+    aktif: "bg-[var(--accent-red)] border-[var(--accent-red)] text-white",
+  },
+  istirahat: {
+    biasa: "bg-[var(--accent-amber-bg)] border-[var(--accent-amber-border)] text-[var(--accent-amber)] hover:border-[var(--accent-amber)]",
+    aktif: "bg-[var(--accent-amber)] border-[var(--accent-amber)] text-white",
+  },
+  rujukan: { biasa: "bg-[#f5f3ff] border-[#ddd6fe] text-[#7c3aed] hover:border-[#7c3aed]", aktif: "bg-[#7c3aed] border-[#7c3aed] text-white" },
+  mcu: {
+    biasa: "bg-[var(--accent-green-bg)] border-[var(--accent-green-border)] text-[var(--accent-green)] hover:border-[var(--accent-green)]",
+    aktif: "bg-[var(--accent-green)] border-[var(--accent-green)] text-white",
+  },
+};
 type View = "data" | "ringkasan" | "konsumsi";
 
 // Local (Jakarta) dates as YYYY-MM-DD.
@@ -742,16 +758,12 @@ export function KlinikLaporanTab({ klinik }: { klinik: string }) {
                       key={k}
                       onClick={() => setFlag(aktif ? "" : k)}
                       title={aktif ? "Tampilkan semua kunjungan" : `Tampilkan ${FLAG_LABEL[k].toLowerCase()} saja`}
-                      className={`inline-flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-full border font-medium ${
-                        aktif
-                          ? "bg-[var(--accent-blue)] border-[var(--accent-blue)] text-white"
-                          : n > 0 && k === "kecelakaan"
-                            ? "bg-[var(--accent-red-bg)] border-[var(--accent-red-border)] text-[var(--accent-red)]"
-                            : "bg-[var(--bg-card)] border-[var(--border)] text-[var(--text-secondary)] hover:border-[var(--accent-blue)]"
-                      }`}
+                      className={`inline-flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-full border font-medium transition ${
+                        aktif ? WARNA_FLAG[k].aktif : WARNA_FLAG[k].biasa
+                      } ${!aktif && n === 0 ? "opacity-60" : ""}`}
                     >
                       {FLAG_LABEL[k]}
-                      <span className={`min-w-[1.25rem] text-center rounded-full px-1.5 font-semibold ${aktif ? "bg-white/25" : "bg-[#f1f5f9] text-[var(--text-primary)]"}`}>{fmt(n)}</span>
+                      <span className={`min-w-[1.25rem] text-center rounded-full px-1.5 font-semibold ${aktif ? "bg-white/25" : "bg-white/80"}`}>{fmt(n)}</span>
                       {k === "istirahat" && n > 0 && <span className="font-normal opacity-80">{fmt(jumlah.hari_istirahat)} hari</span>}
                     </button>
                   );
