@@ -18,6 +18,12 @@ import { useAutoRefresh } from "../hooks/useAutoRefresh";
 // Pemusnahan of its kliniks / koperasi to approve (Setujui Berita Acara), opened as they print with Setujui / Tolak;
 // and for HR (Pelunasan Koperasi) the Permintaan Barang Koperasi sent by the koperasi, opened with Setujui / Tolak.
 const tgl = (iso: string) => iso.split("-").reverse().join("/");
+// Each list a card with clear lines: a firm border, the title as a header bar (blue stripe on the left), the column
+// heads shaded and a line under every row.
+const SEKSI = "bg-[var(--bg-card)] border border-[var(--border)] rounded-lg shadow-sm overflow-hidden";
+const SEKSI_JUDUL = "text-sm font-semibold text-[var(--text-primary)] px-4 py-2.5 bg-[#f1f5f9] border-b border-[var(--border)] border-l-4 border-l-[var(--accent-blue)]";
+const SEKSI_KEPALA = "bg-[#f8fafc] text-xs text-[var(--text-secondary)] border-b border-[var(--border)]";
+const SEKSI_BARIS = "border-t border-[var(--border-soft)] first:border-t-0 hover:bg-[#f8fafc] align-top";
 
 export function PersetujuanPage() {
   const [rows, setRows] = useState<PermintaanMenunggu[] | null>(null);
@@ -81,14 +87,14 @@ export function PersetujuanPage() {
       <BaTtdSaya />
       {bolehKoreksi && <KoreksiPengajuanList />}
       {bolehKop && (
-        <section className="space-y-2">
-          <h2 className="text-sm font-semibold text-[var(--text-primary)]">
+        <section className={SEKSI}>
+          <h2 className={SEKSI_JUDUL}>
             Permintaan Barang Koperasi{" "}
             {kopMenunggu.length > 0 && <span className="ml-1 text-xs font-normal text-[var(--accent-amber)]">{kopMenunggu.length} menunggu</span>}
           </h2>
-          <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg overflow-x-auto">
+          <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-[#f8fafc] text-xs text-[var(--text-secondary)]">
+              <thead className={SEKSI_KEPALA}>
                 <tr className="text-left">
                   <th className="px-3 py-2">Nomor</th>
                   <th className="px-3 py-2">Tanggal</th>
@@ -112,7 +118,7 @@ export function PersetujuanPage() {
                   </tr>
                 ) : (
                   kopMenunggu.map((r) => (
-                    <tr key={r.id} className="border-t border-[var(--border)] hover:bg-[#f8fafc] align-top">
+                    <tr key={r.id} className={SEKSI_BARIS}>
                       <td className="px-3 py-2 font-medium">
                         <button onClick={() => setBukaKop(r.id)} className="text-[var(--accent-blue)] hover:underline text-left">
                           {r.nomor}
@@ -149,14 +155,14 @@ export function PersetujuanPage() {
         />
       )}
       {bolehBa && (
-        <section className="space-y-2">
-          <h2 className="text-sm font-semibold text-[var(--text-primary)]">
+        <section className={SEKSI}>
+          <h2 className={SEKSI_JUDUL}>
             Berita Acara Pemusnahan{" "}
             {bas && bas.length > 0 && <span className="ml-1 text-xs font-normal text-[var(--accent-amber)]">{bas.length} menunggu</span>}
           </h2>
-          <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg overflow-x-auto">
+          <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-[#f8fafc] text-xs text-[var(--text-secondary)]">
+              <thead className={SEKSI_KEPALA}>
                 <tr className="text-left">
                   <th className="px-3 py-2">Nomor</th>
                   <th className="px-3 py-2">Unit</th>
@@ -180,7 +186,7 @@ export function PersetujuanPage() {
                   </tr>
                 ) : (
                   bas.map((b) => (
-                    <tr key={b.id} className="border-t border-[var(--border)] hover:bg-[#f8fafc] align-top">
+                    <tr key={b.id} className={SEKSI_BARIS}>
                       <td className="px-3 py-2 font-medium">
                         <button onClick={() => setPeriksa(b)} className="text-[var(--accent-blue)] hover:underline text-left">
                           {b.nomor}
@@ -217,13 +223,13 @@ export function PersetujuanPage() {
         />
       )}
       {bolehBarang && !!barang?.length && (
-        <section className="space-y-2">
-          <h2 className="text-sm font-semibold text-[var(--text-primary)]">
+        <section className={SEKSI}>
+          <h2 className={SEKSI_JUDUL}>
             Permintaan Barang Klinik <span className="ml-1 text-xs font-normal text-[var(--text-muted)]">non-obat · Dimohon → Diperiksa → Disetujui</span>
           </h2>
-          <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg overflow-x-auto">
+          <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-[#f8fafc] text-xs text-[var(--text-secondary)]">
+              <thead className={SEKSI_KEPALA}>
                 <tr className="text-left">
                   <th className="px-3 py-2">Nomor</th>
                   <th className="px-3 py-2">Klinik</th>
@@ -235,7 +241,7 @@ export function PersetujuanPage() {
               </thead>
               <tbody>
                 {barang.map((r) => (
-                  <tr key={r.id} className="border-t border-[var(--border)] hover:bg-[#f8fafc] align-top">
+                  <tr key={r.id} className={SEKSI_BARIS}>
                     <td className="px-3 py-2 font-medium">
                       <button onClick={() => setOpenSb(r.id)} className="text-[var(--accent-blue)] hover:underline text-left">
                         {r.nomor}
@@ -269,13 +275,13 @@ export function PersetujuanPage() {
         </section>
       )}
       {bolehPermintaan && (
-        <section className="space-y-2">
-          <h2 className="text-sm font-semibold text-[var(--text-primary)]">
+        <section className={SEKSI}>
+          <h2 className={SEKSI_JUDUL}>
             Permintaan Obat <span className="ml-1 text-xs font-normal text-[var(--text-muted)]">4 tanda tangan, urutan bebas</span>
           </h2>
-          <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg overflow-x-auto">
+          <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-[#f8fafc] text-xs text-[var(--text-secondary)]">
+              <thead className={SEKSI_KEPALA}>
                 <tr className="text-left">
                   <th className="px-3 py-2">Nomor</th>
                   <th className="px-3 py-2">Klinik</th>
@@ -301,7 +307,7 @@ export function PersetujuanPage() {
                   </tr>
                 ) : (
                   rows.map((r) => (
-                    <tr key={r.id} className="border-t border-[var(--border)] hover:bg-[#f8fafc] align-top">
+                    <tr key={r.id} className={SEKSI_BARIS}>
                       <td className="px-3 py-2 font-medium">
                         <button onClick={() => setOpen(r.id)} className="text-[var(--accent-blue)] hover:underline text-left">
                           {r.nomor}

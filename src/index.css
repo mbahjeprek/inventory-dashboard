@@ -8,7 +8,10 @@
   --text-primary: #1a2634;
   --text-secondary: #5b6b7c;
   --text-muted: #94a3b8;
-  --border: #e2e8f0;
+  /* Lines of cards, tables and fields: firm enough to read the layout at a glance (was #e2e8f0); --border-soft for the
+     lines between rows inside a card. */
+  --border: #cbd5e1;
+  --border-soft: #e2e8f0;
 
   --accent-blue: #1e5bb5;
   --accent-blue-bg: #e8f0fc;
