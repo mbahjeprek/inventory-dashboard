@@ -9812,7 +9812,10 @@ app.get("/api/berita-acara", async (req, res) => {
   const modul = String(req.query.modul ?? "");
   const unit = String(req.query.unit ?? "");
   if (!baBoleh(req, res, modul, unit, "view")) return;
-  const data = await queryMany(`SELECT ${BA_COLS} FROM berita_acara b LEFT JOIN users u ON u.id = b.dibuat_oleh WHERE b.modul = @modul AND b.unit = @unit ORDER BY b.id DESC LIMIT 200`, { modul, unit });
+  const rows = await queryMany<any>(`SELECT ${BA_COLS} FROM berita_acara b LEFT JOIN users u ON u.id = b.dibuat_oleh WHERE b.modul = @modul AND b.unit = @unit ORDER BY b.id DESC LIMIT 200`, { modul, unit });
+  // ditunjuk: the account each pelaksana / saksi box is reserved for (its name matches one account of the unit), for the signing form.
+  const akun = rows.length ? await akunEstate() : [];
+  const data = rows.map((ba) => ({ ...ba, ditunjuk: baDitunjukSemua(ba, akun) }));
   const terpakai = (
     await queryMany<{ ref_id: number }>("SELECT i.ref_id FROM berita_acara_item i JOIN berita_acara b ON b.id = i.ba_id WHERE b.modul = @modul AND b.unit = @unit AND b.status <> 'BATAL'", { modul, unit })
   ).map((r) => r.ref_id);
@@ -10212,10 +10215,19 @@ app.get("/api/petugas", async (req, res) => {
 
 // The BAs waiting for this account's approval (Setujui Berita Acara, of its units).
 // Who a BA names for a box (pelaksana / saksi): the account of that estate whose name matches the name typed on the
-// BA - same words in any order, titles (Amd.Keb, S.Kep, ...) and punctuation left out, one name contained in the
-// other ("Randy" = "Randy Saifullah", "Jerry Eugenius" = "Eugenius Jerry") - when exactly one account matches.
+// BA - same words in any order, titles (Amd.Keb, S.Kep, ...), punctuation and doubled letters left out, one name contained
+// in the other ("Randy" = "Randy Saifullah", "Jerry Eugenius" = "Eugenius Jerry", "Sitti" = "Siti") - when exactly one
+// account matches.
 const GELAR = new Set(["amd", "keb", "kep", "skep", "ners", "ns", "s", "st", "se", "sh", "skm", "spd", "dr", "drg", "apt", "ama", "a", "md", "ak", "sos", "si"]);
-const namaKata = (s: string) => new Set(String(s ?? "").toLowerCase().split(/[^a-z]+/).filter((w) => w.length > 1 && !GELAR.has(w)));
+// A doubled letter counts once, so a spelling like "Sitti" / "Siti" or "Muhammad" / "Muhamad" still matches.
+const namaKata = (s: string) =>
+  new Set(
+    String(s ?? "")
+      .toLowerCase()
+      .split(/[^a-z]+/)
+      .filter((w) => w.length > 1 && !GELAR.has(w))
+      .map((w) => w.replace(/(.)\1+/g, "$1"))
+  );
 const namaCocok = (a: string, b: string) => {
   const x = namaKata(a);
   const y = namaKata(b);
@@ -10296,8 +10308,9 @@ app.put("/api/berita-acara/:id/persetujuan", async (req, res) => {
 });
 
 // Tanda tangan pelaksana / saksi1 / saksi2 while the BA waits for approval (MENUNGGU), by the account signing (AKUN)
-// or drawn on the screen (LAYAR, with the name on the BA); signing again replaces it. A BA approved under the old
-// order (approval first) can still get its empty boxes signed.
+// or drawn on the screen (LAYAR, with the name on the BA) - within baTtdTolak: a box named for an account is that
+// account's, and only whoever signed a box may sign it again. A BA approved under the old order (approval first) can
+// still get its empty boxes signed.
 app.put("/api/berita-acara/:id/ttd", async (req, res) => {
   const u = req.user!;
   const ba = await queryOne<any>("SELECT * FROM berita_acara WHERE id = @id", { id: req.params.id });
@@ -10311,6 +10324,8 @@ app.put("/api/berita-acara/:id/ttd", async (req, res) => {
   if (!baDigital(ba)) return res.status(400).json({ error: "Berita acara ini dibuat sebelum tanda tangan di aplikasi" });
   if (ba.status === "DISETUJUI" && ba.ttd?.[peran]) return res.status(409).json({ error: "Berita acara ini sudah disetujui; tanda tangan yang ada tidak bisa diganti" });
   const cara = req.body?.cara === "AKUN" ? "AKUN" : "LAYAR";
+  const tolak = baTtdTolak(u, ba, peran, cara, await akunEstate());
+  if (tolak) return res.status(403).json({ error: tolak });
   const jabatan = String(req.body?.jabatan ?? ba.isian?.[peran]?.jabatan ?? "").trim().slice(0, 100);
   let isi: any;
   if (cara === "AKUN") {
@@ -10327,13 +10342,60 @@ app.put("/api/berita-acara/:id/ttd", async (req, res) => {
     isi = { cara, nama, jabatan, gambar, input_oleh: u.id, input_nama: u.nama, at: new Date().toISOString() };
   }
   const ganti = !!ba.ttd?.[peran];
-  await execute("UPDATE berita_acara SET ttd = jsonb_set(ttd, @path::text[], @isi::jsonb) WHERE id = @id", { path: [peran], isi: JSON.stringify(isi), id: ba.id });
+  // Only over the box as it was read (two people signing it at once: the second is refused, not silently replacing).
+  const ok = await queryOne(
+    "UPDATE berita_acara SET ttd = jsonb_set(ttd, @path::text[], @isi::jsonb) WHERE id = @id AND (ttd -> @peran) IS NOT DISTINCT FROM @lama::jsonb RETURNING id",
+    { path: [peran], peran, isi: JSON.stringify(isi), lama: ba.ttd?.[peran] ? JSON.stringify(ba.ttd[peran]) : null, id: ba.id }
+  );
+  if (!ok) return res.status(409).json({ error: "Kotak ini baru saja ditandatangani orang lain; muat ulang halamannya" });
   await baLog(
     req,
     ba,
     "Tanda Tangan Berita Acara",
     `${BA_PERAN_LABEL[peran]}: ${isi.nama}${jabatan ? ` (${jabatan})` : ""} · ${cara === "AKUN" ? "dengan akun" : `di layar, dicatat ${u.nama}`}${ganti ? " · mengganti tanda tangan sebelumnya" : ""}`
   );
+  res.json({ success: true });
+});
+
+// Who may sign box `peran` (pelaksana / saksi) - null = allowed, else why not. A box whose name matches one account of
+// the unit (baDitunjuk) is that account's: signed with it ("Dengan akun saya"), not by someone else, nor drawn on a
+// screen for it. A signed box is changed only by whoever signed it (or recorded it on the screen). A Super User may
+// stand in, and empties a wrong box with Kosongkan.
+function baTtdTolak(u: SessionUser, ba: any, peran: string, cara: string, akun: AkunNama[]): string | null {
+  if (u.role === "superuser") return null;
+  const label = BA_PERAN_LABEL[peran];
+  const id = baDitunjuk(ba, peran, akun);
+  const namaAkun = akun.find((a) => a.id === id)?.nama ?? "";
+  if (id !== null && id !== u.id) return `Kotak ${label} untuk ${namaAkun}; ditandatangani sendiri dengan akunnya (menu Persetujuan)`;
+  if (id !== null && cara !== "AKUN") return `Kotak ${label} untuk akun Anda: tanda tangani dengan tombol "Dengan akun saya"`;
+  const ada = ba.ttd?.[peran];
+  if (ada && (ada.cara === "AKUN" ? ada.user_id : ada.input_oleh) !== u.id)
+    return `Kotak ${label} sudah ditandatangani ${ada.nama}; kalau salah, minta Super User mengosongkannya dulu`;
+  return null;
+}
+const baDitunjukSemua = (ba: any, akun: AkunNama[]) =>
+  Object.fromEntries(
+    BA_TTD_MUSNAH.map((k) => {
+      const id = baDitunjuk(ba, k, akun);
+      return [k, id === null ? null : { user_id: id, nama: akun.find((a) => a.id === id)?.nama ?? "" }];
+    })
+  );
+
+// Kosongkan: a Super User empties a pelaksana / saksi box signed by mistake (before the manager approved), so the
+// right person can sign it.
+app.put("/api/berita-acara/:id/ttd/kosongkan", async (req, res) => {
+  const u = req.user!;
+  if (u.role !== "superuser") return res.status(403).json({ error: "Hanya Super User yang bisa mengosongkan tanda tangan" });
+  const ba = await queryOne<any>("SELECT * FROM berita_acara WHERE id = @id", { id: req.params.id });
+  if (!ba) return res.status(404).json({ error: "Berita acara tidak ditemukan" });
+  const peran = String(req.body?.peran ?? "");
+  if (!BA_TTD_MUSNAH.includes(peran)) return res.status(400).json({ error: "Kotak tanda tangan tidak valid" });
+  if (ba.status !== "MENUNGGU") return res.status(409).json({ error: "Berita acara yang sudah disetujui / ditutup tidak bisa diubah tanda tangannya" });
+  const ada = ba.ttd?.[peran];
+  if (!ada) return res.status(409).json({ error: "Kotak ini belum ditandatangani" });
+  const ok = await queryOne("UPDATE berita_acara SET ttd = ttd - @peran WHERE id = @id AND status = 'MENUNGGU' RETURNING id", { peran, id: ba.id });
+  if (!ok) return res.status(409).json({ error: "Berita acara ini baru saja berubah; muat ulang halamannya" });
+  await baLog(req, ba, "Batal Tanda Tangan Berita Acara", `${BA_PERAN_LABEL[peran]} dikosongkan (sebelumnya ${ada.nama}, ${ada.cara === "AKUN" ? "dengan akun" : `di layar, dicatat ${ada.input_nama ?? "-"}`})`);
   res.json({ success: true });
 });
 

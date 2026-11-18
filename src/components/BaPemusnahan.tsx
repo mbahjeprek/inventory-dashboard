@@ -961,6 +961,20 @@ function BaTtdModal({ jenis: j, ba, onClose, onDone }: { jenis: BaJenis; ba: Ber
   const [diubah, setDiubah] = useState(false);
   const isian = ba.isian as Isian;
   const tutup = () => (diubah ? onDone() : onClose());
+  // What this account may do with a box (the server checks the same, see baTtdTolak): a box named for an account is
+  // that account's; a signed box only for whoever signed it; a Super User may do anything, and empty a wrong box.
+  const su = user?.role === "superuser";
+  const hakKotak = (k: BaPeran): HakKotak => {
+    const untuk = ba.ditunjuk?.[k] ?? null;
+    const t = ttd[k];
+    const milik = t ? (t.cara === "AKUN" ? t.user_id : t.input_oleh) : undefined;
+    return {
+      untuk,
+      bolehTtd: su || ((!untuk || untuk.user_id === user?.id) && (!t || milik === user?.id)),
+      hanyaAkun: !su && !!untuk,
+      kosongkan: su && !!t && ba.status === "MENUNGGU",
+    };
+  };
   return (
     <Shell title={`Tanda tangan ${ba.nomor}`} subtitle="Pelaksana dan kedua saksi memeriksa barangnya lalu menandatangani, sebelum BA diajukan ke manager" onClose={tutup} wide>
       <div className="space-y-3">
@@ -973,13 +987,29 @@ function BaTtdModal({ jenis: j, ba, onClose, onDone }: { jenis: BaJenis; ba: Ber
             buka={aktif === k}
             onBuka={() => setAktif(aktif === k ? null : k)}
             akunSaya={user?.nama ?? ""}
+            hak={hakKotak(k)}
             simpan={async (body) => {
               await api.baTtd(ba.id, { peran: k, ...body });
-              const t: BaTtd = { cara: body.cara, nama: body.cara === "AKUN" ? user?.nama ?? "" : body.nama ?? "", jabatan: body.jabatan ?? "", at: new Date().toISOString(), gambar: body.gambar };
+              const t: BaTtd = {
+                cara: body.cara,
+                nama: body.cara === "AKUN" ? user?.nama ?? "" : body.nama ?? "",
+                jabatan: body.jabatan ?? "",
+                at: new Date().toISOString(),
+                gambar: body.gambar,
+                ...(body.cara === "AKUN" ? { user_id: user?.id } : { input_oleh: user?.id }),
+              };
               const next = { ...ttd, [k]: t };
               setTtd(next);
               setDiubah(true);
               setAktif(TTD_MUSNAH.find((x) => !next[x]) ?? null);
+            }}
+            kosongkan={async () => {
+              await api.baTtdKosongkan(ba.id, k);
+              const next = { ...ttd };
+              delete next[k];
+              setTtd(next);
+              setDiubah(true);
+              setAktif(k);
             }}
           />
         ))}
@@ -993,6 +1023,9 @@ function BaTtdModal({ jenis: j, ba, onClose, onDone }: { jenis: BaJenis; ba: Ber
   );
 }
 
+// untuk: the account the box is reserved for; bolehTtd: this account may sign (or sign again) here; hanyaAkun: only
+// with the account (no drawing for it); kosongkan: a Super User may empty it.
+type HakKotak = { untuk: { user_id: number; nama: string } | null; bolehTtd: boolean; hanyaAkun: boolean; kosongkan: boolean };
 function TtdKotak({
   label,
   orang,
@@ -1000,7 +1033,9 @@ function TtdKotak({
   buka,
   onBuka,
   akunSaya,
+  hak,
   simpan,
+  kosongkan,
 }: {
   label: string;
   orang: Orang | undefined;
@@ -1008,7 +1043,9 @@ function TtdKotak({
   buka: boolean;
   onBuka: () => void;
   akunSaya: string;
+  hak: HakKotak;
   simpan: (b: { cara: "AKUN" | "LAYAR"; nama?: string; jabatan?: string; gambar?: string }) => Promise<void>;
+  kosongkan: () => Promise<void>;
 }) {
   const [nama, setNama] = useState(orang?.nama ?? "");
   const [jabatan, setJabatan] = useState(orang?.jabatan ?? "");
@@ -1029,9 +1066,23 @@ function TtdKotak({
       setBusy(false);
     }
   };
+  const hapus = async () => {
+    if (!ttd || !window.confirm(`Kosongkan tanda tangan ${ttd.nama} di kotak ${label}? Setelah itu orang yang benar bisa menandatanganinya.`)) return;
+    setBusy(true);
+    setError("");
+    try {
+      await kosongkan();
+    } catch (e) {
+      setError(errorText(e, "Gagal mengosongkan"));
+    } finally {
+      setBusy(false);
+    }
+  };
+  // Not this account's box: shown, not opened; a Super User sees Kosongkan on a signed one.
+  const kunci = !hak.bolehTtd;
   return (
     <div className={`rounded-md border ${ttd ? "border-[var(--accent-green-border)]" : "border-[var(--border)]"}`}>
-      <button onClick={onBuka} className="w-full flex items-center gap-3 px-3 py-2 text-left">
+      <button onClick={kunci ? undefined : onBuka} disabled={kunci} className="w-full flex items-center gap-3 px-3 py-2 text-left disabled:cursor-default">
         {ttd ? <Check size={16} className="text-[var(--accent-green)] shrink-0" /> : <CircleDashed size={16} className="text-[var(--text-muted)] shrink-0" />}
         <span className="flex-1 min-w-0">
           <span className="block text-sm font-medium text-[var(--text-primary)]">{label}</span>
@@ -1040,23 +1091,45 @@ function TtdKotak({
           </span>
         </span>
         {ttd?.gambar && <img src={ttd.gambar} alt="" className="h-9 max-w-[120px] object-contain" />}
-        <span className="text-xs text-[var(--accent-blue)]">{buka ? "Tutup" : ttd ? "Ulangi" : "Tanda tangan"}</span>
+        {kunci ? (
+          <span className="text-[11px] text-[var(--text-muted)] text-right max-w-[220px]">
+            {ttd ? "sudah ditandatangani" : `untuk ${hak.untuk?.nama}; ditandatangani sendiri lewat Persetujuan`}
+          </span>
+        ) : (
+          <span className="text-xs text-[var(--accent-blue)]">{buka ? "Tutup" : ttd ? "Ulangi" : "Tanda tangan"}</span>
+        )}
       </button>
-      {buka && (
+      {hak.kosongkan && (
+        <div className="px-3 pb-2 -mt-1 flex justify-end">
+          <button onClick={hapus} disabled={busy} className="text-[11px] text-[var(--accent-red)] hover:underline disabled:opacity-50" title="Super User: kosongkan kotak yang salah ditandatangani">
+            Kosongkan tanda tangan
+          </button>
+        </div>
+      )}
+      {kunci && error && <p className="px-3 pb-2 text-xs text-[var(--accent-red)]">{error}</p>}
+      {buka && !kunci && (
         <div className="border-t border-[var(--border)] p-3 space-y-2">
-          <div className="grid sm:grid-cols-2 gap-2">
-            <input value={nama} onChange={(e) => setNama(e.target.value)} placeholder="Nama" className={inputCls} />
-            <input value={jabatan} onChange={(e) => setJabatan(e.target.value)} placeholder="Jabatan" className={inputCls} />
-          </div>
-          <SignaturePad onChange={setGambar} />
+          {hak.hanyaAkun ? (
+            <p className="text-xs text-[var(--text-secondary)]">Kotak ini untuk akun Anda: tanda tangani dengan akun.</p>
+          ) : (
+            <>
+              <div className="grid sm:grid-cols-2 gap-2">
+                <input value={nama} onChange={(e) => setNama(e.target.value)} placeholder="Nama" className={inputCls} />
+                <input value={jabatan} onChange={(e) => setJabatan(e.target.value)} placeholder="Jabatan" className={inputCls} />
+              </div>
+              <SignaturePad onChange={setGambar} />
+            </>
+          )}
           {error && <p className="text-xs text-[var(--accent-red)]">{error}</p>}
           <div className="flex flex-wrap items-center justify-end gap-2">
-            <button onClick={() => kirim("AKUN")} disabled={busy} title={`Ditandatangani sebagai ${akunSaya} (akun yang sedang login)`} className={`${btnOutline} mr-auto`}>
+            <button onClick={() => kirim("AKUN")} disabled={busy} title={`Ditandatangani sebagai ${akunSaya} (akun yang sedang login)`} className={hak.hanyaAkun ? btnPrimary : `${btnOutline} mr-auto`}>
               <UserCheck size={15} /> Dengan akun saya ({akunSaya})
             </button>
-            <button onClick={() => kirim("LAYAR")} disabled={busy || !gambar} className={btnPrimary}>
-              <PenLine size={15} /> {busy ? "Menyimpan..." : "Simpan tanda tangan"}
-            </button>
+            {!hak.hanyaAkun && (
+              <button onClick={() => kirim("LAYAR")} disabled={busy || !gambar} className={btnPrimary}>
+                <PenLine size={15} /> {busy ? "Menyimpan..." : "Simpan tanda tangan"}
+              </button>
+            )}
           </div>
         </div>
       )}

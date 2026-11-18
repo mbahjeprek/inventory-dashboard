@@ -880,11 +880,13 @@ export type BeritaAcara = {
   batal_alasan: string;
   // Signed in the app (a BA made before it has {}): pj when made, mengetahui on approval, the rest at the destruction.
   ttd: Partial<Record<BaPeran, BaTtd>>;
+  // The account each pelaksana / saksi box is reserved for (its name matches one account of the unit), in the list.
+  ditunjuk?: Partial<Record<BaPeran, { user_id: number; nama: string } | null>>;
 };
 export type BaPeran = "pj" | "pelaksana" | "saksi1" | "saksi2" | "mengetahui";
 // AKUN = signed by the account (user_id); LAYAR = drawn on the screen (gambar, PNG data URL), entered by input_nama;
 // WA = the manager answered YA on WhatsApp (tanggal), recorded by input_nama with the capture.
-export type BaTtd = { cara: "AKUN" | "LAYAR" | "WA"; nama: string; jabatan: string; at: string; user_id?: number; gambar?: string; input_nama?: string; tanggal?: string };
+export type BaTtd = { cara: "AKUN" | "LAYAR" | "WA"; nama: string; jabatan: string; at: string; user_id?: number; gambar?: string; input_oleh?: number; input_nama?: string; tanggal?: string };
 
 // Kendaraan & Alat Berat: one unit (see schema.sql kendaraan_unit) and a cell of the kondisi harian.
 export type KdUnit = {
@@ -1962,6 +1964,8 @@ export const api = {
   baTtdSaya: () => req<{ data: { ba: BeritaAcara; peran: BaPeran[] }[] }>("/api/berita-acara/ttd-saya"),
   baTtd: (id: number, body: { peran: BaPeran; cara: "AKUN" | "LAYAR"; nama?: string; jabatan?: string; gambar?: string }) =>
     req<{ success: boolean }>(`/api/berita-acara/${id}/ttd`, { method: "PUT", body: JSON.stringify(body) }),
+  // A Super User empties a pelaksana / saksi box signed by mistake (before approval).
+  baTtdKosongkan: (id: number, peran: BaPeran) => req<{ success: boolean }>(`/api/berita-acara/${id}/ttd/kosongkan`, { method: "PUT", body: JSON.stringify({ peran }) }),
   baBatal: (id: number, alasan: string) => req<{ success: boolean }>(`/api/berita-acara/${id}/batal`, { method: "PUT", body: JSON.stringify({ alasan }) }),
   depoLaporan: (depo: string, dari: string, sampai: string) => req<DepoLaporan>(`/api/koperasi/depo?${new URLSearchParams({ depo, dari, sampai })}`),
   depoTx: (depo: string, dari: string, sampai: string) =>
