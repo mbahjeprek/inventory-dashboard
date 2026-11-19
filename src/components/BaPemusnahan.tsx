@@ -8,6 +8,7 @@ import { BULAN, HARI, KOP_CSS, escHtml, jabatanDariGelar, kopHtml, namaLama, per
 import { useAuth } from "../context/AuthContext";
 import { can } from "../lib/access";
 import { EvidenceInput, EvidenceLink, useEvidenceEnabled } from "./EvidenceInput";
+import { KonfirmasiTtd } from "./KonfirmasiTtd";
 import { useRefreshTick } from "../hooks/useAutoRefresh";
 
 // Berita Acara Pemusnahan (Klinik obat / BHP, Koperasi barang rusak): a stored document with an automatic
@@ -897,7 +898,9 @@ export const itemsKoperasi = async (): Promise<BaItem[]> => {
 // Mengetahui / menyetujui: the BA as it prints, then Setujui (signed with the account) or Tolak with an alasan
 // (the BA is cancelled). Also opened from Persetujuan.
 export function BaPeriksaModal({ jenis: j, ba, onClose, onDone }: { jenis: BaJenis; ba: BeritaAcara; onClose: () => void; onDone: () => void }) {
+  const { user } = useAuth();
   const [tolak, setTolak] = useState(false);
+  const [yakin, setYakin] = useState(false);
   const [alasan, setAlasan] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -931,6 +934,19 @@ export function BaPeriksaModal({ jenis: j, ba, onClose, onDone }: { jenis: BaJen
               </button>
             </div>
           </div>
+        ) : yakin ? (
+          <>
+            <KonfirmasiTtd
+              kotak="Mengetahui / Menyetujui"
+              akun={user?.nama ?? ""}
+              namaDiSurat={(ba.isian as Isian).mengetahui?.nama}
+              akibat="Tanda tangan langsung tersimpan dan berita acara menjadi Disetujui (siap dimusnahkan); tidak bisa dibatalkan sendiri."
+              busy={busy}
+              onYa={() => kirim("SETUJU")}
+              onBatal={() => (setYakin(false), setError(""))}
+            />
+            {error && <p className="text-xs text-[var(--accent-red)]">{error}</p>}
+          </>
         ) : (
           <>
             {error && <p className="text-xs text-[var(--accent-red)]">{error}</p>}
@@ -941,7 +957,7 @@ export function BaPeriksaModal({ jenis: j, ba, onClose, onDone }: { jenis: BaJen
               <button onClick={() => setTolak(true)} disabled={busy} className={btnOutline}>
                 Tolak
               </button>
-              <button onClick={() => kirim("SETUJU")} disabled={busy} className={btnPrimary}>
+              <button onClick={() => setYakin(true)} disabled={busy} className={btnPrimary}>
                 <ShieldCheck size={15} /> {busy ? "Menyimpan..." : "Setujui & tandatangani"}
               </button>
             </div>

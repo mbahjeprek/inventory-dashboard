@@ -8,6 +8,7 @@ import { printDocument } from "../lib/printTable";
 import { waktuTtd } from "../lib/permintaanSurat";
 import { SB_LABEL, SB_URUT, formatNomor, gabungNomor, ikutTanggal, pisahNomor, suratBarangHtml } from "../lib/suratBarang";
 import { EvidenceInput, EvidenceLink, useEvidenceEnabled } from "./EvidenceInput";
+import { KonfirmasiTtd } from "./KonfirmasiTtd";
 import { useAutoRefresh } from "../hooks/useAutoRefresh";
 
 // Klinik > Permintaan > Permintaan Barang (non-obat): the klinik's letter asking for a barang that isn't an obat (a
@@ -476,6 +477,7 @@ function TtdPanel({ s, onDone }: { s: SuratBarang; onDone: () => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [offline, setOffline] = useState(false);
+  const [yakin, setYakin] = useState(false);
   if (s.status === "DRAFT") return null;
   const berikut = SB_URUT.find((k) => !s.approval?.[k]);
   const bisa = s.status === "DIAJUKAN" ? (s.bisa_ttd ?? [])[0] : undefined;
@@ -483,12 +485,12 @@ function TtdPanel({ s, onDone }: { s: SuratBarang; onDone: () => void }) {
   const kirim = async (aksi: "SETUJU" | "TOLAK") => {
     if (!bisa) return;
     if (aksi === "TOLAK" && alasan.trim().length < 3) return setError("Isi alasan penolakan");
-    if (aksi === "SETUJU" && !window.confirm(`Tandatangani surat ${s.nomor} sebagai ${SB_LABEL[bisa]}?`)) return;
     setBusy(true);
     setError("");
     try {
       await api.sbTtd(s.id, { level: bisa, aksi, alasan: alasan.trim() });
       setTolakMode(false);
+      setYakin(false);
       setAlasan("");
       onDone();
     } catch (e) {
@@ -548,7 +550,17 @@ function TtdPanel({ s, onDone }: { s: SuratBarang; onDone: () => void }) {
       </div>
       {bisa && (
         <div className="flex flex-wrap items-center gap-2 border-t border-[var(--border)] pt-3">
-          {tolakMode ? (
+          {yakin ? (
+            <KonfirmasiTtd
+              kotak={SB_LABEL[bisa]}
+              akun={user?.nama ?? ""}
+              namaDiSurat={s.ttd?.[bisa]?.nama}
+              akibat={`Tanda tangan langsung tersimpan di surat ${s.nomor}; tidak bisa dibatalkan sendiri.`}
+              busy={busy}
+              onYa={() => kirim("SETUJU")}
+              onBatal={() => (setYakin(false), setError(""))}
+            />
+          ) : tolakMode ? (
             <>
               <input autoFocus value={alasan} onChange={(e) => setAlasan(e.target.value)} placeholder="Alasan penolakan (wajib)" maxLength={500} className={`${inputCls} flex-1 min-w-[240px]`} />
               <button onClick={() => kirim("TOLAK")} disabled={busy} className="inline-flex items-center gap-1.5 text-sm px-4 py-2 rounded-md bg-[var(--accent-red)] text-white hover:opacity-90 disabled:opacity-50">
@@ -569,7 +581,7 @@ function TtdPanel({ s, onDone }: { s: SuratBarang; onDone: () => void }) {
                   Tolak
                 </button>
               )}
-              <button onClick={() => kirim("SETUJU")} disabled={busy} className={btnBlue}>
+              <button onClick={() => (setYakin(true), setError(""))} disabled={busy} className={btnBlue}>
                 <Check size={15} /> {busy ? "Menyimpan..." : bisa === "dimohon" ? "Tandatangani" : "Setujui & tandatangani"}
               </button>
             </>

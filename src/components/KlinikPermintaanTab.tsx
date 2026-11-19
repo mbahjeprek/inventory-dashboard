@@ -19,6 +19,7 @@ import { printDocument, type TableReport } from "../lib/printTable";
 import { ExportButtons } from "./ExportButtons";
 import { EvidenceInput, EvidenceLink, useEvidenceEnabled } from "./EvidenceInput";
 import { KlinikSuratBarang } from "./KlinikSuratBarang";
+import { KonfirmasiTtd } from "./KonfirmasiTtd";
 import { TTD_DEFAULT, TTD_LABEL, ttdLengkap, TTD_LEVEL_LABEL, TTD_URUT, URGENSI_LABEL, estateLabel, permintaanHtml, waktuTtd } from "../lib/permintaanSurat";
 import { useAutoRefresh } from "../hooks/useAutoRefresh";
 
@@ -970,6 +971,8 @@ function TtdPanel({ p, onDone }: { p: Permintaan; onDone: () => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [offline, setOffline] = useState(false);
+  // The box waiting for "Ya, sudah benar" (KonfirmasiTtd) before it is signed.
+  const [yakin, setYakin] = useState<(typeof TTD_URUT)[number] | null>(null);
   if (p.status === "DRAFT") return null;
   const bisaOffline = p.status === "DIAJUKAN" && can(user, "klinik.ttd_offline");
   const sudahTtd = user?.role !== "superuser" && TTD_URUT.some((k) => p.approval?.[k]?.user_id === user?.id);
@@ -979,12 +982,12 @@ function TtdPanel({ p, onDone }: { p: Permintaan; onDone: () => void }) {
   const kirim = async (aksi: "SETUJU" | "TOLAK", level = bisa[0]) => {
     if (!level) return;
     if (aksi === "TOLAK" && alasan.trim().length < 3) return setError("Isi alasan penolakan");
-    if (aksi === "SETUJU" && !window.confirm(`Tandatangani permintaan ${p.nomor} sebagai ${TTD_LEVEL_LABEL[level]}?`)) return;
     setBusy(true);
     setError("");
     try {
       await api.permintaanTtd(p.id, { level, aksi, alasan: alasan.trim() });
       setTolakMode(false);
+      setYakin(null);
       setAlasan("");
       onDone();
     } catch (e) {
@@ -1034,7 +1037,7 @@ function TtdPanel({ p, onDone }: { p: Permintaan; onDone: () => void }) {
                 </p>
               )}
               {now && bisa.length > 1 && (
-                <button onClick={() => kirim("SETUJU", k)} disabled={busy} className="mt-1.5 inline-flex items-center gap-1 text-xs px-2 py-1 rounded bg-[var(--accent-blue)] text-white hover:opacity-90 disabled:opacity-50">
+                <button onClick={() => (setYakin(k), setError(""))} disabled={busy} className="mt-1.5 inline-flex items-center gap-1 text-xs px-2 py-1 rounded bg-[var(--accent-blue)] text-white hover:opacity-90 disabled:opacity-50">
                   <Check size={12} /> Tandatangani
                 </button>
               )}
@@ -1044,7 +1047,17 @@ function TtdPanel({ p, onDone }: { p: Permintaan; onDone: () => void }) {
       </div>
       {bisa.length > 0 && (
         <div className="flex flex-wrap items-center gap-2 border-t border-[var(--border)] pt-3">
-          {tolakMode ? (
+          {yakin ? (
+            <KonfirmasiTtd
+              kotak={TTD_LEVEL_LABEL[yakin]}
+              akun={user?.nama ?? ""}
+              namaDiSurat={p.ttd?.[yakin]?.nama}
+              akibat={`Tanda tangan langsung tersimpan di permintaan ${p.nomor}; tidak bisa dibatalkan sendiri.`}
+              busy={busy}
+              onYa={() => kirim("SETUJU", yakin)}
+              onBatal={() => (setYakin(null), setError(""))}
+            />
+          ) : tolakMode ? (
             <>
               <input
                 autoFocus
@@ -1077,7 +1090,7 @@ function TtdPanel({ p, onDone }: { p: Permintaan; onDone: () => void }) {
                 Tolak
               </button>
               {bisa.length === 1 && (
-                <button onClick={() => kirim("SETUJU")} disabled={busy} className={btnBlue}>
+                <button onClick={() => (setYakin(bisa[0]), setError(""))} disabled={busy} className={btnBlue}>
                   <Check size={15} /> {busy ? "Menyimpan..." : "Setujui & tandatangani"}
                 </button>
               )}
