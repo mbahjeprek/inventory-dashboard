@@ -985,7 +985,7 @@ function TtdPanel({ p, onDone }: { p: Permintaan; onDone: () => void }) {
     setBusy(true);
     setError("");
     try {
-      await api.permintaanTtd(p.id, { level, aksi, alasan: alasan.trim() });
+      await api.permintaanTtd(p.id, { level, aksi, alasan: alasan.trim(), konfirmasi: aksi === "SETUJU" && yakin === level });
       setTolakMode(false);
       setYakin(null);
       setAlasan("");

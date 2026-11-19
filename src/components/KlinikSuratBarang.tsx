@@ -488,7 +488,7 @@ function TtdPanel({ s, onDone }: { s: SuratBarang; onDone: () => void }) {
     setBusy(true);
     setError("");
     try {
-      await api.sbTtd(s.id, { level: bisa, aksi, alasan: alasan.trim() });
+      await api.sbTtd(s.id, { level: bisa, aksi, alasan: alasan.trim(), konfirmasi: aksi === "SETUJU" && yakin });
       setTolakMode(false);
       setYakin(false);
       setAlasan("");

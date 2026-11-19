@@ -1745,7 +1745,7 @@ export const api = {
   ) =>
     req<{ success: boolean; saved: number }>(`/api/klinik-permintaan/${id}/pemenuhan`, { method: "PUT", body: JSON.stringify({ lines }) }),
   permintaanMenunggu: () => req<{ rows: PermintaanMenunggu[] }>("/api/klinik-permintaan/menunggu"),
-  permintaanTtd: (id: number, body: { level: string; aksi: "SETUJU" | "TOLAK"; alasan?: string }) =>
+  permintaanTtd: (id: number, body: { level: string; aksi: "SETUJU" | "TOLAK"; alasan?: string; konfirmasi?: boolean }) =>
     req<{ success: boolean; status: Permintaan["status"] }>(`/api/klinik-permintaan/${id}/ttd`, { method: "POST", body: JSON.stringify(body) }),
   permintaanSuratOffline: (
     id: number,
@@ -1935,7 +1935,7 @@ export const api = {
   sbCreate: (body: SuratBarangInput) => req<{ success: boolean; id: number }>("/api/klinik-surat-barang", { method: "POST", body: JSON.stringify(body) }),
   sbUpdate: (id: number, body: SuratBarangInput) => req<{ success: boolean }>(`/api/klinik-surat-barang/${id}`, { method: "PUT", body: JSON.stringify(body) }),
   sbDelete: (id: number) => req<{ success: boolean }>(`/api/klinik-surat-barang/${id}`, { method: "DELETE" }),
-  sbTtd: (id: number, body: { level: SbBox; aksi: "SETUJU" | "TOLAK"; alasan?: string }) =>
+  sbTtd: (id: number, body: { level: SbBox; aksi: "SETUJU" | "TOLAK"; alasan?: string; konfirmasi?: boolean }) =>
     req<{ success: boolean; status: SuratBarang["status"] }>(`/api/klinik-surat-barang/${id}/ttd`, { method: "POST", body: JSON.stringify(body) }),
   sbSuratOffline: (id: number, body: { evidence_ids: string[]; ttd: Partial<Record<SbBox, { nama: string }>> }) =>
     req<{ success: boolean; status: SuratBarang["status"] }>(`/api/klinik-surat-barang/${id}/surat-offline`, { method: "POST", body: JSON.stringify(body) }),
@@ -1958,7 +1958,7 @@ export const api = {
   baSelesai: (id: number, body: { tanggal: string; catatan: string; evidence_id: string | null }) =>
     req<{ success: boolean }>(`/api/berita-acara/${id}/selesai`, { method: "PUT", body: JSON.stringify(body) }),
   baMenunggu: () => req<{ data: BeritaAcara[] }>("/api/berita-acara/menunggu"),
-  baPersetujuan: (id: number, body: { aksi: "SETUJU" | "TOLAK"; alasan?: string }) =>
+  baPersetujuan: (id: number, body: { aksi: "SETUJU" | "TOLAK"; alasan?: string; konfirmasi?: boolean }) =>
     req<{ success: boolean }>(`/api/berita-acara/${id}/persetujuan`, { method: "PUT", body: JSON.stringify(body) }),
   // The BAs waiting for this account's signature as pelaksana / saksi (matched by the name on the BA).
   baTtdSaya: () => req<{ data: { ba: BeritaAcara; peran: BaPeran[] }[] }>("/api/berita-acara/ttd-saya"),

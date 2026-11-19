@@ -5491,8 +5491,16 @@ function permintaanBisaTtd(u: SessionUser, p: any, akun: AkunNama[]): string[] {
 // Sign (SETUJU) or refuse (TOLAK, with alasan) the next box (Dibuat oleh, Diketahui, Disetujui 1, Disetujui 2 in this
 // order; see permintaanBisaTtd). One account signs one box of a request (a Super User may sign any). The fourth signature makes it
 // DISETUJUI; a refusal sends it back to the klinik as a draft.
+// A signature (SETUJU) is saved only when it came through the "Periksa dulu" step (KonfirmasiTtd), which sends
+// konfirmasi: true - a page still running an older version would otherwise sign in one click (real case 2026-11-19).
+const ttdTanpaKonfirmasi = (req: express.Request, res: express.Response) => {
+  if (req.body?.aksi === "TOLAK" || req.body?.konfirmasi === true) return false;
+  res.status(409).json({ error: "Halaman ini masih versi lama. Muat ulang halaman (tekan F5), lalu setujui lagi; Anda akan diminta memeriksa dulu sebelum tanda tangan." });
+  return true;
+};
 app.post("/api/klinik-permintaan/:id/ttd", async (req, res) => {
   const u = req.user!;
+  if (ttdTanpaKonfirmasi(req, res)) return;
   const p = await queryOne<any>("SELECT * FROM klinik_permintaan WHERE id = @id", { id: Number(req.params.id) || 0 });
   if (!p) return res.status(404).json({ error: "Permintaan tidak ditemukan" });
   if (!checkKlinik(req, res, p.klinik)) return;
@@ -5769,6 +5777,7 @@ app.delete("/api/klinik-surat-barang/:id", async (req, res) => {
 // Sign (SETUJU) or refuse (TOLAK, with alasan; back to the klinik as a draft) the next box.
 app.post("/api/klinik-surat-barang/:id/ttd", async (req, res) => {
   const u = req.user!;
+  if (ttdTanpaKonfirmasi(req, res)) return;
   const s = await queryOne<any>("SELECT * FROM klinik_surat_barang WHERE id = @id", { id: Number(req.params.id) || 0 });
   if (!s) return res.status(404).json({ error: "Surat tidak ditemukan" });
   if (!checkKlinik(req, res, s.klinik)) return;
@@ -10284,6 +10293,7 @@ app.get("/api/berita-acara/menunggu", async (req, res) => {
 // BA is cancelled and its barang free for another). Not by the account that made it (a Super User may).
 app.put("/api/berita-acara/:id/persetujuan", async (req, res) => {
   const u = req.user!;
+  if (ttdTanpaKonfirmasi(req, res)) return;
   const ba = await queryOne<any>("SELECT * FROM berita_acara WHERE id = @id", { id: req.params.id });
   if (!ba) return res.status(404).json({ error: "Berita acara tidak ditemukan" });
   if (!baUnitSetuju(u).some((x) => x.modul === ba.modul && x.unit === ba.unit)) return res.status(403).json({ error: "Akun ini tidak punya hak Setujui Berita Acara Pemusnahan untuk unit ini" });

@@ -909,7 +909,7 @@ export function BaPeriksaModal({ jenis: j, ba, onClose, onDone }: { jenis: BaJen
     setBusy(true);
     setError("");
     try {
-      await api.baPersetujuan(ba.id, { aksi, alasan: alasan.trim() });
+      await api.baPersetujuan(ba.id, { aksi, alasan: alasan.trim(), konfirmasi: aksi === "SETUJU" && yakin });
       onDone();
     } catch (e) {
       setError(errorText(e, "Gagal menyimpan"));
