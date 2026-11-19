@@ -2573,7 +2573,7 @@ app.get("/api/alat-berat/pick", async (req, res) => {
   const data = await queryMany(
     `SELECT kode, jenis_unit, nama FROM alat_berat
      WHERE @search = '' OR kode ILIKE @like OR nama ILIKE @like OR jenis_unit ILIKE @like
-     ORDER BY kode LIMIT 100`,
+     ORDER BY kode LIMIT 2000`,
     { search, like: `%${search}%` }
   );
   res.json(data);
