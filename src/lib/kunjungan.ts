@@ -4,7 +4,10 @@ export const BULAN = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "J
 const HARI = ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"];
 export const JENIS_KUNJUNGAN = ["Rawat Jalan", "MCU", "Kontrol", "Rawat Inap"];
 export const STATUS_PASIEN = ["Pekerja", "Istri", "Anak", "Lainnya"];
-export const MAX_TERAPI = 8;
+// Terapi rows a kunjungan may have (was 8, the Daily Report sheet's columns; raised 2026-11-21 on request, a patient
+// can get more). Excel / Cetak keep 8 columns and add more only when a visit in the list has more.
+export const MAX_TERAPI = 20;
+export const KOLOM_TERAPI_SHEET = 8;
 
 const parts = (iso: string) => iso.split("-").map(Number) as [number, number, number];
 

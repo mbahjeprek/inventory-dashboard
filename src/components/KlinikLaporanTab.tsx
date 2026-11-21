@@ -15,7 +15,7 @@ import { SuratRujukanModal } from "./SuratRujukan";
 import { CocokkanObatModal } from "./CocokkanObatModal";
 import { KonsumsiObatPanel } from "./KonsumsiObatPanel";
 import { fetchAllRows, type ReportSection, type SectionReport, type TableReport } from "../lib/printTable";
-import { MAX_TERAPI, hariOf, kodeTglOf, periodeOf, tglSheet, yaTidak } from "../lib/kunjungan";
+import { KOLOM_TERAPI_SHEET, hariOf, kodeTglOf, periodeOf, tglSheet, yaTidak } from "../lib/kunjungan";
 import { tanggalWaktu } from "../lib/datetime";
 import { useRefreshTick } from "../hooks/useAutoRefresh";
 
@@ -260,7 +260,8 @@ export function KlinikLaporanTab({ klinik }: { klinik: string }) {
   // Excel / Cetak: the Daily Report sheet's columns, in its order, oldest visit first.
   const buildReport = async (): Promise<TableReport> => {
     const all = (await fetchAllRows((p, ps) => api.laporanKlinikKunjungan(listQuery(p, ps)))).reverse();
-    const terapiCols = Array.from({ length: MAX_TERAPI }, (_, i) => [{ label: `Terapi ${i + 1}` }, { label: `Qty ${i + 1}`, align: "right" as const }, { label: "Satuan" }]).flat();
+    const nTerapi = Math.max(KOLOM_TERAPI_SHEET, ...all.map((k) => k.obat.length));
+    const terapiCols = Array.from({ length: nTerapi }, (_, i) => [{ label: `Terapi ${i + 1}` }, { label: `Qty ${i + 1}`, align: "right" as const }, { label: "Satuan" }]).flat();
     return {
       title: `Laporan Harian Pasien Klinik - Estate ${klinik}`,
       subtitle: [`Periode: ${periodText}`, ...(flag ? [`Filter: ${FLAG_LABEL[flag]}`] : []), ...(search ? [`Cari: "${search}"`] : [])],
@@ -314,7 +315,7 @@ export function KlinikLaporanTab({ klinik }: { klinik: string }) {
         k.istirahat ? k.hari_istirahat : "",
         yaTidak(k.rujukan),
         k.provider,
-        ...Array.from({ length: MAX_TERAPI }, (_, i) => {
+        ...Array.from({ length: nTerapi }, (_, i) => {
           const o = k.obat[i];
           return o ? [o.nama_obat, o.qty, o.satuan] : ["", "", ""];
         }).flat(),

@@ -4401,7 +4401,7 @@ app.get("/api/klinik-laporan/kunjungan", async (req, res) => {
 });
 
 // Klinik > Laporan Harian: one patient visit, the same columns as the Daily Report sheet. No,
-// Periode, Kode tgl, Hari and Usia follow from the dates; the obat given (Terapi 1-8) are report only
+// Periode, Kode tgl, Hari and Usia follow from the dates; the obat given (Terapi 1-20) are report only
 // and do not move stock.
 const JENIS_KUNJUNGAN = ["Rawat Jalan", "MCU", "Kontrol", "Rawat Inap"];
 const STATUS_PASIEN = ["Pekerja", "Istri", "Anak", "Lainnya"];
@@ -4427,7 +4427,7 @@ function kunjunganPayload(b: any): { data?: Record<string, any>; obat?: { obat_k
   if (istirahat && (!Number.isInteger(hari_istirahat) || hari_istirahat < 1)) return { error: "Jumlah hari istirahat wajib diisi" };
   const rujukan = !!b.rujukan;
   const obatIn = Array.isArray(b.obat) ? b.obat : [];
-  if (obatIn.length > 8) return { error: "Terapi paling banyak 8" };
+  if (obatIn.length > 20) return { error: "Terapi paling banyak 20" };
   const obat = [];
   for (const o of obatIn) {
     const nama_obat = t(o?.nama_obat);
