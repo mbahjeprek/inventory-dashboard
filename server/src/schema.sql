@@ -1354,7 +1354,7 @@ CREATE INDEX IF NOT EXISTS idx_login_gagal ON login_gagal(ip, at);
 -- One waiting request per barang at a time.
 CREATE TABLE IF NOT EXISTS koreksi_pengajuan (
   id SERIAL PRIMARY KEY,
-  module TEXT NOT NULL CHECK (module IN ('GUDANG', 'KLINIK')),
+  module TEXT NOT NULL CHECK (module IN ('GUDANG', 'KLINIK', 'PUPUK')),
   estate TEXT NOT NULL,
   kode TEXT NOT NULL,
   nama TEXT NOT NULL DEFAULT '',
@@ -1373,6 +1373,9 @@ CREATE TABLE IF NOT EXISTS koreksi_pengajuan (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uq_koreksi_menunggu ON koreksi_pengajuan(module, estate, kode) WHERE status = 'MENUNGGU';
 CREATE INDEX IF NOT EXISTS idx_koreksi_status ON koreksi_pengajuan(status, estate);
+-- Koreksi Stok Pupuk (2026-11-25): a pupuk jenis is the kode, booked as a koreksi row on pupuk_log's running saldo.
+ALTER TABLE koreksi_pengajuan DROP CONSTRAINT IF EXISTS koreksi_pengajuan_module_check;
+ALTER TABLE koreksi_pengajuan ADD CONSTRAINT koreksi_pengajuan_module_check CHECK (module IN ('GUDANG', 'KLINIK', 'PUPUK'));
 
 -- Permintaan Barang Klinik (non-obat, e.g. a printer): the klinik's letter as its template (kop, Nomor typed by hand,
 -- Perihal, Kepada Yth, cc, Dari, keperluan, the barang table, Dimohon / Diperiksa / Disetujui Oleh).

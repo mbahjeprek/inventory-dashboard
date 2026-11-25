@@ -249,6 +249,7 @@ function requiredPerms(req: express.Request): Need {
   // Pengajuan Koreksi, booked only when someone with Setujui Koreksi Stok approves it (the route decides).
   if (is(/^\/(stock-correction|gudang-stock\/correction)$/)) return ["gudang.edit"];
   if (is(/^\/klinik-stock\/correction$/)) return ["klinik.edit"];
+  if (is(/^\/pupuk\/koreksi$/)) return ["pupuk.edit"];
   // Pengajuan Koreksi Stok: each route checks the estate, who asked and who may approve.
   if (is(/^\/koreksi-pengajuan(\/|$)/)) return null;
   // items = the master barang list, which is also Nilam's gudang stock.
@@ -420,6 +421,7 @@ async function stockLocations(req: express.Request): Promise<StockLocation[]> {
   if ((p === "/bbm" || p === "/bbm/batch") && m === "POST") return [...B(b.lokasi), ...kirimKe(B)];
   if (/^\/bbm\/\d+$/.test(p)) return B(await col("bbm_log", "lokasi"));
   if ((p === "/pupuk" || p === "/pupuk/batch") && m === "POST") return [...P(b.estate), ...kirimKe(P)];
+  if (p === "/pupuk/koreksi" && m === "POST") return P(b.estate);
   if (/^\/pupuk\/\d+$/.test(p)) return P(await col("pupuk_log", "estate"));
   if ((p === "/oli" || p === "/oli/batch") && m === "POST") return [...O(b.estate), ...kirimKe(O)];
   // Pinjaman: both the lending and the borrowing estate's stock move.
@@ -3922,6 +3924,33 @@ app.post("/api/pupuk", async (req, res) => {
   res.json({ success: true, id: row!.id, saldo_stock: saldoBaru });
 });
 
+// Koreksi Stok Pupuk: the counted stock of one jenis. A Super User books it at once (a koreksi row today); an
+// account with Edit Pupuk sends a Pengajuan Koreksi, booked when someone with Setujui Koreksi Stok approves it.
+app.post("/api/pupuk/koreksi", async (req, res) => {
+  const { estate, jenis_pupuk, actual_qty, note } = req.body ?? {};
+  if (!checkPupukEstate(req, res, estate)) return;
+  const jenis = String(jenis_pupuk ?? "").trim().toUpperCase();
+  const actual = round3(Number(actual_qty));
+  if (!jenis || !(await pupukJenisOk(estate, jenis))) return res.status(400).json({ error: `Jenis pupuk ${jenis} tidak ada di Master Data Pupuk` });
+  if (actual_qty === "" || actual_qty === null || !Number.isFinite(actual) || actual < 0) return res.status(400).json({ error: "Stok aktual tidak boleh kosong / minus" });
+  const alasan = String(note ?? "").trim();
+  if (!alasan) return res.status(400).json({ error: "Isi alasan koreksinya" });
+  const cur = round3(Number((await latestSaldoRow("PUPUK", estate, jenis))?.saldo_stock ?? 0));
+  if (req.user!.role !== "superuser")
+    return ajukanKoreksi(req, res, { module: "PUPUK", estate, kode: jenis, nama: jenis, satuan: "KG", sebelum: [{ exp: "", qty: cur }], sesudah: [{ exp: "", qty: actual }], alasan });
+  if (actual === cur) return res.status(400).json({ error: "Tidak ada selisih stok" });
+  const before = Number(await withTransaction((client) => bookSaldoKoreksi(client, "PUPUK", estate, jenis, jakartaToday(), actual, `Koreksi Stok: ${alasan}`)));
+  const delta = round3(actual - before);
+  await logActivity(req, {
+    module: "PUPUK",
+    estate,
+    aksi: "Koreksi Stok",
+    objek: jenis,
+    detail: `Stock: ${before} → ${actual} KG (selisih ${delta > 0 ? "+" : ""}${delta}); Catatan: ${alasan}`,
+  });
+  res.json({ success: true, delta });
+});
+
 app.put("/api/pupuk/:id", requireSuperuser, async (req, res) => {
   const existing = await queryOne<any>("SELECT * FROM pupuk_log WHERE id = @id", { id: req.params.id });
   if (!existing) return res.status(404).json({ error: "Not found" });
@@ -7107,8 +7136,17 @@ async function applyOpnameLine(client: PoolClient, req: express.Request, o: Opna
 
   // BBM / pupuk / oli: a saldo row dated the opname day, or after the latest row so it becomes the saldo.
   if (!isSaldoModule(o.module)) throw new Error(`Modul ${o.module} tidak punya saldo berjalan`);
-  const t = SALDO_LEDGER[o.module];
-  const before = (await latestSaldoRow(o.module, o.estate, line.kode, client))?.saldo_stock ?? 0;
+  return bookSaldoKoreksi(client, o.module, o.estate, line.kode, o.tanggal, actual, note);
+}
+
+// Sets the saldo of a BBM / pupuk / oli ledger to `actual` with a koreksi row dated `tanggal` (or the latest row's
+// date when one is later, so it becomes the saldo), then rechains. Returns the saldo before. Used by an approved
+// stok opname and by Koreksi Stok (Pupuk).
+async function bookSaldoKoreksi(client: PoolClient, module: SaldoModule, estate: string, jenis: string, tanggal: string, actual: number, note: string) {
+  const t = SALDO_LEDGER[module];
+  const o = { module, estate, tanggal };
+  const line = { kode: jenis };
+  const before = (await latestSaldoRow(module, estate, jenis, client))?.saldo_stock ?? 0;
   const delta = round3(actual - before);
   if (delta === 0) return before;
   const lastIso =
@@ -7143,7 +7181,7 @@ async function applyOpnameLine(client: PoolClient, req: express.Request, o: Opna
       client
     );
   }
-  await rechainSaldo(o.module, o.estate, line.kode, iso, client);
+  await rechainSaldo(module, estate, jenis, iso, client);
   return before;
 }
 
@@ -10000,8 +10038,8 @@ app.put("/api/berita-acara/:id/selesai", async (req, res) => {
 // A Koreksi Stok from an account that isn't a Super User is only a request: the stock moves when someone else with
 // Setujui Koreksi Stok (in that estate) or a Super User approves it; then the difference sesudah - sebelum is booked.
 type KoreksiBaris = { exp: string; qty: number };
-type KoreksiModul = "GUDANG" | "KLINIK";
-const koreksiLog = (m: KoreksiModul): LogModule => (m === "KLINIK" ? "KLINIK" : "BARANG");
+type KoreksiModul = "GUDANG" | "KLINIK" | "PUPUK";
+const koreksiLog = (m: KoreksiModul): LogModule => (m === "KLINIK" ? "KLINIK" : m === "PUPUK" ? "PUPUK" : "BARANG");
 const koreksiTeks = (m: KoreksiModul, rows: KoreksiBaris[]) =>
   m === "KLINIK"
     ? rows
@@ -10060,6 +10098,14 @@ async function terapkanKoreksi(client: PoolClient, req: express.Request, k: any)
     return;
   }
   const delta = round3((sesudah.get("") ?? 0) - (sebelum.get("") ?? 0));
+  // Pupuk: a koreksi row today on the running saldo (the difference, so pupuk booked since the request stays counted).
+  if (k.module === "PUPUK") {
+    const cur = round3(Number((await latestSaldoRow("PUPUK", k.estate, k.kode, client))?.saldo_stock ?? 0));
+    const target = round3(cur + delta);
+    if (target < 0) throw new StockError(`Stok sekarang ${cur}; selisih ${delta} membuatnya minus. Tolak lalu minta diajukan ulang.`);
+    await bookSaldoKoreksi(client, "PUPUK", k.estate, k.kode, jakartaToday(), target, note);
+    return;
+  }
   if (k.estate === "NILAM") {
     const item = await queryOne<{ id: number; stock_tersedia: number }>("SELECT id, stock_tersedia FROM items WHERE kode = @kode FOR UPDATE", { kode: k.kode }, client);
     if (!item) throw new StockError("Barang tidak ditemukan di master data");

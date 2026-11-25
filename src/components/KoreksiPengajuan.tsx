@@ -49,7 +49,7 @@ export function KoreksiPengajuanList({
   reload = 0,
   onChanged,
 }: {
-  module?: "GUDANG" | "KLINIK";
+  module?: "GUDANG" | "KLINIK" | "PUPUK";
   estate?: string;
   sembunyiKosong?: boolean;
   reload?: number;
@@ -152,7 +152,7 @@ export function KoreksiPengajuanList({
                   <td className="px-3 py-2">
                     <div className="font-medium">{k.nama}</div>
                     <div className="text-[11px] text-[var(--text-muted)]">
-                      {k.kode} · {k.module === "KLINIK" ? "Klinik" : "Gudang"} {k.estate}
+                      {k.module === "PUPUK" ? "Pupuk" : `${k.kode} · ${k.module === "KLINIK" ? "Klinik" : "Gudang"}`} {k.estate}
                     </div>
                   </td>
                   <td className="px-3 py-2">
@@ -197,7 +197,7 @@ export function KoreksiPengajuanList({
               <div>
                 <h3 className="font-semibold text-sm text-[var(--text-primary)]">{periksa.setuju ? "Setujui Koreksi Stok" : "Tolak Koreksi Stok"}</h3>
                 <p className="text-xs text-[var(--text-secondary)]">
-                  {periksa.k.kode} · {periksa.k.nama} · {periksa.k.module === "KLINIK" ? "Klinik" : "Gudang"} {periksa.k.estate}
+                  {periksa.k.module === "PUPUK" ? `${periksa.k.nama} · Pupuk` : `${periksa.k.kode} · ${periksa.k.nama} · ${periksa.k.module === "KLINIK" ? "Klinik" : "Gudang"}`} {periksa.k.estate}
                 </p>
               </div>
               <button onClick={() => setPeriksa(null)} className="text-[var(--text-muted)] hover:text-[var(--text-primary)]">

@@ -1264,7 +1264,7 @@ async function req<T>(url: string, opts?: RequestInit): Promise<T> {
 // the stock per expiry date (exp '' for a gudang barang).
 export type KoreksiPengajuan = {
   id: number;
-  module: "GUDANG" | "KLINIK";
+  module: "GUDANG" | "KLINIK" | "PUPUK";
   estate: string;
   kode: string;
   nama: string;
@@ -1588,6 +1588,9 @@ export const api = {
 
   pupukOptions: (estate: string) => req<{ jenis: string[]; divisi: string[] }>(`/api/pupuk/options?estate=${estate}`),
 
+  // Koreksi Stok Pupuk: booked at once by a Super User, otherwise sent as a Pengajuan Koreksi (pending: true).
+  pupukKoreksi: (payload: { estate: string; jenis_pupuk: string; actual_qty: number; note: string }) =>
+    req<{ success: boolean; delta?: number; pending?: boolean }>("/api/pupuk/koreksi", { method: "POST", body: JSON.stringify(payload) }),
   createPupuk: (payload: {
     // Foto bukti (uploadEvidence) - required by the server.
     evidence_id: string;
@@ -1947,7 +1950,7 @@ export const api = {
     req<{ input: string[]; approve: string[]; ba: string[]; pengganti: string[] }>(`/api/petugas?${new URLSearchParams({ modul, unit })}`),
   persetujuanJumlah: () => req<{ permintaan: number; ba: number; kop?: number; koreksi?: number; ba_ttd?: number; barang?: number; total: number }>("/api/persetujuan/jumlah"),
   // Pengajuan Koreksi Stok (Gudang / Klinik) of the account's estates; status MENUNGGU (default) or SEMUA.
-  koreksiList: (params: { status?: "MENUNGGU" | "SEMUA"; module?: "GUDANG" | "KLINIK"; estate?: string } = {}) =>
+  koreksiList: (params: { status?: "MENUNGGU" | "SEMUA"; module?: "GUDANG" | "KLINIK" | "PUPUK"; estate?: string } = {}) =>
     req<{ data: KoreksiPengajuan[] }>(`/api/koreksi-pengajuan?${new URLSearchParams(params as Record<string, string>)}`),
   koreksiPeriksa: (id: number, body: { setuju: boolean; catatan?: string }) =>
     req<{ success: boolean }>(`/api/koreksi-pengajuan/${id}/periksa`, { method: "PUT", body: JSON.stringify(body) }),

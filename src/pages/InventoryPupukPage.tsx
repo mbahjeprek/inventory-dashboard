@@ -20,6 +20,7 @@ import { tanggalWaktu } from "../lib/datetime";
 import { PupukBatchModal } from "../components/SaldoBatchModal";
 import { loanLink, loanTag } from "../lib/opname";
 import { useAutoRefresh } from "../hooks/useAutoRefresh";
+import { KoreksiPengajuanList } from "../components/KoreksiPengajuan";
 
 const localIso = (d: Date) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -56,7 +57,9 @@ export function InventoryPupukPage({ estate }: { estate: string }) {
   const showActions = canEdit || canDelete;
   // "Transaksi" opens the Stok Masuk / Keluar / Koreksi form: shown when any of those is allowed.
   const canInput = can(user, "pupuk.input");
-  const canTx = canInput || user?.role === "superuser";
+  // Koreksi Stok with Edit Pupuk (sent for approval unless a Super User) opens the same form.
+  const canTx = canInput || can(user, "pupuk.edit") || user?.role === "superuser";
+  const [koreksiKey, setKoreksiKey] = useState(0);
   const [editing, setEditing] = useState<PupukRecord | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<PupukRecord | null>(null);
   const pageSize = 25;
@@ -119,6 +122,7 @@ export function InventoryPupukPage({ estate }: { estate: string }) {
   const refresh = () => {
     loadSummary();
     load();
+    setKoreksiKey((k) => k + 1);
   };
 
   const totalPages = Math.max(Math.ceil(total / pageSize), 1);
@@ -209,6 +213,8 @@ export function InventoryPupukPage({ estate }: { estate: string }) {
           </button>)}
         </div>
       </div>
+
+      <KoreksiPengajuanList module="PUPUK" estate={estate} sembunyiKosong reload={koreksiKey} onChanged={() => (loadSummary(), load())} />
 
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
         {cardJenis.map((j) => {

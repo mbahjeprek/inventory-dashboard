@@ -1,9 +1,12 @@
 import { useState } from "react";
-import { X } from "lucide-react";
+import { ClipboardCheck, X } from "lucide-react";
 import { api, errorText, type PupukSummary } from "../lib/api";
 import { EvidenceInput, useEvidenceEnabled } from "./EvidenceInput";
 import { KirimTujuan, TransferShortcut } from "./TransferShortcut";
 import { PEMASOK, kirimKe } from "../lib/kirim";
+import { useAuth } from "../context/AuthContext";
+import { can } from "../lib/access";
+import { KoreksiDiajukan } from "./KoreksiPengajuan";
 
 const todayIso = () => {
   const d = new Date();
@@ -31,8 +34,16 @@ export function PupukTransactionModal({
   onClose: () => void;
   onSuccess: () => void;
 }) {
+  const { user } = useAuth();
+  // Stock In / Out need Input Pupuk. Koreksi (the counted stock): a Super User books it at once; an account with
+  // Edit Pupuk sends it for approval (Setujui Koreksi Stok).
+  const canInput = can(user, "pupuk.input");
+  const canKoreksi = can(user, "pupuk.edit");
+  const koreksiDiajukan = user?.role !== "superuser";
+  const [diajukan, setDiajukan] = useState(false);
   const [jenis, setJenis] = useState(jenisOptions[0] ?? "");
-  const [tipe, setTipe] = useState<"MASUK" | "KELUAR">("KELUAR");
+  const [tipe, setTipe] = useState<"MASUK" | "KELUAR" | "KOREKSI">(canInput ? "KELUAR" : "KOREKSI");
+  const [aktual, setAktual] = useState("");
   const [tanggal, setTanggal] = useState(todayIso());
   const [jumlah, setJumlah] = useState(0);
   const [divisi, setDivisi] = useState("");
@@ -48,10 +59,29 @@ export function PupukTransactionModal({
   const [error, setError] = useState("");
 
   const stokSaatIni = summary?.saldoTerakhir.find((s) => s.jenis_pupuk === jenis)?.saldo_stock ?? 0;
-  const stokSetelah = tipe === "MASUK" ? stokSaatIni + jumlah : stokSaatIni - jumlah;
+  const koreksi = tipe === "KOREKSI";
+  const aktualQty = Math.round((parseFloat(aktual) || 0) * 1000) / 1000;
+  const stokSetelah = koreksi ? (aktual === "" ? stokSaatIni : aktualQty) : tipe === "MASUK" ? stokSaatIni + jumlah : stokSaatIni - jumlah;
+  const selisih = Math.round((stokSetelah - stokSaatIni) * 1000) / 1000;
 
   const submit = async () => {
     setError("");
+    if (koreksi) {
+      if (aktual === "" || aktualQty < 0) return setError("Isi stok aktual (hasil hitung), tidak boleh minus");
+      if (selisih === 0) return setError("Stok aktual sama dengan stok sekarang, tidak ada yang dikoreksi");
+      if (!keterangan.trim()) return setError("Wajib diisi: Alasan koreksi");
+      setSubmitting(true);
+      try {
+        const r = await api.pupukKoreksi({ estate, jenis_pupuk: jenis, actual_qty: aktualQty, note: keterangan.trim() });
+        if (r.pending) setDiajukan(true);
+        else onSuccess();
+      } catch (e) {
+        setError(errorText(e, "Gagal menyimpan koreksi stok"));
+      } finally {
+        setSubmitting(false);
+      }
+      return;
+    }
     if (jumlah <= 0) return setError("Jumlah harus lebih dari 0");
     // Every field shown is required. Pupuk masuk only needs the keterangan; divisi, blok, HA and
     // pokok describe where it was applied.
@@ -98,6 +128,8 @@ export function PupukTransactionModal({
 
   const fmt = (n: number) => n.toLocaleString("id-ID", { maximumFractionDigits: 2 });
 
+  if (diajukan) return <KoreksiDiajukan onClose={onSuccess} />;
+
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-lg w-full max-w-md shadow-xl max-h-[calc(100vh-2rem)] flex flex-col">
@@ -117,10 +149,10 @@ export function PupukTransactionModal({
             <div className={`text-base font-semibold ${stokSaatIni < 0 ? "text-[var(--accent-red)]" : "text-[var(--text-primary)]"}`}>{fmt(stokSaatIni)} KG</div>
           </div>
           <div className="text-right">
-            <div className="text-xs text-[var(--text-secondary)]">Setelah Transaksi</div>
+            <div className="text-xs text-[var(--text-secondary)]">{koreksi ? "Setelah Koreksi" : "Setelah Transaksi"}</div>
             <div className={`text-base font-semibold ${stokSetelah < 0 ? "text-[var(--accent-red)]" : "text-[var(--text-primary)]"}`}>{fmt(stokSetelah)} KG</div>
           </div>
-          {stokSetelah < 0 && (
+          {!koreksi && stokSetelah < 0 && (
             <p className="col-span-2 text-[11px] text-[var(--accent-red)]">Stok akan minus - pastikan pupuk masuk sudah diinput.</p>
           )}
         </div>
@@ -143,7 +175,8 @@ export function PupukTransactionModal({
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-2">
+          <div className={`grid ${canInput && canKoreksi ? "grid-cols-3" : canInput ? "grid-cols-2" : "grid-cols-1"} gap-2`}>
+            {canInput && (
             <button
               onClick={() => setTipe("MASUK")}
               className={`py-1.5 rounded-md text-xs font-medium border ${
@@ -154,6 +187,8 @@ export function PupukTransactionModal({
             >
               Stock In
             </button>
+            )}
+            {canInput && (
             <button
               onClick={() => setTipe("KELUAR")}
               className={`py-1.5 rounded-md text-xs font-medium border ${
@@ -164,6 +199,19 @@ export function PupukTransactionModal({
             >
               Stock Out
             </button>
+            )}
+            {canKoreksi && (
+              <button
+                onClick={() => setTipe("KOREKSI")}
+                className={`py-1.5 rounded-md text-xs font-medium border flex items-center justify-center gap-1 ${
+                  koreksi
+                    ? "bg-[var(--accent-amber-bg)] text-[var(--accent-amber)] border-[var(--accent-amber-border)]"
+                    : "border-[var(--border)] text-[var(--text-secondary)]"
+                }`}
+              >
+                <ClipboardCheck size={13} /> Koreksi
+              </button>
+            )}
           </div>
 
           {tipe === "KELUAR" &&
@@ -173,6 +221,15 @@ export function PupukTransactionModal({
               <TransferShortcut module="PUPUK" dari={estate} kode={jenis} qty={jumlah} note={keterangan} onDone={onSuccess} />
             ))}
 
+          {koreksi ? (
+            <div>
+              <label className={labelCls}>Stok Aktual / Hasil Hitung (KG)</label>
+              <input type="number" min={0} step="any" value={aktual} onChange={(e) => setAktual(e.target.value)} placeholder={fmt(stokSaatIni)} className={inputCls} />
+              <p className={`text-xs mt-1.5 font-medium ${selisih === 0 ? "text-[var(--text-muted)]" : selisih > 0 ? "text-[var(--accent-green)]" : "text-[var(--accent-red)]"}`}>
+                {selisih === 0 ? "Sesuai, tidak ada selisih" : selisih > 0 ? `Selisih: +${fmt(selisih)} KG (stok bertambah)` : `Selisih: ${fmt(selisih)} KG (stok berkurang)`}
+              </p>
+            </div>
+          ) : (
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className={labelCls}>Tanggal</label>
@@ -183,6 +240,7 @@ export function PupukTransactionModal({
               <input type="number" min={0} value={jumlah || ""} onChange={(e) => setJumlah(Number(e.target.value) || 0)} className={inputCls} />
             </div>
           </div>
+          )}
 
           {tipe === "KELUAR" && !ke && (
             <>
@@ -218,16 +276,23 @@ export function PupukTransactionModal({
           )}
 
           <div>
-            <label className={labelCls}>Keterangan</label>
+            <label className={labelCls}>{koreksi ? "Alasan Koreksi" : "Keterangan"}</label>
             <input
               value={keterangan}
               onChange={(e) => setKeterangan(e.target.value)}
-              placeholder={tipe === "MASUK" ? "PUPUK MASUK" : "cth. PEMUPUKAN BLOK U23 ( DOSIS 1 KG )"}
+              placeholder={koreksi ? "cth. Hasil stock opname gudang pupuk" : tipe === "MASUK" ? "PUPUK MASUK" : "cth. PEMUPUKAN BLOK U23 ( DOSIS 1 KG )"}
               className={inputCls}
             />
           </div>
 
-          <EvidenceInput value={evidenceId} onChange={setEvidenceId} />
+          {!koreksi && <EvidenceInput value={evidenceId} onChange={setEvidenceId} />}
+          {koreksi && (
+            <p className="text-[11px] text-[var(--accent-amber)]">
+              {koreksiDiajukan
+                ? "Koreksi diajukan dulu: stok baru berubah setelah disetujui orang yang punya hak Setujui Koreksi Stok (mis. HR / akunting)."
+                : "Stok langsung diubah ke angka ini (dicatat hari ini sebagai Koreksi Stok)."}
+            </p>
+          )}
 
           {error && <p className="text-xs text-[var(--accent-red)]">{error}</p>}
 
@@ -236,7 +301,7 @@ export function PupukTransactionModal({
             disabled={submitting}
             className="w-full py-2 rounded-md text-sm font-medium bg-[var(--accent-blue)] text-white hover:opacity-90 disabled:opacity-50"
           >
-            {submitting ? "Menyimpan..." : "Simpan Transaksi"}
+            {submitting ? "Menyimpan..." : koreksi ? (koreksiDiajukan ? "Ajukan Koreksi Stok" : "Simpan Koreksi Stok") : "Simpan Transaksi"}
           </button>
         </div>
       </div>
