@@ -4,7 +4,8 @@ import { useEffect } from "react";
 // down as well as sideways, like grabbing the table. Mounted once in the layout and delegated from
 // the document, so a table that renders later (or in a dialog) works too. Drags that start on a
 // button/input/link are ignored so row actions keep working, and a click right after a real drag is
-// swallowed so letting go doesn't trigger whatever is under it.
+// swallowed so letting go doesn't trigger whatever is under it. A press on text selects it instead (text cursor),
+// so a name / No PO / number can be copied; the hand shows (and drags) on the empty space between.
 export function useTableDragScroll() {
   useEffect(() => {
     let el: HTMLElement | null = null;
@@ -17,16 +18,35 @@ export function useTableDragScroll() {
     const box = (t: EventTarget | null) => (t instanceof Element ? (t.closest(".table-scroll") as HTMLElement | null) : null);
     const scrollable = (b: HTMLElement) => b.scrollWidth > b.clientWidth || b.scrollHeight > b.clientHeight;
 
-    // The grab cursor shows only on a box that can actually scroll.
-    const onOver = (e: MouseEvent) => {
-      const b = box(e.target);
-      if (b && !el) b.style.cursor = scrollable(b) ? "grab" : "";
+    // Is the pointer on the glyphs of a text (not the cell's padding / empty space)?
+    const onText = (x: number, y: number) => {
+      const d = document as Document & {
+        caretRangeFromPoint?: (x: number, y: number) => Range | null;
+        caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node } | null;
+      };
+      const node = d.caretRangeFromPoint ? d.caretRangeFromPoint(x, y)?.startContainer : d.caretPositionFromPoint?.(x, y)?.offsetNode;
+      if (!node || node.nodeType !== Node.TEXT_NODE || !node.textContent?.trim()) return false;
+      const r = document.createRange();
+      r.selectNodeContents(node);
+      return Array.from(r.getClientRects()).some((c) => x >= c.left && x <= c.right && y >= c.top && y <= c.bottom);
     };
+
+    // The grab cursor shows only on a box that can actually scroll, and not over text (that selects).
+    let hover: HTMLElement | null = null;
+    const cursorAt = (e: MouseEvent) => {
+      const b = box(e.target);
+      if (hover && hover !== b) hover.style.cursor = "";
+      hover = b;
+      if (!b || el) return;
+      b.style.cursor = !scrollable(b) ? "" : onText(e.clientX, e.clientY) ? "text" : "grab";
+    };
+    const onOver = cursorAt;
 
     const onDown = (e: MouseEvent) => {
       const b = box(e.target);
       if (!b || e.button !== 0 || !scrollable(b)) return;
       if ((e.target as HTMLElement).closest("button, a, input, select, textarea, label")) return;
+      if (onText(e.clientX, e.clientY)) return;
       el = b;
       dragged = false;
       startX = e.clientX;
@@ -36,7 +56,7 @@ export function useTableDragScroll() {
     };
 
     const onMove = (e: MouseEvent) => {
-      if (!el) return;
+      if (!el) return cursorAt(e);
       const dx = e.clientX - startX;
       const dy = e.clientY - startY;
       if (!dragged && Math.abs(dx) < 5 && Math.abs(dy) < 5) return;
@@ -53,7 +73,7 @@ export function useTableDragScroll() {
     const onUp = () => {
       if (!el) return;
       el.style.userSelect = "";
-      el.style.cursor = scrollable(el) ? "grab" : "";
+      el.style.cursor = "";
       el = null;
     };
 
