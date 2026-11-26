@@ -363,8 +363,10 @@ function TxTable({
     return () => clearTimeout(t);
   }, [filter]);
   const adaFilter = Object.values(filter).some((v) => v.trim()) || semuaBulan || !!sortTx.key;
-  // A date range or "Semua bulan" looks past the chosen periode.
-  const periodeEff = semuaBulan || fq.dari || fq.sampai ? "" : periode;
+  // Searching (the search box or a column filter), a date range or "Semua bulan" looks through every month: typing
+  // "susu" finds every susu from the start until today, not only the chosen periode's.
+  const mencari = !!q || Object.values(fq).some((v) => v.trim());
+  const periodeEff = semuaBulan || mencari ? "" : periode;
   // Rusak / Koreksi: rows of an earlier month still waiting for their pemeriksaan are listed too.
   const params = useMemo(
     () => ({
@@ -510,8 +512,8 @@ function TxTable({
         )}
         {periode && (
           <label className="inline-flex items-center gap-1.5 text-xs text-[var(--text-secondary)] cursor-pointer select-none" title="Tampilkan semua bulan, bukan hanya periode yang dipilih">
-            <input type="checkbox" checked={semuaBulan} onChange={(e) => setSemuaBulan(e.target.checked)} />
-            Semua bulan
+            <input type="checkbox" checked={semuaBulan || mencari} disabled={mencari} onChange={(e) => setSemuaBulan(e.target.checked)} />
+            {mencari && !fq.dari && !fq.sampai ? "Semua bulan (dari awal s/d hari ini)" : "Semua bulan"}
           </label>
         )}
         {adaFilter && (
