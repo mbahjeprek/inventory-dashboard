@@ -11277,7 +11277,15 @@ app.get("/api/koperasi/limit/:kode", async (req, res) => {
 // ---- Transaksi ----
 app.get("/api/koperasi/tx", async (req, res) => {
   const { jenis = "JUAL", periode = "", anggota = "", barang = "", status = "", search = "", menunggu = "", page = "1", pageSize = "100" } = req.query as Record<string, string>;
+  // Column filters of the table (header row) and its sort.
+  const { f_po = "", f_barang = "", f_anggota = "", f_ket = "", dari = "", sampai = "", sort = "", dir = "" } = req.query as Record<string, string>;
   const conditions = ["t.koperasi = @k"];
+  if (f_po) conditions.push("t.no_po ILIKE @f_po");
+  if (f_barang) conditions.push("(b.nama ILIKE @f_barang OR t.barang_kode ILIKE @f_barang)");
+  if (f_anggota) conditions.push("(t.anggota_kode ILIKE @f_anggota OR a.nama ILIKE @f_anggota OR k.nama ILIKE @f_anggota)");
+  if (f_ket) conditions.push("t.keterangan ILIKE @f_ket");
+  if (ISO_DATE.test(dari)) conditions.push("t.tanggal_iso >= @dari");
+  if (ISO_DATE.test(sampai)) conditions.push("t.tanggal_iso <= @sampai");
   if (["JUAL", "BELI", "RUSAK", "KOREKSI"].includes(jenis)) conditions.push("t.jenis = @jenis");
   // menunggu=1: also rows of an earlier periode still waiting for their pemeriksaan, so they aren't lost
   // once the month turns.
@@ -11289,7 +11297,20 @@ app.get("/api/koperasi/tx", async (req, res) => {
   const where = `WHERE ${conditions.join(" AND ")}`;
   const from = `FROM koperasi_tx t JOIN koperasi_barang b ON b.kode = t.barang_kode
     LEFT JOIN koperasi_anggota a ON a.kode = t.anggota_kode LEFT JOIN karyawan k ON UPPER(REPLACE(k.nik, ' ', '')) = a.kode`;
-  const params = { k: KOPERASI, jenis, periode, anggota, barang, status, like: `%${search}%` };
+  const like = (v: string) => `%${v.trim()}%`;
+  const params = { k: KOPERASI, jenis, periode, anggota, barang, status, like: `%${search}%`, f_po: like(f_po), f_barang: like(f_barang), f_anggota: like(f_anggota), f_ket: like(f_ket), dari, sampai };
+  const SORT_COL: Record<string, string> = {
+    tanggal: "t.tanggal_iso",
+    no_po: "t.no_po",
+    barang: "b.nama",
+    anggota: "COALESCE(NULLIF(k.nama, ''), a.nama)",
+    qty: "t.qty",
+    harga: "t.harga",
+    total: "t.total",
+    keterangan: "t.keterangan",
+  };
+  const arah = dir === "asc" ? "ASC" : "DESC";
+  const orderBy = SORT_COL[sort] && sort !== "tanggal" ? `${SORT_COL[sort]} ${arah} NULLS LAST, t.tanggal_iso DESC, t.id DESC` : `t.tanggal_iso ${sort === "tanggal" ? arah : "DESC"}, t.id ${sort === "tanggal" ? arah : "DESC"}`;
   const sum = await queryOne<{ n: number; total: number; qty: number }>(`SELECT COUNT(*)::int n, COALESCE(SUM(t.total), 0)::float8 total, COALESCE(SUM(t.qty), 0)::float8 qty ${from} ${where}`, params);
   const limit = Math.min(parseInt(pageSize) || 100, 500);
   const offset = (Math.max(parseInt(page) || 1, 1) - 1) * limit;
@@ -11299,7 +11320,7 @@ app.get("/api/koperasi/tx", async (req, res) => {
             COALESCE(u.nama, u.username, '') AS oleh, t.user_id, t.opname_id, t.alasan, t.status, t.diperiksa_at, t.diperiksa_catatan,
             COALESCE(p.nama, p.username) AS diperiksa_nama
        ${from} LEFT JOIN users u ON u.id = t.user_id LEFT JOIN users p ON p.id = t.diperiksa_oleh ${where}
-      ORDER BY t.tanggal_iso DESC, t.id DESC LIMIT @limit OFFSET @offset`,
+      ORDER BY ${orderBy} LIMIT @limit OFFSET @offset`,
     { ...params, limit, offset }
   );
   res.json({ data, total: sum!.n, sum_total: sum!.total, sum_qty: sum!.qty });

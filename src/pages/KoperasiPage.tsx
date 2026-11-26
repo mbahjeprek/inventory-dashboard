@@ -97,6 +97,10 @@ function sortBy<T>(rows: T[], sort: Sort, get: Record<string, (r: T) => SortVal>
     return (typeof x === "number" && typeof y === "number" ? x - y : String(x).localeCompare(String(y), "id", { numeric: true })) * m;
   });
 }
+// Koperasi transaction table: header label -> sort key (server side), and the columns with a text filter.
+const TX_COL_KEY: Record<string, string> = { Tanggal: "tanggal", "No PO": "no_po", Barang: "barang", Anggota: "anggota", Jumlah: "qty", Harga: "harga", Total: "total", Nilai: "total", Keterangan: "keterangan" };
+const TX_TEXT_FILTER = ["no_po", "barang", "anggota", "keterangan"];
+const TX_COL_LABEL: Record<string, string> = { no_po: "No PO", barang: "Barang", anggota: "Anggota", keterangan: "Keterangan" };
 function SortTh({
   label,
   k,
@@ -348,10 +352,39 @@ function TxTable({
   );
   const [error, setError] = useState("");
   const pageSize = 100;
+  // Header filters (typed per column, applied after a pause), the date range, "Semua bulan" and the column sort.
+  const [filter, setFilter] = useState<Record<string, string>>({});
+  const [fq, setFq] = useState<Record<string, string>>({});
+  const [semuaBulan, setSemuaBulan] = useState(false);
+  const [sortTx, setSortTx] = useState<Sort>({ key: "", dir: "desc" });
+  const setF = (k: string, v: string) => setFilter((f) => ({ ...f, [k]: v }));
+  useEffect(() => {
+    const t = setTimeout(() => setFq(filter), 350);
+    return () => clearTimeout(t);
+  }, [filter]);
+  const adaFilter = Object.values(filter).some((v) => v.trim()) || semuaBulan || !!sortTx.key;
+  // A date range or "Semua bulan" looks past the chosen periode.
+  const periodeEff = semuaBulan || fq.dari || fq.sampai ? "" : periode;
   // Rusak / Koreksi: rows of an earlier month still waiting for their pemeriksaan are listed too.
   const params = useMemo(
-    () => ({ jenis, periode, anggota: anggota ?? "", barang: barang ?? "", search: q, status, menunggu: jenis === "RUSAK" || jenis === "KOREKSI" ? "1" : "" }),
-    [jenis, periode, anggota, barang, q, status]
+    () => ({
+      jenis,
+      periode: periodeEff,
+      anggota: anggota ?? "",
+      barang: barang ?? "",
+      search: q,
+      status,
+      menunggu: jenis === "RUSAK" || jenis === "KOREKSI" ? "1" : "",
+      f_po: fq.no_po ?? "",
+      f_barang: fq.barang ?? "",
+      f_anggota: fq.anggota ?? "",
+      f_ket: fq.keterangan ?? "",
+      dari: fq.dari ?? "",
+      sampai: fq.sampai ?? "",
+      sort: sortTx.key,
+      dir: sortTx.dir,
+    }),
+    [jenis, periodeEff, anggota, barang, q, status, fq, sortTx]
   );
   useEffect(() => {
     const t = setTimeout(() => setQ(search.trim()), 300);
@@ -433,7 +466,13 @@ function TxTable({
     for (let p = 2; rows.length < all.total && p <= 40; p++) rows = rows.concat((await api.kopTx({ ...params, page: p, pageSize: 500 })).data);
     return {
       title: `Koperasi PT.AKSS - ${jual ? "Stock Out" : beli ? "Stock In" : koreksi ? "Koreksi Stok" : rusak ? "Barang Rusak" : "Riwayat"}`,
-      subtitle: [periode ? `Periode ${periodeLabel(periode)}` : "Semua periode", ...(q ? [`Cari: ${q}`] : [])],
+      subtitle: [
+        fq.dari || fq.sampai ? `Tanggal ${fq.dari ? fq.dari.split("-").reverse().join("/") : "awal"} s/d ${fq.sampai ? fq.sampai.split("-").reverse().join("/") : "sekarang"}` : periodeEff ? `Periode ${periodeLabel(periodeEff)}` : "Semua periode",
+        ...(q ? [`Cari: ${q}`] : []),
+        ...Object.entries(fq)
+          .filter(([k, v]) => v.trim() && k !== "dari" && k !== "sampai")
+          .map(([k, v]) => `${TX_COL_LABEL[k] ?? k}: ${v}`),
+      ],
       landscape: true,
       columns: cols.map((c) => ({ label: ["Harga", "Total", "Nilai"].includes(c) ? `${c} (Rp)` : c, align: ["Jumlah", "Harga", "Total", "Nilai"].includes(c) ? ("right" as const) : undefined })),
       rows: rows.map((t) => [
@@ -469,6 +508,20 @@ function TxTable({
             {status === "MENUNGGU" ? "Menunggu pemeriksaan (semua bulan)" : `Disetujui ${periodeLabel(periode)}`} <X size={12} />
           </button>
         )}
+        {periode && (
+          <label className="inline-flex items-center gap-1.5 text-xs text-[var(--text-secondary)] cursor-pointer select-none" title="Tampilkan semua bulan, bukan hanya periode yang dipilih">
+            <input type="checkbox" checked={semuaBulan} onChange={(e) => setSemuaBulan(e.target.checked)} />
+            Semua bulan
+          </label>
+        )}
+        {adaFilter && (
+          <button
+            onClick={() => (setFilter({}), setFq({}), setSemuaBulan(false), setSortTx({ key: "", dir: "desc" }))}
+            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border border-[var(--accent-blue-border)] bg-[var(--accent-blue-bg)] text-[var(--accent-blue)]"
+          >
+            Hapus filter <X size={12} />
+          </button>
+        )}
         {error && <span className="text-xs text-[var(--accent-red)]">{error}</span>}
         <div className="ml-auto flex gap-2">
           {jual && multiBons.length > 0 && (
@@ -496,12 +549,35 @@ function TxTable({
         <table className="data-table text-sm">
           <thead>
             <tr className="bg-[#d5edc9] text-left text-xs text-[var(--text-primary)]">
-              {cols.map((c) => (
-                <th key={c} className={`px-3 py-2.5 whitespace-nowrap ${["Jumlah", "Harga", "Total", "Nilai"].includes(c) ? "text-right" : ""}`}>
-                  {c}
-                </th>
-              ))}
+              {cols.map((c) =>
+                TX_COL_KEY[c] ? (
+                  <SortTh key={c} label={c} k={TX_COL_KEY[c]} sort={sortTx} setSort={setSortTx} num={["Jumlah", "Harga", "Total", "Nilai"].includes(c)} desc={c === "Tanggal" || ["Jumlah", "Harga", "Total", "Nilai"].includes(c)} />
+                ) : (
+                  <th key={c} className="px-3 py-2.5 whitespace-nowrap">
+                    {c}
+                  </th>
+                )
+              )}
               {canEdit && <th className="px-3 py-2.5" />}
+            </tr>
+            <tr className="bg-[#eef7e9] text-xs">
+              {cols.map((c) => {
+                const k = TX_COL_KEY[c];
+                const fCls = "w-full min-w-[90px] text-xs rounded border border-[var(--border)] bg-white px-2 py-1 font-normal";
+                return (
+                  <th key={c} className="px-2 py-1.5 align-top">
+                    {c === "Tanggal" ? (
+                      <div className="flex flex-col gap-1 min-w-[130px]">
+                        <input type="date" value={filter.dari ?? ""} onChange={(e) => setF("dari", e.target.value)} title="Dari tanggal" className={fCls} />
+                        <input type="date" value={filter.sampai ?? ""} onChange={(e) => setF("sampai", e.target.value)} title="Sampai tanggal" className={fCls} />
+                      </div>
+                    ) : k && TX_TEXT_FILTER.includes(k) && !(k === "barang" && barang) && !(k === "anggota" && anggota) ? (
+                      <input value={filter[k] ?? ""} onChange={(e) => setF(k, e.target.value)} placeholder="Filter..." className={fCls} />
+                    ) : null}
+                  </th>
+                );
+              })}
+              {canEdit && <th />}
             </tr>
           </thead>
           <tbody className="divide-y divide-[var(--border)]">
