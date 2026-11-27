@@ -1,6 +1,6 @@
 import type { Permintaan, PermintaanTtd, PermintaanUrgensi } from "./api";
 import { KOP_CSS, escHtml as esc, kopHtml, perusahaanEstate, tanggalPanjang } from "./surat";
-import { mewakili } from "./mewakili";
+import { kotakTtd } from "./mewakili";
 
 // The printed "Form Permintaan Obat, BMHP dan Alat Medis" of a klinik, as the paper form: kop, title and
 // nomor, Tanggal / Periode / Estate / Departemen, the items (No, Uraian, Satuan, Jumlah, Urgensi,
@@ -10,15 +10,19 @@ export const URGENSI_LABEL: Record<PermintaanUrgensi, string> = { HIGH: "High", 
 export const kotaEstate = (k: string) => k.charAt(0) + k.slice(1).toLowerCase();
 export const estateLabel = (k: string) => (k === "KNS" || k === "WJA" ? k : kotaEstate(k));
 
-// The Manager Estate who signs Dibuat Oleh at each estate (changeable on the form). At KNS that box is the General
-// Manager's (someone else may sign it "for" him).
-const MANAGER_ESTATE: Record<string, string> = { NILAM: "SIKAM", FIRUS: "PUJI HARTONO", ZAMRUD: "HERI DERMAWAN", KNS: "ARRON JACOBUS" };
-const JABATAN_DIBUAT: Record<string, string> = { KNS: "General Manager" };
+// The Manager Estate who signs Dibuat Oleh at each estate (changeable on the form). KNS has none yet: its box stays
+// without a name and whoever signs it shows "for Manager Estate".
+const MANAGER_ESTATE: Record<string, string> = { NILAM: "SIKAM", FIRUS: "PUJI HARTONO", ZAMRUD: "HERI DERMAWAN" };
+// Disetujui 1 (the GM): KNS and WJA have their own General Manager.
+const GM_ESTATE: Record<string, { nama: string; jabatan: string }> = {
+  KNS: { nama: "ARRON JACOBUS", jabatan: "General Manager" },
+  WJA: { nama: "ARRON JACOBUS", jabatan: "General Manager" },
+};
 // The signatories of the paper form; a new request copies the klinik's last ones instead when it has any.
 export const TTD_DEFAULT = (klinik: string): PermintaanTtd => ({
-  dibuat: { nama: MANAGER_ESTATE[klinik] ?? "", jabatan: JABATAN_DIBUAT[klinik] ?? "Manager Estate" },
+  dibuat: { nama: MANAGER_ESTATE[klinik] ?? "", jabatan: "Manager Estate" },
   diketahui: { nama: "MOHD. NASRUL HAKIM BIN ANUYAR", jabatan: "GM Finance & Audit" },
-  disetujui1: { nama: "FITRIONO EFENDI", jabatan: "Corporate GM Plantation" },
+  disetujui1: GM_ESTATE[klinik] ?? { nama: "FITRIONO EFENDI", jabatan: "Corporate GM Plantation" },
   disetujui2: { nama: "JOHAR LATIFAH", jabatan: "Head of Business Unit" },
 });
 // Saved / remembered signatories over the defaults: a box left without a name gets the default one.
@@ -73,13 +77,15 @@ export function permintaanHtml(p: Permintaan): string {
   // on the paper form and uploaded: a stamp saying so).
   const ttd = TTD_LABEL.map(([k, judul]) => {
     const a = p.approval?.[k];
-    // Signed "for" the person named in the box: the box keeps his name, the stamp says who signed.
-    const wk = !!a && mewakili(a.nama, p.ttd?.[k]?.nama, a.offline);
+    // Signed "for": the person named in the box keeps his name and the stamp says who signed; a box of a position
+    // nobody holds shows the signer with "for <jabatan>".
+    const kt = kotakTtd(a, p.ttd?.[k]);
+    const wk = kt.mode === "for";
     const ruang = a
       ? `<div class="ruang el"><div class="cap">${wk ? "for<br>" : ""}${a.offline ? "DITANDATANGANI DI SURAT ASLI<br>diupload " : "DISETUJUI SECARA ELEKTRONIK<br>"}${esc(waktuTtd(a.at))}${wk ? `<br>oleh ${esc(a.nama)}` : ""}</div></div>`
       : `<div class="ruang"></div>`;
-    const nama = wk ? p.ttd?.[k]?.nama : a?.nama || p.ttd?.[k]?.nama;
-    const jab = wk ? p.ttd?.[k]?.jabatan || a?.jabatan : a?.jabatan || p.ttd?.[k]?.jabatan;
+    const nama = kt.nama;
+    const jab = kt.jabatan;
     return `<div class="ttd"><div>${esc(judul)}</div>${ruang}<div class="nama">${esc(nama || "(................................)")}</div><div class="jab">${esc(jab || "")}</div></div>`;
   }).join("");
   return `<!doctype html><html><head><meta charset="utf-8"><title>${esc(p.nomor)}</title><style>
