@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { JENIS_BBM, jenisBbmLabel, jenisDiLokasi, wrongJenis, type JenisBbm } from "../lib/bbmJenis";
 import { X } from "lucide-react";
 import { api, errorText, type BbmSummary } from "../lib/api";
-import { AlatAutocomplete, type AlatOption } from "./AlatAutocomplete";
+import { AlatAutocomplete, alatLain, type AlatOption } from "./AlatAutocomplete";
 import { EvidenceInput, useEvidenceEnabled } from "./EvidenceInput";
 import { KirimTujuan, TransferShortcut } from "./TransferShortcut";
 import { PEMASOK, kirimKe } from "../lib/kirim";
@@ -277,10 +277,11 @@ export function BbmTransactionModal({
           <div className={isGenset ? "" : "grid grid-cols-2 gap-3"}>
             <div>
               <label className="text-xs text-[var(--text-secondary)] mb-1 block">Kode Kendaraan</label>
-              <AlatAutocomplete value={kodeKendaraan} onChange={setKodeKendaraan} onAlat={setAlat} />
+              <AlatAutocomplete value={kodeKendaraan} onChange={setKodeKendaraan} onAlat={setAlat} lokasi={lokasi} />
               {alat && (alat.jenis_unit || alat.nama) && (
                 <p className="text-[11px] text-[var(--text-muted)] mt-0.5">{[alat.jenis_unit, alat.nama].filter(Boolean).join(" · ")}</p>
               )}
+              {alatLain(alat, lokasi) && <p className="text-[11px] text-[var(--accent-amber)] font-medium mt-0.5">{alatLain(alat, lokasi)}</p>}
             </div>
             {!isGenset && (
             <div>

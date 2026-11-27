@@ -505,11 +505,13 @@ export type PruningBlokOption = {
   baris: { id: number; divisi: string; tahun_tanam: number | null; ha: number | null; sph: number | null }[];
 };
 
+export type AlatGrup = "AKSS" | "KNS" | "WJA";
 export type AlatBerat = {
   id: number;
   kode: string;
   jenis_unit: string;
   nama: string;
+  grup: AlatGrup;
 };
 
 export type BbmBatchRow = {
@@ -1679,7 +1681,7 @@ export const api = {
     return req<{ data: Karyawan[]; total: number; page: number; pageSize: number }>(`/api/karyawan?${qs}`);
   },
 
-  alatPick: (search: string) => req<{ kode: string; jenis_unit: string; nama: string }[]>(`/api/alat-berat/pick?${new URLSearchParams({ search })}`),
+  alatPick: (search: string) => req<{ kode: string; jenis_unit: string; nama: string; grup: AlatGrup }[]>(`/api/alat-berat/pick?${new URLSearchParams({ search })}`),
 
   karyawanPick: (estate: string, search: string) =>
     req<{ nik: string; nama: string }[]>(`/api/karyawan/pick?${new URLSearchParams({ estate, search })}`),
@@ -1705,10 +1707,10 @@ export const api = {
 
   alatBeratJenisOptions: () => req<string[]>("/api/alat-berat/jenis-options"),
 
-  createAlatBerat: (payload: { kode: string; jenis_unit: string; nama: string }) =>
+  createAlatBerat: (payload: { kode: string; jenis_unit: string; nama: string; grup: AlatGrup }) =>
     req<{ success: boolean; id: number }>("/api/alat-berat", { method: "POST", body: JSON.stringify(payload) }),
 
-  updateAlatBerat: (id: number, payload: { kode: string; jenis_unit: string; nama: string }) =>
+  updateAlatBerat: (id: number, payload: { kode: string; jenis_unit: string; nama: string; grup: AlatGrup }) =>
     req<{ success: boolean }>(`/api/alat-berat/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
 
   deleteAlatBerat: (id: number) => req<{ success: boolean }>(`/api/alat-berat/${id}`, { method: "DELETE" }),

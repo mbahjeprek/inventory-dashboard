@@ -92,11 +92,12 @@ export function AlatBeratPage() {
   const [deleteError, setDeleteError] = useState("");
   const [confirmDelete, setConfirmDelete] = useState<AlatBerat | null>(null);
   const pageSize = 25;
+  const [grupF, setGrupF] = useState("");
 
   const load = () => {
     setLoading(true);
     api
-      .alatBerat({ search, jenis_unit: jenisUnit, sortBy, sortDir, page, pageSize })
+      .alatBerat({ search, jenis_unit: jenisUnit, grup: grupF, sortBy, sortDir, page, pageSize })
       .then((res) => {
         setRows(res.data);
         setTotal(res.total);
@@ -111,7 +112,7 @@ export function AlatBeratPage() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, jenisUnit, sortBy, sortDir]);
+  }, [page, jenisUnit, grupF, sortBy, sortDir]);
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -146,13 +147,13 @@ export function AlatBeratPage() {
 
   // Download follows the current search, jenis unit filter and sort, like the table on screen.
   const buildReport = async (): Promise<TableReport> => {
-    const all = await fetchAllRows((p, ps) => api.alatBerat({ search, jenis_unit: jenisUnit, sortBy, sortDir, page: p, pageSize: ps }));
-    const active = [search && `Cari: "${search}"`, jenisUnit && `Jenis Unit: ${jenisUnit}`].filter(Boolean);
+    const all = await fetchAllRows((p, ps) => api.alatBerat({ search, jenis_unit: jenisUnit, grup: grupF, sortBy, sortDir, page: p, pageSize: ps }));
+    const active = [search && `Cari: "${search}"`, jenisUnit && `Jenis Unit: ${jenisUnit}`, grupF && `Milik: ${grupF}`].filter(Boolean);
     return {
       title: "Master Data Alat Berat",
       subtitle: active.length ? [`Filter: ${active.join(" · ")}`] : [],
-      columns: [{ label: "Kode", nowrap: true }, { label: "Jenis Unit" }, { label: "Nama / Model" }],
-      rows: all.map((a) => [a.kode, a.jenis_unit, a.nama]),
+      columns: [{ label: "Kode", nowrap: true }, { label: "Jenis Unit" }, { label: "Nama / Model" }, { label: "Milik" }],
+      rows: all.map((a) => [a.kode, a.jenis_unit, a.nama, a.grup]),
     };
   };
 
@@ -197,19 +198,20 @@ export function AlatBeratPage() {
                 <SortableHeader label="Kode" sortKey="kode" currentSort={sortBy} currentDir={sortDir} onSort={toggleSort} />
                 <FilterHeader label="Jenis Unit" value={jenisUnit} options={jenisOptions} onChange={(v) => { setJenisUnit(v); setPage(1); }} />
                 <SortableHeader label="Nama / Model" sortKey="nama" currentSort={sortBy} currentDir={sortDir} onSort={toggleSort} />
+                <FilterHeader label="Milik" value={grupF} options={["AKSS", "KNS", "WJA"]} onChange={(v) => { setGrupF(v); setPage(1); }} />
                 <th className="px-4 py-2.5 text-right">Aksi</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={4} className="px-4 py-8 text-center text-[var(--text-muted)]">
+                  <td colSpan={5} className="px-4 py-8 text-center text-[var(--text-muted)]">
                     Memuat...
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={4} className="px-4 py-8 text-center text-[var(--text-muted)]">
+                  <td colSpan={5} className="px-4 py-8 text-center text-[var(--text-muted)]">
                     Tidak ada data
                   </td>
                 </tr>
@@ -219,6 +221,9 @@ export function AlatBeratPage() {
                     <td className="px-4 py-2.5 font-mono text-xs">{a.kode}</td>
                     <td className="px-4 py-2.5 text-[var(--text-secondary)]">{a.jenis_unit || "-"}</td>
                     <td className="col-grow px-4 py-2.5">{a.nama}</td>
+                    <td className="px-4 py-2.5">
+                      <span className={`text-[11px] px-2 py-0.5 rounded-full border whitespace-nowrap ${a.grup === "KNS" ? "border-[var(--accent-green-border)] text-[var(--accent-green)] bg-[var(--accent-green-bg)]" : a.grup === "WJA" ? "border-[var(--accent-amber-border)] text-[var(--accent-amber)] bg-[var(--accent-amber-bg)]" : "border-[var(--accent-blue-border)] text-[var(--accent-blue)] bg-[var(--accent-blue-bg)]"}`}>{a.grup}</span>
+                    </td>
                     <td className="px-4 py-2.5 text-right">
                       <div className="inline-flex gap-1.5">
                         <button

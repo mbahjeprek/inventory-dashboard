@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { JENIS_BBM, jenisBbmLabel, jenisDiLokasi, wrongJenis, type JenisBbm } from "../lib/bbmJenis";
 import { api, type BbmSummary } from "../lib/api";
-import type { AlatOption } from "./AlatAutocomplete";
+import { alatLain, grupLokasi, type AlatOption } from "./AlatAutocomplete";
 import { PEMASOK, tujuanColumn } from "../lib/kirim";
 import { BatchGrid, HeaderField, fmtNum, headerInputCls, isBlankIn, localToday, parseNum, runningStock, type Cells, type GridCol } from "./BatchGrid";
 
@@ -60,12 +60,13 @@ export function BbmBatchModal({
       key: "kendaraan",
       label: "Kendaraan / Alat",
       width: 150,
-      options: alat.map((a) => ({ value: a.kode, label: [a.jenis_unit, a.nama].filter(Boolean).join(" · ") })),
+      options: alat.filter((a) => a.grup === grupLokasi(lokasi)).map((a) => ({ value: a.kode, label: [a.jenis_unit, a.nama].filter(Boolean).join(" · ") })),
       placeholder: "cth. MPN02",
       off: (c) => (masuk(c) || kirim(c)) && "-",
       hint: (c) => {
         const a = alatOf(c);
-        return a ? [a.jenis_unit, a.nama].filter(Boolean).join(" · ") : undefined;
+        const lain = alatLain(a, lokasi);
+        return a ? (lain ? `⚠ ${lain}` : [a.jenis_unit, a.nama].filter(Boolean).join(" · ")) : undefined;
       },
     },
     { key: "jumlah", label: "Jumlah (LTR)", width: 90, type: "number", align: "right" },

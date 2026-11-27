@@ -94,6 +94,14 @@ CREATE TABLE IF NOT EXISTS alat_berat (
   jenis_unit TEXT,
   nama TEXT
 );
+-- Whose unit it is: AKSS (Nilam / Zamrud / Firus share their units), KNS or WJA. The BBM Kode Kendaraan picker of
+-- a lokasi lists its own group's units; another group's unit can still be typed (borrowed) and is flagged.
+ALTER TABLE alat_berat ADD COLUMN IF NOT EXISTS grup TEXT NOT NULL DEFAULT 'AKSS';
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'alat_berat_grup_check') THEN
+    ALTER TABLE alat_berat ADD CONSTRAINT alat_berat_grup_check CHECK (grup IN ('AKSS', 'KNS', 'WJA'));
+  END IF;
+END $$;
 
 -- Per-warehouse stock for the non-Nilam gudang (KNS/WJA/ZAMRUD/FIRUS). Nilam's own stock lives
 -- directly on `items` (it's the original/master warehouse); these gudang pick their item names

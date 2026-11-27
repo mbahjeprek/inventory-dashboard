@@ -2570,10 +2570,17 @@ app.delete("/api/karyawan/:id", requireSuperuser, async (req, res) => {
 
 // ---- Alat Berat master data (heavy equipment/vehicles that consume fuel) ----
 // Suggestions for Kode Kendaraan on a BBM Stok Keluar; any logged-in account (like karyawan/pick).
+const ALAT_GRUP = ["AKSS", "KNS", "WJA"];
+const alatGrup = (v: unknown, kode: string) => {
+  const g = String(v ?? "").trim().toUpperCase();
+  if (ALAT_GRUP.includes(g)) return g;
+  const p = kode.trim().toUpperCase();
+  return p.startsWith("KNS") ? "KNS" : p.startsWith("WJA") ? "WJA" : "AKSS";
+};
 app.get("/api/alat-berat/pick", async (req, res) => {
   const { search = "" } = req.query as Record<string, string>;
   const data = await queryMany(
-    `SELECT kode, jenis_unit, nama FROM alat_berat
+    `SELECT kode, jenis_unit, nama, grup FROM alat_berat
      WHERE @search = '' OR kode ILIKE @like OR nama ILIKE @like OR jenis_unit ILIKE @like
      ORDER BY kode LIMIT 2000`,
     { search, like: `%${search}%` }
@@ -2589,10 +2596,10 @@ app.get("/api/alat-berat/jenis-options", requireSuperuser, async (_req, res) => 
 });
 
 app.get("/api/alat-berat", requireSuperuser, async (req, res) => {
-  const { search = "", jenis_unit = "", sortBy = "kode", sortDir = "asc", page = "1", pageSize = "50" } =
+  const { search = "", jenis_unit = "", grup = "", sortBy = "kode", sortDir = "asc", page = "1", pageSize = "50" } =
     req.query as Record<string, string>;
 
-  const validSort = ["kode", "jenis_unit", "nama"];
+  const validSort = ["kode", "jenis_unit", "nama", "grup"];
   const sortCol = validSort.includes(sortBy) ? sortBy : "kode";
   const dir = sortDir === "desc" ? "DESC" : "ASC";
 
@@ -2603,6 +2610,10 @@ app.get("/api/alat-berat", requireSuperuser, async (req, res) => {
   if (jenis_unit) {
     conditions.push("jenis_unit = @jenis_unit");
     params.jenis_unit = jenis_unit;
+  }
+  if (ALAT_GRUP.includes(grup)) {
+    conditions.push("grup = @grup");
+    params.grup = grup;
   }
 
   const where = conditions.length ? "WHERE " + conditions.join(" AND ") : "";
@@ -2628,8 +2639,8 @@ app.post("/api/alat-berat", requireSuperuser, async (req, res) => {
 
   try {
     const row = await queryOne<{ id: number }>(
-      `INSERT INTO alat_berat (kode, jenis_unit, nama) VALUES (@kode, @jenis_unit, @nama) RETURNING id`,
-      { kode: String(kode).trim(), jenis_unit: jenis_unit || "", nama: nama || "" }
+      `INSERT INTO alat_berat (kode, jenis_unit, nama, grup) VALUES (@kode, @jenis_unit, @nama, @grup) RETURNING id`,
+      { kode: String(kode).trim(), jenis_unit: jenis_unit || "", nama: nama || "", grup: alatGrup(req.body.grup, String(kode)) }
     );
     res.json({ success: true, id: row!.id });
   } catch (e: any) {
@@ -2650,10 +2661,11 @@ app.put("/api/alat-berat/:id", requireSuperuser, async (req, res) => {
   }
 
   try {
-    await execute(`UPDATE alat_berat SET kode = @kode, jenis_unit = @jenis_unit, nama = @nama WHERE id = @id`, {
+    await execute(`UPDATE alat_berat SET kode = @kode, jenis_unit = @jenis_unit, nama = @nama, grup = @grup WHERE id = @id`, {
       kode: String(kode).trim(),
       jenis_unit: jenis_unit || "",
       nama: nama || "",
+      grup: alatGrup(req.body.grup ?? (existing as any).grup, String(kode)),
       id: req.params.id,
     });
   } catch (e: any) {

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { X } from "lucide-react";
-import { api, type AlatBerat } from "../lib/api";
+import { api, type AlatBerat, type AlatGrup } from "../lib/api";
 
 export function EditAlatBeratModal({
   alatBerat,
@@ -15,6 +15,10 @@ export function EditAlatBeratModal({
   const [kode, setKode] = useState(alatBerat?.kode ?? "");
   const [jenisUnit, setJenisUnit] = useState(alatBerat?.jenis_unit ?? "");
   const [nama, setNama] = useState(alatBerat?.nama ?? "");
+  // Whose unit: picked by hand; a new one starts from its kode (KNS... / WJA...) until changed.
+  const [grup, setGrup] = useState<AlatGrup | "">(alatBerat?.grup ?? "");
+  const grupAuto: AlatGrup = kode.trim().toUpperCase().startsWith("KNS") ? "KNS" : kode.trim().toUpperCase().startsWith("WJA") ? "WJA" : "AKSS";
+  const grupNow = grup || grupAuto;
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
@@ -27,9 +31,9 @@ export function EditAlatBeratModal({
     setError("");
     try {
       if (isEdit) {
-        await api.updateAlatBerat(alatBerat.id, { kode, jenis_unit: jenisUnit, nama });
+        await api.updateAlatBerat(alatBerat.id, { kode, jenis_unit: jenisUnit, nama, grup: grupNow });
       } else {
-        await api.createAlatBerat({ kode, jenis_unit: jenisUnit, nama });
+        await api.createAlatBerat({ kode, jenis_unit: jenisUnit, nama, grup: grupNow });
       }
       onSuccess();
     } catch (e: any) {
@@ -81,6 +85,16 @@ export function EditAlatBeratModal({
               onChange={(e) => setNama(e.target.value)}
               className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-2"
             />
+          </div>
+
+          <div>
+            <label className="text-xs text-[var(--text-secondary)] mb-1 block">Milik (estate pemakai)</label>
+            <select value={grupNow} onChange={(e) => setGrup(e.target.value as AlatGrup)} className="w-full text-sm rounded-md border border-[var(--border)] px-3 py-2">
+              <option value="AKSS">AKSS (Nilam / Zamrud / Firus)</option>
+              <option value="KNS">KNS</option>
+              <option value="WJA">WJA</option>
+            </select>
+            <p className="text-[11px] text-[var(--text-muted)] mt-1">Di Stock Out BBM, pilihan Kode Kendaraan tiap lokasi hanya unit miliknya.</p>
           </div>
 
           {error && <p className="text-xs text-[var(--accent-red)]">{error}</p>}
