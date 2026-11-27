@@ -1,19 +1,8 @@
 import { AlertTriangle, Check } from "lucide-react";
 
-// Same rule as namaKata on the server: words of a name without gelar, doubled letters collapsed (Sitti = Siti).
-const GELAR = new Set(["amd", "keb", "kep", "skep", "ners", "ns", "s", "st", "se", "sh", "skm", "spd", "dr", "drg", "apt", "ama", "a", "md", "ak", "sos", "si"]);
-const kata = (s: string) =>
-  new Set(
-    String(s ?? "")
-      .toLowerCase()
-      .split(/[^a-z]+/)
-      .filter((w) => w.length > 1 && !GELAR.has(w))
-      .map((w) => w.replace(/(.)\1+/g, "$1"))
-  );
-export const namaSama = (a: string, b: string) => {
-  const ka = kata(a);
-  return [...kata(b)].some((w) => ka.has(w));
-};
+import { namaSama } from "../lib/mewakili";
+
+export { namaSama };
 
 // The step between "Setujui & tandatangani" and the signature being saved (real case 2026-11-19: a BA was signed
 // by the wrong account with one click). Names the box, who signs it and who the letter names, red when they differ.
@@ -57,7 +46,7 @@ export function KonfirmasiTtd({
       </ul>
       {beda && (
         <p className="text-sm font-medium text-[var(--accent-red)]">
-          Nama akun Anda ({akun}) berbeda dengan nama di surat ({nama}). Pastikan memang Anda yang berhak menandatangani kotak ini; kalau bukan, pilih Batal.
+          Nama akun Anda ({akun}) berbeda dengan nama di surat ({nama}). Kalau Anda menandatangani mewakili beliau, lanjutkan: kotak ini akan tertulis "for {nama}", ditandatangani {akun}. Kalau bukan, pilih Batal.
         </p>
       )}
       <div className="flex flex-wrap justify-end gap-2">

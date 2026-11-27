@@ -9,6 +9,7 @@ import { waktuTtd } from "../lib/permintaanSurat";
 import { SB_LABEL, SB_URUT, formatNomor, gabungNomor, ikutTanggal, pisahNomor, suratBarangHtml } from "../lib/suratBarang";
 import { EvidenceInput, EvidenceLink, useEvidenceEnabled } from "./EvidenceInput";
 import { KonfirmasiTtd } from "./KonfirmasiTtd";
+import { mewakili } from "../lib/mewakili";
 import { useAutoRefresh } from "../hooks/useAutoRefresh";
 
 // Klinik > Permintaan > Permintaan Barang (non-obat): the klinik's letter asking for a barang that isn't an obat (a
@@ -515,6 +516,7 @@ function TtdPanel({ s, onDone }: { s: SuratBarang; onDone: () => void }) {
         {SB_URUT.map((k) => {
           const a = s.approval?.[k];
           const now = bisa === k;
+          const wk = !!a && mewakili(a.nama, s.ttd?.[k]?.nama, a.offline);
           return (
             <div
               key={k}
@@ -524,10 +526,12 @@ function TtdPanel({ s, onDone }: { s: SuratBarang; onDone: () => void }) {
                 {a ? <Check size={12} className="text-[var(--accent-green)]" /> : <CircleDashed size={12} />}
                 {SB_LABEL[k]}
               </p>
-              <p className="text-sm font-medium text-[var(--text-primary)] leading-tight mt-0.5">{a?.nama || s.ttd?.[k]?.nama || "-"}</p>
+              <p className="text-sm font-medium text-[var(--text-primary)] leading-tight mt-0.5">{(wk ? s.ttd?.[k]?.nama : a?.nama || s.ttd?.[k]?.nama) || "-"}</p>
               <p className={`text-[11px] mt-0.5 ${a ? "text-[var(--accent-green)]" : now ? "text-[var(--accent-amber)]" : "text-[var(--text-muted)]"}`}>
                 {a?.offline
                   ? `Di surat asli · diupload ${waktuTtd(a.at)}`
+                  : wk && a
+                    ? <>for · ditandatangani <b>{a.nama}</b> {waktuTtd(a.at)}</>
                   : a
                     ? `Ditandatangani ${waktuTtd(a.at)}`
                     : now

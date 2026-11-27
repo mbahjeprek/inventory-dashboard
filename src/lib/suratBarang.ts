@@ -1,6 +1,7 @@
 import type { SuratBarang } from "./api";
 import { BULAN, escHtml as esc, logoPerusahaan, perusahaanEstate } from "./surat";
 import { kotaEstate } from "./permintaanSurat";
+import { mewakili } from "./mewakili";
 
 // The printed Permintaan Barang Klinik (non-obat), as the klinik's letter template: the green kop (bars, logo, PT and
 // estate), Nomor / Tanggal / Perihal, Kepada Yth / cc / Dari, the opening, the barang table (Nama Barang, Type, Qty,
@@ -56,10 +57,12 @@ export function suratBarangHtml(s: SuratBarang): string {
   // uploaded: a stamp saying so); an unsigned box stays blank for the pen.
   const ttd = SB_URUT.map((k) => {
     const a = s.approval?.[k];
+    // Signed "for" the person named in the box: the box keeps his name, the stamp says who signed.
+    const wk = !!a && mewakili(a.nama, s.ttd?.[k]?.nama, a.offline);
     const cap = a
-      ? `<div class="cap">${a.offline ? "DITANDATANGANI DI SURAT ASLI<br>diupload " : "DISETUJUI SECARA ELEKTRONIK<br>"}${esc(waktu(a.at))}</div>`
+      ? `<div class="cap">${wk ? "for<br>" : ""}${a.offline ? "DITANDATANGANI DI SURAT ASLI<br>diupload " : "DISETUJUI SECARA ELEKTRONIK<br>"}${esc(waktu(a.at))}${wk ? `<br>oleh ${esc(a.nama)}` : ""}</div>`
       : "";
-    return `<div class="tt"><div>${SB_LABEL[k]},</div><div class="ruang">${cap}</div><div class="nm"><b><u>${esc(a?.nama || s.ttd?.[k]?.nama || "")}</u></b></div></div>`;
+    return `<div class="tt"><div>${SB_LABEL[k]},</div><div class="ruang">${cap}</div><div class="nm"><b><u>${esc((wk ? s.ttd?.[k]?.nama : a?.nama || s.ttd?.[k]?.nama) || "")}</u></b></div></div>`;
   }).join("");
   return `<!doctype html><html><head><meta charset="utf-8"><title>${esc(s.nomor || s.perihal || "Permintaan Barang")}</title><style>
     @page { size: 8.5in 14in; margin: 0.39in 1in 0.5in 1in; }

@@ -1,5 +1,6 @@
 import type { Permintaan, PermintaanTtd, PermintaanUrgensi } from "./api";
 import { KOP_CSS, escHtml as esc, kopHtml, perusahaanEstate, tanggalPanjang } from "./surat";
+import { mewakili } from "./mewakili";
 
 // The printed "Form Permintaan Obat, BMHP dan Alat Medis" of a klinik, as the paper form: kop, title and
 // nomor, Tanggal / Periode / Estate / Departemen, the items (No, Uraian, Satuan, Jumlah, Urgensi,
@@ -9,11 +10,13 @@ export const URGENSI_LABEL: Record<PermintaanUrgensi, string> = { HIGH: "High", 
 export const kotaEstate = (k: string) => k.charAt(0) + k.slice(1).toLowerCase();
 export const estateLabel = (k: string) => (k === "KNS" || k === "WJA" ? k : kotaEstate(k));
 
-// The Manager Estate who signs Dibuat Oleh at each estate (changeable on the form).
-const MANAGER_ESTATE: Record<string, string> = { NILAM: "SIKAM", FIRUS: "PUJI HARTONO", ZAMRUD: "HERI DERMAWAN" };
+// The Manager Estate who signs Dibuat Oleh at each estate (changeable on the form). At KNS that box is the General
+// Manager's (someone else may sign it "for" him).
+const MANAGER_ESTATE: Record<string, string> = { NILAM: "SIKAM", FIRUS: "PUJI HARTONO", ZAMRUD: "HERI DERMAWAN", KNS: "ARRON JACOBUS" };
+const JABATAN_DIBUAT: Record<string, string> = { KNS: "General Manager" };
 // The signatories of the paper form; a new request copies the klinik's last ones instead when it has any.
 export const TTD_DEFAULT = (klinik: string): PermintaanTtd => ({
-  dibuat: { nama: MANAGER_ESTATE[klinik] ?? "", jabatan: "Manager Estate" },
+  dibuat: { nama: MANAGER_ESTATE[klinik] ?? "", jabatan: JABATAN_DIBUAT[klinik] ?? "Manager Estate" },
   diketahui: { nama: "MOHD. NASRUL HAKIM BIN ANUYAR", jabatan: "GM Finance & Audit" },
   disetujui1: { nama: "FITRIONO EFENDI", jabatan: "Corporate GM Plantation" },
   disetujui2: { nama: "JOHAR LATIFAH", jabatan: "Head of Business Unit" },
@@ -70,10 +73,14 @@ export function permintaanHtml(p: Permintaan): string {
   // on the paper form and uploaded: a stamp saying so).
   const ttd = TTD_LABEL.map(([k, judul]) => {
     const a = p.approval?.[k];
+    // Signed "for" the person named in the box: the box keeps his name, the stamp says who signed.
+    const wk = !!a && mewakili(a.nama, p.ttd?.[k]?.nama, a.offline);
     const ruang = a
-      ? `<div class="ruang el"><div class="cap">${a.offline ? "DITANDATANGANI DI SURAT ASLI<br>diupload " : "DISETUJUI SECARA ELEKTRONIK<br>"}${esc(waktuTtd(a.at))}</div></div>`
+      ? `<div class="ruang el"><div class="cap">${wk ? "for<br>" : ""}${a.offline ? "DITANDATANGANI DI SURAT ASLI<br>diupload " : "DISETUJUI SECARA ELEKTRONIK<br>"}${esc(waktuTtd(a.at))}${wk ? `<br>oleh ${esc(a.nama)}` : ""}</div></div>`
       : `<div class="ruang"></div>`;
-    return `<div class="ttd"><div>${esc(judul)}</div>${ruang}<div class="nama">${esc(a?.nama || p.ttd?.[k]?.nama || "(................................)")}</div><div class="jab">${esc(a?.jabatan || p.ttd?.[k]?.jabatan || "")}</div></div>`;
+    const nama = wk ? p.ttd?.[k]?.nama : a?.nama || p.ttd?.[k]?.nama;
+    const jab = wk ? p.ttd?.[k]?.jabatan || a?.jabatan : a?.jabatan || p.ttd?.[k]?.jabatan;
+    return `<div class="ttd"><div>${esc(judul)}</div>${ruang}<div class="nama">${esc(nama || "(................................)")}</div><div class="jab">${esc(jab || "")}</div></div>`;
   }).join("");
   return `<!doctype html><html><head><meta charset="utf-8"><title>${esc(p.nomor)}</title><style>
     @page { size: A4 portrait; margin: 12mm 12mm 14mm 14mm; }

@@ -9,6 +9,7 @@ import { useAuth } from "../context/AuthContext";
 import { can } from "../lib/access";
 import { EvidenceInput, EvidenceLink, useEvidenceEnabled } from "./EvidenceInput";
 import { KonfirmasiTtd } from "./KonfirmasiTtd";
+import { mewakili } from "../lib/mewakili";
 import { useRefreshTick } from "../hooks/useAutoRefresh";
 
 // Berita Acara Pemusnahan (Klinik obat / BHP, Koperasi barang rusak): a stored document with an automatic
@@ -66,14 +67,19 @@ export function baHtml(
   const ttd = (judul: string, k: Peran, style = "") => {
     const o = f[k];
     const t = ba.ttd?.[k];
+    // Signed "for" the person named in the box: the box keeps his name, the stamp says who signed.
+    const wk = !!t && mewakili(t.nama, o?.nama);
+    const fr = wk ? `<div style="font-style:italic;font-size:9pt">for (oleh ${esc(t!.nama)})</div>` : "";
     const ruang = !t
       ? `<div class="ruang"></div>`
       : t.cara === "WA"
-        ? `<div class="ruang el"><div class="cap">DISETUJUI VIA WHATSAPP<br>${esc(isoDisplay(t.tanggal ?? t.at.slice(0, 10)))}</div></div>`
+        ? `<div class="ruang el"><div class="cap">${wk ? "for<br>" : ""}DISETUJUI VIA WHATSAPP<br>${esc(isoDisplay(t.tanggal ?? t.at.slice(0, 10)))}${wk ? `<br>oleh ${esc(t.nama)}` : ""}</div></div>`
         : t.cara === "LAYAR" && t.gambar
-        ? `<div class="ruang el"><img src="${t.gambar}" alt="tanda tangan"></div>`
-        : `<div class="ruang el"><div class="cap">DITANDATANGANI SECARA ELEKTRONIK<br>${esc(waktuJam(t.at))}</div></div>`;
-    return `<div class="ttd" ${style}><div>${esc(judul)}</div>${ruang}<div class="nama">${esc(t?.nama || o?.nama || "(................................)")}</div><div>${esc(t?.jabatan || o?.jabatan || "")}</div></div>`;
+        ? `<div class="ruang el"><img src="${t.gambar}" alt="tanda tangan"></div>${fr}`
+        : `<div class="ruang el"><div class="cap">${wk ? "for<br>" : ""}DITANDATANGANI SECARA ELEKTRONIK<br>${esc(waktuJam(t.at))}${wk ? `<br>oleh ${esc(t.nama)}` : ""}</div></div>`;
+    const nama = wk ? o?.nama : t?.nama || o?.nama;
+    const jab = wk ? o?.jabatan || t?.jabatan : t?.jabatan || o?.jabatan;
+    return `<div class="ttd" ${style}><div>${esc(judul)}</div>${ruang}<div class="nama">${esc(nama || "(................................)")}</div><div>${esc(jab || "")}</div></div>`;
   };
   const body = rows
     .map(
@@ -544,7 +550,7 @@ function BaLangkah({ j, b }: { j: BaJenis; b: BeritaAcara }) {
         setuju
           ? {
               sudah: true,
-              teks: `${b.disetujui_nama}${b.disetujui_jabatan ? ` (${b.disetujui_jabatan})` : ""} · ${
+              teks: `${b.disetujui_nama}${b.disetujui_jabatan ? ` (${b.disetujui_jabatan})` : ""}${mewakili(b.disetujui_nama, mengetahui?.nama) ? ` for ${mengetahui?.nama}` : ""} · ${
                 b.ttd?.mengetahui && b.ttd.mengetahui.cara !== "WA" ? `${waktuJam(b.ttd.mengetahui.at)} di aplikasi` : `${isoDisplay(b.disetujui_tgl ?? "")} lewat WA`
               }`,
             }

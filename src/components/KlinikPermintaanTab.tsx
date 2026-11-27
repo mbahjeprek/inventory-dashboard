@@ -20,6 +20,7 @@ import { ExportButtons } from "./ExportButtons";
 import { EvidenceInput, EvidenceLink, useEvidenceEnabled } from "./EvidenceInput";
 import { KlinikSuratBarang } from "./KlinikSuratBarang";
 import { KonfirmasiTtd } from "./KonfirmasiTtd";
+import { mewakili } from "../lib/mewakili";
 import { TTD_DEFAULT, TTD_LABEL, ttdLengkap, TTD_LEVEL_LABEL, TTD_URUT, URGENSI_LABEL, estateLabel, permintaanHtml, waktuTtd } from "../lib/permintaanSurat";
 import { useAutoRefresh } from "../hooks/useAutoRefresh";
 
@@ -1012,6 +1013,8 @@ function TtdPanel({ p, onDone }: { p: Permintaan; onDone: () => void }) {
         {TTD_URUT.map((k) => {
           const a = p.approval?.[k];
           const now = bisa.includes(k);
+          // Signed "for" the person named in the box (like "for" on a paper letter).
+          const wk = !!a && mewakili(a.nama, p.ttd?.[k]?.nama, a.offline);
           return (
             <div
               key={k}
@@ -1023,10 +1026,10 @@ function TtdPanel({ p, onDone }: { p: Permintaan; onDone: () => void }) {
                 {a ? <Check size={12} className="text-[var(--accent-green)]" /> : <CircleDashed size={12} />}
                 {TTD_LEVEL_LABEL[k]}
               </p>
-              <p className="text-sm font-medium text-[var(--text-primary)] leading-tight mt-0.5">{a?.nama || p.ttd?.[k]?.nama || "-"}</p>
-              <p className="text-[11px] text-[var(--text-muted)]">{a?.jabatan || p.ttd?.[k]?.jabatan}</p>
+              <p className="text-sm font-medium text-[var(--text-primary)] leading-tight mt-0.5">{(wk ? p.ttd?.[k]?.nama : a?.nama || p.ttd?.[k]?.nama) || "-"}</p>
+              <p className="text-[11px] text-[var(--text-muted)]">{wk ? p.ttd?.[k]?.jabatan || a?.jabatan : a?.jabatan || p.ttd?.[k]?.jabatan}</p>
               <p className={`text-[11px] mt-0.5 ${a ? "text-[var(--accent-green)]" : now ? "text-[var(--accent-amber)]" : "text-[var(--text-muted)]"}`}>
-                {a?.offline ? `Di surat asli · diupload ${waktuTtd(a.at)}` : a ? `Ditandatangani ${waktuTtd(a.at)}` : now ? "Giliran Anda tanda tangan" : k === berikut && p.status === "DIAJUKAN" ? "Giliran tanda tangan" : "Menunggu kotak sebelumnya"}
+                {a?.offline ? `Di surat asli · diupload ${waktuTtd(a.at)}` : wk && a ? <>for · ditandatangani <b>{a.nama}</b> {waktuTtd(a.at)}</> : a ? `Ditandatangani ${waktuTtd(a.at)}` : now ? "Giliran Anda tanda tangan" : k === berikut && p.status === "DIAJUKAN" ? "Giliran tanda tangan" : "Menunggu kotak sebelumnya"}
               </p>
               {a?.offline && (
                 <p className="text-[11px] mt-0.5 flex flex-wrap gap-x-2">
